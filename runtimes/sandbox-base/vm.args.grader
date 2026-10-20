@@ -1,0 +1,6 @@
+## vm.args.grader - Hidden Grader BEAM Configuration (OTP 29+)
+-sname grader
+-hidden
+-setcookie bf_internal_sandbox_cookie
++P 65536
++t 1048576

@@ -1,0 +1,10 @@
+{application, bf_xmpp_sim,
+ [{description, "BeamForge Raw TCP Fragmenter & Multi-Client XMPP Stanza Simulator"},
+  {vsn, "0.1.0"},
+  {registered, [bf_xmpp_sim_sup]},
+  {applications, [kernel, stdlib]},
+  {env, []},
+  {modules, []},
+  {licenses, ["Apache-2.0"]},
+  {links, []}
+ ]}.

@@ -1,0 +1,327 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   BeamForge Global CSS — Dual-Theme Apple Glassmorphism
+   Spec 02: Daylight Frosted Glass (light) + Midnight Dark Glass (dark)
+   ============================================================ */
+
+:root {
+  --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-jetbrains-mono: 'JetBrains Mono', monospace;
+
+  /* ── Daylight Glass Tokens (Default Light Mode) ── */
+  --bf-bg: #EEF2F6;
+  --bf-text-primary: #0F172A;
+  --bf-text-secondary: #475569;
+  --bf-text-muted: #64748B;
+
+  --bf-glass-panel-bg: rgba(255, 255, 255, 0.78);
+  --bf-glass-panel-border: rgba(255, 255, 255, 0.85);
+  --bf-glass-panel-shadow: 0 8px 32px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.03), inset 0 1px 1px rgba(255, 255, 255, 0.95);
+
+  --bf-glass-popover-bg: rgba(255, 255, 255, 0.90);
+  --bf-glass-popover-border: rgba(203, 213, 225, 0.80);
+  --bf-glass-popover-shadow: 0 20px 50px rgba(15, 23, 42, 0.12), 0 8px 20px rgba(15, 23, 42, 0.06);
+
+  --bf-glass-pill-bg: rgba(255, 255, 255, 0.80);
+  --bf-glass-pill-border: rgba(255, 255, 255, 0.90);
+
+  --bf-accent-primary: #F59E0B;   /* Boot.dev Gold/Amber for Submit */
+  --bf-accent-primary-hover: #D97706;
+  --bf-accent-secondary: #007AFF; /* iOS Blue for Run */
+  --bf-accent-emerald: #10B981;   /* Pass */
+  --bf-accent-crimson: #EF4444;   /* Fail */
+  --bf-accent-violet: #8B5CF6;    /* Accent / highlights */
+
+  --bf-code-bg: rgba(241, 245, 249, 0.85);
+  --bf-code-border: rgba(203, 213, 225, 0.60);
+
+  --bf-scrollbar-thumb: rgba(148, 163, 184, 0.40);
+  --bf-scrollbar-thumb-hover: rgba(100, 116, 139, 0.70);
+
+  --bf-mesh-1: rgba(186, 230, 253, 0.55);  /* sky-200 */
+  --bf-mesh-2: rgba(224, 231, 255, 0.50);  /* indigo-100 */
+  --bf-mesh-3: rgba(209, 250, 229, 0.40);  /* emerald-100 */
+}
+
+/* ── Midnight Dark Glass Override ── */
+.theme-dark {
+  --bf-bg: #0B0F17;
+  --bf-text-primary: #F8FAFC;
+  --bf-text-secondary: #94A3B8;
+  --bf-text-muted: #64748B;
+
+  --bf-glass-panel-bg: rgba(15, 23, 42, 0.75);
+  --bf-glass-panel-border: rgba(255, 255, 255, 0.10);
+  --bf-glass-panel-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.30);
+
+  --bf-glass-popover-bg: rgba(15, 23, 42, 0.95);
+  --bf-glass-popover-border: rgba(255, 255, 255, 0.15);
+  --bf-glass-popover-shadow: 0 24px 60px rgba(0, 0, 0, 0.60), 0 12px 30px rgba(0, 0, 0, 0.40);
+
+  --bf-glass-pill-bg: rgba(30, 41, 59, 0.80);
+  --bf-glass-pill-border: rgba(255, 255, 255, 0.12);
+
+  --bf-code-bg: rgba(15, 23, 42, 0.90);
+  --bf-code-border: rgba(255, 255, 255, 0.08);
+
+  --bf-scrollbar-thumb: rgba(71, 85, 105, 0.50);
+  --bf-scrollbar-thumb-hover: rgba(100, 116, 139, 0.80);
+
+  --bf-mesh-1: rgba(30, 27, 75, 0.55);   /* indigo-950 */
+  --bf-mesh-2: rgba(12, 74, 110, 0.40);  /* sky-950 */
+  --bf-mesh-3: rgba(5, 46, 22, 0.30);    /* emerald-950 */
+}
+
+/* ── Base Body + Ambient Mesh Background ── */
+html,
+body {
+  background-color: var(--bf-bg);
+  background-image:
+    radial-gradient(at 15% 15%, var(--bf-mesh-1) 0px, transparent 50%),
+    radial-gradient(at 85% 10%, var(--bf-mesh-2) 0px, transparent 50%),
+    radial-gradient(at 50% 90%, var(--bf-mesh-3) 0px, transparent 55%);
+  background-attachment: fixed;
+  color: var(--bf-text-primary);
+  font-family: var(--font-inter);
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              color 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── JetBrains Mono with Programming Ligatures ── */
+code,
+pre,
+kbd,
+samp,
+.font-mono {
+  font-family: var(--font-jetbrains-mono), monospace;
+  font-feature-settings: "liga" 1, "calt" 1, "zero" 1;
+}
+
+/* ============================================================
+   Apple Glassmorphism Primitives (CSS Component Classes)
+   ============================================================ */
+
+/* Glass Panel — main content areas */
+.glass-panel {
+  background-color: var(--bf-glass-panel-bg);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid var(--bf-glass-panel-border);
+  box-shadow: var(--bf-glass-panel-shadow);
+  border-radius: 1rem;
+  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Glass Popover — dropdowns and overlays */
+.glass-popover {
+  background-color: var(--bf-glass-popover-bg);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border: 1px solid var(--bf-glass-popover-border);
+  box-shadow: var(--bf-glass-popover-shadow);
+  border-radius: 0.75rem;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Glass Pill — buttons and tags */
+.glass-pill {
+  background-color: var(--bf-glass-pill-bg);
+  backdrop-filter: blur(24px) saturate(190%);
+  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  border: 1px solid var(--bf-glass-pill-border);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.glass-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+}
+
+.glass-pill:active {
+  transform: translateY(0);
+}
+
+/* Glass Card — for list items and expandable panels */
+.glass-card {
+  background-color: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.80);
+  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.04), inset 0 1px 0 0 rgba(255, 255, 255, 0.80);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.theme-dark .glass-card {
+  background-color: rgba(30, 41, 59, 0.60);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.glass-card:hover {
+  background-color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(255, 255, 255, 1);
+  box-shadow: 0 12px 28px -6px rgba(15, 23, 42, 0.08), 0 4px 12px -2px rgba(15, 23, 42, 0.04);
+  transform: translateY(-2px);
+}
+
+.theme-dark .glass-card:hover {
+  background-color: rgba(30, 41, 59, 0.85);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* ── Submit Button: Boot.dev Amber/Gold Glass ── */
+.btn-submit {
+  background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+  color: #fff;
+  font-weight: 700;
+  border: none;
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.40), 0 2px 6px rgba(245, 158, 11, 0.25);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 0.625rem;
+}
+
+.btn-submit:hover {
+  background: linear-gradient(135deg, #FBB92D 0%, #E88B10 100%);
+  box-shadow: 0 8px 24px rgba(245, 158, 11, 0.50), 0 4px 12px rgba(245, 158, 11, 0.30);
+  transform: translateY(-1px) scale(1.01);
+}
+
+.btn-submit:active {
+  transform: translateY(0) scale(0.99);
+}
+
+/* ── Run Button: iOS Blue Glass ── */
+.btn-run {
+  background: linear-gradient(135deg, #007AFF 0%, #0062CC 100%);
+  color: #fff;
+  font-weight: 600;
+  border: none;
+  box-shadow: 0 4px 14px rgba(0, 122, 255, 0.35);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 0.625rem;
+}
+
+.btn-run:hover {
+  background: linear-gradient(135deg, #2290FF 0%, #0571DF 100%);
+  box-shadow: 0 8px 24px rgba(0, 122, 255, 0.45);
+  transform: translateY(-1px) scale(1.01);
+}
+
+/* ── OTP Doc Card ── */
+.otp-doc-card {
+  background: var(--bf-code-bg);
+  border: 1px solid var(--bf-code-border);
+  border-left: 3px solid var(--bf-accent-violet);
+  border-radius: 0.625rem;
+  font-family: var(--font-jetbrains-mono), monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  transition: border-color 0.2s ease;
+}
+
+.otp-doc-card:hover {
+  border-color: rgba(139, 92, 246, 0.60);
+}
+
+/* ── Lesson Progress Dots (Boot.dev Connector Nodes) ── */
+@keyframes progress-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.50); }
+  50%       { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
+}
+
+.lesson-dot-active {
+  animation: progress-pulse 1.8s ease-in-out infinite;
+}
+
+/* ── Verification Stage Animations ── */
+@keyframes stage-spinner {
+  to { transform: rotate(360deg); }
+}
+
+.stage-spinner {
+  animation: stage-spinner 0.9s linear infinite;
+}
+
+/* ── Capstone Milestone Badge ── */
+.milestone-badge {
+  background: linear-gradient(135deg, var(--bf-accent-violet) 0%, #6D28D9 100%);
+  color: #fff;
+  border-radius: 9999px;
+  font-weight: 700;
+  font-size: 0.6875rem;
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.40);
+}
+
+/* ── Run Result Test Case Cards ── */
+.test-pass {
+  border-left: 3px solid var(--bf-accent-emerald);
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.test-fail {
+  border-left: 3px solid var(--bf-accent-crimson);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+/* ── Scrollbars ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bf-scrollbar-thumb);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--bf-scrollbar-thumb-hover);
+}
+
+/* ── XMPP / Packet Pulse Animation ── */
+@keyframes pulse-packet {
+  0%   { transform: scale(0.95); opacity: 0.85; }
+  50%  { transform: scale(1.15); opacity: 1; box-shadow: 0 0 12px rgba(0, 122, 255, 0.40); }
+  100% { transform: scale(0.95); opacity: 0.85; }
+}
+
+.animate-pulse-packet {
+  animation: pulse-packet 1.5s infinite ease-in-out;
+}
+
+/* ── Theme Transition ── */
+*,
+*::before,
+*::after {
+  transition-property: background-color, border-color, color;
+  transition-duration: 0.25s;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Floating / Shimmer Effect on Glass TopBar ── */
+@keyframes topbar-shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+/* ── XP Streak Glow Animation ── */
+@keyframes xp-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.30); }
+  50%       { box-shadow: 0 0 20px rgba(245, 158, 11, 0.65); }
+}
+
+.xp-badge-glow {
+  animation: xp-glow 2.5s ease-in-out infinite;
+}

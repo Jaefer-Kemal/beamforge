@@ -1,0 +1,10 @@
+# BeamForge gVisor runsc sandbox configuration profile
+[runsc]
+platform = "kvm"
+network = "sandbox"
+file_access = "exclusive"
+
+[runsc.cgroup]
+cpu_shares = 512
+memory_limit = "536870912" # 512MB
+pids_limit = 128

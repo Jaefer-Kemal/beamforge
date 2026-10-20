@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js Build Outputs
+.next/
+out/
+build/
+dist/
+
+# TypeScript
+*.tsbuildinfo
+
+# Executables & Compiled Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Erlang Crash Dumps & Logs
+erl_crash.dump
+*.log
+
+# Compiled BEAM files, except precompiled runtime harness modules
+*.beam
+!runtimes/erl-harness/ebin/*.beam
+
+# Environment variables
+.env
+.env*.local
+
+# Editor & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

@@ -1,0 +1,9 @@
+## vm.args.user - Hardened Learner BEAM Configuration (OTP 29+)
+-sname learner
+-setcookie bf_internal_sandbox_cookie
++P 32768
++t 262144
++Q 4096
++hmbs 233
++sbwt none
+-kernel prevent_overlapping_partitions true

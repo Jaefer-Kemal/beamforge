@@ -1,0 +1,19 @@
+{application, bf_grader,
+ [{description, "BeamForge In-Memory Compiler, Chaos Fault Injector & Grader"},
+  {vsn, "0.1.0"},
+  {registered, [bf_grader_sup]},
+  {applications, [kernel, stdlib]},
+  {env, []},
+  {modules, [
+      bf_ast_verifier,
+      bf_beam_inspector,
+      bf_chaos_engine,
+      bf_compiler,
+      bf_grader_app,
+      bf_grader_runner,
+      bf_grader_sup,
+      bf_json
+  ]},
+  {licenses, ["Apache-2.0"]},
+  {links, []}
+ ]}.

@@ -1,0 +1,10 @@
+{application, bf_tracer,
+ [{description, "BeamForge Real-Time BEAM Telemetry & Process Tree Tracer"},
+  {vsn, "0.1.0"},
+  {registered, [bf_tracer_sup]},
+  {applications, [kernel, stdlib]},
+  {env, []},
+  {modules, []},
+  {licenses, ["Apache-2.0"]},
+  {links, []}
+ ]}.
