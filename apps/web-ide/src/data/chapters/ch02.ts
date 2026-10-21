@@ -27,7 +27,7 @@ handle_packet({packet, {header, Version, _Route}, _Payload}) ->
 
 If no clause matches the argument structure, the function crashes immediately with a \`function_clause\` exception, preventing corrupted state from propagating down the call stack.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Function Clause Pattern Syntax
@@ -192,7 +192,7 @@ connect(Port) when is_integer(Port), Port >= 1024, Port =< 65535 ->
   - Semicolon (\`;\`) denotes logical **OR**.
 - If an exception occurs inside a guard (such as dividing by zero), the guard does *not* crash the program — it simply evaluates to \`false\` and the BEAM tests the next clause.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Guard Syntax
@@ -397,7 +397,7 @@ if
 end.
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% case ... of syntax
@@ -560,6 +560,7 @@ grade_latency(LatencyMs) when is_integer(LatencyMs), LatencyMs >= 0 ->
     lessonNumber: 4,
     lessonType: 'concept_exercise',
     title: 'Body Recursion vs. Tail-Call Optimization (TCO) on the BEAM Stack',
+    visualScene: 'tco_vs_body_stack',
     difficulty: 'Intermediate',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -586,7 +587,7 @@ sum([H | T], Acc) ->
 \`\`\`
 Because no computation remains after \`sum(T, Acc + H)\`, the BEAM VM reuses the current stack frame, mutating the argument registers in place and jumping to the head of the function. Stack memory remains strictly \`O(1)\`.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% BEAM Bytecode Disassembly Inspection
@@ -744,7 +745,7 @@ filter_active([_Inactive | Rest], Acc) ->
 **Why not \`Acc ++ [Item]\`?**
 Erlang lists are singly linked from head to tail. The append operator \`++\` must copy all elements of the left list to attach the right list. Doing this inside a loop creates an **\`O(N^2)\` accidental complexity disaster** that destroys GC performance.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (stdlib / lists)
@@ -857,6 +858,31 @@ keep_valid_orders([_Invalid | Rest], Acc) ->
     lessonNumber: 6,
     lessonType: 'problem_set',
     title: 'Assignment: Inventory Order Processor',
+    visualScene: 'tco_vs_body_stack',
+    mentalModelCheck: {
+      question: 'In process_orders/2, why must the accumulator list Acc be reversed via lists:reverse/1 before returning the final processed inventory?',
+      codeSnippet: `process_orders([{order, Item, Qty}|Rest], Inv) ->\n    UpdatedInv = deduct_stock(Item, Qty, Inv),\n    process_orders(Rest, [UpdatedInv | Acc]). %% Prepending items!`,
+      options: [
+        {
+          id: 'A',
+          label: 'Prepending [H|Acc] is O(1) but produces a reversed list; lists:reverse/1 restores the original FIFO ordering in linear O(N) time using an optimized C BIF.',
+          isCorrect: true,
+          explanation: 'Correct! Appending to the end of a list (Acc ++ [H]) is O(N), leading to an accidental O(N²) quadratic slowdown. Prepending [H|Acc] is O(1) and reversing once at the end with lists:reverse/1 is extremely fast C bytecode.',
+        },
+        {
+          id: 'B',
+          label: 'The BEAM VM garbage collector requires lists to be sorted by memory address before returning.',
+          isCorrect: false,
+          explanation: 'Garbage collection in Erlang is completely independent of list element ordering.',
+        },
+        {
+          id: 'C',
+          label: 'lists:reverse/1 converts Erlang lists into immutable arrays.',
+          isCorrect: false,
+          explanation: 'Erlang lists are singly linked lists; lists:reverse/1 returns a new linked list, not an array.',
+        },
+      ],
+    },
     difficulty: 'Intermediate',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -882,7 +908,7 @@ total([{order, _, Qty, Price} | Rest], Acc) ->
 
 > The BEAM's \`beam_disasm:file/1\` reveals \`call_last\` opcodes for tail calls vs \`call\` opcodes for body-recursive calls. BeamForge's AST verifier checks both.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Reversing accumulator list
@@ -1023,7 +1049,6 @@ calc_total_loop([], _Inv, Total) ->
 calc_total_loop([{order, ProdId, Qty} | Rest], Inv, Total) ->
     ItemCost = case find_product(Inv, ProdId) of
         {ok, {product, _, _, Price, Stock}} when Stock >= Qty -> Qty * Price;
-        {ok, {product, _, _, Price, Stock}} when Stock > 0     -> Stock * Price;
         _                                                      -> 0
     end,
     calc_total_loop(Rest, Inv, Total + ItemCost).
@@ -1099,7 +1124,6 @@ calc_total_loop([], _Inv, Total) ->
 calc_total_loop([{order, ProdId, Qty} | Rest], Inv, Total) ->
     ItemCost = case find_product(Inv, ProdId) of
         {ok, {product, _, _, Price, Stock}} when Stock >= Qty -> Qty * Price;
-        {ok, {product, _, _, Price, Stock}} when Stock > 0     -> Stock * Price;
         _                                                      -> 0
     end,
     calc_total_loop(Rest, Inv, Total + ItemCost).

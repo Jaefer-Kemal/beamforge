@@ -36,7 +36,7 @@ Session = #{user_id => <<"alice">>, status => online}.
 UpdatedSession = Session#{status := away}.
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (stdlib / maps)
@@ -209,7 +209,7 @@ Under the hood:
 - Field access \`Frame#network_frame.seq\` compiles to a direct \`element(2, Frame)\` BIF call.
 - Field updates \`Frame#network_frame{seq = 2}\` compile to \`setelement(2, Frame, 2)\`.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Record Syntax
@@ -384,7 +384,7 @@ Len = byte_size(NameBin),
 Framed = <<Len:16/big, NameBin/binary>>.
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Bit syntax construction and matching
@@ -525,6 +525,31 @@ encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
     lessonNumber: 4,
     lessonType: 'concept_exercise',
     title: 'Under the Hood: ProcBin Binaries & Avoiding Sub-Binary Leaks',
+    visualScene: 'sub_binary_procbin_refc',
+    mentalModelCheck: {
+      question: 'When pattern matching <<Header:16/binary, _Rest/binary>> from a 64 MB video packet, why does calling binary:copy(Header) resolve the memory leak?',
+      codeSnippet: `extract_header(LargePayload) ->\n    <<Header:16/binary, _/binary>> = LargePayload,\n    binary:copy(Header).`,
+      options: [
+        {
+          id: 'A',
+          label: 'binary:copy/1 forces the 16 bytes into a fresh Heap Binary (< 64 bytes), allowing the 64 MB ProcBin reference count to drop to 0 and get freed.',
+          isCorrect: true,
+          explanation: 'Correct! By copying the 16-byte slice, you allocate a private heap binary. The original 64 MB off-heap ProcBin no longer has any references pinning it, allowing immediate GC reclamation.',
+        },
+        {
+          id: 'B',
+          label: 'binary:copy/1 compresses the binary using gzip.',
+          isCorrect: false,
+          explanation: 'binary:copy/1 performs term cloning to unpin off-heap buffers, not data compression.',
+        },
+        {
+          id: 'C',
+          label: 'binary:copy/1 writes the 16 bytes into an ETS table.',
+          isCorrect: false,
+          explanation: 'binary:copy/1 produces a normal Erlang binary on the calling process heap, not an ETS table.',
+        },
+      ],
+    },
     difficulty: 'Advanced',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -556,7 +581,7 @@ SafeToken = binary:copy(Token).
 \`\`\`
 \`binary:copy/1\` allocates a fresh standalone binary on the process heap, unpinning the massive 64MB off-heap buffer and allowing the BEAM to immediately free it.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (stdlib / binary)
@@ -688,7 +713,7 @@ The wire format for each frame is:
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Record Definition

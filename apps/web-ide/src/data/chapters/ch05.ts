@@ -19,21 +19,10 @@ The **BEAM Virtual Machine** takes an entirely different architectural path crea
 
 Because BEAM processes are so tiny, a single commodity server can easily run **100,000 to 2,000,000 concurrent processes** simultaneously without breaking a sweat—a feat impossible with standard OS threads.
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                           BEAM Schedulers                               |
-|   (1 OS Thread per CPU Core, e.g. Scheduler 1, Scheduler 2, ... N)      |
-+-------------------------------------------------------------------------+
-       |                                              |
-       v                                              v
-+-----------------------------+                +-----------------------------+
-|    BEAM Process A (<0.101.0>) |                |    BEAM Process B (<0.102.0>) |
-|  - Private Heap (~2.5 KB)   |                |  - Private Heap (~2.5 KB)   |
-|  - Stack Frame (Grows down) |                |  - Stack Frame (Grows down) |
-|  - Mailbox (Message Queue)  |     Copy !     |  - Mailbox (Message Queue)  |
-|  - Reductions Counter: 4000 | -------------> |  - Reductions Counter: 4000 |
-+-----------------------------+                +-----------------------------+
-\`\`\`
+> **BEAM Concurrency Model at a Glance:**
+> - **Schedulers:** 1 OS thread per CPU core (Scheduler 1 .. N) running preemptive micro-threads in user space.
+> - **BEAM Process:** ~2.5 KB private heap, private stack, mailbox queue, reduction counter (4,000 reductions per time slice).
+> - **Zero Shared Memory:** Message passing (\`!\`) copies terms from sender heap to recipient mailbox. No mutexes or stop-the-world locks.
 
 ### 1. Zero Shared Memory & Private Garbage Collection
 Unlike Java or Go where all threads share one global heap that requires "Stop-the-World" GC pauses, every Erlang process has its **own private heap**. When a process finishes its work or terminates, its memory is instantly reclaimed without touching any other process.
@@ -41,7 +30,7 @@ Unlike Java or Go where all threads share one global heap that requires "Stop-th
 ### 2. Preemptive Reduction Scheduling (4,000 Reductions)
 In cooperative systems (like Node.js event loops or Python async), an accidental \`while(true)\` loop freezes the entire server. In Erlang, the BEAM scheduler allocates **4,000 reductions** (roughly 4,000 function calls or BIF calls) to a process. The moment the counter hits zero, the scheduler preempts the process, moves it to the back of the run queue, and runs another process. **No single slow computation or buggy user can starve the rest of the backend!**
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (erts / erlang)
@@ -56,14 +45,14 @@ erlang:process_info(Pid, ItemList) -> InfoList | undefined
 ## Assignment Specification
 
 This is a **Guided Runnable Demo**. No code changes are required!
-1. Click **\`▷ Run\`** below to execute \`process_bench:run/0\`.
+1. Click **\`Run\`** below to execute \`process_bench:run/0\`.
 2. The benchmark will spawn 2,000 concurrent processes, query \`erlang:process_info/2\` for per-process memory, and print the microsecond spawn latency and per-process memory footprint to the console.
 3. Review the implementation of \`process_bench:run_bench/1\` to understand how processes are spawned and measured.
 
 ## Rules & Verification Constraints
 
-- Clicking **\`▷ Run\`** executes \`process_bench:run/0\` and verifies process allocation.
-- Clicking **\`▶ Submit\`** validates that \`process_bench:run_bench(2000)\` reports an average memory footprint of under 4,096 bytes per process.`,
+- Clicking **\`Run\`** executes \`process_bench:run/0\` and verifies process allocation.
+- Clicking **\`Submit\`** validates that \`process_bench:run_bench(2000)\` reports an average memory footprint of under 4,096 bytes per process.`,
     otpDocCards: [
       {
         functionName: 'process_info',
@@ -204,7 +193,7 @@ receive
 end.
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (erts / erlang)
@@ -321,6 +310,7 @@ ping(ResponderPid, Payload) ->
     lessonNumber: 3,
     lessonType: 'concept_exercise',
     title: 'Selective receive ... after: Mailbox Pattern Matching & Timeouts',
+    visualScene: 'mailbox_selective_receive',
     difficulty: 'Intermediate',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -346,12 +336,12 @@ Mailbox:    [ NormalMsg1, NormalMsg2, UrgentMsg3, NormalMsg4 ]
 Restored Mailbox: [ NormalMsg1, NormalMsg2, NormalMsg4 ]
 \`\`\`
 
-> ⚠️ **Production Hazard:** If messages arrive that *never* match any clause in your \`receive\` block, they accumulate in the mailbox indefinitely. Scanning a 500,000-message mailbox on every receive degrades performance from $O(1)$ to $O(N)$! Always provide a fallback clause or drain unexpected messages.
+> **Production Hazard:** If messages arrive that *never* match any clause in your \`receive\` block, they accumulate in the mailbox indefinitely. Scanning a 500,000-message mailbox on every receive degrades performance from $O(1)$ to $O(N)$! Always provide a fallback clause or drain unexpected messages.
 
 ### The Timeout: \`after TimeoutMs ->\`
 Adding \`after TimeoutMs ->\` guarantees that the process will wake up after the specified number of milliseconds if no matching message arrives. A timeout of \`after 0 ->\` checks the mailbox without blocking at all!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 receive
@@ -502,7 +492,7 @@ If \`loop(NewState)\` were not in the tail position (for instance, if you wrote 
 
 Because \`loop(NewState)\` is the **very last expression** executed, the BEAM VM reuses the existing stack frame in $O(1)$ memory. The old \`CurrentState\` is discarded and becomes eligible for private garbage collection, while the process runs for years on a constant ~2.5 KB footprint!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% The Actor Pattern Blueprint:
@@ -673,7 +663,7 @@ Client                                          Named Actor (kv_store)
 
 If a delayed message from an earlier request arrives with an old \`Ref\`, the client's \`receive\` pattern \`{reply, Ref, Value}\` **rejects it**, keeping the client immune to race conditions!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signatures (erts / erlang)
@@ -841,6 +831,30 @@ loop(Map) ->
     lessonNumber: 6,
     lessonType: 'problem_set',
     title: 'Assignment: Concurrent Bank Ledger & Order Actor (ledger_actor.erl)',
+    mentalModelCheck: {
+      question: 'When multiple client processes send concurrent {withdraw, AccId, Amount} messages to ledger_actor, what prevents race conditions and balance corruption?',
+      codeSnippet: `loop(Accounts) ->\n    receive\n        {withdraw, From, AccId, Amount} ->\n            NewAccounts = handle_withdraw(AccId, Amount, From, Accounts),\n            loop(NewAccounts)\n    end.`,
+      options: [
+        {
+          id: 'A',
+          label: 'The BEAM actor mailbox is strictly sequential: messages are processed one at a time, making concurrent race conditions mathematically impossible without any mutex locks.',
+          isCorrect: true,
+          explanation: 'Correct! An Erlang actor processes exactly one mailbox message at a time in its tail-recursive loop. State is updated atomically between iterations without requiring mutexes or lock contention.',
+        },
+        {
+          id: 'B',
+          label: 'The BEAM uses PostgreSQL row locks under the hood for all message receives.',
+          isCorrect: false,
+          explanation: 'Erlang actor state is purely in-memory on the process heap; external databases are not involved.',
+        },
+        {
+          id: 'C',
+          label: 'The actor rejects all messages that arrive at the same millisecond.',
+          isCorrect: false,
+          explanation: 'Concurrent messages are safely queued in the process mailbox in order of arrival, never rejected.',
+        },
+      ],
+    },
     difficulty: 'Production',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -857,15 +871,10 @@ In the **Actor Model**, a single ledger actor serializes incoming transactions o
 
 You will build \`ledger_actor\`, a concurrent state machine storing accounts in its tail-recursive loop argument.
 
-\`\`\`
-             Client 1: {withdraw, 1, 60} ---+
-                                             |
-             Client 2: {transfer, 1, 2, 30} -+-> [ Mailbox Queue ]
-                                             |           |
-             Client 3: {deposit, 2, 100} ----+           v
-                                                ledger_actor loop(Accounts)
-                                                (Atomic, Linearized, Safe!)
-\`\`\`
+> **Atomic Actor Mailbox Serialization:**
+> - Multiple concurrent clients send \`{withdraw, ...}\`, \`{transfer, ...}\`, and \`{deposit, ...}\` concurrently.
+> - The BEAM mailbox queues messages in sequential arrival order.
+> - The \`ledger_actor\` tail loop consumes one message at a time, updating account state atomically without locks!
 
 ### Data Representation
 Each account is stored in the actor's state list as:
@@ -873,7 +882,7 @@ Each account is stored in the actor's state list as:
 {account, AccountId :: integer(), OwnerName :: binary(), Balance :: integer()}
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signatures (erts / erlang)

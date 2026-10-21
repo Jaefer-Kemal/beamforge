@@ -19,19 +19,9 @@ In Erlang and the BEAM VM, you do not need Redis for in-process memory caching. 
 3. **Lock-Free Read/Write Concurrency**: By configuring \`{read_concurrency, true}\` and \`{write_concurrency, true}\`, the BEAM VM utilizes decentralized cache-line locking and lock-free read paths across all CPU cores.
 4. **Hardware Atomic Operations**: Functions like \`ets:update_counter/4\` perform lock-free atomic increments, allowing thousands of concurrent workers to increment rate-limiters or telemetry metrics with zero race conditions.
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  BEAM ETS vs External Cache (Redis)                     |
-+-------------------------------------------------------------------------+
-  External Cache (Node.js / Python / Go -> Redis):
-  [App Worker] --(JSON/Resp)--> [TCP Socket] --(Network 1-2ms)--> [Redis Server]
-                                                                        |
-  BEAM VM with ETS:                                                     v
-  [Worker 1] ---> [ ETS Table (Off-Heap C Structs) ] <--- [Worker 2] (Nanoseconds)
-                  - Zero GC pressure on process heaps
-                  - Atomic lock-free counters
-+-------------------------------------------------------------------------+
-\`\`\`
+> **BEAM ETS vs External Cache (Redis):**
+> - **External Cache (Redis):** Network hop overhead (1-2ms), JSON serialization, TCP connection pool management.
+> - **BEAM ETS (In-Process Off-Heap):** Direct memory lookup via C pointers (nanosecond latency), zero garbage collection pause on process heaps, hardware lock-free atomic counters.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -55,7 +45,7 @@ ets:update_counter(TableName, Key, {Pos, Increment}, DefaultTuple) -> NewValue
 
 If \`Key\` exists, element \`Pos\` is atomically incremented by \`Increment\`. If \`Key\` does NOT exist, \`DefaultTuple\` is inserted atomically and then modified!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official ETS Calls (stdlib / ets)
@@ -223,17 +213,9 @@ Erlang solves this with the **\`protected\` ETS Pattern**:
 - **BUT ANY PROCESS** can perform \`ets:lookup/2\` or \`ets:select/2\` directly in C memory at hardware bus speed without sending a single message to the \`gen_server\`!
 - Result: 50,000 clients read directly in parallel without blocking each other or the server!
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  Protected ETS Concurrency Architecture                 |
-+-------------------------------------------------------------------------+
-  Client 1 (Read)  --------+
-  Client 2 (Read)  --------+---> [ protected ETS Table ] (Nanosecond C Reads)
-  Client 3 (Read)  --------+     ^
-                                 | Writes only
-                    [ Token Manager gen_server ]
-+-------------------------------------------------------------------------+
-\`\`\`
+> **Protected ETS Concurrency Architecture:**
+> - **Owner Process (\`gen_server\`):** Has exclusive write privileges; manages insertions, updates, and deletions.
+> - **Concurrent Readers (Clients 1..N):** Execute direct, lock-free C-level reads (\`ets:lookup/2\`) in parallel without sending messages or blocking the owner process!
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -260,7 +242,7 @@ ExpiredTokens = ets:select(auth_token_table, MatchSpec).
 
 To purge all matching expired entries in a single atomic pass, use **\`ets:select_delete(Tab, MatchSpec)\`**, which returns the exact integer count of deleted records!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official ETS Query Calls (stdlib / ets)
@@ -410,20 +392,12 @@ Even worse: when your supervisor restarts process \`A\` as process \`A'\`, proce
 
 To prevent this, OTP provides the **ETS Heir Protocol** (\`{heir, HeirPid, HeirData}\` and \`ets:give_away/3\`).
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  The ETS Heir Failover Handshake                        |
-+-------------------------------------------------------------------------+
-  1. Worker boots and creates table with {heir, HeirPid, HeirData}.
-  2. Worker crashes!
-  3. BEAM VM intercepts crash and transfers ownership to Heir:
-     Heir receives: {'ETS-TRANSFER', Tab, DeadPid, HeirData}
-  4. Supervisor restarts Worker -> Worker boots as NewWorker.
-  5. NewWorker asks Heir for table -> Heir calls ets:give_away(Tab, NewWorker, Data).
-  6. NewWorker receives: {'ETS-TRANSFER', Tab, HeirPid, Data}.
-  7. ZERO LOST DATA!
-+-------------------------------------------------------------------------+
-\`\`\`
+> **The ETS Heir Failover Handshake:**
+> 1. **Worker boots:** Creates table with \`{heir, HeirPid, HeirData}\`.
+> 2. **Worker crashes:** BEAM VM intercepts crash and atomically transfers ownership to Heir.
+> 3. **Heir receives:** \`{'ETS-TRANSFER', Tab, DeadPid, HeirData}\`. Table is completely preserved.
+> 4. **Supervisor restarts Worker:** Worker asks Heir for table. Heir calls \`ets:give_away(Tab, NewWorker, Data)\`.
+> 5. **NewWorker receives:** \`{'ETS-TRANSFER', Tab, HeirPid, Data}\`. Zero lost cached data!
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -457,7 +431,7 @@ ets:give_away(Tab, NewOwnerPid, GiftData)
 
 The new owner process receives \`{'ETS-TRANSFER', Tab, HeirPid, GiftData}\` and immediately becomes the full legal owner of the table!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official ETS Heir Calls (stdlib / ets)
@@ -597,15 +571,10 @@ Erlang provides two built-in standard library solutions:
 - **Mnesia**: An ACID-compliant distributed DBMS embedded directly in BEAM. It supports tables replicated across multiple nodes in RAM or disk, and runs all mutations inside transactional closures (\`mnesia:transaction(Fun)\`) that roll back automatically on crashes!
 - **\`pg\` (Distributed Process Groups)**: Introduced in OTP 23 to replace the older single-process \`pg2\`. \`pg\` allows any process on any node to join topic groups with zero centralized bottlenecks.
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  Mnesia vs ETS vs pg Architectural Role                 |
-+-------------------------------------------------------------------------+
-  1. ETS: Single-Node, High-Throughput In-Memory Caching (No Transactions)
-  2. Mnesia: Multi-Node Replicated, ACID Transactions with Rollback
-  3. pg: Distributed Pub/Sub Messaging across Cluster Nodes
-+-------------------------------------------------------------------------+
-\`\`\`
+> **Mnesia vs ETS vs pg Architectural Roles:**
+> 1. **ETS:** Single-node, high-throughput in-memory caching with lock-free reads and atomic counters.
+> 2. **Mnesia:** Multi-node replicated, ACID transactions with automated rollback closures.
+> 3. **\`pg\`:** Decentralized pub/sub process groups across cluster nodes with monitor cleanup.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -638,7 +607,7 @@ In modern Erlang/OTP, \`pg\` provides process group routing:
 - \`pg:join(Scope, GroupName, Pid)\`: Subscribes \`Pid\` to topic \`GroupName\`.
 - \`pg:get_members(Scope, GroupName)\`: Fetches all live pids subscribed to \`GroupName\`. If a subscribed process crashes, \`pg\` detects its termination via monitors and unregisters it automatically!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official Mnesia & pg Calls (stdlib / pg & mnesia)
@@ -777,20 +746,11 @@ Erlang approaches software quality through two industry-standard tools:
 1. **Dialyzer (DIscrepancy AnaLYZer for ERlang)**: A static analysis tool based on **Success Typings**. Unlike compilers that reject valid code due to rigid type hierarchies, Dialyzer only reports bugs that are **mathematically proven to fail at runtime**!
 2. **EUnit**: OTP's standard unit-testing framework, featuring assertion macros, test generators, and lifecycle fixtures (\`setup\`, \`cleanup\`).
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                    Erlang Quality Assurance Pipeline                    |
-+-------------------------------------------------------------------------+
-  [Source Code with -spec annotations]
-                 |
-                 +---> Dialyzer (Static Success Typing & Discrepancy Audit)
-                 |
-                 +---> EUnit (Automated Unit Testing & Fixture Execution)
-                 |
-                 v
-  [Production-Ready Zero-Defect BEAM Releases]
-+-------------------------------------------------------------------------+
-\`\`\`
+> **Erlang Quality Assurance Pipeline:**
+> - **Source with \`-spec\`:** Contracts define mathematical success typings.
+> - **Dialyzer:** Static discrepancy audit mathematically proving code validity without false positives.
+> - **EUnit:** Automated unit testing and fixture execution.
+> - **BEAM Release:** Hardened, zero-defect production deployment.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -821,7 +781,7 @@ deposit_test() ->
     ?assertEqual(150, maps:get(<<"acc_1">>, Updated)).
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official EUnit Assertions (eunit/include/eunit.hrl)
@@ -982,22 +942,10 @@ By combining **ETS** with the **Heir Failover Handshake**, you achieve the holy 
 2. **Zero Data Loss on Crash**: If the worker process crashes (e.g. unhandled payload or OOM crash), a dedicated **Heir Guardian** process catches the table via \`{'ETS-TRANSFER', ...}\`.
 3. **Transparent Recovery**: When the supervisor restarts the worker, the new worker reclaims the existing ETS table from the guardian via \`ets:give_away/3\`, preserving 100% of user sessions and rate-limit counters!
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  Fault-Tolerant Session Cache Architecture              |
-+-------------------------------------------------------------------------+
-                          [ session_sup ]
-                                 | (one_for_one)
-                 +---------------+---------------+
-                 |                               |
-        [ table_manager ]              [ session_cache ]
-        (Long-Lived Heir)              (Worker gen_server)
-                 |                               |
-                 +==== {'ETS-TRANSFER'} <========+ (Crash!)
-                 |
-                 +==== ets:give_away/3 =========> [ session_cache' ] (Restarted)
-+-------------------------------------------------------------------------+
-\`\`\`
+> **Fault-Tolerant Session Cache Architecture:**
+> - \`session_sup\` (\`one_for_one\`) boots \`table_manager\` (heir guardian) first, then \`session_cache\` (worker).
+> - If \`session_cache\` crashes, BEAM immediately delivers \`{'ETS-TRANSFER', ...}\` to \`table_manager\`.
+> - Supervisor restarts \`session_cache\`, and \`table_manager\` transfers the table back via \`ets:give_away/3\` with 0% data loss!
 
 ## Deep Concept Breakdown & Under the Hood
 

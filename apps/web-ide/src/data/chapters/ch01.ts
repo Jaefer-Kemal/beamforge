@@ -28,7 +28,7 @@ MaxProcs   = erlang:system_info(process_limit),
 OtpRel     = erlang:system_info(otp_release).
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (erts / erlang)
@@ -44,7 +44,7 @@ erlang:system_info(Item) -> Info
 This is a **Guided Runnable Demo**. The code below is already complete.
 1. Inspect the pre-written module \`beam_intro.erl\`.
 2. Notice how it calls \`erlang:system_info/1\` to query live BEAM VM internals.
-3. Click **▷ Run** below to run the live BEAM diagnostic probe.
+3. Click **Run** below to run the live BEAM diagnostic probe.
 
 ## Rules & Verification Constraints
 
@@ -180,7 +180,7 @@ BandwidthKbps = (TotalBytes * 8) div (DurationSec * 1000).
 IsAllowed = (UserRole =:= admin) orelse (Credits > 0).
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Integer division and remainder BIFs
@@ -328,7 +328,7 @@ Event = {call_event, 1001, <<"alice">>, <<"bob">>, 45}.
 {call_event, Id, Caller, Callee, Duration} = Event.
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Creating and destructuring tuples
@@ -475,7 +475,7 @@ A list cell consists of two pointers: one pointing to the element (\`Head\`), an
 %% T = [2, 3]
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Standard list operations (stdlib / lists)
@@ -636,7 +636,7 @@ State0 = #{balance => 100},
 State1 = maps:put(balance, 150, State0).
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Pattern matching assertions
@@ -787,7 +787,7 @@ connect(Host, Port, Retries) ->
     {ok, connected, Host, Port, Retries}.
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Module definition and exports
@@ -931,7 +931,7 @@ This problem set synthesizes all foundational Erlang skills:
 {ipv6, SrcIp, DstIp, Payload}
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% BIFs used for validation

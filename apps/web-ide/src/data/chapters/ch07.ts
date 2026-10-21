@@ -23,29 +23,10 @@ Erlang solves this with **OTP Behaviours**. An OTP Behaviour (like \`gen_server\
 
 ## Deep Concept Breakdown & Under the Hood
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  The OTP gen_server Architecture                        |
-+-------------------------------------------------------------------------+
-    Client Call: gen_server:call(Pid, {deposit, 100})
-         |
-         v
-+-------------------------------------------------------------------------+
-|                       Generic Engine (gen_server.erl)                   |
-|   - Sets up MRef = monitor(process, Pid)                                |
-|   - Formats message: {'$gen_call', {From, MRef}, Request}               |
-|   - Handles sys messages (sys:get_state, sys:suspend, etc.)             |
-+-------------------------------------------------------------------------+
-         |
-         v Invokes your specific callback!
-+-------------------------------------------------------------------------+
-|                    Your Callback Module (my_bank.erl)                   |
-|   -init(Args)                   -> {ok, State}                          |
-|   -handle_call(Request, From, S) -> {reply, Reply, NewState}            |
-|   -handle_cast(Request, S)      -> {noreply, NewState}                  |
-|   -handle_info(Info, S)         -> {noreply, NewState}                  |
-+-------------------------------------------------------------------------+
-\`\`\`
+> **The OTP \`gen_server\` Architecture:**
+> 1. **Client Call:** \`gen_server:call(Pid, Request)\` sets up a monitor and sends \`{'$gen_call', {From, MRef}, Request}\`.
+> 2. **Generic Engine (\`gen_server.erl\`):** Handles system protocols, timeouts, and process monitoring.
+> 3. **Your Callback Module:** Implements \`init/1\`, \`handle_call/3\`, \`handle_cast/2\`, \`handle_info/2\`, and \`terminate/2\`.
 
 ### Inspecting Live State with \`sys:get_state/1\`
 
@@ -57,7 +38,7 @@ State = sys:get_state(ServerPid)
 
 The \`gen_server\` engine intercepts the system query, extracts its current internal \`State\` term, and replies to the caller **without dropping requests or disrupting normal traffic**!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Module: gen_server (stdlib)
@@ -82,7 +63,7 @@ sys:get_status(NameOrPid) -> Status
 
 This is a **Guided Runnable Demo**. No code changes are required!
 1. Inspect the pre-written \`otp_intro_demo\` module in the editor.
-2. Click **\`▷ Run\`** below to execute the demo.
+2. Click **\`Run\`** below to execute the demo.
 3. Observe how the server initializes with state \`#{counter => 0, ops => 0}\`, executes synchronous calls and asynchronous casts, and uses \`sys:get_state/1\` to query the live internal map!
 
 ## Rules & Verification Constraints
@@ -248,17 +229,12 @@ The fundamental architectural choice when building any \`gen_server\` endpoint i
 
 Understanding the trade-offs is essential to preventing production outages:
 
-\`\`\`
-+-----------------------+-----------------------------+-----------------------------+
-| Feature               | Synchronous call (handle_call)| Asynchronous cast (handle_cast)|
-+-----------------------+-----------------------------+-----------------------------+
-| Return Value          | Returns Reply term to caller| Returns 'ok' immediately    |
-| Caller Blocking       | Blocks until server replies | Never blocks the caller     |
-| System Backpressure   | Built-in backpressure! Caller| ZERO backpressure! Can flood|
-|                       | rate is limited by server.  | server mailbox to OOM.      |
-| Error Visibility      | Catches server crashes / err| Failures are silent!        |
-+-----------------------+-----------------------------+-----------------------------+
-\`\`\`
+| Feature | Synchronous \`call\` (\`handle_call\`) | Asynchronous \`cast\` (\`handle_cast\`) |
+| :--- | :--- | :--- |
+| **Return Value** | Returns \`Reply\` term to caller | Returns \`ok\` immediately |
+| **Caller Blocking** | Blocks until server replies | Never blocks the caller |
+| **Backpressure** | Built-in backpressure; caller limited by server | ZERO backpressure; can flood server mailbox |
+| **Error Visibility** | Catches server crashes / errors | Failures are completely silent |
 
 > **Production Golden Rule:** Default to \`gen_server:call/2\` for 90% of your backend APIs. Use \`gen_server:cast/2\` only when high throughput is mandatory, order is non-critical, and upstream rate-limiting prevents mailbox flooding!
 
@@ -274,7 +250,7 @@ Understanding the trade-offs is essential to preventing production outages:
    - Return tuple: \`{noreply, NewState}\`
 4. **\`stop(Pid)\`**: Cleanly terminates the server using \`gen_server:stop(Pid)\`.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Module: gen_server
@@ -492,7 +468,7 @@ schedule_tick(IntervalMs) ->
 \`\`\`
 Messages sent directly to \`self()\` (not via \`call\` or \`cast\`) arrive as out-of-band events in **\`handle_info/2\`**!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Callback: handle_continue/2 (OTP 21+)
@@ -696,27 +672,10 @@ Erlang provides **\`gen_statem\`** (State Machine Behaviour) to enforce strict, 
 
 ## Deep Concept Breakdown & Under the Hood
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  Circuit Breaker State Machine Transitions              |
-+-------------------------------------------------------------------------+
-                      [closed] (Healthy - Requests Flow)
-                         |
-           Failures >= Threshold hit!
-                         |
-                         v
-                       [open] (Downstream Dead - Fast Fail {error, circuit_open})
-                         |
-               After OpenTimeoutMs...
-                         |
-                         v
-                    [half_open] (Trial Request)
-                    /          \\
-           Trial Fails!       Trial Succeeds!
-                 /                \\
-                v                  v
-             [open]             [closed]
-\`\`\`
+> **Circuit Breaker State Machine Lifecycle:**
+> - \`closed\` -> Normal healthy operation; requests pass through.
+> - \`open\` -> Error threshold exceeded; immediately fast-fails with \`{error, circuit_open}\`.
+> - \`half_open\` -> After timeout, allows a trial canary request to test downstream recovery. Transitions back to \`closed\` on success, or \`open\` on failure.
 
 ### The \`state_functions\` Callback Mode
 
@@ -737,7 +696,7 @@ Common return actions:
 - \`{next_state, NextState, NewData, [{reply, From, Reply}]}\`: Transitions to \`NextState\` and replies.
 - \`{next_state, open, NewData, [{state_timeout, TimeoutMs, retry_half_open}]}\`: Automatically triggers an event when the state timer expires!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Module: gen_statem
@@ -949,21 +908,9 @@ Erlang solves this with **\`gen_event\`** (The Event Manager Behaviour). Unlike 
 
 ## Deep Concept Breakdown & Under the Hood
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  gen_event Manager & Dynamic Handlers                   |
-+-------------------------------------------------------------------------+
-                          gen_event:notify(Mgr, Event)
-                                      |
-                                      v
-                        +---------------------------+
-                        |     gen_event Manager     |
-                        +---------------------------+
-                               /      |      \\
-                             /        |        \\
-                           v          v          v
-                  [Audit Logger]  [StatsD]  [Fraud Detector]
-\`\`\`
+> **\`gen_event\` Dynamic Event Bus:**
+> - \`gen_event:notify(Mgr, Event)\` dispatches events to all attached handlers in parallel.
+> - Handlers (e.g. Audit Logger, StatsD metrics, Fraud Detector) can be dynamically added or removed at runtime with \`gen_event:add_handler/3\`.
 
 ### The \`gen_event\` Callback Invariants
 
@@ -973,7 +920,7 @@ A handler module exports:
 3. \`handle_call(Request, State) -> {ok, Reply, NewState}\`
 4. \`terminate(Reason, State) -> ok\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Module: gen_event
@@ -1132,23 +1079,21 @@ Implementing this as an OTP \`gen_server\` gives us:
 
 ## Deep Concept Breakdown & Under the Hood
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  Token-Bucket Algorithm State Map                       |
-+-------------------------------------------------------------------------+
+\`\`\`erlang
+%% Token-Bucket State Map Format:
 #{
-    max_tokens    => 10,
-    refill_amount => 3,
-    clients       => #{
+    max_tokens     => 10,
+    refill_amount  => 3,
+    clients        => #{
         <<"client_alice">> => 7,
-        <<"client_bob">>   => 0   <-- Denied on next check!
+        <<"client_bob">>   => 0   %% Denied on next check!
     },
     total_allowed  => 142,
     total_rejected => 18
 }
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 - [\`erlang.org/doc/apps/stdlib/gen_server.html\`](https://www.erlang.org/doc/apps/stdlib/gen_server.html)
 - [\`erlang.org/doc/apps/stdlib/sys.html#get_state/1\`](https://www.erlang.org/doc/apps/stdlib/sys.html#get_state/1)

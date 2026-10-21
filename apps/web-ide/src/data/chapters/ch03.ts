@@ -31,7 +31,7 @@ SquareRoot = fun math:sqrt/1,
 Result = SquareRoot(16.0).  %% => 4.0
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Closure creation syntax
@@ -196,7 +196,7 @@ lists:filtermap(fun({user, Id, active}) -> {true, Id};
                 end, Users).
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signatures (stdlib / lists)
@@ -388,7 +388,7 @@ Notice that \`foldl\` is **tail-recursive**: the call to \`foldl/3\` is in the r
 ### \`lists:foldr/3\` (Body-Recursive, Stack O(N))
 By contrast, \`foldr\` processes elements from right to left, requiring the entire list to be walked onto the BEAM stack before the folding function begins. **Always prefer \`lists:foldl/3\` in production**.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (stdlib / lists)
@@ -568,7 +568,7 @@ Users = [{user, 1, active}, {guest, 2}, {user, 3, suspended}],
 %% => [1]
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% List comprehension syntax
@@ -720,7 +720,7 @@ Total = lists:foldl(fun({product, _, _, Price, Stock}, Acc) ->
 end, 0, Inventory).
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Standard library higher-order functions

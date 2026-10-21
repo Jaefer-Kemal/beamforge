@@ -1,4 +1,4 @@
-import { WorkspaceFile, BeamNode, BeamEdge, XmppC2SState } from '../types/workspace';
+import { WorkspaceFile, BeamNode, BeamEdge, XmppC2SState, VisualSceneId, MentalModelCheckSpec } from '../types/workspace';
 
 export type CapabilityMode = 'code_only' | 'code_and_memory' | 'beam_graph' | 'xmpp_full';
 export type Difficulty = 'Beginner' | 'Intermediate' | 'Advanced' | 'Production';
@@ -36,6 +36,8 @@ export interface CurriculumLevel {
   initialNodes?: BeamNode[];
   initialEdges?: BeamEdge[];
   initialXmppState?: XmppC2SState;
+  visualScene?: VisualSceneId;
+  mentalModelCheck?: MentalModelCheckSpec;
 }
 
 export interface CurriculumWorld {
@@ -216,6 +218,7 @@ validate_priority(_) ->
         estimatedMinutes: 20,
         xpReward: 150,
         capabilityMode: 'code_and_memory',
+        visualScene: 'tco_vs_body_stack',
         conceptMarkdown: `## Tail-Call Optimization (TCO) & BEAM Stack Frames
 
 Erlang processes have no loops (\`while\`, \`for\`). All iteration is achieved via recursion.
@@ -347,6 +350,7 @@ filter_active_sessions([_ | T], Acc) ->
         estimatedMinutes: 25,
         xpReward: 200,
         capabilityMode: 'code_and_memory',
+        visualScene: 'sub_binary_procbin_refc',
         conceptMarkdown: `## Erlang Bit Syntax & Sub-Binary Memory Leak Prevention
 
 Erlang features unmatched support for unpacking binary wire protocols via bit-level pattern matching.
@@ -471,6 +475,7 @@ parse_frame(_) ->
         estimatedMinutes: 25,
         xpReward: 200,
         capabilityMode: 'beam_graph',
+        visualScene: 'links_monitors_signals',
         conceptMarkdown: `## Process Links, Monitors & trap_exit Fault Signals
 
 The foundation of Erlang fault tolerance is the principle: *"Let it crash, but detect it immediately."*
@@ -934,6 +939,7 @@ terminate(_Reason, _State) ->
         estimatedMinutes: 25,
         xpReward: 250,
         capabilityMode: 'beam_graph',
+        visualScene: 'supervision_rest_for_one_ets_heir',
         conceptMarkdown: `## Supervision Strategies: \`one_for_one\` vs \`rest_for_one\`
 
 Choosing the wrong supervision strategy is the #1 cause of cascading failures in distributed Erlang.
@@ -1057,6 +1063,7 @@ init([]) ->
         estimatedMinutes: 30,
         xpReward: 300,
         capabilityMode: 'beam_graph',
+        visualScene: 'supervision_rest_for_one_ets_heir',
         conceptMarkdown: `## Fault-Tolerant Session Cache with ETS Heir Transfer
 
 In production distributed systems, killing or restarting a \`gen_server\` worker must **never** drop active user sessions or in-memory routing tables.
@@ -1346,6 +1353,7 @@ terminate(_Reason, _State) ->
         estimatedMinutes: 25,
         xpReward: 250,
         capabilityMode: 'beam_graph',
+        visualScene: 'tcp_xmpp_stream_framing',
         conceptMarkdown: `## TCP Flow Control: \`{active, once}\` vs \`{active, true}\`
 
 In network servers handling untrusted clients, how the BEAM reads from the kernel socket buffer determines whether your node survives a DDoS attack or crashes with Out-Of-Memory (OOM).
@@ -1469,6 +1477,7 @@ loop(Socket, PacketCount) ->
         estimatedMinutes: 35,
         xpReward: 350,
         capabilityMode: 'xmpp_full',
+        visualScene: 'xmpp_5_module_capstone_arch',
         conceptMarkdown: `## XMPP C2S \`gen_statem\` Stream Negotiation & SASL
 
 XMPP (Extensible Messaging and Presence Protocol) is the protocol powering WhatsApp, Cisco Webex, and enterprise chat backbones.

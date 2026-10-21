@@ -15,31 +15,12 @@ The **Extensible Messaging and Presence Protocol (XMPP — RFC 6120 & RFC 6121)*
 
 Unlike HTTP (where the client opens a connection, requests a resource, receives JSON, and closes), XMPP establishes a **persistent, bidirectional XML stream** over a single long-lived TCP socket:
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  THE 5-PHASE XMPP C2S PROTOCOL LIFECYCLE                |
-+-------------------------------------------------------------------------+
- Client                                                        Server (BEAM)
-   |                                                                |
-   | --- [Phase 1: Stream Open] ----------------------------------> |
-   |     <stream:stream to='localhost' xmlns='jabber:client' ...>   |
-   |                                                                |
-   | <--- [Phase 2: Stream Features] ------------------------------ |
-   |     <stream:features><mechanisms><mechanism>PLAIN...           |
-   |                                                                |
-   | --- [Phase 3: SASL PLAIN Auth] ------------------------------> |
-   |     <auth mechanism='PLAIN'>AGFsaWNlAHBhc3N3b3Jk</auth>        |
-   | <--- <success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/> ----- |
-   |                                                                |
-   | --- [Phase 4: IQ Resource Binding] --------------------------> |
-   |     <iq type='set' id='b1'><bind><resource>obsidian</resource> |
-   | <--- <iq type='result' id='b1'><bind><jid>alice@host/obsidian  |
-   |                                                                |
-   | <=== [Phase 5: Discrete Stanzas: <iq>, <presence>, <message>] ==> |
-   |     Client and Server exchange stanzas indefinitely            |
-   |     over the same open stream without HTTP polling overhead!   |
-+-------------------------------------------------------------------------+
-\`\`\`
+> **The 5-Phase XMPP C2S Protocol Lifecycle:**
+> 1. **Phase 1: Stream Open** — \`<stream:stream to='localhost' xmlns='jabber:client' ...>\`
+> 2. **Phase 2: Stream Features** — Server advertises supported auth mechanisms (\`<mechanisms>\`)
+> 3. **Phase 3: SASL PLAIN Auth** — Client sends credentials (\`<auth>\`) and receives \`<success/>\`
+> 4. **Phase 4: IQ Resource Binding** — Client binds session resource (\`<iq><bind>\`) and receives Full JID
+> 5. **Phase 5: Discrete Stanzas** — Bidirectional peer XML exchange (\`<iq>\`, \`<presence>\`, \`<message>\`) over the persistent stream
 
 Notice the most crucial property of XMPP: **The initial \`<stream:stream>\` tag is NEVER closed** during active communication! It remains open for hours or days. Discrete stanzas (\`<iq>\`, \`<presence>\`, \`<message>\`) are transmitted inside this stream as peer XML root elements.
 
@@ -62,7 +43,7 @@ In Erlang:
    \`\`\`
 3. **Hardware Backpressure**: By using \`inet:setopts(Socket, [{active, once}])\`, a slow client or flooded socket never causes memory leaks or process crashes.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% IETF RFC 6120 - Section 4.2: Stream Initiation
@@ -78,9 +59,9 @@ In this guided demonstration, we will boot an in-memory mock XMPP C2S acceptor a
 
 This is a **guided terminal demo**—no code changes are required!
 1. Review the runnable Erlang module \`xmpp_wire_demo.erl\`.
-2. Click **\`▷ Run\`** to boot the live mock C2S listener and execute the full 5-stage handshake.
+2. Click **\`Run\`** to boot the live mock C2S listener and execute the full 5-stage handshake.
 3. Observe the structured wire timeline in the console output.
-4. Click **\`▶ Submit\`** to verify the socket and protocol execution stages.
+4. Click **\`Submit\`** to verify the socket and protocol execution stages.
 
 ## Rules & Verification Constraints
 
@@ -249,18 +230,12 @@ A single user account has a **Bare JID** (\`alice@chat.beamforge.io\`), represen
 - \`alice@chat.beamforge.io/mobile_ios\`
 - \`alice@chat.beamforge.io/macbook_desktop\`
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  RFC 7622 JID ADDRESSING STRUCTURE                      |
-+-------------------------------------------------------------------------+
-      alice       @     chat.beamforge.io      /      mobile_ios
-    [localpart]             [domainpart]              [resourcepart]
-         \\______________________/                         |
-                     |                                    |
-                 Bare JID                             Full JID
-        (Account & Roster Identity)            (Unique TCP C2S Session)
-+-------------------------------------------------------------------------+
-\`\`\`
+> **RFC 7622 JID Addressing Structure:**
+> - **Localpart:** \`alice\` (Account identity)
+> - **Domainpart:** \`chat.beamforge.io\` (Server host)
+> - **Resourcepart:** \`mobile_ios\` (Unique client session)
+> - **Bare JID:** \`alice@chat.beamforge.io\` (Account & Roster Identity)
+> - **Full JID:** \`alice@chat.beamforge.io/mobile_ios\` (Unique TCP C2S Session)
 
 If your parser fails to validate empty resources, handles sub-binaries incorrectly, or allows malformed JIDs into your routing table, messages get lost or sent to dead processes.
 
@@ -285,7 +260,7 @@ CleanUser = binary:copy(User)
 3. If a forward slash \`/\` is present, the \`resource\` (resourcepart) MUST NOT be empty. (e.g. \`alice@localhost/\` is invalid).
 4. If no \`/\` is present, it is a valid **Bare JID**, and \`resource\` is normalized to \`<<>>\`.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (stdlib / binary)
@@ -542,28 +517,10 @@ In XMPP, after the stream header has been negotiated, all communication consists
 
 Production Erlang servers like MongooseIM and ejabberd handle millions of stanzas per second. Constructing XML efficiently using **IO Lists** and matching incoming stanzas using high-performance binary pattern matching is the foundation of high-throughput messaging.
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  THE 3 FUNDAMENTAL XMPP STANZA PATTERNS                 |
-+-------------------------------------------------------------------------+
- 1. <iq> (Info/Query - Request/Response Correlated by 'id')
-    <iq from='alice@host' to='host' id='ping_1' type='get'>
-      <ping xmlns='urn:xmpp:ping'/>
-    </iq>
-    <iq from='host' to='alice@host' id='ping_1' type='result'/>
-
- 2. <presence> (Availability & Routing Priority)
-    <presence from='alice@host/phone'>
-      <show>chat</show>
-      <priority>10</priority>
-    </presence>
-
- 3. <message> (Direct or Group Communication)
-    <message from='alice@host/phone' to='bob@host' id='msg_42' type='chat'>
-      <body>Hey Bob, ready for the BEAM release?</body>
-    </message>
-+-------------------------------------------------------------------------+
-\`\`\`
+> **The 3 Fundamental XMPP Stanza Patterns:**
+> 1. \`<iq>\` (Info/Query) — Request/Response correlated by unique \`id\` attribute.
+> 2. \`<presence>\` (Availability) — Broadcasts presence status and routing priority.
+> 3. \`<message>\` (Direct Chat) — Real-time user-to-user and group chat delivery.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -578,7 +535,7 @@ Before dispatching a packet to its handler, the connection state machine must cl
 ### 2. High-Performance Wire Binary Construction
 In Erlang, concatenating binaries using \`<<Chunk1/binary, Chunk2/binary>>\` is extremely fast and zero-copy when building known XML payloads.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% RFC 6120 Section 8: XML Stanzas
@@ -868,6 +825,7 @@ build_chat_message(FromJid, ToJid, Id, BodyText) ->
     lessonNumber: 4,
     lessonType: 'concept_exercise',
     title: 'Incremental XML Stream Framing Over Fragmented TCP Sockets',
+    visualScene: 'tcp_xmpp_stream_framing',
     difficulty: 'Advanced',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -877,27 +835,10 @@ Why does that fail catastrophically?
 1. **The Stream is Never Closed**: An XML DOM parser expects \`</stream:stream>\` at the end of the document. If you feed it an open XMPP stream, it blocks forever waiting for EOF!
 2. **TCP Packet Fragmentation & Coalescing**: TCP delivers bytes in arbitrary chunks. A client may send an IQ stanza in 3 separate 10-byte packets, or bundle two chat messages into one TCP frame.
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  INCREMENTAL XML STREAM FRAMING PIPELINE                |
-+-------------------------------------------------------------------------+
- Incoming TCP Chunks:
-   Chunk 1: <<"<stream:stream to='host' ...>  <iq type=">>
-   Chunk 2: <<"'set' id='b1'><bind><resource>obs">>
-   Chunk 3: <<"idian</resource></bind></iq><presence/>">>
-
- Buffer State Transitions:
-   After Chunk 1:
-     -> Extracted Frame 1: <stream:stream to='host' ...>
-     -> Remaining Buffer:  "<iq type="
-   After Chunk 2:
-     -> Remaining Buffer:  "<iq type='set' id='b1'><bind><resource>obs"
-   After Chunk 3:
-     -> Extracted Frame 2: <iq type='set' id='b1'><bind><resource>obsidian</resource></bind></iq>
-     -> Extracted Frame 3: <presence/>
-     -> Remaining Buffer:  <<>>
-+-------------------------------------------------------------------------+
-\`\`\`
+> **Incremental XML Stream Framing Pipeline:**
+> - **Chunk 1:** \`<<"<stream:stream to='host' ...>  <iq type=">>\` -> Emits \`<stream:stream>\` header, keeps incomplete \`<iq type=\` in buffer.
+> - **Chunk 2:** \`<<"'set' id='b1'><bind><resource>obs">>\` -> Accumulates in buffer.
+> - **Chunk 3:** \`<<"idian</resource></bind></iq><presence/>">>\` -> Slices and emits \`<iq>\` and self-closing \`<presence/>\`, leaves buffer empty.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -917,7 +858,7 @@ The framing function \`extract_frames/2\` takes \`(OldBufferBin, NewChunkBin)\`,
 \`\`\`
 Where \`CleanRemainingBuffer\` is copied via \`binary:copy/1\` so that stale 64KB socket buffers are not kept alive in the worker process heap.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Searching for tag boundaries in binaries:
@@ -1136,33 +1077,11 @@ In production servers like **MongooseIM** (\`mongoose_c2s.erl\`) and **ejabberd*
 
 Before a client can send or receive chat messages, it MUST navigate a strict cryptographic and protocol handshake. If an unauthenticated client sends a chat \`<message>\` or an \`<iq>\` before authenticating, the server MUST reject it immediately to prevent unauthorized spoofing.
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  C2S CLIENT HANDSHAKE FINITE STATE MACHINE              |
-+-------------------------------------------------------------------------+
-                    +--------------------+
-                    |  wait_for_stream   |  <--- Initial State
-                    +--------------------+
-                              |
-                              | Receive <stream:stream to='host' ...>
-                              v (Reply: Stream Header + <stream:features>)
-                    +--------------------+
-                    |   wait_for_sasl    |  <--- Rejects any <iq> or <message>!
-                    +--------------------+
-                              |
-                              | Receive <auth mechanism='PLAIN'>credentials</auth>
-                              v (Reply: <success xmlns='urn:...:xmpp-sasl'/>)
-                    +--------------------+
-                    |   authenticated    |  <--- Stream restarts; binds resource
-                    +--------------------+
-                              |
-                              | Receive <iq type='set'><bind><resource>Res...
-                              v (Reply: <iq type='result'><bind><jid>User@Host/Res...
-                    +--------------------+
-                    | session_established|  <--- Full JID active; routes chat!
-                    +--------------------+
-+-------------------------------------------------------------------------+
-\`\`\`
+> **C2S Client Handshake Finite State Machine:**
+> - \`wait_for_stream\` -> Initial state waiting for \`<stream:stream>\` header.
+> - \`wait_for_sasl\` -> Negotiates SASL PLAIN credentials; rejects any \`<iq>\` or \`<message>\`.
+> - \`authenticated\` -> Stream restarts; waits for \`<iq type='set'><bind>\` resource bind.
+> - \`session_established\` -> Bound Full JID registered; real-time chat stanzas routed.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -1185,7 +1104,7 @@ The FSM ensures protocol security:
 - In \`wait_for_stream\`, any stanza other than \`{stream_open, Domain}\` returns \`{error, unexpected_stanza_before_stream, State}\`.
 - In \`wait_for_sasl\`, any stanza other than \`{auth_plain, Base64}\` returns \`{error, not_authorized, State}\`.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Base64 Decoding
@@ -1451,25 +1370,11 @@ When Bob sends a message to \`alice@chat.beamforge.io\` (a Bare JID), how does t
 
 The answer is **RFC 6121 Section 8 (Priority-Based Message Routing & Presence Broadcast)**. This algorithm is the heartbeat of enterprise XMPP servers like ejabberd and MongooseIM.
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  RFC 6121 MULTI-DEVICE PRIORITY ROUTING                 |
-+-------------------------------------------------------------------------+
- Incoming Message to: alice@localhost (Bare JID)
- 
- Alice's Active Sessions:
-   1. alice@localhost/watch   (Priority: -5)  --> Negative priority (DND)
-   2. alice@localhost/phone   (Priority:  5)  --> Online
-   3. alice@localhost/desktop (Priority: 10)  --> Highest Priority!
-
- Routing Decision:
-   - Negative priority sessions are EXCLUDED.
-   - Desktop has highest priority (10 > 5).
-   - Message is routed EXCLUSIVELY to alice@localhost/desktop!
-   - (If desktop and phone both had priority 10, both would receive it!)
-   - If all devices have negative priority or are offline -> Store Offline.
-+-------------------------------------------------------------------------+
-\`\`\`
+> **RFC 6121 Multi-Device Priority Routing Rules:**
+> 1. **Negative Priority Exclusion:** Sessions with negative priority (e.g. \`Priority: -5\` DND) are strictly excluded from message delivery.
+> 2. **Highest Numerical Priority:** Messages delivered to a Bare JID are routed exclusively to the session with the highest positive priority.
+> 3. **Tied Priority Fan-Out:** If multiple sessions share the identical highest priority, stanzas fan out to all tied sessions.
+> 4. **Offline Fallback:** If all sessions are offline or negative priority, the stanza is stored in the offline message spool.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -1497,7 +1402,7 @@ To represent active user sessions cleanly in Erlang memory without external data
    - Sends \`Pid ! {xmpp_presence, SenderFullJid, PresenceStanzaBin}\` to all online sessions belonging to those contacts, **plus** Alice's own other connected devices!
    - Returns the count of distinct worker PIDs notified.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% IETF RFC 6121 Section 8.3: Inbound Message Routing

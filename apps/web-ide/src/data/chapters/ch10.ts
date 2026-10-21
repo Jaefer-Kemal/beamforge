@@ -15,20 +15,10 @@ Every network service on the modern Internet—from Redis and PostgreSQL to What
 
 In languages like Python, Node.js, or Go, managing thousands of concurrent TCP sockets requires complicated thread pools, asynchronous event loops (\`libuv\`, \`epoll\`), or Goroutines that can easily deadlock. In Erlang and the BEAM VM, **every connected TCP socket is mapped directly to a lightweight Erlang process**. When a client sends bytes over the physical wire, the BEAM VM converts the OS network frame into an Erlang message (\`{tcp, Socket, Data}\`) and delivers it directly to that process's mailbox!
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  THE BEAM RAW TCP SOCKET ARCHITECTURE                   |
-+-------------------------------------------------------------------------+
-  1. gen_tcp:listen(Port)       --> Creates ListenSocket ("Front Door")
-  2. gen_tcp:accept(ListenSock) --> Blocks until client connects
-                                    Returns ClientSocket (Dedicated Pipe)
-  3. Wire Traffic:
-     Client ---> [OS TCP Stack] ---> [BEAM Port Driver]
-                                            |
-                                            v (Delivers {tcp, Sock, Bin})
-                                     [Process Mailbox]
-+-------------------------------------------------------------------------+
-\`\`\`
+> **The BEAM Raw TCP Socket Architecture:**
+> 1. \`gen_tcp:listen(Port)\` -> Creates \`ListenSocket\` (Front door welcoming new connections)
+> 2. \`gen_tcp:accept(ListenSock)\` -> Blocks until client connects; returns dedicated \`ClientSocket\`
+> 3. **Wire Traffic:** Client -> OS TCP Stack -> BEAM Port Driver -> Delivers \`{tcp, Sock, Bin}\` directly into the process mailbox
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -46,7 +36,7 @@ When opening a socket in Erlang, you configure critical options:
 ### 3. Ephemeral Ports (\`Port = 0\`)
 When you pass \`0\` as the port number to \`gen_tcp:listen(0, ...)\`, the operating system automatically assigns an available ephemeral port (e.g., 52341). You retrieve the actual assigned port using \`inet:port(ListenSocket)\`.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (kernel / gen_tcp)
@@ -73,11 +63,11 @@ This is a **Guided Demonstration**. The file \`src/tcp_live_demo.erl\` contains 
 4. Exchanges 3 round-trip request/response frames over \`127.0.0.1\`.
 5. Queries \`inet:getstat/1\` to observe octets sent and received.
 
-Click **\`▷ Run\`** to execute the demo and observe real TCP socket communication in the console!
+Click **\`Run\`** to execute the demo and observe real TCP socket communication in the console!
 
 ## Rules & Verification Constraints
 - Observe the step-by-step output in the Terminal.
-- Clicking **\`▶ Submit\`** will verify that \`tcp_live_demo:run_demo/0\` returns \`{ok, 3}\`.
+- Clicking **\`Submit\`** will verify that \`tcp_live_demo:run_demo/0\` returns \`{ok, 3}\`.
 `,
     otpDocCards: [
       {
@@ -293,6 +283,30 @@ echo_loop(Socket, Count, Parent) ->
     lessonNumber: 2,
     lessonType: 'concept_exercise',
     title: 'TCP Flow Control: Enforcing {active, once} Mailbox Backpressure',
+    mentalModelCheck: {
+      question: 'When an incoming packet arrives under {active, once}, what does the BEAM socket driver do before delivering {tcp, Socket, Data} to the process?',
+      codeSnippet: `receive\n    {tcp, Socket, Data} ->\n        process_data(Data),\n        ok = inet:setopts(Socket, [{active, once}]),\n        loop(Socket)\nend`,
+      options: [
+        {
+          id: 'A',
+          label: 'It automatically flips the socket mode to passive ({active, false}), buffering subsequent network packets in the OS kernel until inet:setopts re-arms it.',
+          isCorrect: true,
+          explanation: 'Correct! Under {active, once}, the VM delivers exactly one packet and reverts to passive mode. Packets accumulate in kernel TCP buffers; if full, TCP flow control shrinks the receive window and pauses the sender.',
+        },
+        {
+          id: 'B',
+          label: 'It drops any packets that arrive during process_data(Data).',
+          isCorrect: false,
+          explanation: 'TCP guarantees zero packet loss on reliable links; packets wait safely in OS kernel socket buffers.',
+        },
+        {
+          id: 'C',
+          label: 'It spawns a new Erlang process for each subsequent byte.',
+          isCorrect: false,
+          explanation: 'The same controlling process receives the next packet once inet:setopts re-arms active mode.',
+        },
+      ],
+    },
     difficulty: 'Intermediate',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -300,27 +314,9 @@ The **#1 cause of production outages** in Erlang backend services is the unconst
 
 When a socket is opened in \`{active, true}\` mode, the operating system kernel delivers incoming network packets directly into the Erlang process's mailbox as fast as the physical network card can receive them. If a rogue client or malicious attacker blasts 200,000 packets per second, your Erlang process's mailbox queue length balloons from 0 to 1,000,000 messages in seconds. The BEAM VM consumes all available RAM and triggers the Linux Out-Of-Memory (OOM) Killer, destroying the entire node!
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  {active, true} vs {active, once}                       |
-+-------------------------------------------------------------------------+
-  DISASTER: {active, true} (Unbounded Mailbox Flood)
-  [Fast Client] ==(100k msgs/sec)==> [Kernel Buffer]
-                                            |
-                                            v (Pushes ALL packets instantly)
-                                     [Process Mailbox] (1,000,000 msgs -> OOM Crash!)
-
-  PRODUCTION SAFE: {active, once} (Hardware Backpressure)
-  [Fast Client] ----(Packet 1)-----> [Kernel Buffer]
-                                            |
-                                            v (Pushes EXACTLY 1 message)
-                                     [Process Mailbox] (Size: 1)
-                                            | (Process does work...)
-                                            v
-                                     inet:setopts(Sock, [{active, once}])
-                                     (Socket re-armed. Kernel accepts Packet 2!)
-+-------------------------------------------------------------------------+
-\`\`\`
+> **Flow Control: \`{active, true}\` vs \`{active, once}\`:**
+> - **Dangerous \`{active, true}\`:** Unbounded mailbox flood. Fast clients push 100k msgs/sec directly into actor mailbox, exhausting RAM and triggering OOM.
+> - **Production Safe \`{active, once}\`:** Hardware backpressure. OS delivers exactly 1 packet, switches socket to passive mode, and waits until the actor calls \`inet:setopts(Sock, [{active, once}])\` before accepting the next packet.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -340,7 +336,7 @@ When a socket is opened in \`{active, true}\` mode, the operating system kernel 
      ok = inet:setopts(Socket, [{active, once}])
      \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (kernel / inet)
@@ -607,6 +603,7 @@ code_change(_OldVsn, State, _Extra) ->
     lessonNumber: 3,
     lessonType: 'concept_exercise',
     title: 'Stateful Stream Framing: Reconstructing Fragmented & Coalesced TCP Packets',
+    visualScene: 'tcp_xmpp_stream_framing',
     difficulty: 'Intermediate',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -618,20 +615,11 @@ In TCP, there are **no message boundaries**. TCP is a continuous, unstructured *
 
 If your server blindly parses incoming \`{tcp, Socket, Data}\` binaries without maintaining a stateful **framing buffer**, it will crash with syntax errors on fragmented frames and drop coalesced commands!
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                TCP FRAGMENTATION & COALESCING IN ACTION                 |
-+-------------------------------------------------------------------------+
-  Client Sends:
-    Frame 1: "SET token abc\\r\\n"
-    Frame 2: "GET token\\r\\n"
-
-  Wire Delivers:
-    Chunk 1: "SET tok"                   --> Buffer: "SET tok" (No \\r\\n yet)
-    Chunk 2: "en abc\\r\\nGET token\\r\\nPA" --> Extracted: ["SET token abc", "GET token"]
-                                             Buffer: "PA" (Waiting for next \\r\\n)
-+-------------------------------------------------------------------------+
-\`\`\`
+> **TCP Fragmentation & Coalescing in Action:**
+> - **Client Sends:** Frame 1: \`"SET token abc\\r\\n"\`, Frame 2: \`"GET token\\r\\n"\`
+> - **Wire Delivers:**
+>   - Chunk 1: \`"SET tok"\` -> Buffer: \`"SET tok"\` (No \`\\r\\n\` yet; wait for more)
+>   - Chunk 2: \`"en abc\\r\\nGET token\\r\\nPA"\` -> Slices \`["SET token abc", "GET token"]\`; leaves leftover \`"PA"\` in buffer
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -644,7 +632,7 @@ CleanRemaining = binary:copy(RemainingBuffer)
 \`\`\`
 you allocate a tiny independent binary for the leftover fragment and allow the 64KB parent buffer to be immediately reclaimed by the garbage collector!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (stdlib / binary)
@@ -835,27 +823,10 @@ Production-grade servers (such as Nine Nines' **Ranch**, used by Cowboy HTTP ser
 3. The BEAM VM and Linux kernel dispatch incoming TCP SYN handshakes across the pool without lock contention.
 4. The instant an acceptor receives \`{ok, ClientSocket}\`, it spawns a dedicated connection worker and transfers ownership via **\`gen_tcp:controlling_process(ClientSocket, WorkerPid)\`**, then immediately loops back to accept the next client!
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  RANCH-STYLE ACCEPTOR POOL ARCHITECTURE                 |
-+-------------------------------------------------------------------------+
-                     [ListenSocket (Port 5222)]
-                                  |
-         +------------------------+------------------------+
-         |                                                 |
-         v                                                 v
-  [Acceptor 1]                                      [Acceptor 2]
-  gen_tcp:accept(Sock)                              gen_tcp:accept(Sock)
-         |                                                 |
-  (Client connects!)                                (Client connects!)
-         v                                                 v
-  spawn(Worker1)                                    spawn(Worker2)
-  controlling_process(Sock, Worker1)                controlling_process(Sock, Worker2)
-  Worker1 ! {socket_ready, Sock}                    Worker2 ! {socket_ready, Sock}
-         |                                                 |
-  (Loops back to accept!)                           (Loops back to accept!)
-+-------------------------------------------------------------------------+
-\`\`\`
+> **Ranch-Style Acceptor Pool Architecture:**
+> - Multiple acceptor processes concurrently wait on the same shared \`ListenSocket\`.
+> - When an incoming TCP handshake completes, one acceptor wakes up with \`{ok, ClientSocket}\`.
+> - The acceptor spawns a dedicated connection worker, executes \`gen_tcp:controlling_process(ClientSocket, WorkerPid)\`, and immediately loops back to accept more connections without blocking.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -871,7 +842,7 @@ ok = gen_tcp:controlling_process(ClientSocket, WorkerPid)
 \`\`\`
 And then notify \`WorkerPid\` that it is now safe to arm the socket with \`inet:setopts(ClientSocket, [{active, once}])\`!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (kernel / gen_tcp)
@@ -1189,30 +1160,13 @@ You have mastered raw sockets, \`{active, once}\` backpressure, stream framing, 
 
 This mini-capstone mirrors the core network engine of production databases and messaging gateways (including the XMPP server you will build in Chapters 11 and 12).
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  TCP KEY-VALUE BACKEND ARCHITECTURE                     |
-+-------------------------------------------------------------------------+
-  Client ---> [Raw TCP Socket]
-                     | (Stream of fragmented/coalesced bytes)
-                     v
-             [Framing Buffer] (Extracts \\r\\n lines)
-                     |
-                     v
-             [Command Parser] (SET k v | GET k | DEL k | PING)
-                     |
-                     v
-             [ETS Key-Value Table] (Off-Heap In-Memory Store)
-                     |
-                     v
-             [Wire Formatter] (+OK | $value | :1 | +PONG | -ERR)
-                     |
-                     v
-             [gen_tcp:send/2] ---> Client
-                     |
-             inet:setopts(Sock, [{active, once}]) (Flow Control Armed!)
-+-------------------------------------------------------------------------+
-\`\`\`
+> **TCP Key-Value Backend Pipeline:**
+> 1. **Client Socket:** Raw fragmented byte stream arrives under \`{active, once}\`.
+> 2. **Framing Buffer:** Accumulates chunks and slices clean \`\\r\\n\` command lines.
+> 3. **Command Parser:** Tokenizes verbs (\`SET\`, \`GET\`, \`DEL\`, \`PING\`).
+> 4. **ETS Key-Value Store:** Executes atomic read/write against off-heap ETS table.
+> 5. **Wire Formatter & Dispatch:** Encodes responses (\`+OK\`, \`$val\`, \`:1\`, \`-ERR\`) and sends via \`gen_tcp:send/2\`.
+> 6. **Flow Control Armed:** Re-arms socket via \`inet:setopts(Sock, [{active, once}])\`.
 
 ## Deep Concept Breakdown & Wire Protocol
 
@@ -1233,7 +1187,7 @@ Your server must speak a text-based, newline-terminated (\`\\r\\n\`) protocol:
 5. **Any Unknown Command**:
    - Reply: \`<<"-ERR unknown command\\r\\n">>\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Signature (stdlib / ets)

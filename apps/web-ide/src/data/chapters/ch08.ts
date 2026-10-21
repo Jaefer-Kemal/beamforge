@@ -8,6 +8,7 @@ export const CHAPTER_8_LESSONS: LessonContent[] = [
     lessonNumber: 1,
     lessonType: 'concept_exercise',
     title: 'Supervisor Flags & Restart Strategies: one_for_one, rest_for_one, and one_for_all',
+    visualScene: 'supervision_rest_for_one_ets_heir',
     difficulty: 'Intermediate',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -19,29 +20,10 @@ Instead of writing defensive \`try/catch\` blocks around every statement, Erlang
 
 However, restoring workers requires choosing the correct **Restart Strategy**. If an independent caching worker crashes, you must not take down the entire system. Conversely, if a shared database connection crashes, downstream workers that depend on it must be cleanly restarted so they do not operate on dead handles.
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  Comparison of OTP Restart Strategies                   |
-+-------------------------------------------------------------------------+
-  1. one_for_one (Independent Workers)
-     [Worker A]   [Worker B] (CRASH!)   [Worker C]
-         |             |                    |
-         v             v (Restarts ONLY B)  v
-     [Worker A]   [Worker B']           [Worker C]
-
-  2. rest_for_one (Sequential Dependency Pipeline)
-     [Child 1: DB] --> [Child 2: Cache] (CRASH!) --> [Child 3: Gateway]
-           |                   |                              |
-           v (Preserved)       v (Restarts Cache)             v (Restarts Gateway)
-     [Child 1: DB]     [Child 2: Cache']              [Child 3: Gateway']
-
-  3. one_for_all (Tightly Coupled Cluster)
-     [Peer 1] <-----> [Peer 2] (CRASH!) <-----> [Peer 3]
-        |                 |                        |
-        v                 v                        v
-     (Restarts ALL peers simultaneously: 1', 2', 3')
-+-------------------------------------------------------------------------+
-\`\`\`
+> **Comparison of OTP Restart Strategies:**
+> 1. **\`one_for_one\` (Independent Workers):** If a child process terminates, only that single child is restarted. Siblings are unaffected.
+> 2. **\`rest_for_one\` (Sequential Dependency Pipeline):** If a child terminates, any child process started *after* it in the spec list is terminated and restarted in order. Preceding children are untouched.
+> 3. **\`one_for_all\` (Tightly Coupled Cluster):** If any child terminates, all other children are immediately terminated and restarted together.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -72,7 +54,7 @@ The \`intensity\` (MaxRestarts) and \`period\` (MaxSeconds) parameters define a 
 - It terminates all surviving children cleanly and terminates itself with \`shutdown\`!
 - This escalates the failure up to the parent supervisor in the tree.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Type Specification (stdlib / supervisor)
@@ -232,19 +214,13 @@ Misconfiguring child specifications is one of the most common causes of producti
 
 ### Restart Types: Permanent vs. Transient vs. Temporary
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  OTP Child Restart Decision Matrix                      |
-+-------------------------------------------------------------------------+
-  Exit Reason         | permanent   | transient   | temporary
-  --------------------+-------------+-------------+------------
-  normal              | RESTART     | NO RESTART  | NO RESTART
-  shutdown            | RESTART     | NO RESTART  | NO RESTART
-  {shutdown, term()}  | RESTART     | NO RESTART  | NO RESTART
-  badarith / crash    | RESTART     | RESTART     | NO RESTART
-  killed              | RESTART     | RESTART     | NO RESTART
-+-------------------------------------------------------------------------+
-\`\`\`
+| Exit Reason | \`permanent\` | \`transient\` | \`temporary\` |
+| :--- | :--- | :--- | :--- |
+| \`normal\` | RESTART | NO RESTART | NO RESTART |
+| \`shutdown\` | RESTART | NO RESTART | NO RESTART |
+| \`{shutdown, term()}\` | RESTART | NO RESTART | NO RESTART |
+| \`badarith / crash\` | RESTART | RESTART | NO RESTART |
+| \`killed\` | RESTART | RESTART | NO RESTART |
 
 - **\`permanent\`**: Always restarted, regardless of exit reason. Used for long-lived servers that should never stop (e.g., API listeners, database connection pools).
 - **\`transient\`**: Restarted ONLY if it crashes abnormally (\`Reason =/= normal\`, \`shutdown\`, or \`{shutdown, _}\`). Never restarted if it exits cleanly. Used for tasks that run to completion.
@@ -258,7 +234,7 @@ When a supervisor terminates a child:
 3. If the child does not terminate within \`Shutdown\` milliseconds, the supervisor unlinks and forcefully kills it via \`exit(ChildPid, kill)\`.
 4. Using \`brutal_kill\` skips step 1 and immediately sends \`kill\`.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Type Specification (stdlib / supervisor)
@@ -403,20 +379,10 @@ If you spawned raw processes via \`spawn/3\`, a crash in one client process woul
 
 To solve this, OTP provides **Dynamic Supervisors** using the **\`simple_one_for_one\`** strategy.
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  simple_one_for_one Dynamic Worker Pool                 |
-+-------------------------------------------------------------------------+
-              [dynamic_session_sup] (Strategy: simple_one_for_one)
-                       |
-        +--------------+--------------+----------------+ ...
-        |                             |                |
-        v                             v                v
- [Session Worker 1]          [Session Worker 2]  [Session Worker N]
- (Spawned dynamically via     (Spawned on TCP     (Thousands of identical
-  supervisor:start_child)      connection)         instances on demand)
-+-------------------------------------------------------------------------+
-\`\`\`
+> **\`simple_one_for_one\` Dynamic Worker Pool:**
+> - The supervisor holds a template child spec in \`init/1\`.
+> - Thousands of worker instances are spawned dynamically on demand via \`supervisor:start_child(Sup, ExtraArgs)\`.
+> - Crashes in individual ephemeral client sessions do not trigger cascading restarts across the pool.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -450,7 +416,7 @@ Which returns:
 }
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Supervisor Calls (stdlib / supervisor)
@@ -662,30 +628,11 @@ An Application is a self-contained component that packages:
 
 When you run a production release (via \`rebar3 release\` or Docker), the BEAM VM starts the Application Controller, resolves dependency trees, boots every application in order, and monitors their root supervisors.
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                    The OTP Application Lifecycle                        |
-+-------------------------------------------------------------------------+
-                  BEAM Node Starts (rebar3 release)
-                                 |
-                                 v
-                     [Application Controller]
-                                 |
-      +--------------------------+--------------------------+
-      | Loads .app metadata                                 | Boots dependencies
-      v                                                     v
-  [commerce_app.app]                             [kernel, stdlib, crypto]
-      |
-      v Invokes application callback!
-  [commerce_app:start(normal, [])]
-      |
-      v Starts Root Supervisor
-  [commerce_sup:start_link()]
-      |
-      +---> [Child Worker 1]
-      +---> [Child Worker 2]
-+-------------------------------------------------------------------------+
-\`\`\`
+> **The OTP Application Lifecycle:**
+> 1. BEAM node boots release and launches the central Application Controller.
+> 2. Resolves dependencies and loads application resource metadata (\`.app\`).
+> 3. Invokes the application callback \`commerce_app:start(normal, [])\`.
+> 4. Starts the root supervisor \`commerce_sup:start_link()\` and its supervised worker children.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -720,7 +667,7 @@ Port = application:get_env(commerce_app, listen_port, 8080)
 
 If \`listen_port\` is defined in the \`.app\` file or \`sys.config\`, that value is returned. Otherwise, the fallback default (\`8080\`) is used.
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Application Reference (kernel / application)
@@ -871,6 +818,31 @@ init([]) ->
     lessonNumber: 5,
     lessonType: 'problem_set',
     title: 'Assignment: Fault-Isolated E-Commerce Checkout Supervision Tree (checkout_sup.erl)',
+    visualScene: 'supervision_rest_for_one_ets_heir',
+    mentalModelCheck: {
+      question: 'In checkout_sup with children [db_pool, pricing_cache, order_gateway] under rest_for_one, why does order_gateway crashing NOT restart pricing_cache?',
+      codeSnippet: `init([]) ->\n    SupFlags = #{strategy => rest_for_one, intensity => 3, period => 5},\n    Children = [db_pool_spec(), pricing_cache_spec(), order_gateway_spec()],\n    {ok, {SupFlags, Children}}.`,
+      options: [
+        {
+          id: 'A',
+          label: 'Under rest_for_one, only processes started AFTER the crashed child in the spec list are restarted; upstream dependencies started before it remain running.',
+          isCorrect: true,
+          explanation: 'Correct! order_gateway is the last child in the spec list. Because no child was started after it, only order_gateway is restarted, keeping database and pricing cache alive with zero downtime.',
+        },
+        {
+          id: 'B',
+          label: 'The supervisor converts order_gateway crashes into ignore returns.',
+          isCorrect: false,
+          explanation: 'Supervisors restart crashed workers according to strategy; they do not convert crashes into ignore.',
+        },
+        {
+          id: 'C',
+          label: 'order_gateway is marked as temporary while cache is permanent.',
+          isCorrect: false,
+          explanation: 'Both can be permanent; rest_for_one restart scoping is governed by child spec ordering.',
+        },
+      ],
+    },
     difficulty: 'Advanced',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -885,28 +857,11 @@ What happens when an unhandled edge-case payload crashes \`order_gateway_worker\
 
 The mathematical solution is OTP's **\`rest_for_one\`** restart strategy.
 
-\`\`\`
-+-------------------------------------------------------------------------+
-|                  The rest_for_one Dependency Cascade                    |
-+-------------------------------------------------------------------------+
-  Pipeline Order:
-  [Child 1: db_pool] ---> [Child 2: pricing_cache] ---> [Child 3: order_gateway]
-
-  Scenario A: Child 3 (order_gateway) Crashes
-  - Gateway is at the end of the dependency chain.
-  - ONLY Child 3 restarts!
-  - Child 1 (DB) and Child 2 (Cache) keep their original PIDs untouched!
-
-  Scenario B: Child 2 (pricing_cache) Crashes
-  - Cache is in the middle of the chain.
-  - Child 2 (Cache) AND Child 3 (Gateway, started AFTER it) are restarted!
-  - Child 1 (DB, started BEFORE it) keeps its original PID untouched!
-
-  Scenario C: Child 1 (db_pool) Crashes
-  - Root dependency crashed.
-  - ALL 3 children are restarted in sequential order: 1 -> 2 -> 3!
-+-------------------------------------------------------------------------+
-\`\`\`
+> **The \`rest_for_one\` Dependency Cascade:**
+> - **Order:** \`[Child 1: db_pool]\` -> \`[Child 2: pricing_cache]\` -> \`[Child 3: order_gateway]\`
+> - **Child 3 crashes:** Only Child 3 restarts. Upstream DB and Cache keep running with zero interruption.
+> - **Child 2 crashes:** Child 2 and Child 3 (started after it) restart in order. Upstream DB is preserved.
+> - **Child 1 crashes:** All 3 children restart in sequential order (\`1\` -> \`2\` -> \`3\`).
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -927,7 +882,7 @@ During shutdown or cascading restart, the supervisor terminates them in **revers
 
 This guarantees that downstream dependencies are always stopped before the upstream services they depend on!
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official OTP Supervisor Calls (stdlib / supervisor)

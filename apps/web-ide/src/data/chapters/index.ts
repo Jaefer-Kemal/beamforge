@@ -10,6 +10,7 @@ import { CHAPTER_8_LESSONS } from './ch08';
 import { CHAPTER_9_LESSONS } from './ch09';
 import { CHAPTER_10_LESSONS } from './ch10';
 import { CHAPTER_11_LESSONS } from './ch11';
+import { CHAPTER_12_LESSONS } from './ch12';
 
 export {
   CHAPTER_1_LESSONS,
@@ -23,6 +24,7 @@ export {
   CHAPTER_9_LESSONS,
   CHAPTER_10_LESSONS,
   CHAPTER_11_LESSONS,
+  CHAPTER_12_LESSONS,
 };
 
 export const ALL_CURRICULUM_CHAPTERS: Record<number, LessonContent[]> = {
@@ -37,6 +39,7 @@ export const ALL_CURRICULUM_CHAPTERS: Record<number, LessonContent[]> = {
   9: CHAPTER_9_LESSONS,
   10: CHAPTER_10_LESSONS,
   11: CHAPTER_11_LESSONS,
+  12: CHAPTER_12_LESSONS,
 };
 
 /** All flat lessons in sequential curriculum order */
@@ -52,6 +55,7 @@ export const ALL_LESSONS_FLAT: LessonContent[] = [
   ...CHAPTER_9_LESSONS,
   ...CHAPTER_10_LESSONS,
   ...CHAPTER_11_LESSONS,
+  ...CHAPTER_12_LESSONS,
 ];
 
 /** Lookup lesson by its unique string ID (e.g. "ch02-l06") */
