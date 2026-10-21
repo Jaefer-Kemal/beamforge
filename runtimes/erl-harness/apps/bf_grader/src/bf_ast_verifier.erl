@@ -472,8 +472,10 @@ scan_expr({match, _Line, Left, Right}, ForbiddenCalls, ForbiddenConstructs, VAcc
     {V1, R1, C1} = scan_expr(Left, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet),
     scan_expr(Right, ForbiddenCalls, ForbiddenConstructs, V1, R1, C1);
 
-scan_expr({call, _Line, {atom, _, _LocalFun}, Args}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
-    scan_exprs(Args, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet);
+scan_expr({call, _Line, {atom, _, LocalFun}, Args}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
+    Arity = length(Args),
+    NewRAcc = [{erlang, LocalFun, Arity}, {LocalFun, Arity} | RAcc],
+    scan_exprs(Args, ForbiddenCalls, ForbiddenConstructs, VAcc, NewRAcc, CSet);
 
 scan_expr({'fun', _Line, {clauses, Clauses}}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
     scan_clauses(Clauses, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet);
@@ -510,9 +512,14 @@ is_forbidden_call(Mod, Fun, Arity, ForbiddenCalls) ->
 
 check_required_calls(RequiredCalls, RemoteCallsFound) ->
     lists:filtermap(fun({ReqMod, ReqFun, ReqArity}) ->
-        Found = lists:any(fun({M, F, A}) ->
-            M =:= ReqMod andalso F =:= ReqFun andalso
-            (ReqArity =:= any orelse ReqArity =:= A)
+        Found = lists:any(fun
+            ({M, F, A}) ->
+                (M =:= ReqMod orelse (ReqMod =:= erlang andalso (M =:= ReqFun orelse M =:= erlang))) andalso F =:= ReqFun andalso
+                (ReqArity =:= any orelse ReqArity =:= A);
+            ({F, A}) ->
+                (ReqMod =:= erlang orelse ReqMod =:= any orelse ReqMod =:= unknown) andalso F =:= ReqFun andalso
+                (ReqArity =:= any orelse ReqArity =:= A);
+            (_) -> false
         end, RemoteCallsFound),
         case Found of
             true -> false;
