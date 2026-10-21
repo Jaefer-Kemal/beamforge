@@ -791,18 +791,21 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
       <div
         className="w-1/2 flex flex-col border-r overflow-hidden"
         style={{
-          background: isDark ? 'rgba(11, 15, 23, 0.75)' : 'rgba(255, 255, 255, 0.92)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)',
+          background: isDark ? 'rgba(11, 17, 30, 0.58)' : 'rgba(255, 255, 255, 0.72)',
+          backdropFilter: 'blur(28px) saturate(190%)',
+          WebkitBackdropFilter: 'blur(28px) saturate(190%)',
+          borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.08)',
+          boxShadow: isDark
+            ? 'inset 0 1px 0 0 rgba(255, 255, 255, 0.16)'
+            : 'inset 0 1px 0 0 rgba(255, 255, 255, 0.90)',
         }}
       >
         {/* Left Header */}
         <div
           className="flex items-center gap-3 px-5 py-3 flex-shrink-0"
           style={{
-            background: isDark ? 'rgba(11,15,23,0.65)' : 'rgba(241,245,249,0.90)',
-            borderBottom: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
+            background: isDark ? 'rgba(15,23,42,0.45)' : 'rgba(248,250,252,0.70)',
+            borderBottom: isDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(15,23,42,0.08)',
           }}
         >
           <div className="flex items-center gap-2">
@@ -933,8 +936,8 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
         <div
           className="flex items-center justify-between px-3 flex-shrink-0"
           style={{
-            background: isDark ? 'rgba(11,15,23,0.65)' : 'rgba(241,245,249,0.90)',
-            borderBottom: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
+            background: isDark ? 'rgba(15,23,42,0.45)' : 'rgba(248,250,252,0.70)',
+            borderBottom: isDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(15,23,42,0.08)',
             height: '44px',
           }}
         >
@@ -1045,9 +1048,12 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           className="flex items-center gap-2 px-3 flex-shrink-0"
           style={{
             height: '44px',
-            background: isDark ? 'rgba(11,15,23,0.70)' : 'rgba(238,242,246,0.70)',
-            borderTop: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
-            borderBottom: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
+            background: isDark ? 'rgba(11,15,23,0.55)' : 'rgba(241,245,249,0.70)',
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            borderTop: isDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(15,23,42,0.08)',
+            borderBottom: isDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(15,23,42,0.08)',
+            boxShadow: isDark ? 'inset 0 1px 0 0 rgba(255,255,255,0.12)' : 'inset 0 1px 0 0 rgba(255,255,255,0.80)',
           }}
         >
           {/* ▶ Submit */}

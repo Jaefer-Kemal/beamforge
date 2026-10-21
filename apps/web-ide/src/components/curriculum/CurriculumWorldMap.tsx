@@ -435,14 +435,17 @@ export function CurriculumWorldMap() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.35, delay: worldIdx * 0.06 }}
-                className="rounded-3xl border overflow-hidden shadow-lg transition-all"
+                className="rounded-3xl border overflow-hidden transition-all duration-300"
                 style={{
-                  background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'rgba(255, 255, 255, 0.85)',
-                  backdropFilter: 'blur(25px)',
-                  WebkitBackdropFilter: 'blur(25px)',
+                  background: isDark ? 'rgba(13, 19, 33, 0.58)' : 'rgba(255, 255, 255, 0.72)',
+                  backdropFilter: 'blur(28px) saturate(190%)',
+                  WebkitBackdropFilter: 'blur(28px) saturate(190%)',
                   borderColor: isWorldActive
-                    ? (isDark ? 'rgba(0,122,255,0.40)' : 'rgba(0,122,255,0.30)')
-                    : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)'),
+                    ? (isDark ? 'rgba(0,122,255,0.45)' : 'rgba(0,122,255,0.35)')
+                    : (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.85)'),
+                  boxShadow: isDark
+                    ? '0 20px 50px -15px rgba(0,0,0,0.70), inset 0 1px 0 0 rgba(255,255,255,0.22), inset 0 0 0 1px rgba(255,255,255,0.04)'
+                    : '0 20px 48px -12px rgba(15,23,42,0.08), inset 0 1px 2px 0 rgba(255,255,255,1)',
                 }}
               >
                 {/* ── World Banner Header ── */}

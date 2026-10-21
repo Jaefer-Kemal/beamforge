@@ -249,3 +249,20 @@ We execute the platform overhaul incrementally so every single piece is built to
 - [x] **14.2: Production README.md & Roadmap Authoring**:
   - Authored root `README.md` with Apple glass squircle brand vector, versioning badges (`v0.9.0-beta`, OTP 27-29, Go 1.22+, Next.js 14, MIT), curriculum world directory, dual-engine topology, and 2-minute quickstart guide.
   - Structured detailed upcoming roadmap table detailing XP locking progression, multi-BEAM language tracks (Elixir, Gleam, LFE), pluggable polyglot runner interface, production incident triage labs, and live browser multi-node clustering.
+
+## Phase 15: Authentic Apple Glassmorphism Overhaul & Dev Server Clean Boot
+- [x] **15.1: Erlang & BEAM Language Mission Refinement**:
+  - Re-anchored `README.md` Purpose & Mission section strictly on Erlang and the BEAM language paradigm shift (single-assignment immutable terms, loopless TCO recursion, share-nothing actors, OTP "Let It Crash"), removing UI distractions from the core mission statement.
+  - Pushed to remote `origin/main` (commit `0a200ab`).
+- [x] **15.2: Authentic Apple visionOS & macOS Glass Token Engine**:
+  - Upgraded `globals.css` with luminous ambient aurora mesh gradients (`--bf-mesh-1` through `--bf-mesh-4` in cyan, violet, amber, and emerald) diffused via `backdrop-filter: blur(28px) saturate(190%)`.
+  - Added signature Apple 1px specular top rim highlights (`inset 0 1px 0 0 rgba(255, 255, 255, 0.24)`) and chamfer glows across `.glass-panel`, `.glass-card`, `.glass-pill`, and `.glass-popover`.
+  - Tuned optical translucency (`rgba(13, 19, 33, 0.60)` in Dark Mode, `rgba(255, 255, 255, 0.65)` in Light Mode) to ensure ambient aurora light refracts through while maintaining high-contrast `#F8FAFC` reading ergonomics.
+- [x] **15.3: Component Glass Upgrades Across TopBar, Split View, Studio & Syllabus**:
+  - `BootDevTopBar.tsx`: Calibrated frosted translucency with top specular highlight and drop shadow.
+  - `LessonSplitView.tsx`: Frosted glass left guide pane, elevated tabs bar, and translucent action bar.
+  - `CapstoneStudioView.tsx`: Apple glass milestone stepper, multi-file tab bar, and action controls.
+  - `CurriculumWorldMap.tsx`: Frosted World cards floating over ambient aurora mesh.
+- [x] **15.4: Dev Server Clean Boot & CSS Compilation**:
+  - Killed legacy background process holding port 3000, completely purged `.next` cache directory, and restarted clean dev server on port 3000.
+  - Verified HTTP 200 compilation (1637 modules compiled cleanly).

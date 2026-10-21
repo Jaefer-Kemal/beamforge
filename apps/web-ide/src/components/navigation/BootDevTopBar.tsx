@@ -94,16 +94,16 @@ export function BootDevTopBar() {
       className="fixed top-0 left-0 right-0 z-50 h-14 px-4 flex items-center gap-3 select-none"
       style={{
         background: isDark
-          ? 'rgba(11, 15, 23, 0.85)'
-          : 'rgba(238, 242, 246, 0.85)',
-        backdropFilter: 'blur(32px) saturate(200%)',
-        WebkitBackdropFilter: 'blur(32px) saturate(200%)',
+          ? 'rgba(11, 15, 23, 0.65)'
+          : 'rgba(255, 255, 255, 0.72)',
+        backdropFilter: 'blur(28px) saturate(200%)',
+        WebkitBackdropFilter: 'blur(28px) saturate(200%)',
         borderBottom: isDark
-          ? '1px solid rgba(255,255,255,0.08)'
-          : '1px solid rgba(255,255,255,0.70)',
+          ? '1px solid rgba(255, 255, 255, 0.12)'
+          : '1px solid rgba(255, 255, 255, 0.85)',
         boxShadow: isDark
-          ? '0 4px 20px rgba(0,0,0,0.40)'
-          : '0 4px 20px rgba(15,23,42,0.06)',
+          ? '0 12px 36px -10px rgba(0, 0, 0, 0.65), inset 0 -1px 0 0 rgba(255, 255, 255, 0.06), inset 0 1px 0 0 rgba(255, 255, 255, 0.20)'
+          : '0 10px 30px -8px rgba(15, 23, 42, 0.08), inset 0 -1px 0 0 rgba(255, 255, 255, 0.85)',
       }}
     >
       {/* ── LEFT ZONE: Brand + Stats ─────────────────────────────────────────── */}
