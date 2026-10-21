@@ -240,3 +240,12 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Documented preemptive reduction counting (4,000 reductions/slice), actor-isolated private heaps, and $O(1)$ process garbage collection.
   - Formulated the Go Orchestrator concurrency limiter / semaphore architecture to guarantee 100% OOM protection on Render 512 MB – 2 GB cloud tiers.
   - Outlined ephemeral subprocess vs. resident warm-node execution pipelines, RAM disk (`tmpfs`) acceleration, and multi-stage production Docker packaging.
+
+## Phase 14: Remote Git Integration, License Merge & Production README
+- [x] **14.1: Remote Repository Configuration & MIT License Merge**:
+  - Configured git remote `origin` to `https://github.com/Jaefer-Kemal/beamforge.git`.
+  - Renamed primary local branch to `main`.
+  - Fetched `origin/main` and merged remote MIT `LICENSE` (authored by Jaefer Mohammed Kemal) into the commit history with clean 3-way merge.
+- [x] **14.2: Production README.md & Roadmap Authoring**:
+  - Authored root `README.md` with Apple glass squircle brand vector, versioning badges (`v0.9.0-beta`, OTP 27-29, Go 1.22+, Next.js 14, MIT), curriculum world directory, dual-engine topology, and 2-minute quickstart guide.
+  - Structured detailed upcoming roadmap table detailing XP locking progression, multi-BEAM language tracks (Elixir, Gleam, LFE), pluggable polyglot runner interface, production incident triage labs, and live browser multi-node clustering.
