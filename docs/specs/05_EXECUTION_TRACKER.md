@@ -214,3 +214,22 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Identified root cause of transient CSS layout issue: concurrent execution of `next build` while `next dev` was active caused `.next` build output collisions and 404s on CSS chunks.
   - Purged `.next/` directory, restarted clean Next.js server on port 3000, and verified CSS asset compilation (HTTP 200, 72 KB).
   - Validated via Playwright browser subagent: normal 848px viewport height, Apple Glassmorphism styling, crisp Lucide icons, and zero layout shift across Split View, Test Drawer, and Curriculum World Map.
+
+## Phase 12: Apple Glass Brand Identity, Next.js Favicon & Granular Atomic Commits
+- [x] **12.1: Git Hygiene & Scratch Isolation**:
+  - Added `scratch/` and `**/scratch/` to root `.gitignore`.
+  - Verified untracked temporary audit scripts and scratchpads are safely ignored and excluded from git tracking.
+- [x] **12.2: Theme-Adaptive Apple Glass Squircle Brand Identity & Favicon**:
+  - Implemented `apps/web-ide/src/components/navigation/BeamForgeLogo.tsx` featuring the approved Apple glass squircle base, OTP supervision hexagon, refracting BEAM pulse, amber Forge spark, and process PID nodes.
+  - Implemented `apps/web-ide/src/app/icon.svg` as the official Next.js 14 App Router SVG favicon.
+  - Integrated `BeamForgeLogo` into `BootDevTopBar.tsx`, replacing the legacy static `BF` badge.
+- [x] **12.3: Granular Atomic Git Commits (7 Commits)**:
+  - Partitioned all staged work into 7 distinct, atomic semantic commits:
+    1. `ba81575`: `docs(specs): update execution tracker, governance rules, and linter specs`
+    2. `f4a7ff4`: `feat(grader): enhance AST verifier, add bf_linter and precompile harness beams`
+    3. `550b82b`: `feat(orchestrator): add concurrent visible test execution to verify endpoint and failure reporting`
+    4. `da49973`: `feat(curriculum): complete chapters 1-12 curriculum, course worlds catalog and chapter 12 capstone`
+    5. `b67cfdf`: `feat(pedagogy): add BeamConceptVisualizer scenes, ErlangTermDiffCard, and MentalModelCheckCard`
+    6. `a194c77`: `feat(brand): add theme-adaptive Apple glass squircle BeamForgeLogo and App Router icon.svg favicon`
+    7. `c42a0b3`: `feat(ui): synchronize submit/run states, replace emojis with Lucide icons, and prune legacy drawers`
+  - Verified working tree is 100% clean and both Go (8080) and Next.js (3000) servers are operating nominally.
