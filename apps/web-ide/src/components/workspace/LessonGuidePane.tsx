@@ -6,25 +6,20 @@ import {
   BookOpen, 
   CheckCircle2, 
   ExternalLink, 
-  FileCode, 
   Lightbulb, 
   Sparkles, 
   ShieldCheck, 
-  HelpCircle,
   ArrowUpRight,
-  ChevronRight,
-  RotateCcw,
-  Code2
+  AlertCircle,
 } from 'lucide-react';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
-import { getLevelById, ExternalReference } from '../../data/curriculumCatalog';
+import { getLevelById } from '../../data/curriculumCatalog';
 
 export function LessonGuidePane() {
   const { 
     activeExerciseId, 
     verificationStages, 
-    loadSolutionForActiveExercise, 
-    resetWorkspace 
+    loadSolutionForActiveExercise 
   } = useWorkspaceStore();
 
   const [activeTab, setActiveTab] = useState<string>('concept');
@@ -267,9 +262,7 @@ export function LessonGuidePane() {
                     {isPassed ? (
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                     ) : isFailed ? (
-                      <div className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center text-[10px] font-bold">
-                        ✕
-                      </div>
+                      <AlertCircle className="w-4 h-4 text-rose-600" />
                     ) : (
                       <div className="w-4 h-4 rounded-full border-2 border-slate-300" />
                     )}

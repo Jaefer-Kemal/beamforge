@@ -184,7 +184,268 @@ export function configureMonacoErlang(monaco: any) {
       'editor.inactiveSelectionBackground': '#38bdf813',
     },
   });
+
+  // 5. Language Configuration (Comments, Brackets, Auto-closing pairs)
+  monaco.languages.setLanguageConfiguration('erlang', {
+    comments: {
+      lineComment: '%',
+    },
+    brackets: [
+      ['{', '}'],
+      ['[', ']'],
+      ['(', ')'],
+      ['<<', '>>'],
+    ],
+    autoClosingPairs: [
+      { open: '{', close: '}' },
+      { open: '[', close: ']' },
+      { open: '(', close: ')' },
+      { open: '<<', close: '>>' },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+    ],
+    surroundingPairs: [
+      { open: '{', close: '}' },
+      { open: '[', close: ']' },
+      { open: '(', close: ')' },
+      { open: '<<', close: '>>' },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+    ],
+  });
+
+  // 6. Erlang IntelliSense Autocomplete & Tab-to-Expand Snippets
+  if (!(monaco.languages as any).__bf_erlangCompletionRegistered) {
+    (monaco.languages as any).__bf_erlangCompletionRegistered = true;
+    monaco.languages.registerCompletionItemProvider('erlang', {
+      triggerCharacters: [':', '-', '?'],
+      provideCompletionItems: (model: any, position: any) => {
+        const textUntilPosition = model.getValueInRange({
+          startLineNumber: position.lineNumber,
+          startColumn: 1,
+          endLineNumber: position.lineNumber,
+          endColumn: position.column,
+        });
+
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endColumn: word.endColumn,
+        };
+
+        const SnippetKind = monaco.languages.CompletionItemKind?.Snippet ?? 27;
+        const FunctionKind = monaco.languages.CompletionItemKind?.Function ?? 1;
+        const ModuleKind = monaco.languages.CompletionItemKind?.Module ?? 8;
+        const VariableKind = monaco.languages.CompletionItemKind?.Variable ?? 4;
+        const InsertAsSnippet = monaco.languages.CompletionItemInsertTextRule?.InsertAsSnippet ?? 4;
+
+        // Check if typing after a module colon e.g. "lists:", "maps:", "erlang:", "gen_server:"
+        const colonMatch = textUntilPosition.match(/([a-z_][a-zA-Z0-9_]*):$/);
+        if (colonMatch) {
+          const mod = colonMatch[1];
+          if (OTP_LIB_COMPLETIONS[mod]) {
+            return {
+              suggestions: OTP_LIB_COMPLETIONS[mod].map((c) => ({
+                label: c.label,
+                kind: FunctionKind,
+                documentation: c.doc,
+                detail: c.detail,
+                insertText: c.insertText,
+                insertTextRules: InsertAsSnippet,
+                range,
+              })),
+            };
+          }
+        }
+
+        const suggestions: any[] = [];
+
+        // Standard OTP Snippets (case, try, receive, fun, -module, -export, etc.)
+        for (const s of ERLANG_SNIPPETS) {
+          suggestions.push({
+            label: s.label,
+            kind: SnippetKind,
+            documentation: s.doc,
+            detail: s.detail,
+            insertText: s.insertText,
+            insertTextRules: InsertAsSnippet,
+            range,
+          });
+        }
+
+        // Standard OTP Modules
+        for (const m of ['lists', 'maps', 'erlang', 'gen_server', 'gen_statem', 'ets', 'timer', 'io', 'binary']) {
+          suggestions.push({
+            label: `${m}:`,
+            kind: ModuleKind,
+            detail: `OTP ${m} standard library module`,
+            insertText: `${m}:`,
+            range,
+          });
+        }
+
+        // In-scope variables: scan words starting with uppercase or underscore
+        const fullContent = model.getValue();
+        const varMatches = fullContent.match(/\b[A-Z_][a-zA-Z0-9_]*\b/g);
+        if (varMatches) {
+          const uniqueVars = Array.from(new Set(varMatches));
+          for (const v of uniqueVars.slice(0, 30)) {
+            if (typeof v === 'string' && v.length > 1) {
+              suggestions.push({
+                label: v,
+                kind: VariableKind,
+                detail: 'In-scope variable',
+                insertText: v,
+                range,
+              });
+            }
+          }
+        }
+
+        return { suggestions };
+      },
+    });
+  }
 }
+
+// ── Standard OTP Snippets ──────────────────────────────────────────────────
+export const ERLANG_SNIPPETS = [
+  {
+    label: 'case',
+    detail: 'case Expr of ... end',
+    insertText: 'case ${1:Expr} of\n    ${2:Pattern} ->\n        ${3:Body};\n    ${4:_Other} ->\n        ${5:Default}\nend',
+    doc: 'Pattern matching branch construct with guards and default fall-through.',
+  },
+  {
+    label: 'try',
+    detail: 'try Expr of ... catch ... end',
+    insertText: 'try ${1:Expr} of\n    ${2:Pattern} ->\n        ${3:Body}\ncatch\n    ${4:Class}:${5:Reason}:${6:Stacktrace} ->\n        ${7:ErrorHandler}\nend',
+    doc: 'Sequential exception containment pattern in Erlang/OTP.',
+  },
+  {
+    label: 'receive',
+    detail: 'receive Pattern -> Body after ... end',
+    insertText: 'receive\n    ${1:Pattern} ->\n        ${2:Body}\nafter ${3:TimeoutMs} ->\n        ${4:TimeoutBody}\nend',
+    doc: 'Selective mailbox message receive loop with timeout guard.',
+  },
+  {
+    label: 'fun',
+    detail: 'fun(Args) -> Body end',
+    insertText: 'fun(${1:Args}) -> ${2:Body} end',
+    doc: 'Anonymous function closure.',
+  },
+  {
+    label: 'spawn',
+    detail: 'spawn(fun() -> ... end)',
+    insertText: 'spawn(fun() ->\n    ${1:Body}\nend)',
+    doc: 'Spawns an asynchronous actor process.',
+  },
+  {
+    label: 'spawn_link',
+    detail: 'spawn_link(fun() -> ... end)',
+    insertText: 'spawn_link(fun() ->\n    ${1:Body}\nend)',
+    doc: 'Atomically spawns and links an actor to caller.',
+  },
+  {
+    label: 'spawn_monitor',
+    detail: '{Pid, Ref} = spawn_monitor(fun() -> ... end)',
+    insertText: '{${1:WorkerPid}, ${2:MRef}} = spawn_monitor(fun() ->\n    ${3:Body}\nend)',
+    doc: 'Atomically spawns and monitors an actor to receive {\'DOWN\', Ref, process, Pid, Reason}.',
+  },
+  {
+    label: '-module',
+    detail: '-module(name).',
+    insertText: '-module(${1:module_name}).\n',
+    doc: 'Declares the Erlang module header.',
+  },
+  {
+    label: '-export',
+    detail: '-export([func/arity]).',
+    insertText: '-export([\n    ${1:function_name}/${2:arity}\n]).\n',
+    doc: 'Module public function export declaration list.',
+  },
+  {
+    label: '-record',
+    detail: '-record(name, {fields}).',
+    insertText: '-record(${1:record_name}, {\n    ${2:field} = ${3:default} :: ${4:type}()\n}).\n',
+    doc: 'Defines an Erlang record structure.',
+  },
+  {
+    label: '-spec',
+    detail: '-spec func(args) -> return.',
+    insertText: '-spec ${1:func_name}(${2:arg_types}) -> ${3:return_type}.\n',
+    doc: 'Formal Dialyzer function type specification.',
+  },
+  {
+    label: '-behaviour',
+    detail: '-behaviour(gen_server).',
+    insertText: '-behaviour(${1:gen_server}).\n',
+    doc: 'Declares implementation of an OTP design pattern behaviour.',
+  },
+];
+
+// ── Standard OTP Library Function Completions ─────────────────────────────
+export const OTP_LIB_COMPLETIONS: Record<string, Array<{ label: string; detail: string; insertText: string; doc: string }>> = {
+  lists: [
+    { label: 'reverse/1', detail: 'lists:reverse(List)', insertText: 'reverse(${1:List})', doc: 'Reverses the elements of a list in O(n).' },
+    { label: 'map/2', detail: 'lists:map(Fun, List)', insertText: 'map(${1:Fun}, ${2:List})', doc: 'Applies Fun to each element of List and returns the new list.' },
+    { label: 'filter/2', detail: 'lists:filter(Pred, List)', insertText: 'filter(${1:Pred}, ${2:List})', doc: 'Returns elements for which Pred returns true.' },
+    { label: 'foldl/3', detail: 'lists:foldl(Fun, Acc0, List)', insertText: 'foldl(${1:Fun}, ${2:Acc0}, ${3:List})', doc: 'Left-associative accumulator reduction over List.' },
+    { label: 'foldr/3', detail: 'lists:foldr(Fun, Acc0, List)', insertText: 'foldr(${1:Fun}, ${2:Acc0}, ${3:List})', doc: 'Right-associative accumulator reduction over List.' },
+    { label: 'member/2', detail: 'lists:member(Elem, List)', insertText: 'member(${1:Elem}, ${2:List})', doc: 'Returns true if Elem is a member of List, false otherwise.' },
+    { label: 'keyfind/3', detail: 'lists:keyfind(Key, N, TupleList)', insertText: 'keyfind(${1:Key}, ${2:N}, ${3:TupleList})', doc: 'Searches for a tuple whose Nth element matches Key.' },
+    { label: 'keystore/4', detail: 'lists:keystore(Key, N, TupleList, NewTuple)', insertText: 'keystore(${1:Key}, ${2:N}, ${3:TupleList}, ${4:NewTuple})', doc: 'Replaces or appends tuple by key in TupleList.' },
+    { label: 'flatten/1', detail: 'lists:flatten(DeepList)', insertText: 'flatten(${1:DeepList})', doc: 'Flattens deep nested lists into a single flat list.' },
+    { label: 'sort/1', detail: 'lists:sort(List)', insertText: 'sort(${1:List})', doc: 'Sorts elements of List into ascending order.' },
+    { label: 'seq/2', detail: 'lists:seq(From, To)', insertText: 'seq(${1:From}, ${2:To})', doc: 'Generates an integer sequence from From to To.' },
+  ],
+  maps: [
+    { label: 'get/2', detail: 'maps:get(Key, Map)', insertText: 'get(${1:Key}, ${2:Map})', doc: 'Returns the value for Key in Map. Throws badkey if missing.' },
+    { label: 'get/3', detail: 'maps:get(Key, Map, Default)', insertText: 'get(${1:Key}, ${2:Map}, ${3:Default})', doc: 'Returns the value for Key in Map, or Default if not present.' },
+    { label: 'put/3', detail: 'maps:put(Key, Value, Map)', insertText: 'put(${1:Key}, ${2:Value}, ${3:Map})', doc: 'Associates Key with Value in Map.' },
+    { label: 'remove/2', detail: 'maps:remove(Key, Map)', insertText: 'remove(${1:Key}, ${2:Map})', doc: 'Removes Key and its associated value from Map.' },
+    { label: 'find/2', detail: 'maps:find(Key, Map)', insertText: 'find(${1:Key}, ${2:Map})', doc: 'Returns {ok, Value} or error if Key is not present in Map.' },
+    { label: 'keys/1', detail: 'maps:keys(Map)', insertText: 'keys(${1:Map})', doc: 'Returns a list containing all keys in Map.' },
+    { label: 'values/1', detail: 'maps:values(Map)', insertText: 'values(${1:Map})', doc: 'Returns a list containing all values in Map.' },
+    { label: 'merge/2', detail: 'maps:merge(Map1, Map2)', insertText: 'merge(${1:Map1}, ${2:Map2})', doc: 'Merges two maps. Values from Map2 override Map1.' },
+    { label: 'new/0', detail: 'maps:new()', insertText: 'new()', doc: 'Returns a new empty map #{}.' },
+  ],
+  erlang: [
+    { label: 'monitor/2', detail: 'erlang:monitor(process, Item)', insertText: 'monitor(process, ${1:Item})', doc: 'Starts a unidirectional monitor watching Item process.' },
+    { label: 'demonitor/2', detail: 'erlang:demonitor(MRef, [flush])', insertText: 'demonitor(${1:MRef}, [flush])', doc: 'Deactivates monitor and flushes pending DOWN message from mailbox.' },
+    { label: 'spawn_monitor/1', detail: 'spawn_monitor(Fun)', insertText: 'spawn_monitor(${1:Fun})', doc: 'Atomically creates process and monitor, returning {Pid, Ref}.' },
+    { label: 'binary_to_term/2', detail: 'erlang:binary_to_term(Bin, [safe])', insertText: 'binary_to_term(${1:Bin}, [safe])', doc: 'Deserializes binary into Erlang term safely without atom exhaustion.' },
+    { label: 'term_to_binary/1', detail: 'erlang:term_to_binary(Term)', insertText: 'term_to_binary(${1:Term})', doc: 'Serializes any Erlang term into standard External Term Format binary.' },
+    { label: 'system_time/1', detail: 'erlang:system_time(millisecond)', insertText: 'system_time(${1:millisecond})', doc: 'Returns current Erlang system time in specified time unit.' },
+    { label: 'make_ref/0', detail: 'make_ref()', insertText: 'make_ref()', doc: 'Returns a unique BEAM reference term.' },
+    { label: 'send_after/3', detail: 'erlang:send_after(TimeMs, Dest, Msg)', insertText: 'send_after(${1:TimeMs}, ${2:Dest}, ${3:Msg})', doc: 'Sends Msg to Dest after TimeMs milliseconds.' },
+    { label: 'process_flag/2', detail: 'process_flag(trap_exit, true)', insertText: 'process_flag(trap_exit, ${1:true})', doc: 'Converts exit signals into mailbox messages {\'EXIT\', Pid, Reason}.' },
+    { label: 'is_process_alive/1', detail: 'is_process_alive(Pid)', insertText: 'is_process_alive(${1:Pid})', doc: 'Returns true if process is alive, false otherwise.' },
+  ],
+  gen_server: [
+    { label: 'start_link/3', detail: 'gen_server:start_link({local, ?MODULE}, ?MODULE, Args, [])', insertText: 'start_link({local, ?MODULE}, ?MODULE, ${1:Args}, [])', doc: 'Starts gen_server process in supervision tree.' },
+    { label: 'start_link/4', detail: 'gen_server:start_link(Name, Module, Args, Options)', insertText: 'start_link(${1:Name}, ${2:Module}, ${3:Args}, ${4:Options})', doc: 'Starts gen_server with custom registered name.' },
+    { label: 'call/2', detail: 'gen_server:call(ServerRef, Request)', insertText: 'call(${1:ServerRef}, ${2:Request})', doc: 'Makes a synchronous call to ServerRef and waits 5000ms for reply.' },
+    { label: 'call/3', detail: 'gen_server:call(ServerRef, Request, TimeoutMs)', insertText: 'call(${1:ServerRef}, ${2:Request}, ${3:TimeoutMs})', doc: 'Makes a synchronous call with explicit timeout.' },
+    { label: 'cast/2', detail: 'gen_server:cast(ServerRef, Request)', insertText: 'cast(${1:ServerRef}, ${2:Request})', doc: 'Sends an asynchronous request to ServerRef and returns ok immediately.' },
+    { label: 'reply/2', detail: 'gen_server:reply(From, Reply)', insertText: 'reply(${1:From}, ${2:Reply})', doc: 'Explicitly replies to client caller From.' },
+  ],
+  gen_statem: [
+    { label: 'start_link/3', detail: 'gen_statem:start_link({local, ?MODULE}, ?MODULE, Args, [])', insertText: 'start_link({local, ?MODULE}, ?MODULE, ${1:Args}, [])', doc: 'Starts gen_statem state machine process.' },
+    { label: 'call/2', detail: 'gen_statem:call(ServerRef, Request)', insertText: 'call(${1:ServerRef}, ${2:Request})', doc: 'Synchronous call to gen_statem process.' },
+    { label: 'cast/2', detail: 'gen_statem:cast(ServerRef, Request)', insertText: 'cast(${1:ServerRef}, ${2:Request})', doc: 'Asynchronous event to gen_statem process.' },
+  ],
+  ets: [
+    { label: 'new/2', detail: 'ets:new(Name, Options)', insertText: 'new(${1:Table}, [set, public, named_table, {read_concurrency, true}])', doc: 'Creates a new off-heap ETS table.' },
+    { label: 'insert/2', detail: 'ets:insert(Table, Object)', insertText: 'insert(${1:Table}, ${2:Object})', doc: 'Inserts one or more objects into ETS table.' },
+    { label: 'lookup/2', detail: 'ets:lookup(Table, Key)', insertText: 'lookup(${1:Table}, ${2:Key})', doc: 'Returns list of tuples matching Key in ETS table.' },
+    { label: 'delete/2', detail: 'ets:delete(Table, Key)', insertText: 'delete(${1:Table}, ${2:Key})', doc: 'Deletes object with matching Key from ETS table.' },
+    { label: 'update_counter/3', detail: 'ets:update_counter(Table, Key, {Pos, Incr})', insertText: 'update_counter(${1:Table}, ${2:Key}, {${3:Pos}, ${4:Incr}})', doc: 'Atomically increments a counter field in ETS table.' },
+    { label: 'tab2list/1', detail: 'ets:tab2list(Table)', insertText: 'tab2list(${1:Table})', doc: 'Returns all objects stored in Table as a list.' },
+  ],
+};
 
 /**
  * Fast, zero-dependency token highlighter for Erlang code snippets in markdown lessons.

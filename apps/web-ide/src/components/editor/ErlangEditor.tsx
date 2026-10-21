@@ -3,7 +3,7 @@
 import React, { useRef } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
-import { X, FileCode, CheckCircle2 } from 'lucide-react';
+import { X, FileCode } from 'lucide-react';
 
 import { configureMonacoErlang } from '../../lib/monacoErlang';
 
@@ -17,7 +17,6 @@ export const ErlangEditor: React.FC = () => {
     updateFileContent,
     theme,
   } = useWorkspaceStore();
-
   const activeFile = files.find((f) => f.path === activeFilePath) || files[0];
   const monacoRef = useRef<Monaco | null>(null);
 

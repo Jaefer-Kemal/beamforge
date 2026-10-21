@@ -9,19 +9,14 @@ import {
   AlertCircle, 
   Clock, 
   ArrowRight, 
-  Sparkles, 
-  Play, 
-  Terminal, 
-  ShieldCheck,
-  RotateCcw
+  Sparkles
 } from 'lucide-react';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
-import { getNextLevelId, getLevelById } from '../../data/curriculumCatalog';
+import { getNextLevelId } from '../../data/curriculumCatalog';
 
 export function VerificationDrawer() {
   const { 
     verificationStages, 
-    isVerifying, 
     activeExerciseId, 
     advanceToNextLevel, 
     loadSolutionForActiveExercise, 
@@ -31,7 +26,6 @@ export function VerificationDrawer() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<'stages' | 'terminal'>('stages');
 
-  const level = getLevelById(activeExerciseId);
   const nextLevelId = getNextLevelId(activeExerciseId);
   const passedCount = verificationStages.filter((s) => s.status === 'passed').length;
   const isAllPassed = verificationStages.length > 0 && passedCount === verificationStages.length;

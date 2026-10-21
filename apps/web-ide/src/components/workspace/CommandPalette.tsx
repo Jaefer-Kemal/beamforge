@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import { 
-  Command, 
   Search, 
   Play, 
   Skull, 
@@ -11,8 +10,7 @@ import {
   Layers, 
   FileCode, 
   Network, 
-  Trash2,
-  ArrowRight
+  Trash2
 } from 'lucide-react';
 
 export const CommandPalette: React.FC = () => {

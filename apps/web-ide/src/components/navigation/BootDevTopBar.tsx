@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { Zap, BookOpen, Compass } from 'lucide-react';
+import { BeamForgeLogo } from './BeamForgeLogo';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
-import { CURRICULUM_WORLDS, ALL_CURRICULUM_CHAPTERS } from '../../data/curriculumCatalog';
+import { ALL_CURRICULUM_CHAPTERS } from '../../data/curriculumCatalog';
 
 // ── Chapter metadata for the 12-chapter curriculum ──────────────────────────
 export const CHAPTERS = [
@@ -54,7 +56,7 @@ export function BootDevTopBar() {
     activeChapter, setActiveChapter,
     activeLesson, setActiveLesson,
     goToPrevLesson, goToNextLesson,
-    totalXp, completedLevelIds,
+    totalXp,
     wsStatus,
   } = useWorkspaceStore();
 
@@ -107,12 +109,13 @@ export function BootDevTopBar() {
       {/* ── LEFT ZONE: Brand + Stats ─────────────────────────────────────────── */}
       <div className="flex items-center gap-3 min-w-0 flex-shrink-0">
         {/* Logo */}
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-black"
-            style={{ background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)', boxShadow: '0 4px 12px rgba(245,158,11,0.40)' }}>
-            BF
-          </div>
-          <span className="font-bold text-sm tracking-tight hidden lg:block"
+        <div 
+          className="flex items-center gap-2.5 cursor-pointer group" 
+          onClick={() => setBootDevView('syllabus')}
+          title="BeamForge — Return to Curriculum Syllabus"
+        >
+          <BeamForgeLogo size={28} />
+          <span className="font-black text-sm tracking-tight hidden lg:block group-hover:text-blue-500 transition-colors"
             style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
             BeamForge
           </span>
@@ -132,7 +135,7 @@ export function BootDevTopBar() {
             color: '#F59E0B',
           }}
         >
-          <span>⚡</span>
+          <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500 flex-shrink-0" />
           <span suppressHydrationWarning>{mounted ? totalXp.toLocaleString() : '0'} XP</span>
         </div>
 
@@ -173,16 +176,15 @@ export function BootDevTopBar() {
             border: isDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(255,255,255,0.80)',
           }}
         >
-          {([
-            { key: 'lesson' as const, label: '📖 Lesson' },
-            { key: 'syllabus' as const, label: '🗺️ Syllabus' },
-            ...(activeChapter === 12 ? [{ key: 'capstone' as const, label: '🏗️ Capstone' }] : []),
-          ]).map(({ key, label }) => (
+          {[
+            { key: 'lesson' as const, label: 'Lesson', icon: BookOpen },
+            { key: 'syllabus' as const, label: 'Syllabus', icon: Compass },
+          ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
               id={`view-switcher-${key}`}
               onClick={() => setBootDevView(key)}
-              className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all duration-200"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all duration-200"
               style={{
                 background: bootDevView === key
                   ? (isDark ? 'rgba(139,92,246,0.30)' : 'rgba(245,158,11,0.15)')
@@ -192,7 +194,8 @@ export function BootDevTopBar() {
                   : (isDark ? '#94A3B8' : '#64748B'),
               }}
             >
-              {label}
+              <Icon className="w-3.5 h-3.5" />
+              <span>{label}</span>
             </button>
           ))}
         </div>
@@ -204,7 +207,6 @@ export function BootDevTopBar() {
           const lessonNum = idx + 1;
           const isCompleted = lessonNum < activeLesson;
           const isActive = lessonNum === activeLesson;
-          const isUpcoming = lessonNum > activeLesson;
           return (
             <React.Fragment key={lessonNum}>
               {/* Connector line */}

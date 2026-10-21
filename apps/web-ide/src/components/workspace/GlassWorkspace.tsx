@@ -6,14 +6,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Code2, 
   Activity, 
-  Sparkles, 
-  Layers, 
-  Maximize2, 
-  Minimize2, 
   Radio, 
   X,
-  Send,
-  Cpu
+  Send
 } from 'lucide-react';
 import { LessonGuidePane } from './LessonGuidePane';
 import { VerificationDrawer } from './VerificationDrawer';
@@ -50,7 +45,6 @@ export function GlassWorkspace() {
   const { 
     activeExerciseId, 
     devModeUnlockedAll,
-    xmppState,
     socketMode,
     setSocketMode,
     sendFragmentedXmlPacket,

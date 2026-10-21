@@ -18,9 +18,7 @@ import {
   CURRICULUM_WORLDS, 
   getLevelById, 
   getNextLevelId, 
-  getAllLevelIds,
-  CurriculumLevel,
-  getLessonById,
+  getLessonById, 
   getLessonByChapterAndNum,
   ALL_CURRICULUM_CHAPTERS,
 } from '../data/curriculumCatalog';
@@ -61,9 +59,9 @@ interface WorkspaceState {
   theme: AppTheme;
   toggleTheme: () => void;
 
-  /** Boot.dev top-bar view switcher: lesson workspace / syllabus / capstone */
-  bootDevView: 'lesson' | 'syllabus' | 'capstone';
-  setBootDevView: (view: 'lesson' | 'syllabus' | 'capstone') => void;
+  /** Boot.dev top-bar view switcher: lesson workspace / syllabus */
+  bootDevView: 'lesson' | 'syllabus';
+  setBootDevView: (view: 'lesson' | 'syllabus') => void;
 
   /** Currently selected chapter number (1-12) */
   activeChapter: number;
@@ -80,8 +78,8 @@ interface WorkspaceState {
   goToNextLesson: () => void;
 
   /** Bottom lesson output drawer tab */
-  lessonOutputTab: 'test_results' | 'console' | 'test_suite';
-  setLessonOutputTab: (tab: 'test_results' | 'console' | 'test_suite') => void;
+  lessonOutputTab: 'test_results' | 'console' | 'verification';
+  setLessonOutputTab: (tab: 'test_results' | 'console' | 'verification') => void;
 
   /** Whether the lesson output drawer is open */
   isLessonOutputOpen: boolean;
@@ -91,10 +89,10 @@ interface WorkspaceState {
   isSolutionVisible: boolean;
   setSolutionVisible: (visible: boolean) => void;
 
-  /** ▷ Run result — stdout + visible test case outcomes */
+  /** Run result — stdout + visible test case outcomes */
   runResult: RunResult | null;
   isRunning: boolean;
-  runCode: () => Promise<void>;
+  runCode: (keepTab?: boolean) => Promise<void>;
   clearRunResult: () => void;
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -128,16 +126,8 @@ interface WorkspaceState {
   resetWorkspace: () => void;
 
   // Workspace UI Layout
-  activeRibbonTab: 'vault' | 'explorer' | 'observer' | 'chaos' | 'xmpp' | 'sim';
-  setActiveRibbonTab: (tab: 'vault' | 'explorer' | 'observer' | 'chaos' | 'xmpp' | 'sim') => void;
-  isLeftDrawerOpen: boolean;
-  toggleLeftDrawer: () => void;
   isCommandPaletteOpen: boolean;
   setCommandPaletteOpen: (open: boolean) => void;
-  bottomDrawerTab: 'terminal' | 'chaos' | 'xmpp';
-  setBottomDrawerTab: (tab: 'terminal' | 'chaos' | 'xmpp') => void;
-  isBottomDrawerExpanded: boolean;
-  toggleBottomDrawer: () => void;
 
   // Live BEAM Process Graph
   nodes: BeamNode[];
@@ -291,7 +281,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     if (status === 'connected') {
       get().addTerminalEntry({
         type: 'output',
-        text: '⚡ [Gateway] Connected to live Go Orchestrator (ws://localhost:8080/ws) • Native Erlang/OTP 29',
+        text: '[Gateway] Connected to live Go Orchestrator (ws://localhost:8080/ws) • Native Erlang/OTP 29',
       });
     }
   });
@@ -363,6 +353,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           assertionDetails: st.details,
         }));
         set({ verificationStages: mappedStages, isVerifying: false });
+      }
+      if (report.visible_tests && report.visible_tests.length > 0) {
+        set({
+          runResult: {
+            mode: 'run',
+            exerciseId: get().activeExerciseId,
+            compileOk: true,
+            stdout: report.stdout || '',
+            visibleTests: report.visible_tests.map((t: any) => ({
+              callStr: t.call_str,
+              expected: t.expected,
+              actual: t.actual,
+              passed: t.passed,
+              timeMs: t.time_ms,
+            })),
+            totalDurationMs: report.total_time_ms || 0,
+            diagnostics: [],
+          },
+        });
       }
       if (report.score === 100 || report.verdict === 'PASSED') {
         get().onLevelCompleted(get().activeExerciseId);
@@ -451,9 +460,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     runResult: null,
     isRunning: false,
     clearRunResult: () => set({ runResult: null }),
-    runCode: async () => {
-      set({ isRunning: true, isLessonOutputOpen: true, lessonOutputTab: 'console', runResult: null });
-      get().addTerminalEntry({ type: 'output', text: '▷ [BeamForge] Running visible test cases...' });
+    runCode: async (keepTab?: boolean) => {
+      set({ isRunning: true, isLessonOutputOpen: true, runResult: null });
+      if (!keepTab) set({ lessonOutputTab: 'test_results' });
+      get().addTerminalEntry({ type: 'output', text: '[BeamForge] Running visible test cases...' });
 
       const fileMap: Record<string, string> = {};
       get().files.forEach((f) => { fileMap[f.path] = f.content; });
@@ -484,15 +494,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               timeMs: t.time_ms,
             })),
             totalDurationMs: data.total_duration_ms || 0,
+            diagnostics: (data.diagnostics || []).map((d: any) => ({
+              file: d.file || '',
+              line: Number(d.line) || 1,
+              col: Number(d.col) || 1,
+              severity: d.severity || 'error',
+              message: d.message || '',
+            })),
           };
-          set({ runResult, lessonOutputTab: 'test_results', isLessonOutputOpen: true });
-          const passCount = runResult.visibleTests.filter((t) => t.passed).length;
-          get().addTerminalEntry({
-            type: 'output',
-            text: `▷ Run complete: ${passCount}/${runResult.visibleTests.length} tests passed. stdout: ${runResult.stdout || '(none)'}`,
-          });
+          set({ runResult, isLessonOutputOpen: true });
+          if (!keepTab) set({ lessonOutputTab: 'test_results' });
+          if (!runResult.compileOk) {
+            get().addTerminalEntry({
+              type: 'error',
+              text: `[erlc] Compilation Failed:\n${runResult.stdout || 'Check syntax errors.'}`,
+            });
+          } else {
+            const passCount = runResult.visibleTests.filter((t) => t.passed).length;
+            get().addTerminalEntry({
+              type: 'output',
+              text: `[Run] Complete: ${passCount}/${runResult.visibleTests.length} tests passed. stdout: ${runResult.stdout || '(none)'}`,
+            });
+          }
         } else {
-          get().addTerminalEntry({ type: 'error', text: `▷ Run failed: HTTP ${res.status}` });
+          get().addTerminalEntry({ type: 'error', text: `[Run] Failed: HTTP ${res.status}` });
         }
       } catch (err) {
         // Fallback simulation when orchestrator is not running
@@ -506,8 +531,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           ],
           totalDurationMs: 320,
         };
-        set({ runResult: simResult, lessonOutputTab: 'test_results', isLessonOutputOpen: true });
-        get().addTerminalEntry({ type: 'output', text: '▷ [Offline Mode] Simulated run result shown.' });
+        set({ runResult: simResult, isLessonOutputOpen: true });
+        if (!keepTab) set({ lessonOutputTab: 'test_results' });
+        get().addTerminalEntry({ type: 'output', text: '[Offline Mode] Simulated run result shown.' });
       } finally {
         set({ isRunning: false });
       }
@@ -538,27 +564,49 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       get().addTerminalEntry({
         type: 'output',
         text: next 
-          ? '⚡ [DEV MODE] Unlocked all 5 Worlds & 10 Levels for unrestricted testing!'
-          : '⚡ [DEV MODE] Normal progressive curriculum restored.',
+          ? '[DEV MODE] Unlocked all 5 Worlds & 10 Levels for unrestricted testing!'
+          : '[DEV MODE] Normal progressive curriculum restored.',
       });
     },
 
     loadSolutionForActiveExercise: () => {
       const { activeExerciseId } = get();
       const lesson = getLessonById(activeExerciseId);
-      if (lesson && lesson.solutionFiles) {
-        const solFiles = lesson.solutionFiles;
+      if (lesson) {
+        let currentFiles = get().files;
+        if (currentFiles.length === 0 && (lesson.starterCode || lesson.solutionCode)) {
+          const modMatch = (lesson.starterCode || lesson.solutionCode || '').match(/-module\s*\(\s*([a-zA-Z0-9_]+)\s*\)\s*\./);
+          const modName = modMatch ? modMatch[1] : activeExerciseId.replace(/[^a-zA-Z0-9_]/g, '_');
+          const fileName = `${modName}.erl`;
+          currentFiles = [
+            {
+              path: `src/${fileName}`,
+              name: fileName,
+              content: lesson.starterCode || '',
+            },
+          ];
+          set({
+            files: currentFiles,
+            activeFilePath: currentFiles[0].path,
+            openTabPaths: [currentFiles[0].path],
+          });
+        }
+        const solFiles = lesson.solutionFiles || (lesson.solutionCode ? { [currentFiles[0]?.path || 'src/solution.erl']: lesson.solutionCode } : {});
         set((state) => ({
           files: state.files.map((f) => {
-            if (solFiles[f.path]) {
-              return { ...f, content: solFiles[f.path], isModified: true };
+            const solContent = solFiles[f.path]
+              ?? solFiles[f.path.replace(/^src\//, '')]
+              ?? solFiles['src/' + f.path]
+              ?? (state.files.length === 1 && lesson.solutionCode ? lesson.solutionCode : undefined);
+            if (solContent !== undefined) {
+              return { ...f, content: solContent, isModified: true };
             }
             return f;
           }),
         }));
         get().addTerminalEntry({
           type: 'output',
-          text: `⚡ [BeamForge] Loaded verified reference solution for Lesson ${lesson.id} (${lesson.title}).`,
+          text: `[BeamForge] Loaded verified reference solution for Lesson ${lesson.id} (${lesson.title}).`,
         });
         if (wsMux.isConnected()) {
           const fileMap: Record<string, string> = {};
@@ -582,7 +630,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         }));
         get().addTerminalEntry({
           type: 'output',
-          text: `⚡ [BeamForge] Loaded verified reference solution for Level ${level.levelNumber} (${level.title}).`,
+          text: `[BeamForge] Loaded verified reference solution for Level ${level.levelNumber} (${level.title}).`,
         });
         if (wsMux.isConnected()) {
           const fileMap: Record<string, string> = {};
@@ -594,7 +642,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       } else {
         get().addTerminalEntry({
           type: 'output',
-          text: '⚡ [BeamForge] No solution available for this custom workspace.',
+          text: '[BeamForge] No solution available for this custom workspace.',
         });
       }
     },
@@ -606,12 +654,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         get().switchExercise(nextId);
         get().addTerminalEntry({
           type: 'output',
-          text: `🚀 [BeamForge] Advancing to next level: ${nextId}`,
+          text: `[BeamForge] Advancing to next level: ${nextId}`,
         });
       } else {
         get().addTerminalEntry({
           type: 'output',
-          text: '🎉 [BeamForge] Congratulations! You have completed all 10 levels across all 5 Worlds!',
+          text: '[BeamForge] Congratulations! You have completed all 10 levels across all 5 Worlds!',
         });
       }
     },
@@ -637,7 +685,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
                 newUnlockedWorlds.push(nextWorld.id);
                 get().addTerminalEntry({
                   type: 'output',
-                  text: `🌟 [WORLD UNLOCKED] You unlocked World ${nextWorld.worldNumber}: ${nextWorld.title}!`,
+                  text: `[WORLD UNLOCKED] You unlocked World ${nextWorld.worldNumber}: ${nextWorld.title}!`,
                 });
               }
             }
@@ -664,7 +712,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
       get().addTerminalEntry({
         type: 'output',
-        text: `🏆 [Mastery] Level ${level?.levelNumber || levelId} passed! (+${level?.xpReward || 100} XP). Total XP: ${newXp}`,
+        text: `[Mastery] Level ${level?.levelNumber || levelId} passed! (+${level?.xpReward || 100} XP). Total XP: ${newXp}`,
       });
     },
 
@@ -680,7 +728,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     switchExercise: (id: string) => {
       const lesson = getLessonById(id);
       if (lesson) {
-        const lessonFiles: WorkspaceFile[] = lesson.files || [];
+        let lessonFiles: WorkspaceFile[] = lesson.files && lesson.files.length > 0 ? [...lesson.files] : [];
+        if (lessonFiles.length === 0 && (lesson.starterCode || lesson.solutionCode)) {
+          const modMatch = (lesson.starterCode || lesson.solutionCode || '').match(/-module\s*\(\s*([a-zA-Z0-9_]+)\s*\)\s*\./);
+          const modName = modMatch ? modMatch[1] : id.replace(/[^a-zA-Z0-9_]/g, '_');
+          const fileName = `${modName}.erl`;
+          lessonFiles = [
+            {
+              path: `src/${fileName}`,
+              name: fileName,
+              content: lesson.starterCode || '',
+            },
+          ];
+        }
         set({
           activeExerciseId: id,
           activeChapter: lesson.chapterNumber,
@@ -690,7 +750,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           openTabPaths: lessonFiles.slice(0, 2).map((f) => f.path),
           isSolutionVisible: false,
           runResult: null,
-          verificationStages: INITIAL_STAGES.map((s) => ({ ...s, status: 'pending', timeMs: undefined })),
+          verificationStages: [],
         });
         get().addTerminalEntry({
           type: 'output',
@@ -785,16 +845,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     },
 
     // UI Layout
-    activeRibbonTab: 'explorer',
-    setActiveRibbonTab: (tab) => set({ activeRibbonTab: tab, isLeftDrawerOpen: true }),
-    isLeftDrawerOpen: true,
-    toggleLeftDrawer: () => set((state) => ({ isLeftDrawerOpen: !state.isLeftDrawerOpen })),
     isCommandPaletteOpen: false,
     setCommandPaletteOpen: (open) => set({ isCommandPaletteOpen: open }),
-    bottomDrawerTab: 'terminal',
-    setBottomDrawerTab: (tab) => set({ bottomDrawerTab: tab }),
-    isBottomDrawerExpanded: false,
-    toggleBottomDrawer: () => set((state) => ({ isBottomDrawerExpanded: !state.isBottomDrawerExpanded })),
 
     // Live Graph
     nodes: defaultEx.initialNodes,
@@ -879,13 +931,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
     // Verification Pipeline
     isVerifying: false,
-    verificationStages: INITIAL_STAGES,
+    verificationStages: [],
     runVerificationSuite: async () => {
-      set({ isVerifying: true, bottomDrawerTab: 'chaos' });
+      set({ isVerifying: true, lessonOutputTab: 'verification', isLessonOutputOpen: true });
       get().addTerminalEntry({
         type: 'output',
         text: '==> [bf_grader] Initializing verification pipeline...',
       });
+
+      // Concurrently run visible tests in background so Test Suite & Diffs tab is updated live for this code revision
+      get().runCode(true);
 
       // If connected to Go Orchestrator, trigger live OTP verification over WebSocket
       if (wsMux.isConnected()) {
@@ -923,6 +978,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               assertionDetails: st.details,
             }));
             set({ verificationStages: mappedStages, isVerifying: false });
+          }
+          if (report.visible_tests && report.visible_tests.length > 0) {
+            set({
+              runResult: {
+                mode: 'run',
+                exerciseId: get().activeExerciseId,
+                compileOk: true,
+                stdout: report.stdout || '',
+                visibleTests: report.visible_tests.map((t: any) => ({
+                  callStr: t.call_str,
+                  expected: t.expected,
+                  actual: t.actual,
+                  passed: t.passed,
+                  timeMs: t.time_ms,
+                })),
+                totalDurationMs: report.total_time_ms || 0,
+                diagnostics: [],
+              },
+            });
           }
           if (report.score === 100 || report.verdict === 'PASSED') {
             get().onLevelCompleted(get().activeExerciseId);

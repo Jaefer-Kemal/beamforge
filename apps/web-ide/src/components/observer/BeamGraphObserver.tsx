@@ -2,21 +2,14 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
-import { BeamNode } from '../../types/workspace';
 import { 
   Radio, 
-  Activity, 
   Skull, 
   Mail, 
   Flame, 
-  Database, 
-  Layers, 
-  Maximize2, 
   Minus, 
   Plus, 
-  RotateCcw,
-  Sparkles,
-  Zap
+  RotateCcw
 } from 'lucide-react';
 
 export const BeamGraphObserver: React.FC = () => {
@@ -346,7 +339,7 @@ export const BeamGraphObserver: React.FC = () => {
                 fontWeight="bold"
                 className="pointer-events-none"
               >
-                {isCrashed ? '✕' : isSupervisor ? 'SUP' : isEts ? 'ETS' : 'GEN'}
+                {isCrashed ? 'RIP' : isSupervisor ? 'SUP' : isEts ? 'ETS' : 'GEN'}
               </text>
 
               {/* Registered Name Label */}

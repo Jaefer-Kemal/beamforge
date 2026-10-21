@@ -4,14 +4,12 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { 
   BookOpen, 
-  ExternalLink, 
   Search, 
   FileCode2, 
   Terminal, 
   ShieldCheck, 
   Compass,
-  ArrowUpRight,
-  Filter
+  ArrowUpRight
 } from 'lucide-react';
 import { CURRICULUM_WORLDS, ExternalReference, ReferenceCategory } from '../../data/curriculumCatalog';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';

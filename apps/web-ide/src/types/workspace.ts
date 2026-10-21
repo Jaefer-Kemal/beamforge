@@ -117,7 +117,7 @@ export interface OtpDocSignatureCard {
   githubSourceUrl?: string;
 }
 
-/** A visible test case shown in the 🧪 Test Cases drawer, executed on ▷ Run */
+/** A visible test case shown in the Test Cases drawer, executed on Run */
 export interface VisibleTestCase {
   /** Unique identifier for this test case */
   id: string;
@@ -131,7 +131,7 @@ export interface VisibleTestCase {
   explanation: string;
 }
 
-/** AST/Bytecode rule specification passed to bf_ast_verifier:verify_rules/3 on ▶ Submit */
+/** AST/Bytecode rule specification passed to bf_ast_verifier:verify_rules/3 on Submit */
 export interface AstRuleSpec {
   /** Functions that must be implemented using tail recursion, e.g. ["process_order/2"] */
   requireTailRecursion?: string[];
@@ -186,12 +186,49 @@ export interface RunResult {
 /** Application theme mode */
 export type AppTheme = 'light' | 'dark';
 
+export type VisualSceneId =
+  | 'xmpp_5_module_capstone_arch'
+  | 'tco_vs_body_stack'
+  | 'sub_binary_procbin_refc'
+  | 'mailbox_selective_receive'
+  | 'links_monitors_signals'
+  | 'supervision_rest_for_one_ets_heir'
+  | 'tcp_xmpp_stream_framing';
+
+export interface MentalModelOption {
+  id: string; // e.g. 'A' | 'B' | 'C'
+  label: string;
+  text?: string; // alias for label
+  isCorrect: boolean;
+  explanation: string;
+}
+
+export interface MentalModelCheckSpec {
+  id?: string;
+  question: string;
+  codeSnippet?: string;
+  options: MentalModelOption[];
+  correctOptionId?: string;
+}
+
+export type MentalModelCheck = MentalModelCheckSpec;
+
+export interface IncidentAlert {
+  id: string;
+  severity: 'P1-CRITICAL' | 'P2-HIGH' | 'P3-WARNING';
+  incidentTitle: string;
+  service: string;
+  symptom: string;
+  diagnosticClue: string;
+  recommendedAction: string;
+}
+
 /** Full lesson content matching the Boot.dev pedagogy and Glassmorphic specification */
 export interface LessonContent {
   id: string; // e.g. "ch01-l01"
   chapterNumber: number;
   lessonNumber: number;
-  lessonType: LessonType;
+  lessonType: LessonType | 'incident_triage';
   title: string;
   difficulty: 'Beginner' | 'Intermediate' | 'Advanced' | 'Production';
   conceptMarkdown: string;
@@ -203,6 +240,12 @@ export interface LessonContent {
   solutionCode: string;
   files?: WorkspaceFile[];
   solutionFiles?: Record<string, string>;
+  capstoneMilestones?: CapstoneMilestone[];
+  capabilityMode?: 'code_only' | 'code_and_memory' | 'beam_graph' | 'xmpp_full';
+  visualScene?: VisualSceneId;
+  mentalModelCheck?: MentalModelCheck;
+  incidentAlert?: IncidentAlert;
+  xpReward?: number;
   references?: Array<{
     title: string;
     url: string;

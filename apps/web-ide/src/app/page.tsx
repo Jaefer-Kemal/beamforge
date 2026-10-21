@@ -251,26 +251,28 @@ export default function WorkspacePage() {
 
   // Determine which view to render in the workspace slot
   const renderWorkspaceContent = () => {
-    if (activeView === 'curriculum_map') return <CurriculumWorldMap />;
-    if (activeView === 'references')    return <ReferencesVaultView />;
+    // 1. Syllabus / Curriculum Map view takes top priority when selected
+    if (activeView === 'curriculum_map' || bootDevView === 'syllabus') {
+      return <CurriculumWorldMap />;
+    }
+    if (activeView === 'references') {
+      return <ReferencesVaultView />;
+    }
 
-    // Boot.dev view switcher
-    if (bootDevView === 'capstone' || activeChapter === 12) {
+    // 2. Lesson view: Chapter 12 renders Capstone Studio, all others render LessonSplitView
+    if (activeChapter === 12) {
       return <CapstoneStudioView />;
     }
-    if (bootDevView === 'lesson') {
-      const currentLesson = 
-        getLessonByChapterAndNum(activeChapter, activeLesson) ||
-        getLessonById(activeExerciseId) ||
-        DEMO_LESSON;
-      return <LessonSplitView lesson={currentLesson} />;
-    }
-    // 'syllabus' → show the world map
-    return <CurriculumWorldMap />;
+
+    const currentLesson = 
+      getLessonByChapterAndNum(activeChapter, activeLesson) ||
+      getLessonById(activeExerciseId) ||
+      DEMO_LESSON;
+    return <LessonSplitView lesson={currentLesson} />;
   };
 
   return (
-    <main className="flex h-screen w-screen overflow-hidden select-none relative">
+    <main className="flex h-screen w-screen overflow-hidden relative">
       {/* Boot.dev Top Bar (replaces TopSegmentedNav as primary navigation) */}
       <BootDevTopBar />
 
