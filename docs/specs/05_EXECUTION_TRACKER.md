@@ -233,3 +233,10 @@ We execute the platform overhaul incrementally so every single piece is built to
     6. `a194c77`: `feat(brand): add theme-adaptive Apple glass squircle BeamForgeLogo and App Router icon.svg favicon`
     7. `c42a0b3`: `feat(ui): synchronize submit/run states, replace emojis with Lucide icons, and prune legacy drawers`
   - Verified working tree is 100% clean and both Go (8080) and Next.js (3000) servers are operating nominally.
+
+## Phase 13: BEAM Execution Model & Cloud Deployment Architecture (Spec 08)
+- [x] **13.1: Systems Performance & Comparative Runtime Blueprint**:
+  - Authored `docs/specs/08_BEAM_EXECUTION_AND_CLOUD_DEPLOYMENT_ARCHITECTURE.md` covering deep technical comparisons across BEAM, HotSpot JVM, .NET Core CLR, CPython, and native Go/Rust binaries.
+  - Documented preemptive reduction counting (4,000 reductions/slice), actor-isolated private heaps, and $O(1)$ process garbage collection.
+  - Formulated the Go Orchestrator concurrency limiter / semaphore architecture to guarantee 100% OOM protection on Render 512 MB – 2 GB cloud tiers.
+  - Outlined ephemeral subprocess vs. resident warm-node execution pipelines, RAM disk (`tmpfs`) acceleration, and multi-stage production Docker packaging.
