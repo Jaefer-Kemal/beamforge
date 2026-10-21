@@ -4,7 +4,7 @@
 
 # BeamForge
 
-### Production-Grade Interactive Training Platform for Erlang/OTP, Distributed Systems & the BEAM Virtual Machine
+### Interactive In-Browser Training Platform for Erlang/OTP & BEAM Ecosystem Languages
 
 [![Version](https://img.shields.io/badge/version-0.9.0--beta-38BDF8.svg?style=flat-square)](https://github.com/Jaefer-Kemal/beamforge)
 [![Erlang/OTP](https://img.shields.io/badge/Erlang%2FOTP-27%20%7C%2028%20%7C%2029-A90533.svg?style=flat-square)](https://www.erlang.org/)
@@ -26,19 +26,28 @@
 
 ## Purpose & Mission
 
-Mastering distributed, fault-tolerant backend architectures is one of the steepest challenges in modern computer science. While many backend developers understand basic threading and asynchronous programming, they struggle when building systems that must maintain state across distributed clusters, parse binary wire protocols without memory leaks, or survive hardware failure without dropping network connections.
+For developers trained in imperative, object-oriented languages (Python, JavaScript, Java, C++, Go), learning **Erlang and the BEAM ecosystem** is one of the steepest and most disorienting paradigm shifts in computer science:
 
-**BeamForge** bridges this chasm. Modeled after the pedagogical ergonomics of **Boot.dev** and styled with a sleek **Apple Light and Dark Glassmorphic UI**, BeamForge is an in-browser engineering academy that guides developers from foundational functional immutability to architecting a production **5-module XMPP real-time messaging server** from scratch.
+1. **A Radical Term & Syntax Model:** Prolog-rooted syntax, immutable data terms, single-assignment variables (`X = 1`, where reassignment is impossible), and pervasive pattern matching on tuples, maps, and raw bitstrings.
+2. **Iteration Without Loops:** No `for`, `while`, or `until` constructs exist; all iteration demands pure recursive thinking, accumulator patterns, and strict Tail-Call Optimization (TCO).
+3. **Share-Nothing Actor Concurrency:** Eliminating shared mutable memory, threads, and mutexes entirely. Processes are lightweight isolated actors with private heaps communicating purely via asynchronous message mailboxes (`Pid ! Message`).
+4. **The OTP Mindset ("Let It Crash"):** Replacing defensive `try/catch` boilerplate with supervision trees, restart strategies (`one_for_one`, `rest_for_one`), and generic standard behaviours (`gen_server`, `gen_statem`, `gen_event`).
 
-Every concept is learned through **active code execution**: learners write real Erlang code verified by an automated AST inspector, Tail-Call Optimization (TCO) bytecode disassembler, and live OTP supervision harnesses.
+### The Problem: The BEAM "Learning Desert"
+For decades, mastering Erlang and BEAM languages has been notoriously difficult. Beginners encounter either 20-year-old academic papers, terse man pages, or trivial syntax cheat sheets that abandon learners long before they understand real OTP architecture, binary wire framing, or fault tolerance. There has never been an interactive, deliberate-practice learning environment built specifically for the BEAM.
+
+### The Mission: Hands-On BEAM Mastery
+**BeamForge** exists to make the **BEAM ecosystem accessible, hands-on, and rigorous**. Rather than passively reading docs, learners write real code in the browser, verified instantaneously by native AST analyzers, bytecode disassemblers, and live OTP supervisor test harnesses.
+
+Starting with a complete 12-chapter Erlang/OTP core and expanding to **Elixir, Gleam, and other BEAM languages**, BeamForge empowers software engineers to internalize the mental models required to build systems capable of the legendary 99.9999999% ("nine nines") uptime for which the BEAM is world-renowned.
 
 ---
 
 ## Key Capabilities & Core Innovations
 
-### 1. Boot.dev Ergonomic 50/50 Split View
-- **Dual-Pane Mastery Workspace:** Clean, uncrowded 50/50 horizontal split between pedagogical concept textbooks (left) and the Monaco code editor with real-time test verification drawers (right).
-- **Apple Glassmorphic Design System:** Custom frosted glass tokens responsive to both **Daylight Frosted Glass** (high-contrast `#0F172A` text on `#F8FAFC` glass) and **Midnight Dark Glass** (`#F8FAFC` text on `#0B0F17` glass).
+### 1. Interactive Deliberate Practice Workspace
+- **Boot.dev-Style Dual-Pane Layout:** Clean, uncrowded 50/50 horizontal split between concept lessons with official OTP signature cards (left) and the code editor with live test verification drawers (right).
+- **Daylight & Midnight Theme Support:** Ergonomically designed high-contrast themes for daytime and late-night coding sessions.
 - **Zero Trivia Quizzes:** Every lesson demands functional implementation. No multiple-choice trivia masquerading as learning.
 
 ### 2. Dual-Engine Execution Pipeline: `▷ Run` vs `▶ Submit`
