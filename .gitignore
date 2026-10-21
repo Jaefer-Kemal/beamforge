@@ -38,3 +38,7 @@ erl_crash.dump
 *.swo
 .DS_Store
 Thumbs.db
+
+# Scratch and Temporary Development Scripts
+scratch/
+**/scratch/

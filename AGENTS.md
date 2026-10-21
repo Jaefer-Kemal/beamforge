@@ -11,9 +11,11 @@ Before creating or editing any code file, you MUST open and read the relevant sp
 - Working on Erlang Grader, AST Checker, or Go Orchestrator? Read `docs/specs/01_ARCHITECTURE_AND_AST_GRADER.md`.
 - Working on Frontend UI, Layout, Theme, or Capstone Studio? Read `docs/specs/02_UI_BOOTDEV_GLASS_SPEC.md`.
 - Working on Curriculum Chapters, Lessons, or Problem Sets? Read `docs/specs/03_CURRICULUM_MASTER_BLUEPRINT.md` AND `docs/specs/04_PEDAGOGY_AND_LESSON_TEMPLATE.md`.
+- Working on Interactive Step-Diagrams, Mental Model Checks, Incident Triage Labs, Term Diffs, or BEAM Footprint Telemetry? Read `docs/specs/07_VISUAL_PEDAGOGY_AND_INCIDENT_TRIAGE.md`.
 
 ### Gate 2: Implementation & Compiler Verification
 - Never leave `// TODO`, `% TODO` (except inside learner starter templates where explicitly required), or mock stubs.
+- **NO ASCII BOX DIAGRAMS: Never use `+---+` or `| v` ASCII art inside markdown strings. Always use `<BeamConceptVisualizer />` SVG/React scenes.**
 - Every Erlang module must compile cleanly with `erlc.exe`.
 - Every Go package must compile cleanly with `go build`.
 - The Next.js frontend must pass `npx tsc --noEmit` and `npm run build` with zero errors.
