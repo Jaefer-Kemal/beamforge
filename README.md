@@ -1,50 +1,6 @@
 <div align="center">
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="80" height="80" fill="none">
-  <defs>
-    <linearGradient id="bf-bg" x1="16" y1="8" x2="112" y2="120" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#1E293B" />
-      <stop offset="50%" stop-color="#0F172A" />
-      <stop offset="100%" stop-color="#090D16" />
-    </linearGradient>
-    <radialGradient id="bf-glow" cx="64" cy="36" r="64" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.28" />
-      <stop offset="55%" stop-color="#8B5CF6" stop-opacity="0.12" />
-      <stop offset="100%" stop-color="#0F172A" stop-opacity="0" />
-    </radialGradient>
-    <linearGradient id="bf-rim" x1="64" y1="6" x2="64" y2="122" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.45" />
-      <stop offset="35%" stop-color="#94A3B8" stop-opacity="0.15" />
-      <stop offset="100%" stop-color="#38BDF8" stop-opacity="0.30" />
-    </linearGradient>
-    <linearGradient id="bf-beam" x1="38" y1="28" x2="90" y2="100" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#38BDF8" />
-      <stop offset="50%" stop-color="#818CF8" />
-      <stop offset="100%" stop-color="#C084FC" />
-    </linearGradient>
-    <linearGradient id="bf-forge" x1="64" y1="64" x2="78" y2="78" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FDE68A" />
-      <stop offset="50%" stop-color="#F59E0B" />
-      <stop offset="100%" stop-color="#EA580C" />
-    </linearGradient>
-    <filter id="bf-shadow" x="0" y="2" width="128" height="128" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0284C7" flood-opacity="0.22" />
-      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.4" />
-    </filter>
-  </defs>
-  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bf-bg)" filter="url(#bf-shadow)" />
-  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bf-glow)" />
-  <rect x="8.5" y="8.5" width="111" height="111" rx="27.5" stroke="url(#bf-rim)" stroke-width="1.2" />
-  <path d="M64 24 L94 41.3 L94 76 L64 93.3 L34 76 L34 41.3 Z" stroke="#38BDF8" stroke-opacity="0.35" stroke-width="1.5" stroke-dasharray="3 3" />
-  <path d="M64 36 L43 72 L62 72 L58 92 L85 58 L66 58 Z" fill="url(#bf-beam)" />
-  <circle cx="70" cy="62" r="5" fill="url(#bf-forge)" />
-  <circle cx="34" cy="41.3" r="3" fill="#38BDF8" fill-opacity="0.8" />
-  <circle cx="94" cy="41.3" r="3" fill="#818CF8" fill-opacity="0.8" />
-  <circle cx="94" cy="76" r="3" fill="#C084FC" fill-opacity="0.8" />
-  <circle cx="34" cy="76" r="3" fill="#38BDF8" fill-opacity="0.8" />
-  <circle cx="64" cy="24" r="3.5" fill="#F8FAFC" />
-  <circle cx="64" cy="93.3" r="3" fill="#818CF8" fill-opacity="0.8" />
-</svg>
+<img src="apps/web-ide/src/app/icon.svg" width="96" height="96" alt="BeamForge Logo" />
 
 # BeamForge
 
