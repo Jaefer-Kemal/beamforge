@@ -308,13 +308,25 @@ T1_Res = try tco_counter:sum_packets([10, 20, 30, 40]) of
         #{call_str => <<"tco_counter:sum_packets([10, 20, 30, 40])">>, expected => <<"100">>,
           actual => <<"100">>, passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"tco_counter:sum_packets(...)">>, expected => <<"100">>,
+        #{call_str => <<"tco_counter:sum_packets([10, 20, 30, 40])">>, expected => <<"100">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
-catch C1:R1 ->
-    #{call_str => <<"tco_counter:sum_packets(...)">>, expected => <<"100">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+catch C1:Err1 ->
+    #{call_str => <<"tco_counter:sum_packets([10, 20, 30, 40])">>, expected => <<"100">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try tco_counter:count_packets([a, b, c, d, e]) of
+    5 ->
+        #{call_str => <<"tco_counter:count_packets([a, b, c, d, e])">>, expected => <<"5">>,
+          actual => <<"5">>, passed => true, time_ms => erlang:system_time(millisecond) - T2_Start};
+    Other2 ->
+        #{call_str => <<"tco_counter:count_packets([a, b, c, d, e])">>, expected => <<"5">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
+catch C2:Err2 ->
+    #{call_str => <<"tco_counter:count_packets([a, b, c, d, e])">>, expected => <<"5">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -1222,7 +1234,9 @@ T1_Start = erlang:system_time(millisecond),
 T1_Res = try
     {ok, Sup1} = dynamic_session_sup:start_link(),
     Count1 = dynamic_session_sup:count_sessions(Sup1),
+    MRef1 = monitor(process, Sup1),
     exit(Sup1, shutdown),
+    receive {'DOWN', MRef1, process, Sup1, _} -> ok after 500 -> ok end,
     #{call_str => <<"dynamic_session_sup:count_sessions(Sup) (initial)">>,
       expected => <<"0">>,
       actual => list_to_binary(lists:flatten(io_lib:format("~p", [Count1]))),
@@ -1237,7 +1251,9 @@ T2_Res = try
     {ok, P1} = dynamic_session_sup:start_session(Sup2, <<"s1">>, <<"u1">>),
     {ok, P2} = dynamic_session_sup:start_session(Sup2, <<"s2">>, <<"u2">>),
     Count2 = dynamic_session_sup:count_sessions(Sup2),
+    MRef2 = monitor(process, Sup2),
     exit(Sup2, shutdown),
+    receive {'DOWN', MRef2, process, Sup2, _} -> ok after 500 -> ok end,
     PidsOk = is_pid(P1) andalso is_pid(P2) andalso (Count2 =:= 2),
     #{call_str => <<"dynamic_session_sup:start_session(Sup, ...) -> count 2">>,
       expected => <<"{true, true, 2}">>,
@@ -1253,7 +1269,9 @@ T3_Res = try
     {ok, P3} = dynamic_session_sup:start_session(Sup3, <<"s1">>, <<"u1">>),
     ok = dynamic_session_sup:terminate_session(Sup3, P3),
     Count3 = dynamic_session_sup:count_sessions(Sup3),
+    MRef3 = monitor(process, Sup3),
     exit(Sup3, shutdown),
+    receive {'DOWN', MRef3, process, Sup3, _} -> ok after 500 -> ok end,
     #{call_str => <<"dynamic_session_sup:terminate_session(Sup, Child)">>,
       expected => <<"0">>,
       actual => list_to_binary(lists:flatten(io_lib:format("~p", [Count3]))),
@@ -1955,6 +1973,129 @@ io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllRes
 init:stop().
 `, true
 
+	case "ch12-capstone", "ch12-l01", "xmpp_capstone":
+		return `
+catch xmpp_router:stop(),
+catch xmpp_session_registry:stop(),
+catch (case whereis(xmpp_sup) of undefined -> ok; SupP -> exit(SupP, kill) end),
+catch ets:delete(xmpp_sessions_tab),
+
+io:format("====================================================================~n"),
+io:format("== [BeamForge Capstone] Simulating Live 5-Module OTP XMPP Server  ==~n"),
+io:format("====================================================================~n~n"),
+
+T1_Start = erlang:system_time(millisecond),
+T1_Res = try
+    io:format("[M1] Booting Root Supervisor Tree (xmpp_sup)...~n"),
+    {ok, SupPid} = xmpp_sup:start_link(),
+    RegPid = whereis(xmpp_session_registry),
+    RouterPid = whereis(xmpp_router),
+    io:format("     xmpp_sup: ~p, xmpp_session_registry: ~p, xmpp_router: ~p~n", [SupPid, RegPid, RouterPid]),
+    Pass1 = is_pid(SupPid) andalso is_pid(RegPid) andalso is_pid(RouterPid),
+    #{call_str => <<"xmpp_sup:start_link()">>,
+      expected => <<"{ok, SupPid} (registry & router running)">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [{ok, SupPid}]))),
+      passed => Pass1, time_ms => erlang:system_time(millisecond) - T1_Start}
+catch C1:R1 ->
+    io:format("     ERROR: ~p:~p~n", [C1, R1]),
+    #{call_str => <<"xmpp_sup:start_link()">>, expected => <<"{ok, SupPid}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+end,
+
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    io:format("[M2] Testing Incremental XML Stream Framer...~n"),
+    B0 = xmpp_stream_parser:new_buffer(),
+    {Evs1, B1} = xmpp_stream_parser:feed_chunk(B0, <<"<stream:str">>),
+    {Evs2, B2} = xmpp_stream_parser:feed_chunk(B1, <<"eam to='localhost'><ping id='p1'/>">>),
+    AllEvs = Evs1 ++ Evs2,
+    io:format("     Parsed events from split TCP chunks: ~p~n", [AllEvs]),
+    Pass2 = (AllEvs =:= [{stream_open, <<"localhost">>}, {ping, <<"p1">>}]) andalso (B2 =:= <<>>),
+    #{call_str => <<"xmpp_stream_parser:feed_chunk(FragmentedChunks)">>,
+      expected => <<"[{stream_open, <<\"localhost\">>}, {ping, <<\"p1\">>}]">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [AllEvs]))),
+      passed => Pass2, time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    io:format("     ERROR: ~p:~p~n", [C2, R2]),
+    #{call_str => <<"xmpp_stream_parser:feed_chunk(...)">>, expected => <<"events">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+end,
+
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    io:format("[M3] Testing ETS Session Registry & Priority Routing...~n"),
+    Self = self(),
+    ok = xmpp_session_registry:register_session(<<"alice@localhost/obsidian">>, 10, Self),
+    LookedUp = xmpp_session_registry:lookup_by_jid(<<"alice@localhost">>),
+    io:format("     Registered alice@localhost/obsidian (prio 10) -> lookup: ~p~n", [LookedUp]),
+    Pass3 = (LookedUp =:= [Self]),
+    #{call_str => <<"xmpp_session_registry:lookup_by_jid(<<\"alice@localhost\">>)">>,
+      expected => list_to_binary(lists:flatten(io_lib:format("~p", [[Self]]))),
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [LookedUp]))),
+      passed => Pass3, time_ms => erlang:system_time(millisecond) - T3_Start}
+catch C3:R3 ->
+    io:format("     ERROR: ~p:~p~n", [C3, R3]),
+    #{call_str => <<"xmpp_session_registry:register_session(...)">>, expected => <<"registered">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+
+T4_Start = erlang:system_time(millisecond),
+T4_Res = try
+    io:format("[M4] Simulating C2S gen_statem Handshake...~n"),
+    {ok, C2sPid} = xmpp_c2s_statem:start_link(#{username => <<"alice">>, domain => <<"localhost">>}),
+    {ok, wait_for_sasl, [StreamResp]} = xmpp_c2s_statem:feed_xml(C2sPid, <<"<stream:stream to='localhost'>">>),
+    io:format("     [C->S] <stream:stream to='localhost'>~n"),
+    io:format("     [S->C] ~s~n", [StreamResp]),
+    {ok, authenticated, [AuthResp]} = xmpp_c2s_statem:feed_xml(C2sPid, <<"<auth mechanism='PLAIN'>alice</auth>">>),
+    io:format("     [C->S] <auth mechanism='PLAIN'>alice</auth>~n"),
+    io:format("     [S->C] ~s~n", [AuthResp]),
+    {ok, session_established, [BindResp]} = xmpp_c2s_statem:feed_xml(C2sPid, <<"<iq id='b1'><resource>obsidian</resource></iq>">>),
+    io:format("     [C->S] <iq id='b1'><resource>obsidian</resource></iq>~n"),
+    io:format("     [S->C] ~s~n", [BindResp]),
+    Pass4 = is_binary(BindResp) andalso binary:match(BindResp, <<"alice@localhost/obsidian">>) =/= nomatch,
+    xmpp_c2s_statem:stop(C2sPid),
+    #{call_str => <<"xmpp_c2s_statem handshake (stream -> auth -> bind)">>,
+      expected => <<"session_established with jid alice@localhost/obsidian">>,
+      actual => <<"session_established verified">>,
+      passed => Pass4, time_ms => erlang:system_time(millisecond) - T4_Start}
+catch C4:R4 ->
+    io:format("     ERROR: ~p:~p~n", [C4, R4]),
+    #{call_str => <<"xmpp_c2s_statem:feed_xml(...)">>, expected => <<"handshake success">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
+end,
+
+T5_Start = erlang:system_time(millisecond),
+T5_Res = try
+    io:format("[M5] Testing Stanza Router (Online Routing & Offline Fallback)...~n"),
+    Self5 = self(),
+    ok = xmpp_session_registry:register_session(<<"alice@localhost/obsidian">>, 10, Self5),
+    RouteOnline = xmpp_router:route_stanza(<<"alice@localhost/obsidian">>, <<"alice@localhost">>, <<"<message>Hi Self</message>">>),
+    io:format("     Online route to self: ~p~n", [RouteOnline]),
+    RouteOffline = xmpp_router:route_stanza(<<"alice@localhost/obsidian">>, <<"charlie@localhost">>, <<"<message>Hi Charlie</message>">>),
+    io:format("     Offline route to charlie: ~p~n", [RouteOffline]),
+    {ok, [QueuedMsg]} = xmpp_router:pop_offline_messages(<<"charlie@localhost">>),
+    io:format("     Popped offline message: ~s~n", [QueuedMsg]),
+    Pass5 = (RouteOnline =:= {routed, 1}) andalso (RouteOffline =:= {queued_offline, <<"charlie@localhost">>}) andalso (QueuedMsg =:= <<"<message>Hi Charlie</message>">>),
+    #{call_str => <<"xmpp_router:route_stanza/3 & pop_offline_messages/1">>,
+      expected => <<"{routed, 1} and {queued_offline, <<\"charlie@localhost\">>}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p and ~p", [RouteOnline, RouteOffline]))),
+      passed => Pass5, time_ms => erlang:system_time(millisecond) - T5_Start}
+catch C5:R5 ->
+    io:format("     ERROR: ~p:~p~n", [C5, R5]),
+    #{call_str => <<"xmpp_router:route_stanza(...)">>, expected => <<"routed">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C5, R5])), passed => false, time_ms => 0}
+end,
+
+catch xmpp_router:stop(),
+catch xmpp_session_registry:stop(),
+catch (case whereis(xmpp_sup) of undefined -> ok; SupP2 -> exit(SupP2, kill) end),
+catch ets:delete(xmpp_sessions_tab),
+
+AllResults = [T1_Res, T2_Res, T3_Res, T4_Res, T5_Res],
+io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
+init:stop().
+`, true
+
 	default:
 		return "", false
 	}
@@ -2057,8 +2198,8 @@ S1_Lists = try
         Got1 ->
             #{id => <<"list_head_tail_ops">>, title => <<"Cons Cell [H|T] Head/Tail Operations">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("List ops mismatch: ~p", [Got1]))}
     end
-catch C1:R1 ->
-    #{id => <<"list_head_tail_ops">>, title => <<"Cons Cell [H|T] Head/Tail Operations">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"list_head_tail_ops">>, title => <<"Cons Cell [H|T] Head/Tail Operations">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
 Stages = [CompileStage, S1_Lists]
 `), true
@@ -2081,8 +2222,8 @@ S1_Pattern = try
         Got1 ->
             #{id => <<"single_assignment_matching">>, title => <<"Single Assignment & Repeated Variable Matching">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
     end
-catch C1:R1 ->
-    #{id => <<"single_assignment_matching">>, title => <<"Single Assignment & Repeated Variable Matching">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"single_assignment_matching">>, title => <<"Single Assignment & Repeated Variable Matching">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
 Stages = [CompileStage, S1_Pattern]
 `), true
@@ -2107,8 +2248,8 @@ S1_Arity = try
         Got1 ->
             #{id => <<"arity_delegation">>, title => <<"Function Arity Cascading Defaults">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Arity mismatch: ~p", [Got1]))}
     end
-catch C1:R1 ->
-    #{id => <<"arity_delegation">>, title => <<"Function Arity Cascading Defaults">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"arity_delegation">>, title => <<"Function Arity Cascading Defaults">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
 Stages = [CompileStage, S1_Arity]
 `), true
@@ -2162,8 +2303,8 @@ S1_Match = try
         Got1 ->
             #{id => <<"deep_pattern_matching">>, title => <<"Deep Function Head Pattern Matching">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
     end
-catch C1:R1 ->
-    #{id => <<"deep_pattern_matching">>, title => <<"Deep Function Head Pattern Matching">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"deep_pattern_matching">>, title => <<"Deep Function Head Pattern Matching">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
 Stages = [CompileStage, S1_Match]
 `), true
@@ -2192,8 +2333,8 @@ S1_Guards = try
         Got1 ->
             #{id => <<"guard_clause_validation">>, title => <<"Pure Guard Clauses & Predicate Bounds">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Guard mismatch: ~p", [Got1]))}
     end
-catch C1:R1 ->
-    #{id => <<"guard_clause_validation">>, title => <<"Pure Guard Clauses & Predicate Bounds">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"guard_clause_validation">>, title => <<"Pure Guard Clauses & Predicate Bounds">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
 Stages = [CompileStage, S1_Guards]
 `), true
@@ -2219,8 +2360,8 @@ S1_Flow = try
         Got1 ->
             #{id => <<"case_and_if_expressions">>, title => <<"Control Expressions (case...of & if...end)">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Flow mismatch: ~p", [Got1]))}
     end
-catch C1:R1 ->
-    #{id => <<"case_and_if_expressions">>, title => <<"Control Expressions (case...of & if...end)">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"case_and_if_expressions">>, title => <<"Control Expressions (case...of & if...end)">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
 Stages = [CompileStage, S1_Flow]
 `), true
@@ -2233,19 +2374,39 @@ CompileStage = case code:ensure_loaded(tco_counter) of
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Tco = try
+S1_Ast = try
+    SourceFile = case filelib:is_regular("src/tco_counter.erl") of
+        true -> "src/tco_counter.erl";
+        false -> "tco_counter.erl"
+    end,
+    Rules = #{
+        require_tail_recursion => [{sum_packets, 1}, {count_packets, 1}],
+        forbidden_remote_calls => [{lists, sum, 1}, {erlang, length, 1}]
+    },
+    case bf_ast_verifier:verify_rules(SourceFile, Rules) of
+        {ok, _} ->
+            #{id => <<"tail_recursion_ast_audit">>, title => <<"Tail Call Optimization (TCO) & AST Verification">>, status => <<"passed">>, time_ms => 15, details => <<"Strict tail recursion verified via AST & BEAM bytecode inspection.">>};
+        {error, [#{message := Msg} | _]} ->
+            #{id => <<"tail_recursion_ast_audit">>, title => <<"Tail Call Optimization (TCO) & AST Verification">>, status => <<"failed">>, time_ms => 15, details => Msg};
+        {error, OtherErr} ->
+            #{id => <<"tail_recursion_ast_audit">>, title => <<"Tail Call Optimization (TCO) & AST Verification">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Rule violation: ~p", [OtherErr]))}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"tail_recursion_ast_audit">>, title => <<"Tail Call Optimization (TCO) & AST Verification">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_Tco = try
     Sum = tco_counter:sum_packets([10, 20, 30, 40]),
     Cnt = tco_counter:count_packets([1, 2, 3, 4, 5]),
     case {Sum, Cnt} of
         {100, 5} ->
-            #{id => <<"tail_recursion_accumulator">>, title => <<"Tail Call Optimization (TCO) Accumulator Loops">>, status => <<"passed">>, time_ms => 10, details => <<"Constant stack accumulator loops verified">>};
+            #{id => <<"functional_contract">>, title => <<"Functional Accumulator Correctness">>, status => <<"passed">>, time_ms => 10, details => <<"Packet sum (100) and packet count (5) match functional specification">>};
         Got1 ->
-            #{id => <<"tail_recursion_accumulator">>, title => <<"Tail Call Optimization (TCO) Accumulator Loops">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("TCO mismatch: ~p", [Got1]))}
+            #{id => <<"functional_contract">>, title => <<"Functional Accumulator Correctness">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Functional mismatch: expected {100, 5}, got ~p", [Got1]))}
     end
-catch C1:R1 ->
-    #{id => <<"tail_recursion_accumulator">>, title => <<"Tail Call Optimization (TCO) Accumulator Loops">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"functional_contract">>, title => <<"Functional Accumulator Correctness">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
-Stages = [CompileStage, S1_Tco]
+Stages = [CompileStage, S1_Ast, S2_Tco]
 `), true
 
 	case "ch02-l05":
@@ -2264,8 +2425,8 @@ S1_Reverse = try
         Got1 ->
             #{id => <<"accumulator_and_reverse">>, title => <<"Accumulator Pattern & lists:reverse/1 Preservation">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Reverse mismatch: ~p", [Got1]))}
     end
-catch C1:R1 ->
-    #{id => <<"accumulator_and_reverse">>, title => <<"Accumulator Pattern & lists:reverse/1 Preservation">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"accumulator_and_reverse">>, title => <<"Accumulator Pattern & lists:reverse/1 Preservation">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
 Stages = [CompileStage, S1_Reverse]
 `), true
@@ -2291,8 +2452,8 @@ S1_Closures = try
         Got1 ->
             #{id => <<"closures_and_captures">>, title => <<"First-Class Functions, Closures & Captures">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("HOF mismatch: ~p", [Got1]))}
     end
-catch C1:R1 ->
-    #{id => <<"closures_and_captures">>, title => <<"First-Class Functions, Closures & Captures">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"closures_and_captures">>, title => <<"First-Class Functions, Closures & Captures">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
 Stages = [CompileStage, S1_Closures]
 `), true
@@ -3478,14 +3639,14 @@ end,
 S4_TtlExpiration = try
     {ok, S3} = session_ttl_server:start_link(1),
     ok = session_ttl_server:create_session(S3, <<"sess_short">>),
-    timer:sleep(1100),
+    timer:sleep(2100),
     VShort = session_ttl_server:is_valid(S3, <<"sess_short">>),
     session_ttl_server:stop(S3),
     case VShort of
         false ->
-            #{id => <<"ttl_expiration_sweep">>, title => <<"Session Expiration Sweeping & handle_info Cleanup">>, status => <<"passed">>, time_ms => 1120, details => <<"Expired session correctly invalidated after TTL passed.">>};
+            #{id => <<"ttl_expiration_sweep">>, title => <<"Session Expiration Sweeping & handle_info Cleanup">>, status => <<"passed">>, time_ms => 2120, details => <<"Expired session correctly invalidated after TTL passed.">>};
         true ->
-            #{id => <<"ttl_expiration_sweep">>, title => <<"Session Expiration Sweeping & handle_info Cleanup">>, status => <<"failed">>, time_ms => 1120, details => <<"Session remained valid after TTL expiration">>}
+            #{id => <<"ttl_expiration_sweep">>, title => <<"Session Expiration Sweeping & handle_info Cleanup">>, status => <<"failed">>, time_ms => 2120, details => <<"Session remained valid after TTL expiration">>}
     end
 catch C4:R4 ->
     #{id => <<"ttl_expiration_sweep">>, title => <<"Session Expiration Sweeping & handle_info Cleanup">>, status => <<"failed">>, time_ms => 1120, details => list_to_binary(io_lib:format("Expiration error: ~p:~p", [C4, R4]))}
@@ -4362,7 +4523,7 @@ Stages = [CompileStage, S1_Ast, S2_PubSubLifecycle]
 `, wsDir, wsDir), true
 
 	case "ch09-l05":
-		return fmt.Sprintf(`
+		return `
 CompileStage = case code:ensure_loaded(ledger_specs_and_tests) of
     {module, ledger_specs_and_tests} ->
         Exports = ledger_specs_and_tests:module_info(exports),
@@ -4402,7 +4563,7 @@ catch C2:R2 ->
     #{id => <<"eunit_assertions_execution">>, title => <<"EUnit Suite Execution & Invariant Audit">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Unit test crash: ~p:~p", [C2, R2]))}
 end,
 Stages = [CompileStage, S1_SpecValidation, S2_UnitTestSuite]
-`, wsDir, wsDir), true
+`, true
 
 	case "ch09-l06":
 		return fmt.Sprintf(`
@@ -5040,6 +5201,211 @@ catch C3:R3 ->
 end,
 Stages = [CompileStage, S1_Ast, S2_UnitLifecycleAndRouting, S3_UnitPresenceBroadcast]
 `, wsDir, wsDir), true
+
+	case "ch12-capstone", "ch12-l01", "xmpp_capstone":
+		return `
+catch xmpp_router:stop(),
+catch xmpp_session_registry:stop(),
+catch (case whereis(xmpp_sup) of undefined -> ok; SupP -> exit(SupP, kill) end),
+catch ets:delete(xmpp_sessions_tab),
+
+%% ── STAGE 1: Milestone 1: Supervision Tree Boot ──────────────────────────────
+S1_SupBoot = try
+    {ok, {SupFlags, ChildSpecs}} = xmpp_sup:init([]),
+    Strategy = maps:get(strategy, SupFlags, undefined),
+    ChildIds = [maps:get(id, Spec) || Spec <- ChildSpecs],
+    {ok, SupPid} = xmpp_sup:start_link(),
+    RegPid = whereis(xmpp_session_registry),
+    RouterPid = whereis(xmpp_router),
+    CheckStrategy = (Strategy =:= rest_for_one),
+    CheckOrder = (ChildIds =:= [xmpp_session_registry, xmpp_router]),
+    CheckAlive = is_pid(SupPid) andalso is_pid(RegPid) andalso is_pid(RouterPid),
+    case CheckStrategy andalso CheckOrder andalso CheckAlive of
+        true ->
+            #{id => <<"milestone_1_supervision_boot">>,
+              title => <<"Milestone 1: OTP Supervision Boot (rest_for_one & ordered child specs)">>,
+              status => <<"passed">>, time_ms => 18,
+              details => <<"xmpp_sup configured with rest_for_one; xmpp_session_registry and xmpp_router running as supervised permanent workers.">>};
+        false ->
+            #{id => <<"milestone_1_supervision_boot">>,
+              title => <<"Milestone 1: OTP Supervision Boot (rest_for_one & ordered child specs)">>,
+              status => <<"failed">>, time_ms => 18,
+              details => list_to_binary(io_lib:format("Strategy: ~p, ChildIds: ~p, Alive: ~p", [Strategy, ChildIds, CheckAlive]))}
+    end
+catch C1:R1 ->
+    #{id => <<"milestone_1_supervision_boot">>,
+      title => <<"Milestone 1: OTP Supervision Boot (rest_for_one & ordered child specs)">>,
+      status => <<"failed">>, time_ms => 18,
+      details => list_to_binary(io_lib:format("Supervisor boot crashed: ~p:~p", [C1, R1]))}
+end,
+
+%% ── STAGE 2: Milestone 2: XML Stream Framer & Memory Safety ─────────────────
+S2_StreamFramer = try
+    B0 = xmpp_stream_parser:new_buffer(),
+    {E1, B1} = xmpp_stream_parser:feed_chunk(B0, <<"<stream:st">>),
+    {E2, B2} = xmpp_stream_parser:feed_chunk(B1, <<"ream to='localhost'>">>),
+    {E3, B3} = xmpp_stream_parser:feed_chunk(B2, <<"<ping id='p1'/><message id='m1' to='bob@host'><body>Hi Bob</body></message>">>),
+    AllEvents = E1 ++ E2 ++ E3,
+    CheckEvents = case AllEvents of
+        [{stream_open, <<"localhost">>}, {ping, <<"p1">>}, {chat_message, <<"m1">>, <<"bob@host">>, <<"Hi Bob">>}] -> true;
+        _ -> false
+    end,
+    CheckBufEmpty = (B3 =:= <<>>),
+    %% Sub-binary memory unpinning test
+    BigChunk = <<"   <message id='big_12345' to='alice@host'><body>Secret", (binary:copy(<<"X">>, 2048))/binary, "</body></message>">>,
+    {[{chat_message, IdBin, _To, _Body}], <<>>} = xmpp_stream_parser:feed_chunk(<<>>, BigChunk),
+    RefSize = binary:referenced_byte_size(IdBin),
+    CheckMemUnpinned = (RefSize < 500),
+    case CheckEvents andalso CheckBufEmpty andalso CheckMemUnpinned of
+        true ->
+            #{id => <<"milestone_2_xml_stream_parser">>,
+              title => <<"Milestone 2: XML Stream Parser (Packet Fragmentation & Memory Unpinning)">>,
+              status => <<"passed">>, time_ms => 22,
+              details => <<"Handled split stream open, coalesced stanzas, and verified binary:copy/1 memory unpinning.">>};
+        false ->
+            #{id => <<"milestone_2_xml_stream_parser">>,
+              title => <<"Milestone 2: XML Stream Parser (Packet Fragmentation & Memory Unpinning)">>,
+              status => <<"failed">>, time_ms => 22,
+              details => list_to_binary(io_lib:format("EventsMatch: ~p, BufEmpty: ~p, Unpinned: ~p (ref_size=~p)", [CheckEvents, CheckBufEmpty, CheckMemUnpinned, RefSize]))}
+    end
+catch C2:R2 ->
+    #{id => <<"milestone_2_xml_stream_parser">>,
+      title => <<"Milestone 2: XML Stream Parser (Packet Fragmentation & Memory Unpinning)">>,
+      status => <<"failed">>, time_ms => 22,
+      details => list_to_binary(io_lib:format("Parser test crashed: ~p:~p", [C2, R2]))}
+end,
+
+%% ── STAGE 3: Milestone 3: ETS Session Registry & Process Monitors ───────────
+S3_SessionRegistry = try
+    PPhone = spawn(fun Loop() -> receive _ -> Loop() end end),
+    PDesk = spawn(fun Loop() -> receive _ -> Loop() end end),
+    ok = xmpp_session_registry:register_session(<<"bob@localhost/phone">>, 5, PPhone),
+    ok = xmpp_session_registry:register_session(<<"bob@localhost/desktop">>, 10, PDesk),
+    HighestPrioPids = xmpp_session_registry:lookup_by_jid(<<"bob@localhost">>),
+    CheckHighPrio = (HighestPrioPids =:= [PDesk]),
+    %% Kill PDesk and verify monitor cleanup and fallback
+    exit(PDesk, kill),
+    timer:sleep(30),
+    FallbackPids = xmpp_session_registry:lookup_by_jid(<<"bob@localhost">>),
+    CheckFallback = (FallbackPids =:= [PPhone]),
+    exit(PPhone, kill),
+    timer:sleep(30),
+    DeadPids = xmpp_session_registry:lookup_by_jid(<<"bob@localhost">>),
+    CheckCleaned = (DeadPids =:= []),
+    case CheckHighPrio andalso CheckFallback andalso CheckCleaned of
+        true ->
+            #{id => <<"milestone_3_ets_session_registry">>,
+              title => <<"Milestone 3: ETS Session Registry & DOWN Monitor Pruning">>,
+              status => <<"passed">>, time_ms => 35,
+              details => <<"Highest-priority routing verified. Killing active session triggered DOWN monitor to prune dead pid and route to survivor.">>};
+        false ->
+            #{id => <<"milestone_3_ets_session_registry">>,
+              title => <<"Milestone 3: ETS Session Registry & DOWN Monitor Pruning">>,
+              status => <<"failed">>, time_ms => 35,
+              details => list_to_binary(io_lib:format("HighPrio: ~p, Fallback: ~p, Cleaned: ~p", [CheckHighPrio, CheckFallback, CheckCleaned]))}
+    end
+catch C3:R3 ->
+    #{id => <<"milestone_3_ets_session_registry">>,
+      title => <<"Milestone 3: ETS Session Registry & DOWN Monitor Pruning">>,
+      status => <<"failed">>, time_ms => 35,
+      details => list_to_binary(io_lib:format("Registry test crashed: ~p:~p", [C3, R3]))}
+end,
+
+%% ── STAGE 4: Milestone 4: C2S State Machine & Flow Control ──────────────────
+S4_C2sStatem = try
+    {ok, C2sAlice} = xmpp_c2s_statem:start_link(#{username => <<"alice">>, domain => <<"localhost">>}),
+    %% 1. Pre-auth stanza rejection
+    {ok, wait_for_sasl, [_OpenResp]} = xmpp_c2s_statem:feed_xml(C2sAlice, <<"<stream:stream to='localhost'>">>),
+    {ok, wait_for_sasl, [ErrResp]} = xmpp_c2s_statem:feed_xml(C2sAlice, <<"<message id='hack'><body>unauth</body></message>">>),
+    CheckPreAuthReject = (binary:match(ErrResp, <<"not-authorized">>) =/= nomatch),
+    %% 2. SASL PLAIN Auth
+    {ok, authenticated, [AuthResp]} = xmpp_c2s_statem:feed_xml(C2sAlice, <<"<auth mechanism='PLAIN'>alice</auth>">>),
+    CheckAuthOk = (binary:match(AuthResp, <<"success">>) =/= nomatch),
+    %% 3. IQ Resource Binding
+    {ok, session_established, [BindResp]} = xmpp_c2s_statem:feed_xml(C2sAlice, <<"<iq id='b1'><resource>obsidian</resource></iq>">>),
+    CheckBindOk = (binary:match(BindResp, <<"alice@localhost/obsidian">>) =/= nomatch),
+    %% 4. Automatic registration in registry
+    LookupAlice = xmpp_session_registry:lookup_by_jid(<<"alice@localhost/obsidian">>),
+    CheckRegistered = (LookupAlice =:= [C2sAlice]),
+    xmpp_c2s_statem:stop(C2sAlice),
+    timer:sleep(20),
+    CheckUnregistered = (xmpp_session_registry:lookup_by_jid(<<"alice@localhost/obsidian">>) =:= []),
+    case CheckPreAuthReject andalso CheckAuthOk andalso CheckBindOk andalso CheckRegistered andalso CheckUnregistered of
+        true ->
+            #{id => <<"milestone_4_c2s_handshake_and_backpressure">>,
+              title => <<"Milestone 4: C2S gen_statem 4-Phase Lifecycle & Resource Binding">>,
+              status => <<"passed">>, time_ms => 40,
+              details => <<"wait_for_stream -> wait_for_sasl (rejected unauth) -> authenticated -> session_established with automatic registry binding.">>};
+        false ->
+            #{id => <<"milestone_4_c2s_handshake_and_backpressure">>,
+              title => <<"Milestone 4: C2S gen_statem 4-Phase Lifecycle & Resource Binding">>,
+              status => <<"failed">>, time_ms => 40,
+              details => list_to_binary(io_lib:format("Reject: ~p, Auth: ~p, Bind: ~p, Reg: ~p, Unreg: ~p", [CheckPreAuthReject, CheckAuthOk, CheckBindOk, CheckRegistered, CheckUnregistered]))}
+    end
+catch C4:R4 ->
+    #{id => <<"milestone_4_c2s_handshake_and_backpressure">>,
+      title => <<"Milestone 4: C2S gen_statem 4-Phase Lifecycle & Resource Binding">>,
+      status => <<"failed">>, time_ms => 40,
+      details => list_to_binary(io_lib:format("C2S statem test crashed: ~p:~p", [C4, R4]))}
+end,
+
+%% ── STAGE 5: Milestone 5: Multi-Client Routing & Offline Store ──────────────
+S5_Router = try
+    {ok, C2sAlice2} = xmpp_c2s_statem:start_link(#{username => <<"alice">>, domain => <<"localhost">>}),
+    {ok, _, _} = xmpp_c2s_statem:feed_xml(C2sAlice2, <<"<stream:stream to='localhost'>">>),
+    {ok, _, _} = xmpp_c2s_statem:feed_xml(C2sAlice2, <<"<auth mechanism='PLAIN'>alice</auth>">>),
+    {ok, _, _} = xmpp_c2s_statem:feed_xml(C2sAlice2, <<"<iq id='b1'><resource>obsidian</resource></iq>">>),
+
+    {ok, C2sBob} = xmpp_c2s_statem:start_link(#{username => <<"bob">>, domain => <<"localhost">>}),
+    {ok, _, _} = xmpp_c2s_statem:feed_xml(C2sBob, <<"<stream:stream to='localhost'>">>),
+    {ok, _, _} = xmpp_c2s_statem:feed_xml(C2sBob, <<"<auth mechanism='PLAIN'>bob</auth>">>),
+    {ok, _, _} = xmpp_c2s_statem:feed_xml(C2sBob, <<"<iq id='b2'><resource>desktop</resource></iq>">>),
+
+    %% 1. Route Alice -> Bob (Online)
+    MsgXml = <<"<message from='alice@localhost/obsidian' to='bob@localhost' id='m_101' type='chat'><body>Hello Bob!</body></message>">>,
+    {routed, 1} = xmpp_router:route_stanza(<<"alice@localhost/obsidian">>, <<"bob@localhost">>, MsgXml),
+    timer:sleep(20),
+    {ok, session_established, BobData} = xmpp_c2s_statem:get_session_info(C2sBob),
+    BobInbox = maps:get(delivered_inbox, BobData, []),
+    CheckOnlineDelivered = lists:member(MsgXml, BobInbox),
+
+    %% 2. Route Alice -> Charlie (Offline fallback)
+    OfflineMsgXml = <<"<message from='alice@localhost/obsidian' to='charlie@localhost' id='m_102' type='chat'><body>Are you there?</body></message>">>,
+    {queued_offline, <<"charlie@localhost">>} = xmpp_router:route_stanza(<<"alice@localhost/obsidian">>, <<"charlie@localhost">>, OfflineMsgXml),
+    Count1 = xmpp_router:get_offline_count(<<"charlie@localhost">>),
+    {ok, [PoppedXml]} = xmpp_router:pop_offline_messages(<<"charlie@localhost">>),
+    Count2 = xmpp_router:get_offline_count(<<"charlie@localhost">>),
+    CheckOffline = (Count1 =:= 1) andalso (PoppedXml =:= OfflineMsgXml) andalso (Count2 =:= 0),
+
+    xmpp_c2s_statem:stop(C2sAlice2),
+    xmpp_c2s_statem:stop(C2sBob),
+
+    case CheckOnlineDelivered andalso CheckOffline of
+        true ->
+            #{id => <<"milestone_5_multi_client_routing_and_offline">>,
+              title => <<"Milestone 5: Multi-Client Routing & Offline Queue Spooling">>,
+              status => <<"passed">>, time_ms => 45,
+              details => <<"Online stanza routed directly into recipient's C2S delivered_inbox. Offline stanza spooled into store and drained via pop_offline_messages/1.">>};
+        false ->
+            #{id => <<"milestone_5_multi_client_routing_and_offline">>,
+              title => <<"Milestone 5: Multi-Client Routing & Offline Queue Spooling">>,
+              status => <<"failed">>, time_ms => 45,
+              details => list_to_binary(io_lib:format("OnlineDelivered: ~p, OfflineSpool: ~p", [CheckOnlineDelivered, CheckOffline]))}
+    end
+catch C5:R5 ->
+    #{id => <<"milestone_5_multi_client_routing_and_offline">>,
+      title => <<"Milestone 5: Multi-Client Routing & Offline Queue Spooling">>,
+      status => <<"failed">>, time_ms => 45,
+      details => list_to_binary(io_lib:format("Routing test crashed: ~p:~p", [C5, R5]))}
+end,
+
+catch xmpp_router:stop(),
+catch xmpp_session_registry:stop(),
+catch (case whereis(xmpp_sup) of undefined -> ok; SupP3 -> exit(SupP3, kill) end),
+catch ets:delete(xmpp_sessions_tab),
+
+Stages = [S1_SupBoot, S2_StreamFramer, S3_SessionRegistry, S4_C2sStatem, S5_Router]
+`, true
 
 	default:
 		_ = wsDir

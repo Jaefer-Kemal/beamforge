@@ -149,13 +149,14 @@ func (h *Handler) handleJSONChannel(
 			Files map[string]string `json:"files"`
 		}
 		_ = json.Unmarshal(frame.Payload, &req)
-		diags, err := h.runner.CompileFiles(ctx, session, req.Files)
+		diags, rawOut, err := h.runner.CompileFiles(ctx, session, req.Files)
 		send(ResponseFrame{
 			Channel: 3, // Emits to diagnostics channel
 			Type:    "diagnostics",
 			ID:      frame.ID,
 			Payload: map[string]interface{}{
 				"diagnostics": diags,
+				"raw_output":  rawOut,
 				"error":       err,
 			},
 		})

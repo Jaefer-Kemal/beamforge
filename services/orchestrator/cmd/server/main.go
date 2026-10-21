@@ -183,6 +183,49 @@ func main() {
 		})
 	})
 
+	// 5. REST Lint Endpoint (Fast debounced compiler diagnostics)
+	mux.HandleFunc("/api/v1/lint", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			Code      string `json:"code"`
+			Filename  string `json:"filename"`
+			SessionID string `json:"session_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+			return
+		}
+
+		if req.Filename == "" {
+			req.Filename = "src/buffer.erl"
+		}
+		if req.SessionID == "" {
+			req.SessionID = "rest-lint"
+		}
+
+		session, err := poolMgr.ClaimSession(req.SessionID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer poolMgr.ReleaseSession(req.SessionID)
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		diags, rawOut, err := runner.CompileFiles(ctx, session, map[string]string{req.Filename: req.Code})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"diagnostics": diags,
+			"raw_output":  rawOut,
+			"error":       err,
+		})
+	})
+
 	// CORS Wrapper
 	handler := enableCORS(mux)
 

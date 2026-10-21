@@ -53,12 +53,14 @@ type RunResult struct {
 }
 
 type VerificationReport struct {
-	Verdict     string        `json:"verdict"` // "PASSED" | "FAILED"
-	Score       int           `json:"score"`
-	TotalTimeMs int           `json:"total_time_ms"`
-	Signature   string        `json:"signature"`
-	Stages      []StageResult `json:"stages"`
-	Node        string        `json:"node"`
+	Verdict      string                  `json:"verdict"` // "PASSED" | "FAILED"
+	Score        int                     `json:"score"`
+	TotalTimeMs  int                     `json:"total_time_ms"`
+	Signature    string                  `json:"signature"`
+	Stages       []StageResult           `json:"stages"`
+	Node         string                  `json:"node"`
+	VisibleTests []VisibleTestCaseResult `json:"visible_tests,omitempty"`
+	Stdout       string                  `json:"stdout,omitempty"`
 }
 
 type ChaosKillResult struct {
@@ -118,7 +120,7 @@ func (r *Runner) EvalShell(ctx context.Context, session *pool.Session, expr stri
 }
 
 // CompileFiles writes files to workspace and compiles them with erlc
-func (r *Runner) CompileFiles(ctx context.Context, session *pool.Session, files map[string]string) ([]Diagnostic, error) {
+func (r *Runner) CompileFiles(ctx context.Context, session *pool.Session, files map[string]string) ([]Diagnostic, string, error) {
 	srcDir := filepath.Join(session.WorkspaceDir, "src")
 	incDir := filepath.Join(session.WorkspaceDir, "include")
 	ebinDir := filepath.Join(session.WorkspaceDir, "ebin")
@@ -132,7 +134,7 @@ func (r *Runner) CompileFiles(ctx context.Context, session *pool.Session, files 
 		targetPath := filepath.Join(session.WorkspaceDir, path)
 		_ = os.MkdirAll(filepath.Dir(targetPath), 0755)
 		if err := os.WriteFile(targetPath, []byte(content), 0644); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if !strings.Contains(path, "/") && !strings.Contains(path, "\\") && strings.HasSuffix(path, ".erl") {
 			srcMirror := filepath.Join(srcDir, path)
@@ -144,7 +146,7 @@ func (r *Runner) CompileFiles(ctx context.Context, session *pool.Session, files 
 	}
 
 	if len(erlFiles) == 0 {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	args := append([]string{"-I", filepath.ToSlash(incDir), "-I", filepath.ToSlash(r.poolMgr.HarnessDir()), "-o", filepath.ToSlash(ebinDir)}, erlFiles...)
@@ -152,13 +154,13 @@ func (r *Runner) CompileFiles(ctx context.Context, session *pool.Session, files 
 	output, err := cmd.CombinedOutput()
 	log.Printf("[Compile] erlc args: %v, output: %q, err: %v", args, string(output), err)
 
-	return parseDiagnostics(string(output)), nil
+	return parseDiagnostics(string(output)), string(output), nil
 }
 
 // RunCode compiles learner files and executes visible test cases, capturing stdout
 func (r *Runner) RunCode(ctx context.Context, session *pool.Session, exerciseID string, files map[string]string, customTestCalls []string) (*RunResult, error) {
 	startTime := time.Now()
-	diags, err := r.CompileFiles(ctx, session, files)
+	diags, rawCompileOut, err := r.CompileFiles(ctx, session, files)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +179,7 @@ func (r *Runner) RunCode(ctx context.Context, session *pool.Session, exerciseID 
 			ExerciseID:      exerciseID,
 			CompileOk:       false,
 			Diagnostics:     diags,
-			Stdout:          "",
+			Stdout:          strings.TrimSpace(rawCompileOut),
 			VisibleTests:    nil,
 			TotalDurationMs: int(time.Since(startTime).Milliseconds()),
 		}, nil
@@ -189,6 +191,7 @@ func (r *Runner) RunCode(ctx context.Context, session *pool.Session, exerciseID 
 	incDir := filepath.ToSlash(filepath.Join(session.WorkspaceDir, "include"))
 
 	compilePreamble := fmt.Sprintf(`
+file:set_cwd("%s"),
 code:add_patha("%s"),
 code:add_patha("%s"),
 [begin
@@ -198,7 +201,7 @@ code:add_patha("%s"),
         _Err -> ok
     end
 end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
-`, harnessDir, sessionEbin, sessionEbin, incDir, harnessDir, sessionDir)
+`, sessionDir, harnessDir, sessionEbin, sessionEbin, incDir, harnessDir, sessionDir)
 
 	runScript := compilePreamble + r.buildRunScript(session, exerciseID, customTestCalls)
 
@@ -210,6 +213,7 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 	}
 
 	cmd := exec.CommandContext(ctx, r.poolMgr.ErlPath(), args...)
+	cmd.Dir = session.WorkspaceDir
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
@@ -250,7 +254,30 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 // RunVerification executes the verification pipeline corresponding to exerciseID
 func (r *Runner) RunVerification(ctx context.Context, session *pool.Session, exerciseID string, files map[string]string) (*VerificationReport, error) {
 	// First compile user files into ebin
-	_, _ = r.CompileFiles(ctx, session, files)
+	diags, rawCompileOut, _ := r.CompileFiles(ctx, session, files)
+	hasErrors := false
+	for _, d := range diags {
+		if d.Severity == "error" {
+			hasErrors = true
+			break
+		}
+	}
+	if hasErrors {
+		return &VerificationReport{
+			Score:       0,
+			Verdict:     "FAILED",
+			TotalTimeMs: 5,
+			Stages: []StageResult{
+				{
+					ID:      "compile",
+					Title:   "Module Compilation & Syntax (erlc)",
+					Status:  "failed",
+					TimeMs:  5,
+					Details: strings.TrimSpace(rawCompileOut),
+				},
+			},
+		}, nil
+	}
 
 	sessionDir := filepath.ToSlash(session.WorkspaceDir)
 	sessionEbin := filepath.ToSlash(filepath.Join(session.WorkspaceDir, "ebin"))
@@ -258,6 +285,7 @@ func (r *Runner) RunVerification(ctx context.Context, session *pool.Session, exe
 	incDir := filepath.ToSlash(filepath.Join(session.WorkspaceDir, "include"))
 
 	compilePreamble := fmt.Sprintf(`
+file:set_cwd("%s"),
 code:add_patha("%s"),
 code:add_patha("%s"),
 [begin
@@ -267,7 +295,7 @@ code:add_patha("%s"),
         _Err -> ok
     end
 end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
-`, harnessDir, sessionEbin, sessionEbin, incDir, harnessDir, sessionDir)
+`, sessionDir, harnessDir, sessionEbin, sessionEbin, incDir, harnessDir, sessionDir)
 
 	evalCmd := compilePreamble + r.buildVerificationScript(session, exerciseID)
 
@@ -279,14 +307,22 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 	}
 
 	cmd := exec.CommandContext(ctx, r.poolMgr.ErlPath(), args...)
+	cmd.Dir = session.WorkspaceDir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	out := stdout.Bytes()
 	if err != nil {
+		errDetails := strings.TrimSpace(stderr.String())
+		if errDetails == "" {
+			errDetails = strings.TrimSpace(stdout.String())
+		}
+		if errDetails == "" {
+			errDetails = err.Error()
+		}
 		log.Printf("[RunVerification] Erl crashed: err=%v, stderr=%s, stdout=%s", err, stderr.String(), stdout.String())
-		return r.generateFallbackReport(exerciseID), nil
+		return r.generateFailureReport(exerciseID, errDetails), nil
 	}
 
 	var report VerificationReport
@@ -295,12 +331,20 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
 			if err := json.Unmarshal([]byte(line), &report); err == nil {
+				if runRes, errRun := r.RunCode(ctx, session, exerciseID, files, nil); errRun == nil && runRes != nil {
+					report.VisibleTests = runRes.VisibleTests
+					report.Stdout = runRes.Stdout
+				}
 				return &report, nil
 			}
 		}
 	}
 
-	return r.generateFallbackReport(exerciseID), nil
+	errDetails := strings.TrimSpace(stderr.String())
+	if errDetails == "" {
+		errDetails = strings.TrimSpace(stdout.String())
+	}
+	return r.generateFailureReport(exerciseID, "No valid verification report JSON returned from BEAM: "+errDetails), nil
 }
 
 func (r *Runner) buildRunScript(session *pool.Session, exerciseID string, customTestCalls []string) string {
@@ -494,7 +538,7 @@ S3_TcoStack = try
 catch C3:R3 ->
     #{id => <<"tco_deep_stack_audit">>, title => <<"TCO Deep Stack Inspection (1,000 recursive frames)">>, status => <<"failed">>, time_ms => 22, details => list_to_binary(io_lib:format("Stack sampling crash: ~p:~p", [C3, R3]))}
 end,
-Stages = [CompileStage, S1_Ast, S2_Tests, S3_TcoStack]`, filepath.ToSlash(session.WorkspaceDir), filepath.ToSlash(filepath.Join(session.WorkspaceDir, "ebin")))
+Stages = [CompileStage, S1_Ast, S2_Tests, S3_TcoStack]`, filepath.ToSlash(session.WorkspaceDir), filepath.ToSlash(session.WorkspaceDir), filepath.ToSlash(session.WorkspaceDir), filepath.ToSlash(session.WorkspaceDir))
 
 	case "erl-101-pattern-matching":
 		stagesErl = `
@@ -794,16 +838,18 @@ init:stop().
 `, stagesErl)
 }
 
-func (r *Runner) generateFallbackReport(exerciseID string) *VerificationReport {
+func (r *Runner) generateFailureReport(exerciseID string, errMsg string) *VerificationReport {
+	if errMsg == "" {
+		errMsg = "Verification runtime execution failed. Check syntax and runtime logs."
+	}
 	stages := []StageResult{
-		{ID: "syntax_and_compilation", Title: "BEAM Bytecode Compilation & Export Audit", Status: "passed", TimeMs: 15, Details: "All modules compiled cleanly with debug_info."},
-		{ID: "functional_assertion", Title: "OTP & Behavioral Contract Validation", Status: "passed", TimeMs: 25, Details: "Core functional contracts satisfied."},
+		{ID: "execution_crash", Title: "BEAM Runtime Verification Execution", Status: "failed", TimeMs: 10, Details: errMsg},
 	}
 	return &VerificationReport{
-		Verdict:     "PASSED",
-		Score:       100,
-		TotalTimeMs: 40,
-		Signature:   "sha256:7f8a91c2b4d5e8f901ab34cd56ef23145890abcd1234567890abcdef12345678",
+		Verdict:     "FAILED",
+		Score:       0,
+		TotalTimeMs: 10,
+		Signature:   "",
 		Node:        "learner@127.0.0.1",
 		Stages:      stages,
 	}
@@ -920,23 +966,30 @@ init:stop().
 	return nil, fmt.Errorf("XMPP harness produced invalid transcript")
 }
 
-// Helper to parse erlc output line format: "path/file.erl:Line:Col: Warning/Error: message"
-var erlcRegex = regexp.MustCompile(`(?m)^(.+?):(\d+):(?:\d+:)?\s*(Warning|Error|syntax error):\s*(.+)$`)
+// Helper to parse erlc output line format:
+// "path/file.erl:Line:Col: message" or "path/file.erl:Line: message"
+var erlcRegex = regexp.MustCompile(`(?m)^(?:[a-zA-Z]:)?([^:\r\n]+\.erl):(\d+)(?::(\d+))?:\s*(?:(Warning|Error):\s*)?(.+)$`)
 
 func parseDiagnostics(output string) []Diagnostic {
 	var diags []Diagnostic
 	matches := erlcRegex.FindAllStringSubmatch(output, -1)
 	for _, m := range matches {
 		line, _ := strconv.Atoi(m[2])
+		col := 1
+		if len(m) > 3 && m[3] != "" {
+			col, _ = strconv.Atoi(m[3])
+		}
+		rawMsg := m[len(m)-1]
 		severity := "error"
-		if strings.EqualFold(m[3], "warning") {
+		if len(m) > 4 && strings.EqualFold(m[4], "warning") {
 			severity = "warning"
 		}
 		diags = append(diags, Diagnostic{
 			File:     filepath.Base(m[1]),
 			Line:     line,
+			Col:      col,
 			Severity: severity,
-			Message:  m[4],
+			Message:  strings.TrimSpace(rawMsg),
 		})
 	}
 	return diags
