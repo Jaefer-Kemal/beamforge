@@ -6,20 +6,18 @@ import {
   BookOpen, 
   CheckCircle2, 
   ExternalLink, 
-  Lightbulb, 
-  Sparkles, 
   ShieldCheck, 
   ArrowUpRight,
   AlertCircle,
 } from 'lucide-react';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import { getLevelById } from '../../data/curriculumCatalog';
+import { BeamMarkdownRenderer } from '../pedagogy/BeamMarkdownRenderer';
 
 export function LessonGuidePane() {
   const { 
     activeExerciseId, 
     verificationStages, 
-    loadSolutionForActiveExercise 
   } = useWorkspaceStore();
 
   const [activeTab, setActiveTab] = useState<string>('concept');
@@ -32,81 +30,6 @@ export function LessonGuidePane() {
       </div>
     );
   }
-
-  // Helper to render markdown content with daylight typography
-  const renderMarkdown = (markdown: string) => {
-    const lines = markdown.split('\n');
-    const elements: React.ReactNode[] = [];
-    let inCodeBlock = false;
-    let codeBlockLines: string[] = [];
-    let codeLanguage = '';
-
-    lines.forEach((line, index) => {
-      if (line.startsWith('```')) {
-        if (!inCodeBlock) {
-          inCodeBlock = true;
-          codeLanguage = line.replace('```', '').trim();
-          codeBlockLines = [];
-        } else {
-          inCodeBlock = false;
-          elements.push(
-            <div key={`code-${index}`} className="my-3 rounded-xl overflow-hidden border border-slate-200/80 bg-slate-900 text-slate-100 shadow-sm">
-              <div className="bg-slate-800/80 px-3.5 py-1 text-[10px] font-mono text-slate-400 flex items-center justify-between border-b border-slate-700/60">
-                <span>{codeLanguage || 'erlang'}</span>
-              </div>
-              <pre className="p-3.5 text-xs font-mono overflow-x-auto leading-relaxed text-emerald-400">
-                <code>{codeBlockLines.join('\n')}</code>
-              </pre>
-            </div>
-          );
-        }
-        return;
-      }
-
-      if (inCodeBlock) {
-        codeBlockLines.push(line);
-        return;
-      }
-
-      if (line.startsWith('### ')) {
-        elements.push(
-          <h3 key={`h3-${index}`} className="text-base font-bold text-ios-slate mt-5 mb-2 tracking-tight">
-            {line.replace('### ', '')}
-          </h3>
-        );
-      } else if (line.startsWith('#### ')) {
-        elements.push(
-          <h4 key={`h4-${index}`} className="text-xs font-bold text-ios-slate uppercase tracking-wider text-ios-blue mt-4 mb-1.5 font-mono">
-            {line.replace('#### ', '')}
-          </h4>
-        );
-      } else if (line.startsWith('> [!NOTE]') || line.startsWith('> **Note:**')) {
-        elements.push(
-          <div key={`note-${index}`} className="my-3 p-3.5 rounded-xl bg-blue-50/70 border border-blue-200/80 text-blue-900 text-xs flex gap-2.5 shadow-sm">
-            <Lightbulb className="w-4 h-4 text-ios-blue shrink-0 mt-0.5" />
-            <div className="leading-relaxed font-medium">
-              {line.replace('> [!NOTE]', '').replace('> **Note:**', '').trim()}
-            </div>
-          </div>
-        );
-      } else if (line.startsWith('- ') || line.startsWith('* ')) {
-        elements.push(
-          <div key={`li-${index}`} className="flex items-start gap-2 my-1 text-xs text-ios-slate leading-relaxed">
-            <span className="w-1.5 h-1.5 rounded-full bg-ios-blue shrink-0 mt-1.5" />
-            <span>{line.substring(2)}</span>
-          </div>
-        );
-      } else if (line.trim().length > 0) {
-        elements.push(
-          <p key={`p-${index}`} className="text-xs text-ios-slate/90 leading-relaxed my-2">
-            {line}
-          </p>
-        );
-      }
-    });
-
-    return elements;
-  };
 
   return (
     <div className="h-full flex flex-col glass-panel overflow-hidden border border-white/80 shadow-glass-panel">
@@ -125,20 +48,6 @@ export function LessonGuidePane() {
             {level.title}
           </h2>
         </div>
-
-        {/* Load Reference Solution Button */}
-        <button
-          onClick={() => {
-            if (confirm('Load verified solution for this level? This will overwrite the current editor code.')) {
-              loadSolutionForActiveExercise();
-            }
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[11px] font-semibold shadow-sm transition-all hover:border-slate-300"
-          title="Inspect the verified OTP 29 reference implementation"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-amber-500 fill-amber-500/20" />
-          <span>Solution</span>
-        </button>
       </div>
 
       {/* Segmented Navigation Tabs */}
@@ -183,8 +92,8 @@ export function LessonGuidePane() {
 
         {/* Tab 1: Concept & Task Markdown Briefing */}
         <Tabs.Content value="concept" className="flex-1 overflow-y-auto p-5 focus:outline-none">
-          <div className="prose prose-slate max-w-none">
-            {renderMarkdown(level.conceptMarkdown)}
+          <div className="max-w-none">
+            <BeamMarkdownRenderer md={level.conceptMarkdown} />
           </div>
         </Tabs.Content>
 

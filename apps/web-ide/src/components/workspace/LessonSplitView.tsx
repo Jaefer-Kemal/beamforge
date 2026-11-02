@@ -18,9 +18,11 @@ import {
   Clock,
   ExternalLink,
   BookOpen,
+  Code2,
   Trophy,
   Target,
   ArrowRight,
+  WifiOff,
 } from 'lucide-react';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import type {
@@ -34,6 +36,12 @@ import { configureMonacoErlang, ErlangCodeBlock } from '../../lib/monacoErlang';
 import { BeamConceptVisualizer } from '../pedagogy/BeamConceptVisualizer';
 import { MentalModelCheckCard } from '../pedagogy/MentalModelCheckCard';
 import { ErlangTermDiffCard } from '../pedagogy/ErlangTermDiffCard';
+import { BeamFootprintCard } from '../pedagogy/BeamFootprintCard';
+import { IncidentAlertBanner } from '../pedagogy/IncidentAlertBanner';
+import { BeamMarkdownRenderer, renderInlineContent } from '../pedagogy/BeamMarkdownRenderer';
+import { SolutionUnlockModal } from './SolutionUnlockModal';
+import { ResetConfirmModal } from './ResetConfirmModal';
+import { SolutionViewerTab } from './SolutionViewerTab';
 
 export type { LessonContent };
 
@@ -57,132 +65,8 @@ if (typeof window !== 'undefined') {
 }
 
 
-// ── Utility: parse inline markdown elements (bold, code, links) ──────────────
-function renderInlineContent(text: string, isDark: boolean): React.ReactNode {
-  if (!text) return null;
-
-  // Regex splits on inline code (`...`) and bold (**...**)
-  const regex = /(`[^`]+`|\*\*[^*]+?\*\*)/g;
-  const parts = text.split(regex);
-
-  return parts.map((part, idx) => {
-    if (!part) return null;
-
-    // Inline code (`...`)
-    if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
-      const codeVal = part.slice(1, -1);
-      return (
-        <code
-          key={idx}
-          className="px-1.5 py-0.5 rounded text-xs font-mono font-semibold inline-block mx-0.5"
-          style={{
-            background: isDark ? 'rgba(139,92,246,0.22)' : 'rgba(124,58,237,0.12)',
-            color: isDark ? '#DDD6FE' : '#4C1D95',
-            border: isDark ? '1px solid rgba(139,92,246,0.35)' : '1px solid rgba(124,58,237,0.28)',
-          }}
-        >
-          {codeVal}
-        </code>
-      );
-    }
-
-    // Bold text (**...**)
-    if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
-      const inner = part.slice(2, -2);
-      return (
-        <strong
-          key={idx}
-          className="font-bold"
-          style={{
-            color: isDark ? '#FFFFFF' : '#020617',
-            fontWeight: 700,
-          }}
-        >
-          {inner.includes('`') ? renderInlineContent(inner, isDark) : inner}
-        </strong>
-      );
-    }
-
-    return <React.Fragment key={idx}>{part}</React.Fragment>;
-  });
-}
-
-// ── Utility: parse markdown to simple HTML segments ──────────────────────────
-function MarkdownRenderer({ md }: { md: string }) {
-  const isDark = useWorkspaceStore((s) => s.theme) === 'dark';
-  const lines = md.split('\n');
-  const elements: React.ReactNode[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (line.startsWith('```erlang') || line.startsWith('```')) {
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith('```')) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      elements.push(
-        <ErlangCodeBlock key={i} code={codeLines.join('\n')} isDark={isDark} />
-      );
-    } else if (line.startsWith('## ')) {
-      elements.push(
-        <h2 key={i} className="text-base font-extrabold mt-6 mb-2 tracking-tight"
-          style={{ color: isDark ? '#F8FAFC' : '#020617' }}>
-          {renderInlineContent(line.slice(3), isDark)}
-        </h2>
-      );
-    } else if (line.startsWith('### ')) {
-      elements.push(
-        <h3 key={i} className="text-sm font-bold mt-4 mb-1.5"
-          style={{ color: isDark ? '#F1F5F9' : '#0F172A' }}>
-          {renderInlineContent(line.slice(4), isDark)}
-        </h3>
-      );
-    } else if (line.startsWith('> ')) {
-      elements.push(
-        <blockquote key={i} className="border-l-4 pl-4 py-2 my-2 text-sm leading-relaxed"
-          style={{
-            borderColor: isDark ? '#A78BFA' : '#7C3AED',
-            color: isDark ? '#E2E8F0' : '#0F172A',
-            background: isDark ? 'rgba(139,92,246,0.12)' : 'rgba(124,58,237,0.06)',
-            borderRadius: '0 0.5rem 0.5rem 0',
-          }}>
-          {renderInlineContent(line.slice(2), isDark)}
-        </blockquote>
-      );
-    } else if (line.startsWith('- ') || line.startsWith('* ')) {
-      elements.push(
-        <li key={i} className="ml-5 text-sm mb-1.5 list-disc leading-relaxed font-normal"
-          style={{ color: isDark ? '#E2E8F0' : '#0F172A' }}>
-          {renderInlineContent(line.slice(2), isDark)}
-        </li>
-      );
-    } else if (/^\d+\.\s+/.test(line)) {
-      const numMatch = line.match(/^(\d+\.)\s+(.*)$/);
-      elements.push(
-        <li key={i} className="ml-5 text-sm mb-1.5 list-decimal leading-relaxed font-medium"
-          style={{ color: isDark ? '#E2E8F0' : '#0F172A' }}>
-          {renderInlineContent(numMatch ? numMatch[2] : line, isDark)}
-        </li>
-      );
-    } else if (line.trim() === '') {
-      elements.push(<div key={i} className="h-2" />);
-    } else {
-      elements.push(
-        <p key={i} className="text-sm leading-relaxed mb-2 font-normal"
-          style={{ color: isDark ? '#E2E8F0' : '#0F172A' }}>
-          {renderInlineContent(line, isDark)}
-        </p>
-      );
-    }
-    i++;
-  }
-
-  return <div className="leading-relaxed">{elements}</div>;
-}
+// ── Markdown Renderer Delegated to BeamMarkdownRenderer ──────────────────────
+const MarkdownRenderer = BeamMarkdownRenderer;
 
 // ── OTP Doc Signature Card ───────────────────────────────────────────────────
 function OtpDocCard({ card, isDark }: { card: OtpDocSignatureCard; isDark: boolean }) {
@@ -223,12 +107,14 @@ function OtpDocCard({ card, isDark }: { card: OtpDocSignatureCard; isDark: boole
             ))}
           </div>
           {/* Description */}
-          <p className="text-sm leading-relaxed font-normal" style={{ color: isDark ? '#E2E8F0' : '#0F172A' }}>{card.description}</p>
+          <p className="text-sm leading-relaxed font-normal" style={{ color: isDark ? '#E2E8F0' : '#0F172A' }}>
+            {renderInlineContent(card.description, isDark)}
+          </p>
           {/* Complexity */}
           <div className="flex items-center gap-1.5 text-xs font-medium"
             style={{ color: isDark ? '#CBD5E1' : '#334155' }}>
             <Clock className="w-3 h-3 text-slate-400 shrink-0" />
-            <span>{card.complexityNote}</span>
+            <span>{renderInlineContent(card.complexityNote, isDark)}</span>
           </div>
           {/* Links */}
           <div className="flex items-center gap-3">
@@ -654,18 +540,54 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
     theme,
     files, activeFilePath, openTabPaths,
     updateFileContent, openFile, resetWorkspace,
-    runCode, isRunning, runResult,
+    runCode, isRunning, runResult, beamFootprint,
     runVerificationSuite, isVerifying, verificationStages,
+    isBackendOnline, checkBackendHealth,
     lessonOutputTab, setLessonOutputTab,
     isLessonOutputOpen, setLessonOutputOpen,
     isSolutionVisible, setSolutionVisible,
     loadSolutionForActiveExercise,
+    unlockedSolutionLessonIds,
+    unlockSolutionForLesson,
   } = useWorkspaceStore();
 
   const isDark = theme === 'dark';
   const activeFile = files.find((f) => f.path === activeFilePath);
   const [editorMounted, setEditorMounted] = useState(false);
   const monacoRef = useRef<any>(null);
+  const [mobileTab, setMobileTab] = useState<'guide' | 'code' | 'results'>('guide');
+
+  // Confirmation Modals
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
+
+  const insertTokenAtCursor = (token: string) => {
+    if (monacoRef.current?.editor) {
+      const editor = monacoRef.current.editor;
+      const selection = editor.getSelection();
+      if (selection) {
+        editor.executeEdits('beamforge-mobile-toolbar', [
+          {
+            range: selection,
+            text: token,
+            forceMoveMarkers: true,
+          },
+        ]);
+      } else {
+        editor.trigger('keyboard', 'type', { text: token });
+      }
+      editor.focus();
+    }
+  };
+
+  // Continuously verify Go Orchestrator backend health
+  useEffect(() => {
+    checkBackendHealth();
+    const interval = setInterval(() => {
+      checkBackendHealth();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [checkBackendHealth]);
 
   // Click-to-jump navigation: Reveal and place cursor at line/column in Monaco editor
   const jumpToPosition = (line: number, col: number) => {
@@ -778,18 +700,86 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
     }
   }, [runResult]);
 
-  const outputDrawerHeight = isLessonOutputOpen ? 300 : 44;
+  const [isDrawerExpanded, setIsDrawerExpanded] = useState(false);
+  const outputDrawerHeight = isLessonOutputOpen ? (isDrawerExpanded ? 580 : 340) : 44;
 
   return (
     <div
-      className="flex w-full overflow-hidden"
-      style={{ height: 'calc(100vh - 3.5rem)', marginTop: '3.5rem' }}
+      className="flex flex-col md:flex-row w-full overflow-hidden"
+      style={{ height: 'calc(100dvh - 3.5rem)', marginTop: '3.5rem' }}
     >
+      {/* ── MOBILE SEGMENTED VIEW SWITCHER (< md) ── */}
+      <div
+        className="flex md:hidden items-center justify-between px-3 py-1.5 border-b flex-shrink-0"
+        style={{
+          background: isDark ? 'rgba(15,23,42,0.65)' : 'rgba(255,255,255,0.75)',
+          borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)',
+        }}
+      >
+        <div className="flex items-center gap-1.5 w-full">
+          <button
+            id="mobile-tab-guide"
+            onClick={() => setMobileTab('guide')}
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all"
+            style={{
+              background: mobileTab === 'guide'
+                ? (isDark ? 'rgba(139,92,246,0.30)' : 'rgba(139,92,246,0.15)')
+                : 'transparent',
+              color: mobileTab === 'guide' ? '#A78BFA' : (isDark ? '#94A3B8' : '#64748B'),
+            }}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Guide</span>
+          </button>
+
+          <button
+            id="mobile-tab-code"
+            onClick={() => setMobileTab('code')}
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all"
+            style={{
+              background: mobileTab === 'code'
+                ? (isDark ? 'rgba(0,122,255,0.25)' : 'rgba(0,122,255,0.12)')
+                : 'transparent',
+              color: mobileTab === 'code' ? (isDark ? '#60A5FA' : '#007AFF') : (isDark ? '#94A3B8' : '#64748B'),
+            }}
+          >
+            <Code2 className="w-3.5 h-3.5" />
+            <span>Code</span>
+          </button>
+
+          <button
+            id="mobile-tab-results"
+            onClick={() => {
+              setMobileTab('results');
+              setLessonOutputOpen(true);
+            }}
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all"
+            style={{
+              background: mobileTab === 'results'
+                ? (isDark ? 'rgba(16,185,129,0.25)' : 'rgba(16,185,129,0.12)')
+                : 'transparent',
+              color: mobileTab === 'results' ? '#34D399' : (isDark ? '#94A3B8' : '#64748B'),
+            }}
+          >
+            <FlaskConical className="w-3.5 h-3.5" />
+            <span>Results</span>
+            {runResult?.visibleTests && runResult.visibleTests.length > 0 && (
+              <span
+                className="w-2 h-2 rounded-full inline-block ml-0.5"
+                style={{
+                  background: runResult.visibleTests.every((t) => t.passed) ? '#10B981' : '#EF4444',
+                }}
+              />
+            )}
+          </button>
+        </div>
+      </div>
+
       {/* ════════════════════════════════════════════════════════════════════
-          LEFT PANE — Interactive Textbook, Doc Cards & Assignment Spec (50%)
+          LEFT PANE — Interactive Textbook, Doc Cards & Assignment Spec
           ════════════════════════════════════════════════════════════════════ */}
       <div
-        className="w-1/2 flex flex-col border-r overflow-hidden"
+        className={`${mobileTab === 'guide' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-col border-r overflow-hidden`}
         style={{
           background: isDark ? 'rgba(11, 17, 30, 0.58)' : 'rgba(255, 255, 255, 0.72)',
           backdropFilter: 'blur(28px) saturate(190%)',
@@ -815,18 +805,27 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             </span>
             <span className="text-xs font-bold px-2 py-0.5 rounded-md flex items-center gap-1"
               style={{
-                background: lesson.lessonType === 'problem_set'
+                background: lesson.lessonType === 'incident_triage'
+                  ? 'rgba(244,63,94,0.15)'
+                  : lesson.lessonType === 'problem_set'
                   ? 'rgba(245,158,11,0.15)'
                   : lesson.lessonType === 'guided_demo'
                   ? 'rgba(0,122,255,0.12)'
                   : 'rgba(16,185,129,0.12)',
-                color: lesson.lessonType === 'problem_set'
+                color: lesson.lessonType === 'incident_triage'
+                  ? '#F43F5E'
+                  : lesson.lessonType === 'problem_set'
                   ? '#F59E0B'
                   : lesson.lessonType === 'guided_demo'
                   ? '#007AFF'
                   : '#10B981',
               }}>
-              {lesson.lessonType === 'problem_set' ? (
+              {lesson.lessonType === 'incident_triage' ? (
+                <>
+                  <AlertTriangle className="w-3 h-3 text-rose-500 animate-pulse" />
+                  <span>Incident Triage</span>
+                </>
+              ) : lesson.lessonType === 'problem_set' ? (
                 <>
                   <Trophy className="w-3 h-3" />
                   <span>Assignment</span>
@@ -851,16 +850,24 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
               {lesson.difficulty}
             </span>
           </div>
-          <h1 className="text-sm font-bold ml-1 flex-1 truncate"
+          <h1 className="text-sm font-bold ml-1 flex-1 truncate flex items-center gap-1.5"
             style={{ color: isDark ? '#F8FAFC' : '#020617' }}>
-            {lesson.title}
+            {lesson.lessonType === 'incident_triage' && (
+              <AlertTriangle className="w-4 h-4 text-rose-500 flex-shrink-0 animate-pulse" />
+            )}
+            <span className="truncate">{lesson.title}</span>
           </h1>
         </div>
 
         {/* Left Scrollable Content */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
+          {/* Slot 1: Incident Alert Banner (only on incident_triage or when incidentAlert is defined) */}
+          {lesson.incidentAlert && (
+            <IncidentAlertBanner alert={lesson.incidentAlert} isDark={isDark} />
+          )}
+
           {/* Slot 2: Concept Markdown */}
-          <MarkdownRenderer md={lesson.conceptMarkdown} />
+          <MarkdownRenderer md={lesson.conceptMarkdown} isDark={isDark} />
 
           {/* Slot 3: Interactive Step-Diagram (Collapsible) */}
           {resolveVisualScene(lesson) && (
@@ -896,41 +903,30 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           {/* Slot 6: Strict Rules & Verification Constraints Card */}
           {lesson.astRules && <AstRulesCard rules={lesson.astRules} isDark={isDark} />}
 
-          {/* Solution */}
-          {isSolutionVisible && (
-            <div className="mt-4 rounded-xl p-4"
+          {/* Mobile Quick-Jump to Code Editor */}
+          <div className="flex md:hidden pt-4 pb-2">
+            <button
+              onClick={() => setMobileTab('code')}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all shadow-md active:scale-[0.99]"
               style={{
-                background: isDark ? 'rgba(16,185,129,0.08)' : 'rgba(16,185,129,0.06)',
-                border: '1.5px solid rgba(16,185,129,0.25)',
-              }}>
-              <div className="flex items-center gap-2 mb-3">
-                <Eye className="w-4 h-4 text-emerald-500" />
-                <span className="text-sm font-bold" style={{ color: isDark ? '#34D399' : '#059669' }}>
-                  Reference Solution & Explanation
-                </span>
-              </div>
-              <pre className="otp-doc-card p-3 text-xs overflow-x-auto mb-3"
-                style={{ color: isDark ? '#E2E8F0' : '#1E293B', borderLeft: '3px solid #10B981' }}>
-                <code>{lesson.solutionCode}</code>
-              </pre>
-              <p className="text-sm leading-relaxed" style={{ color: isDark ? '#94A3B8' : '#475569' }}>
-                {lesson.solutionExplanation}
-              </p>
-              <button onClick={() => setSolutionVisible(false)} className="mt-3 text-xs underline"
-                style={{ color: isDark ? '#64748B' : '#94A3B8' }}>
-                Hide solution
-              </button>
-            </div>
-          )}
+                background: 'linear-gradient(135deg, #007AFF 0%, #0056B3 100%)',
+                color: '#FFFFFF',
+              }}
+            >
+              <Code2 className="w-4 h-4" />
+              <span>Open Code Editor</span>
+            </button>
+          </div>
 
           <div className="h-8" />
         </div>
       </div>
 
       {/* ════════════════════════════════════════════════════════════════════
-          RIGHT PANE — Code Editor, Action Bar & Output Drawer (50%)
+          RIGHT PANE — Code Editor, Action Bar & Output Drawer (Responsive)
           ════════════════════════════════════════════════════════════════════ */}
-      <div className="w-1/2 flex flex-col overflow-hidden">
+      <div className={`${mobileTab === 'code' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-col flex-1 min-h-0 overflow-hidden relative`}
+        style={{ background: isDark ? '#0B0F17' : '#FFFFFF' }}>
 
         {/* File Tabs Header */}
         <div
@@ -972,8 +968,8 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           {/* Reset Button */}
           <button
             id="reset-template-btn"
-            onClick={resetWorkspace}
-            className="ml-2 px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 flex-shrink-0 transition-all duration-200"
+            onClick={() => setIsResetModalOpen(true)}
+            className="ml-2 px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 flex-shrink-0 transition-all duration-200 cursor-pointer"
             style={{
               background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
               color: isDark ? '#CBD5E1' : '#334155',
@@ -986,10 +982,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
         </div>
 
         {/* Monaco Editor */}
-        <div
-          className="flex-1 overflow-hidden"
-          style={{ height: `calc(100% - 44px - 44px - ${outputDrawerHeight}px)` }}
-        >
+        <div className="flex-1 w-full min-h-0 overflow-hidden relative">
           {editorMounted && MonacoEditor ? (
             <MonacoEditor
               language="erlang"
@@ -1017,15 +1010,18 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                 }
               }}
               options={{
-                fontSize: 13,
+                fontSize: 14,
                 fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
                 fontWeight: '500',
-                fontLigatures: true,
+                fontLigatures: false,
                 lineHeight: 22,
                 minimap: { enabled: false },
+                folding: false,
+                glyphMargin: false,
+                lineNumbersMinChars: 2,
                 scrollBeyondLastLine: false,
                 wordWrap: 'on',
-                padding: { top: 16, bottom: 16 },
+                padding: { top: 12, bottom: 12 },
                 renderLineHighlight: 'gutter',
                 smoothScrolling: true,
                 cursorBlinking: 'smooth',
@@ -1042,12 +1038,41 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           )}
         </div>
 
+        {/* ── Mobile Erlang Quick-Syntax Accessory Bar (< md) ── */}
+        <div
+          id="erlang-syntax-accessory-bar"
+          className="flex md:hidden items-center gap-1.5 px-3 py-1.5 overflow-x-auto flex-shrink-0 no-scrollbar border-t"
+          style={{
+            background: isDark ? 'rgba(15,23,42,0.85)' : 'rgba(241,245,249,0.92)',
+            borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)',
+          }}
+        >
+          {[
+            '->', '>>', '<<', ':=', '=>', ',', ';', '.', '_', '|',
+            '{', '}', '[', ']', '?', 'ok', 'error',
+          ].map((token) => (
+            <button
+              key={token}
+              onClick={() => insertTokenAtCursor(token)}
+              className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all flex-shrink-0 active:scale-95"
+              style={{
+                background: isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF',
+                border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(203,213,225,0.80)',
+                color: isDark ? '#E2E8F0' : '#1E293B',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+              }}
+            >
+              {token}
+            </button>
+          ))}
+        </div>
+
         {/* ── Boot.dev Action Bar ── */}
         <div
           id="lesson-action-bar"
-          className="flex items-center gap-2 px-3 flex-shrink-0"
+          className="flex items-center gap-2 px-3 py-1.5 flex-shrink-0 pb-safe"
           style={{
-            height: '44px',
+            minHeight: '48px',
             background: isDark ? 'rgba(11,15,23,0.55)' : 'rgba(241,245,249,0.70)',
             backdropFilter: 'blur(20px) saturate(180%)',
             WebkitBackdropFilter: 'blur(20px) saturate(180%)',
@@ -1056,74 +1081,102 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             boxShadow: isDark ? 'inset 0 1px 0 0 rgba(255,255,255,0.12)' : 'inset 0 1px 0 0 rgba(255,255,255,0.80)',
           }}
         >
-          {/* ▶ Submit */}
-          <button
-            id="submit-btn"
-            onClick={() => {
-              setLessonOutputOpen(true);
-              setLessonOutputTab('verification');
-              runVerificationSuite();
-            }}
-            disabled={isVerifying || isRunning}
-            className="btn-submit flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isVerifying ? (
-              <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
-            ) : (
-              <ShieldCheck className="w-3.5 h-3.5" />
-            )}
-            <span>Submit</span>
-          </button>
-
           {/* ▷ Run */}
           <button
             id="run-btn"
             onClick={() => {
               setLessonOutputOpen(true);
               setLessonOutputTab('test_results');
+              if (typeof window !== 'undefined' && window.innerWidth < 768) setMobileTab('results');
               runCode();
             }}
-            disabled={isRunning || isVerifying}
-            className="btn-run flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isRunning || isVerifying || !isBackendOnline}
+            title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to run code.' : 'Run visible test cases'}
+            className="btn-run flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             {isRunning ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+            ) : !isBackendOnline ? (
+              <WifiOff className="w-3.5 h-3.5 text-red-300" />
             ) : (
               <Play className="w-3.5 h-3.5 fill-current" />
             )}
-            <span>Run</span>
+            <span>{isRunning ? 'Running...' : !isBackendOnline ? 'Run (Offline)' : 'Run'}</span>
+          </button>
+
+          {/* ▶ Submit */}
+          <button
+            id="submit-btn"
+            onClick={() => {
+              setLessonOutputOpen(true);
+              setLessonOutputTab('verification');
+              if (typeof window !== 'undefined' && window.innerWidth < 768) setMobileTab('results');
+              runVerificationSuite();
+            }}
+            disabled={isVerifying || isRunning || !isBackendOnline}
+            title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to submit.' : 'Submit code for full verification suite'}
+            className="btn-submit flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-bold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {isVerifying ? (
+              <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+            ) : !isBackendOnline ? (
+              <WifiOff className="w-3.5 h-3.5 text-red-400" />
+            ) : (
+              <ShieldCheck className="w-3.5 h-3.5" />
+            )}
+            <span>{isVerifying ? 'Verifying...' : !isBackendOnline ? 'Submit (Offline)' : 'Submit'}</span>
           </button>
 
           {/* Solution */}
           <button
             id="solution-btn"
             onClick={() => {
-              setSolutionVisible(!isSolutionVisible);
-              if (!isSolutionVisible) loadSolutionForActiveExercise();
+              const isUnlocked = (unlockedSolutionLessonIds || []).includes(lesson.id);
+              if (isUnlocked) {
+                if (isLessonOutputOpen && lessonOutputTab === 'solution') {
+                  setLessonOutputOpen(false);
+                } else {
+                  setLessonOutputOpen(true);
+                  setLessonOutputTab('solution');
+                  if (typeof window !== 'undefined' && window.innerWidth < 768) setMobileTab('results');
+                }
+              } else {
+                setIsUnlockModalOpen(true);
+              }
             }}
-            className="glass-pill flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg"
-            style={{ color: isDark ? '#94A3B8' : '#64748B' }}
+            className="glass-pill flex items-center justify-center gap-1.5 px-3 h-10 text-xs font-medium rounded-xl cursor-pointer"
+            style={{
+              background: isLessonOutputOpen && lessonOutputTab === 'solution'
+                ? (isDark ? 'rgba(245,158,11,0.20)' : 'rgba(245,158,11,0.12)')
+                : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)'),
+              color: isLessonOutputOpen && lessonOutputTab === 'solution'
+                ? (isDark ? '#FCD34D' : '#D97706')
+                : (isDark ? '#94A3B8' : '#64748B'),
+              border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
+            }}
+            title={`Inspect reference solution for ${activeFile?.name || 'active file'}`}
           >
-            {isSolutionVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            <Eye className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Solution</span>
           </button>
 
-          {/* Test Cases */}
+          {/* Test Cases (hidden on mobile since Results tab is at the top) */}
           <button
             id="test-cases-btn"
             onClick={() => {
               setLessonOutputOpen(true);
               setLessonOutputTab('test_results');
+              if (typeof window !== 'undefined' && window.innerWidth < 768) setMobileTab('results');
             }}
-            className="glass-pill flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg"
+            className="glass-pill hidden sm:flex items-center justify-center gap-1.5 px-3 h-10 text-xs font-medium rounded-xl"
             style={{ color: isDark ? '#94A3B8' : '#64748B' }}
           >
             <FlaskConical className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Test Cases</span>
+            <span>Test Cases</span>
           </button>
 
           {/* Keyboard shortcut hint */}
-          <div className="ml-auto text-xs hidden md:block"
+          <div className="ml-auto text-xs hidden lg:block"
             style={{ color: isDark ? '#64748B' : '#94A3B8' }}>
             <kbd className="px-1 rounded text-xs font-mono"
               style={{ background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)' }}>
@@ -1132,9 +1185,9 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           </div>
         </div>
 
-        {/* ── Collapsible Output & Verification Drawer ── */}
+        {/* ── Collapsible Output & Verification Drawer (Desktop Only in Code Pane) ── */}
         <div
-          className="flex-shrink-0 overflow-hidden transition-all duration-300"
+          className="hidden md:block flex-shrink-0 overflow-hidden transition-all duration-300"
           style={{ height: `${outputDrawerHeight}px` }}
         >
           {/* Drawer Tab Bar */}
@@ -1187,6 +1240,14 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                       color: verificationStages.every((s) => s.status === 'passed') ? '#10B981' : '#EF4444',
                       bg: verificationStages.every((s) => s.status === 'passed') ? 'rgba(16,185,129,0.20)' : 'rgba(239,68,68,0.20)'
                     }
+                  : undefined,
+              },
+              {
+                key: 'solution' as const,
+                label: `Solution (${activeFile?.name || 'File'})`,
+                icon: Eye,
+                badge: (unlockedSolutionLessonIds || []).includes(lesson.id)
+                  ? { text: 'Unlocked', color: '#F59E0B', bg: 'rgba(245,158,11,0.20)' }
                   : undefined,
               },
             ]).map(({ key, label, icon: Icon, badge }) => (
@@ -1314,6 +1375,13 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                       ))}
                     </div>
                   )}
+
+                  {/* BEAM VM Real Telemetry Strip placed under test results */}
+                  {beamFootprint && (
+                    <div className="pt-3">
+                      <BeamFootprintCard footprint={beamFootprint} isDark={isDark} />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1427,14 +1495,390 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                       {verificationStages.map((s) => (
                         <StageRow key={s.id} stage={s} isDark={isDark} />
                       ))}
+
+                      {/* BEAM VM Real Telemetry Strip placed under submit verification pipeline */}
+                      {beamFootprint && (
+                        <div className="pt-3">
+                          <BeamFootprintCard footprint={beamFootprint} isDark={isDark} />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* Solution Tab Content */}
+              {lessonOutputTab === 'solution' && (
+                <SolutionViewerTab
+                  fileName={activeFile?.name || 'solution.erl'}
+                  solutionCode={
+                    (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles[activeFile.path]) ||
+                    (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles[activeFile.path.replace(/^src\//, '')]) ||
+                    (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles['src/' + activeFile.path]) ||
+                    lesson.solutionCode ||
+                    ''
+                  }
+                  solutionExplanation={lesson.solutionExplanation}
+                  isDark={isDark}
+                  isExpanded={isDrawerExpanded}
+                  onToggleExpand={() => setIsDrawerExpanded((prev) => !prev)}
+                />
               )}
             </div>
           )}
         </div>
       </div>
+
+      {/* ════════════════════════════════════════════════════════════════════
+          MOBILE DEDICATED RESULTS & DEBUGGING VIEW (< md)
+          ════════════════════════════════════════════════════════════════════ */}
+      <div
+        className={`${mobileTab === 'results' ? 'w-full flex' : 'hidden'} md:hidden flex-col flex-1 min-h-0 overflow-hidden relative`}
+        style={{
+          background: isDark ? '#0B0F17' : '#FFFFFF',
+        }}
+      >
+        {/* Mobile Results Header & Sub-Tabs */}
+        <div
+          className="flex items-center justify-between px-3 flex-shrink-0 border-b select-none"
+          style={{
+            height: '44px',
+            background: isDark ? 'rgba(15,23,42,0.60)' : 'rgba(248,250,252,0.80)',
+            borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)',
+          }}
+        >
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+            <button
+              id="mobile-results-tab-tests"
+              onClick={() => setLessonOutputTab('test_results')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{
+                background: lessonOutputTab === 'test_results'
+                  ? (isDark ? 'rgba(0,122,255,0.25)' : 'rgba(0,122,255,0.12)')
+                  : 'transparent',
+                color: lessonOutputTab === 'test_results'
+                  ? (isDark ? '#60A5FA' : '#007AFF')
+                  : (isDark ? '#94A3B8' : '#64748B'),
+              }}
+            >
+              <FlaskConical className="w-3.5 h-3.5" />
+              <span>Tests &amp; Diffs</span>
+              {runResult && (
+                <span
+                  className="px-1.5 py-0.2 rounded-full text-[10px] font-bold ml-0.5"
+                  style={{
+                    background: runResult.compileOk && runResult.visibleTests.length > 0 && runResult.visibleTests.every((t) => t.passed)
+                      ? 'rgba(16,185,129,0.20)'
+                      : 'rgba(239,68,68,0.20)',
+                    color: runResult.compileOk && runResult.visibleTests.length > 0 && runResult.visibleTests.every((t) => t.passed)
+                      ? '#10B981'
+                      : '#EF4444',
+                  }}
+                >
+                  {runResult.compileOk
+                    ? `${runResult.visibleTests.filter((t) => t.passed).length}/${runResult.visibleTests.length}`
+                    : 'Error'}
+                </span>
+              )}
+            </button>
+
+            <button
+              id="mobile-results-tab-console"
+              onClick={() => setLessonOutputTab('console')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{
+                background: lessonOutputTab === 'console'
+                  ? (isDark ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.12)')
+                  : 'transparent',
+                color: lessonOutputTab === 'console'
+                  ? (isDark ? '#A78BFA' : '#7C3AED')
+                  : (isDark ? '#94A3B8' : '#64748B'),
+              }}
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              <span>Console</span>
+            </button>
+
+            <button
+              id="mobile-results-tab-verify"
+              onClick={() => setLessonOutputTab('verification')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{
+                background: lessonOutputTab === 'verification'
+                  ? (isDark ? 'rgba(16,185,129,0.25)' : 'rgba(16,185,129,0.12)')
+                  : 'transparent',
+                color: lessonOutputTab === 'verification'
+                  ? '#34D399'
+                  : (isDark ? '#94A3B8' : '#64748B'),
+              }}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Verify</span>
+              {verificationStages.length > 0 && (
+                <span
+                  className="w-2 h-2 rounded-full inline-block ml-0.5"
+                  style={{
+                    background: verificationStages.every((s) => s.status === 'passed') ? '#10B981' : '#EF4444',
+                  }}
+                />
+              )}
+            </button>
+
+            <button
+              id="mobile-results-tab-solution"
+              onClick={() => {
+                const isUnlocked = (unlockedSolutionLessonIds || []).includes(lesson.id);
+                if (isUnlocked) {
+                  setLessonOutputTab('solution');
+                } else {
+                  setIsUnlockModalOpen(true);
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+              style={{
+                background: lessonOutputTab === 'solution'
+                  ? (isDark ? 'rgba(245,158,11,0.25)' : 'rgba(245,158,11,0.12)')
+                  : 'transparent',
+                color: lessonOutputTab === 'solution'
+                  ? '#FCD34D'
+                  : (isDark ? '#94A3B8' : '#64748B'),
+              }}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Solution</span>
+            </button>
+          </div>
+
+          <button
+            onClick={() => setMobileTab('code')}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all text-blue-500"
+          >
+            <Code2 className="w-3.5 h-3.5" />
+            <span>Editor</span>
+          </button>
+        </div>
+
+        {/* Mobile Results Scrollable Body */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {lessonOutputTab === 'test_results' && (
+            <>
+              {runResult && !runResult.compileOk && (
+                <CompilationErrorCard
+                  stdout={runResult.stdout}
+                  diagnostics={runResult.diagnostics}
+                  onJumpTo={(line, col) => {
+                    setMobileTab('code');
+                    jumpToPosition(line, col);
+                  }}
+                  isDark={isDark}
+                />
+              )}
+
+              {runResult?.visibleTests && runResult.visibleTests.length > 0 ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between pb-1">
+                    <span className="text-xs font-bold uppercase tracking-wider" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                      Test Case Assertions &amp; Diffs
+                    </span>
+                    <span
+                      className="text-xs font-bold px-2 py-0.5 rounded-full"
+                      style={{
+                        background: runResult.visibleTests.every((t) => t.passed) ? 'rgba(16,185,129,0.20)' : 'rgba(239,68,68,0.20)',
+                        color: runResult.visibleTests.every((t) => t.passed) ? '#10B981' : '#EF4444',
+                      }}
+                    >
+                      {runResult.visibleTests.filter((t) => t.passed).length}/{runResult.visibleTests.length} Passed
+                    </span>
+                  </div>
+                  {lesson.visibleTestCases.map((tc, idx) => {
+                    const matchedTest = runResult?.visibleTests?.find(
+                      (t) => t.callStr.trim() === tc.erlangCall.trim() || t.expected.trim() === tc.expectedOutput.trim()
+                    ) || (runResult?.visibleTests ? runResult.visibleTests[idx] : undefined);
+
+                    return (
+                      <UnifiedTestCaseCard
+                        key={tc.id || idx}
+                        testCase={tc}
+                        runTest={matchedTest}
+                        isDark={isDark}
+                      />
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-6 text-center rounded-2xl border" style={{ borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)' }}>
+                  <FlaskConical className="w-8 h-8 mx-auto mb-2 text-blue-400 opacity-70" />
+                  <h4 className="text-sm font-bold mb-1" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
+                    No Tests Executed Yet
+                  </h4>
+                  <p className="text-xs max-w-xs mx-auto leading-relaxed mb-4" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                    Tap <strong>Run Tests</strong> below to compile your code and inspect Erlang term diffs.
+                  </p>
+                  <button
+                    onClick={() => runCode()}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md inline-flex items-center gap-1.5"
+                    style={{ background: '#007AFF' }}
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Run Tests Now</span>
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {lessonOutputTab === 'console' && (
+            <div className="space-y-2">
+              <span className="text-xs font-bold uppercase tracking-wider block" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                BEAM Process Standard Output (stdout)
+              </span>
+              <pre
+                className="font-mono text-xs p-3 rounded-xl overflow-x-auto leading-relaxed select-text"
+                style={{
+                  background: isDark ? '#05080E' : '#0F172A',
+                  color: '#34D399',
+                  border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.12)',
+                  minHeight: '160px',
+                }}
+              >
+                {runResult?.stdout ? runResult.stdout : '% No console output captured. Use io:format/2 in your module.'}
+              </pre>
+            </div>
+          )}
+
+          {lessonOutputTab === 'verification' && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between pb-1">
+                <span className="text-xs font-bold uppercase tracking-wider" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                  Verification Pipeline
+                </span>
+                {verificationStages.length > 0 && (
+                  <span
+                    className="text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={{
+                      background: verificationStages.every((s) => s.status === 'passed') ? 'rgba(16,185,129,0.20)' : 'rgba(239,68,68,0.20)',
+                      color: verificationStages.every((s) => s.status === 'passed') ? '#10B981' : '#EF4444',
+                    }}
+                  >
+                    {verificationStages.every((s) => s.status === 'passed') ? '100/100 PASSED' : 'VERIFICATION FAILED'}
+                  </span>
+                )}
+              </div>
+              {verificationStages.length > 0 ? (
+                <div className="space-y-1.5">
+                  {verificationStages.map((s) => (
+                    <StageRow key={s.id} stage={s} isDark={isDark} />
+                  ))}
+                  {beamFootprint && (
+                    <div className="pt-2">
+                      <BeamFootprintCard footprint={beamFootprint} isDark={isDark} />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-6 text-center rounded-2xl border" style={{ borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)' }}>
+                  <ShieldCheck className="w-8 h-8 mx-auto mb-2 text-amber-500 opacity-80" />
+                  <h4 className="text-sm font-bold mb-1" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
+                    Full Verification Required
+                  </h4>
+                  <p className="text-xs max-w-xs mx-auto leading-relaxed mb-4" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                    Tap <strong>Submit for Grading</strong> to run compiler checks, AST rules, and hidden test suites.
+                  </p>
+                  <button
+                    onClick={() => runVerificationSuite()}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-900 shadow-md inline-flex items-center gap-1.5"
+                    style={{ background: '#F59E0B' }}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Submit for Grading</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {lessonOutputTab === 'solution' && (
+            <SolutionViewerTab
+              fileName={activeFile?.name || 'solution.erl'}
+              solutionCode={
+                (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles[activeFile.path]) ||
+                (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles[activeFile.path.replace(/^src\//, '')]) ||
+                (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles['src/' + activeFile.path]) ||
+                lesson.solutionCode ||
+                ''
+              }
+              solutionExplanation={lesson.solutionExplanation}
+              isDark={isDark}
+              isExpanded={isDrawerExpanded}
+              onToggleExpand={() => setIsDrawerExpanded((prev) => !prev)}
+            />
+          )}
+        </div>
+
+        {/* Mobile Results Bottom Action Bar */}
+        <div
+          className="flex items-center gap-2 p-3 border-t flex-shrink-0 pb-safe"
+          style={{
+            background: isDark ? 'rgba(11,15,23,0.85)' : 'rgba(241,245,249,0.92)',
+            borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)',
+          }}
+        >
+          <button
+            onClick={() => setMobileTab('code')}
+            className="flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
+            style={{
+              background: isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF',
+              color: isDark ? '#F8FAFC' : '#0F172A',
+              border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(15,23,42,0.10)',
+            }}
+          >
+            <Code2 className="w-3.5 h-3.5" />
+            <span>Back to Editor</span>
+          </button>
+
+          <button
+            onClick={() => runCode()}
+            disabled={isRunning || isVerifying || !isBackendOnline}
+            className="btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>{isRunning ? 'Running...' : 'Run Again'}</span>
+          </button>
+
+          <button
+            onClick={() => runVerificationSuite()}
+            disabled={isVerifying || isRunning || !isBackendOnline}
+            className="btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40"
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>{isVerifying ? 'Verifying...' : 'Submit'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Confirmation & Solution Unlock Modals */}
+      <SolutionUnlockModal
+        isOpen={isUnlockModalOpen}
+        fileName={activeFile?.name || 'solution.erl'}
+        isDark={isDark}
+        onClose={() => setIsUnlockModalOpen(false)}
+        onConfirm={() => {
+          unlockSolutionForLesson(lesson.id);
+          setLessonOutputOpen(true);
+          setLessonOutputTab('solution');
+          if (typeof window !== 'undefined' && window.innerWidth < 768) {
+            setMobileTab('results');
+          }
+        }}
+      />
+
+      <ResetConfirmModal
+        isOpen={isResetModalOpen}
+        fileName={activeFile?.name || 'workspace'}
+        isDark={isDark}
+        onClose={() => setIsResetModalOpen(false)}
+        onConfirm={resetWorkspace}
+      />
     </div>
   );
 }

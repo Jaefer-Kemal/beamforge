@@ -12,6 +12,7 @@ import {
   ExerciseManifest,
   AppTheme,
   RunResult,
+  BeamFootprint,
 } from '../types/workspace';
 import { EXERCISES } from './exercisesData';
 import { 
@@ -78,8 +79,8 @@ interface WorkspaceState {
   goToNextLesson: () => void;
 
   /** Bottom lesson output drawer tab */
-  lessonOutputTab: 'test_results' | 'console' | 'verification';
-  setLessonOutputTab: (tab: 'test_results' | 'console' | 'verification') => void;
+  lessonOutputTab: 'test_results' | 'console' | 'verification' | 'solution';
+  setLessonOutputTab: (tab: 'test_results' | 'console' | 'verification' | 'solution') => void;
 
   /** Whether the lesson output drawer is open */
   isLessonOutputOpen: boolean;
@@ -91,6 +92,8 @@ interface WorkspaceState {
 
   /** Run result — stdout + visible test case outcomes */
   runResult: RunResult | null;
+  beamFootprint: BeamFootprint | null;
+  setBeamFootprint: (footprint: BeamFootprint | null) => void;
   isRunning: boolean;
   runCode: (keepTab?: boolean) => Promise<void>;
   clearRunResult: () => void;
@@ -102,7 +105,9 @@ interface WorkspaceState {
   totalXp: number;
   unlockedWorldIds: string[];
   devModeUnlockedAll: boolean;
+  unlockedSolutionLessonIds: string[];
   toggleDevModeUnlockedAll: () => void;
+  unlockSolutionForLesson: (lessonId: string) => void;
   loadSolutionForActiveExercise: () => void;
   advanceToNextLevel: () => void;
   onLevelCompleted: (levelId: string) => void;
@@ -110,6 +115,8 @@ interface WorkspaceState {
   // Connection & Backend Mode
   wsStatus: WSConnectionStatus;
   setWsStatus: (status: WSConnectionStatus) => void;
+  isBackendOnline: boolean;
+  checkBackendHealth: () => Promise<boolean>;
 
   // Exercises
   activeExerciseId: string;
@@ -246,6 +253,7 @@ const loadInitialProgress = () => {
       totalXp: 0,
       unlockedWorldIds: ['world-1-foundations'],
       devModeUnlockedAll: false,
+      unlockedSolutionLessonIds: [] as string[],
     };
   }
   try {
@@ -257,6 +265,7 @@ const loadInitialProgress = () => {
         totalXp: (parsed.totalXp || 0) as number,
         unlockedWorldIds: (parsed.unlockedWorldIds || ['world-1-foundations']) as string[],
         devModeUnlockedAll: Boolean(parsed.devModeUnlockedAll),
+        unlockedSolutionLessonIds: (parsed.unlockedSolutionLessonIds || []) as string[],
       };
     }
   } catch (e) {
@@ -267,22 +276,30 @@ const loadInitialProgress = () => {
     totalXp: 0,
     unlockedWorldIds: ['world-1-foundations'],
     devModeUnlockedAll: false,
+    unlockedSolutionLessonIds: [] as string[],
   };
 };
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
-  const defaultLesson = getLessonById('ch02-l06');
+  const lastActiveId = (typeof window !== 'undefined' ? localStorage.getItem('bf_last_active_exercise') : null) || 'ch01-l01';
+  const defaultLesson = getLessonById(lastActiveId) || getLessonById('ch01-l01');
   const defaultEx = ALL_EXERCISES['erl-101-pattern-matching'] || ALL_EXERCISES['otp-04-ets-heir-resilience'];
   const initialFiles: WorkspaceFile[] = (defaultLesson && defaultLesson.files) ? defaultLesson.files : (defaultEx?.files || []);
 
   // Initialize WebSocket multiplexer listeners
   wsMux.onStatusChange((status) => {
-    set({ wsStatus: status });
+    set({ wsStatus: status, isBackendOnline: status === 'connected' });
     if (status === 'connected') {
-      get().addTerminalEntry({
-        type: 'output',
-        text: '[Gateway] Connected to live Go Orchestrator (ws://localhost:8080/ws) • Native Erlang/OTP 29',
-      });
+      if (typeof get === 'function' && get()?.addTerminalEntry) {
+        get().addTerminalEntry({
+          type: 'output',
+          text: '[Gateway] Connected to live Go Orchestrator (ws://localhost:8080/ws) • Native Erlang/OTP 29',
+        });
+      }
+    } else {
+      if (typeof get === 'function' && get()?.checkBackendHealth) {
+        get().checkBackendHealth();
+      }
     }
   });
 
@@ -373,6 +390,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           },
         });
       }
+      if (report.beam_footprint || report.beamFootprint) {
+        set({ beamFootprint: report.beam_footprint || report.beamFootprint });
+      }
       if (report.score === 100 || report.verdict === 'PASSED') {
         get().onLevelCompleted(get().activeExerciseId);
       }
@@ -400,7 +420,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     bootDevView: 'lesson',
     setBootDevView: (view) => set({ bootDevView: view }),
 
-    activeChapter: 2,
+    activeChapter: defaultLesson ? defaultLesson.chapterNumber : 1,
     setActiveChapter: (ch) => {
       const target = getLessonByChapterAndNum(ch, 1);
       if (target) {
@@ -411,7 +431,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       }
     },
 
-    activeLesson: 6,
+    activeLesson: defaultLesson ? defaultLesson.lessonNumber : 1,
     setActiveLesson: (lesson) => {
       const ch = get().activeChapter;
       const target = getLessonByChapterAndNum(ch, lesson);
@@ -458,6 +478,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     setSolutionVisible: (visible) => set({ isSolutionVisible: visible }),
 
     runResult: null,
+    beamFootprint: null,
+    setBeamFootprint: (footprint) => set({ beamFootprint: footprint }),
     isRunning: false,
     clearRunResult: () => set({ runResult: null }),
     runCode: async (keepTab?: boolean) => {
@@ -468,18 +490,29 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       const fileMap: Record<string, string> = {};
       get().files.forEach((f) => { fileMap[f.path] = f.content; });
 
+      const activeId = get().activeExerciseId;
+      const lesson = getLessonById(activeId);
+      const visibleTestInputs = (lesson?.visibleTestCases || []).map((tc) => ({
+        id: tc.id,
+        call_str: tc.erlangCall || tc.callStr || '',
+        expected: tc.expectedOutput || '',
+        title: tc.title || '',
+      }));
+
       try {
         const res = await fetch('http://localhost:8080/api/v1/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            exercise_id: get().activeExerciseId,
-            session_id: `bootdev-${get().activeExerciseId}`,
+            exercise_id: activeId,
+            session_id: `bootdev-${activeId}`,
             files: fileMap,
+            visible_tests: visibleTestInputs,
           }),
         });
 
         if (res.ok) {
+          set({ isBackendOnline: true });
           const data = await res.json();
           const runResult: RunResult = {
             mode: 'run',
@@ -502,7 +535,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               message: d.message || '',
             })),
           };
-          set({ runResult, isLessonOutputOpen: true });
+          const footprint: BeamFootprint | null = data.beam_footprint || data.beamFootprint || null;
+          set({ runResult, beamFootprint: footprint, isLessonOutputOpen: true });
           if (!keepTab) set({ lessonOutputTab: 'test_results' });
           if (!runResult.compileOk) {
             get().addTerminalEntry({
@@ -517,23 +551,48 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             });
           }
         } else {
+          set({
+            runResult: {
+              mode: 'run',
+              exerciseId: get().activeExerciseId,
+              compileOk: false,
+              stdout: `[Run Error] Backend responded with HTTP ${res.status}`,
+              visibleTests: [],
+              totalDurationMs: 0,
+            },
+            beamFootprint: null,
+          });
           get().addTerminalEntry({ type: 'error', text: `[Run] Failed: HTTP ${res.status}` });
         }
       } catch (err) {
-        // Fallback simulation when orchestrator is not running
-        const simResult: RunResult = {
-          mode: 'run',
-          exerciseId: get().activeExerciseId,
-          compileOk: true,
-          stdout: 'Processing 3 orders on inventory...',
-          visibleTests: [
-            { callStr: 'inventory:calculate_order_total(Inv, Orders)', expected: '175', actual: '175', passed: true, timeMs: 12 },
-          ],
-          totalDurationMs: 320,
-        };
-        set({ runResult: simResult, isLessonOutputOpen: true });
+        // Backend is offline — DO NOT fake-pass!
+        set({
+          isBackendOnline: false,
+          runResult: {
+            mode: 'run',
+            exerciseId: get().activeExerciseId,
+            compileOk: false,
+            stdout: '[BeamForge Offline Error]\n\nGo Orchestrator backend (http://localhost:8080) is OFFLINE.\n\nCode execution was NOT performed because the BEAM/OTP runtime is not reachable.\nTo run and compile Erlang code, start the Go Orchestrator:\n  1. Open a terminal in services/orchestrator\n  2. Run: .\\orchestrator.exe (or go run ./cmd/server)',
+            visibleTests: [],
+            totalDurationMs: 0,
+            diagnostics: [
+              {
+                file: 'Go Orchestrator',
+                line: 1,
+                col: 1,
+                severity: 'error',
+                message: 'Backend Offline: Cannot reach http://localhost:8080',
+              },
+            ],
+          },
+          beamFootprint: null,
+          isLessonOutputOpen: true,
+        });
         if (!keepTab) set({ lessonOutputTab: 'test_results' });
-        get().addTerminalEntry({ type: 'output', text: '[Offline Mode] Simulated run result shown.' });
+        get().addTerminalEntry({
+          type: 'error',
+          text: '[BeamForge] Error: Go Orchestrator is OFFLINE (http://localhost:8080). Start the backend to execute code.',
+        });
       } finally {
         set({ isRunning: false });
       }
@@ -545,6 +604,29 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     totalXp: initialProgress.totalXp,
     unlockedWorldIds: initialProgress.unlockedWorldIds,
     devModeUnlockedAll: initialProgress.devModeUnlockedAll,
+    unlockedSolutionLessonIds: initialProgress.unlockedSolutionLessonIds || [],
+
+    unlockSolutionForLesson: (lessonId: string) => {
+      set((state) => {
+        if (state.unlockedSolutionLessonIds.includes(lessonId)) return state;
+        const next = [...state.unlockedSolutionLessonIds, lessonId];
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem(
+              'beamforge_progress',
+              JSON.stringify({
+                completedLevelIds: state.completedLevelIds,
+                totalXp: state.totalXp,
+                unlockedWorldIds: state.unlockedWorldIds,
+                devModeUnlockedAll: state.devModeUnlockedAll,
+                unlockedSolutionLessonIds: next,
+              })
+            );
+          } catch {}
+        }
+        return { unlockedSolutionLessonIds: next };
+      });
+    },
 
     toggleDevModeUnlockedAll: () => {
       const next = !get().devModeUnlockedAll;
@@ -558,6 +640,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             totalXp: get().totalXp,
             unlockedWorldIds: newUnlocked,
             devModeUnlockedAll: next,
+            unlockedSolutionLessonIds: get().unlockedSolutionLessonIds,
           }));
         } catch {}
       }
@@ -665,11 +748,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     },
 
     onLevelCompleted: (levelId: string) => {
-      const { completedLevelIds, totalXp, unlockedWorldIds, devModeUnlockedAll } = get();
+      const { completedLevelIds, totalXp, unlockedWorldIds, devModeUnlockedAll, unlockedSolutionLessonIds, activeExerciseId } = get();
       const level = getLevelById(levelId);
       const isAlreadyCompleted = completedLevelIds.includes(levelId);
+      const isSolutionUnlocked = (unlockedSolutionLessonIds || []).includes(levelId) || (unlockedSolutionLessonIds || []).includes(activeExerciseId);
+      const xpReward = isSolutionUnlocked ? 0 : (level?.xpReward || 100);
       const newCompleted = isAlreadyCompleted ? completedLevelIds : [...completedLevelIds, levelId];
-      const newXp = isAlreadyCompleted ? totalXp : totalXp + (level?.xpReward || 100);
+      const newXp = isAlreadyCompleted ? totalXp : totalXp + xpReward;
 
       let newUnlockedWorlds = [...unlockedWorldIds];
       if (level) {
@@ -706,18 +791,41 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             totalXp: newXp,
             unlockedWorldIds: newUnlockedWorlds,
             devModeUnlockedAll,
+            unlockedSolutionLessonIds,
           }));
         } catch {}
       }
 
       get().addTerminalEntry({
         type: 'output',
-        text: `[Mastery] Level ${level?.levelNumber || levelId} passed! (+${level?.xpReward || 100} XP). Total XP: ${newXp}`,
+        text: isSolutionUnlocked
+          ? `[Mastery] Level ${level?.levelNumber || levelId} passed! (+0 XP - Solution was viewed). Total XP: ${newXp}`
+          : `[Mastery] Level ${level?.levelNumber || levelId} passed! (+${xpReward} XP). Total XP: ${newXp}`,
       });
     },
 
     wsStatus: wsMux.isConnected() ? 'connected' : 'disconnected',
-    setWsStatus: (status) => set({ wsStatus: status }),
+    setWsStatus: (status) => set({ wsStatus: status, isBackendOnline: status === 'connected' }),
+    isBackendOnline: false,
+    checkBackendHealth: async () => {
+      if (typeof window === 'undefined') return false;
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 1200);
+        const res = await fetch('http://localhost:8080/health', { signal: controller.signal });
+        clearTimeout(timer);
+        const online = res.ok;
+        if (get().isBackendOnline !== online) {
+          set({ isBackendOnline: online });
+        }
+        return online;
+      } catch {
+        if (get().isBackendOnline) {
+          set({ isBackendOnline: false });
+        }
+        return false;
+      }
+    },
 
     activeExerciseId: defaultLesson ? defaultLesson.id : defaultEx.id,
     exercises: ALL_EXERCISES,
@@ -747,11 +855,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           activeLesson: lesson.lessonNumber,
           files: lessonFiles,
           activeFilePath: lessonFiles[0]?.path || '',
-          openTabPaths: lessonFiles.slice(0, 2).map((f) => f.path),
+          openTabPaths: lessonFiles.map((f) => f.path),
           isSolutionVisible: false,
           runResult: null,
           verificationStages: [],
+          lessonOutputTab: 'test_results',
+          isLessonOutputOpen: false,
         });
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('bf_last_active_exercise', id);
+          } catch (_) {}
+        }
         get().addTerminalEntry({
           type: 'output',
           text: `==> Switched workspace to Lesson [${lesson.id}] Ch ${lesson.chapterNumber}.${lesson.lessonNumber}: ${lesson.title}`,
@@ -778,7 +893,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             hintOnFail: s.hintOnFail,
           })),
           xmppState: curriculumLevel.initialXmppState || 'wait_for_stream',
+          lessonOutputTab: 'test_results',
+          isLessonOutputOpen: false,
         });
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('bf_last_active_exercise', id);
+          } catch (_) {}
+        }
         get().addTerminalEntry({
           type: 'output',
           text: `==> Switched workspace to Level [${curriculumLevel.levelNumber}] ${curriculumLevel.title}`,
@@ -799,7 +921,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         selectedNodeId: null,
         verificationStages: INITIAL_STAGES.map((s) => ({ ...s, status: 'pending', timeMs: undefined })),
         xmppState: ex.initialXmppState || 'wait_for_stream',
+        lessonOutputTab: 'test_results',
+        isLessonOutputOpen: false,
       });
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('bf_last_active_exercise', id);
+        } catch (_) {}
+      }
       get().addTerminalEntry({
         type: 'output',
         text: `==> Switched workspace to exercise: [${ex.id}] ${ex.title}`,
@@ -979,6 +1108,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             }));
             set({ verificationStages: mappedStages, isVerifying: false });
           }
+          if (report.beam_footprint || report.beamFootprint) {
+            set({ beamFootprint: report.beam_footprint || report.beamFootprint });
+          }
           if (report.visible_tests && report.visible_tests.length > 0) {
             set({
               runResult: {
@@ -1011,72 +1143,32 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             });
           }
           return;
+        } else {
+          throw new Error(`HTTP ${res.status}`);
         }
       } catch (e) {
-        // Orchestrator server not reachable via REST, continue to offline simulation
+        // Backend is offline — DO NOT fake-pass!
+        set({
+          isBackendOnline: false,
+          isVerifying: false,
+          verificationStages: [
+            {
+              id: 'compile_and_typecheck',
+              title: '1. Backend Runtime Connection',
+              status: 'failed',
+              timeMs: 0,
+              assertionDetails: 'Cannot connect to Go Orchestrator at http://localhost:8080. The BEAM/OTP 29 runtime is offline.',
+              hintOnFail: 'Start the Go Orchestrator with .\\orchestrator.exe or go run ./cmd/server in services/orchestrator to verify and grade code.',
+            },
+          ],
+          beamFootprint: null,
+        });
+        get().addTerminalEntry({
+          type: 'error',
+          text: '==> [bf_grader] VERIFICATION ABORTED: Go Orchestrator is OFFLINE (http://localhost:8080). Start backend service to verify code.',
+        });
+        return;
       }
-
-      // Offline Simulation Fallback
-      set((state) => ({
-        verificationStages: state.verificationStages.map((s, idx) =>
-          idx === 0 ? { ...s, status: 'running' } : s
-        ),
-      }));
-      await new Promise((r) => setTimeout(r, 650));
-      set((state) => ({
-        verificationStages: state.verificationStages.map((s, idx) =>
-          idx === 0 ? { ...s, status: 'passed', timeMs: 38 } : s
-        ),
-      }));
-
-      set((state) => ({
-        verificationStages: state.verificationStages.map((s, idx) =>
-          idx === 1 ? { ...s, status: 'running' } : s
-        ),
-      }));
-      await new Promise((r) => setTimeout(r, 850));
-      set((state) => ({
-        verificationStages: state.verificationStages.map((s, idx) =>
-          idx === 1 ? { ...s, status: 'passed', timeMs: 142 } : s
-        ),
-      }));
-
-      set((state) => ({
-        verificationStages: state.verificationStages.map((s, idx) =>
-          idx === 2 ? { ...s, status: 'running' } : s
-        ),
-      }));
-      await new Promise((r) => setTimeout(r, 700));
-      set((state) => ({
-        verificationStages: state.verificationStages.map((s, idx) =>
-          idx === 2 ? { ...s, status: 'passed', timeMs: 64 } : s
-        ),
-      }));
-
-      set((state) => ({
-        verificationStages: state.verificationStages.map((s, idx) =>
-          idx === 3 ? { ...s, status: 'running' } : s
-        ),
-      }));
-
-      const targetWorker = get().nodes.find((n) => n.name === 'session_cache' || n.name === 'xmpp_c2s_statem');
-      if (targetWorker) {
-        get().killProcess(targetWorker.id);
-      }
-
-      await new Promise((r) => setTimeout(r, 1400));
-      set((state) => ({
-        verificationStages: state.verificationStages.map((s, idx) =>
-          idx === 3 ? { ...s, status: 'passed', timeMs: 288 } : s
-        ),
-        isVerifying: false,
-      }));
-
-      get().onLevelCompleted(get().activeExerciseId);
-      get().addTerminalEntry({
-        type: 'output',
-        text: '==> [bf_grader] ALL VERIFICATION STAGES PASSED! (Score: 100/100, Signature: ed25519:7f8a91c2b4d5...)',
-      });
     },
 
     // XMPP Inspector

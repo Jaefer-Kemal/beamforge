@@ -31,11 +31,20 @@ import {
   Lightbulb,
   BookOpen,
   X,
+  WifiOff,
+  Code2,
+  Terminal,
+  ArrowRight,
 } from 'lucide-react';
 import type { OtpDocSignatureCard } from '../../types/workspace';
 import { BeamConceptVisualizer } from '../pedagogy/BeamConceptVisualizer';
 import { MentalModelCheckCard } from '../pedagogy/MentalModelCheckCard';
 import { ErlangTermDiffCard } from '../pedagogy/ErlangTermDiffCard';
+import { BeamFootprintCard } from '../pedagogy/BeamFootprintCard';
+import { BeamMarkdownRenderer, renderInlineContent } from '../pedagogy/BeamMarkdownRenderer';
+import { SolutionUnlockModal } from './SolutionUnlockModal';
+import { ResetConfirmModal } from './ResetConfirmModal';
+import { SolutionViewerTab } from './SolutionViewerTab';
 
 const CAPSTONE_FILES = [
   { path: 'src/xmpp_sup.erl', label: 'xmpp_sup.erl', milestoneIdx: 0, tag: 'M1' },
@@ -45,144 +54,34 @@ const CAPSTONE_FILES = [
   { path: 'src/xmpp_router.erl', label: 'xmpp_router.erl', milestoneIdx: 4, tag: 'M5' },
 ];
 
-// ── Markdown Parser Utilities ────────────────────────────────────────────────
-function renderInlineContent(text: string, isDark: boolean): React.ReactNode {
-  if (!text) return null;
-  const regex = /(`[^`]+`|\*\*[^*]+?\*\*)/g;
-  const parts = text.split(regex);
+const FILE_TO_MILESTONE_KEY: Record<string, string> = {
+  'src/xmpp_sup.erl': 'ch12-m1',
+  'src/xmpp_stream_parser.erl': 'ch12-m2',
+  'src/xmpp_session_registry.erl': 'ch12-m3',
+  'src/xmpp_c2s_statem.erl': 'ch12-m4',
+  'src/xmpp_router.erl': 'ch12-m5',
+};
 
-  return parts.map((part, idx) => {
-    if (!part) return null;
+const MILESTONE_LESSON_IDS = [
+  'ch12-l01',
+  'ch12-l02',
+  'ch12-l03',
+  'ch12-l04',
+  'ch12-l05',
+  'ch12-capstone',
+];
 
-    if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
-      const codeVal = part.slice(1, -1);
-      return (
-        <code
-          key={idx}
-          className="px-1.5 py-0.5 rounded text-xs font-mono font-semibold inline-block mx-0.5"
-          style={{
-            background: isDark ? 'rgba(139,92,246,0.22)' : 'rgba(124,58,237,0.12)',
-            color: isDark ? '#DDD6FE' : '#4C1D95',
-            border: isDark ? '1px solid rgba(139,92,246,0.35)' : '1px solid rgba(124,58,237,0.28)',
-          }}
-        >
-          {codeVal}
-        </code>
-      );
-    }
+const MILESTONE_SHORT_LABELS = [
+  '1. Supervisor',
+  '2. XML Framer',
+  '3. ETS Registry',
+  '4. C2S StateM',
+  '5. Router',
+  '6. Chaos Monkey',
+];
 
-    if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
-      const inner = part.slice(2, -2);
-      return (
-        <strong
-          key={idx}
-          className="font-bold"
-          style={{
-            color: isDark ? '#FFFFFF' : '#020617',
-            fontWeight: 700,
-          }}
-        >
-          {inner.includes('`') ? renderInlineContent(inner, isDark) : inner}
-        </strong>
-      );
-    }
-
-    return <React.Fragment key={idx}>{part}</React.Fragment>;
-  });
-}
-
-function MilestoneMarkdownRenderer({ md, isDark }: { md: string; isDark: boolean }) {
-  const lines = md.split('\n');
-  const elements: React.ReactNode[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (line.startsWith('```erlang') || line.startsWith('```')) {
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith('```')) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      elements.push(
-        <ErlangCodeBlock key={i} code={codeLines.join('\n')} isDark={isDark} />
-      );
-    } else if (line.startsWith('## ')) {
-      elements.push(
-        <h2
-          key={i}
-          className="text-base font-extrabold mt-6 mb-2 tracking-tight"
-          style={{ color: isDark ? '#F8FAFC' : '#020617' }}
-        >
-          {renderInlineContent(line.slice(3), isDark)}
-        </h2>
-      );
-    } else if (line.startsWith('### ')) {
-      elements.push(
-        <h3
-          key={i}
-          className="text-sm font-bold mt-5 mb-2"
-          style={{ color: isDark ? '#F1F5F9' : '#0F172A' }}
-        >
-          {renderInlineContent(line.slice(4), isDark)}
-        </h3>
-      );
-    } else if (line.startsWith('> ')) {
-      elements.push(
-        <blockquote
-          key={i}
-          className="border-l-4 pl-4 py-2 my-2.5 text-xs leading-relaxed"
-          style={{
-            borderColor: isDark ? '#A78BFA' : '#7C3AED',
-            color: isDark ? '#E2E8F0' : '#0F172A',
-            background: isDark ? 'rgba(139,92,246,0.12)' : 'rgba(124,58,237,0.06)',
-            borderRadius: '0 0.5rem 0.5rem 0',
-          }}
-        >
-          {renderInlineContent(line.slice(2), isDark)}
-        </blockquote>
-      );
-    } else if (line.startsWith('- ') || line.startsWith('* ')) {
-      elements.push(
-        <li
-          key={i}
-          className="ml-5 text-xs mb-1.5 list-disc leading-relaxed font-normal"
-          style={{ color: isDark ? '#CBD5E1' : '#334155' }}
-        >
-          {renderInlineContent(line.slice(2), isDark)}
-        </li>
-      );
-    } else if (/^\d+\.\s+/.test(line)) {
-      const numMatch = line.match(/^(\d+\.)\s+(.*)$/);
-      elements.push(
-        <li
-          key={i}
-          className="ml-5 text-xs mb-1.5 list-decimal leading-relaxed font-normal"
-          style={{ color: isDark ? '#CBD5E1' : '#334155' }}
-        >
-          {renderInlineContent(numMatch ? numMatch[2] : line, isDark)}
-        </li>
-      );
-    } else if (line.trim() === '') {
-      elements.push(<div key={i} className="h-2" />);
-    } else {
-      elements.push(
-        <p
-          key={i}
-          className="text-xs leading-relaxed mb-2 font-normal"
-          style={{ color: isDark ? '#CBD5E1' : '#334155' }}
-        >
-          {renderInlineContent(line, isDark)}
-        </p>
-      );
-    }
-    i++;
-  }
-
-  return <div className="leading-relaxed space-y-1">{elements}</div>;
-}
+// ── Milestone Markdown Renderer Delegated to BeamMarkdownRenderer ────────────
+const MilestoneMarkdownRenderer = BeamMarkdownRenderer;
 
 // ── Compact Expandable OTP Doc Card ──────────────────────────────────────────
 function CapstoneOtpDocCard({ card, isDark }: { card: OtpDocSignatureCard; isDark: boolean }) {
@@ -247,11 +146,11 @@ function CapstoneOtpDocCard({ card, isDark }: { card: OtpDocSignatureCard; isDar
             ))}
           </div>
           <p className="text-[11px] leading-relaxed" style={{ color: isDark ? '#CBD5E1' : '#334155' }}>
-            {card.description}
+            {renderInlineContent(card.description, isDark)}
           </p>
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-500">
             <Zap className="w-3.5 h-3.5 text-emerald-500 fill-emerald-500 shrink-0" />
-            <span>{card.complexityNote}</span>
+            <span>{renderInlineContent(card.complexityNote, isDark)}</span>
           </div>
           <div className="flex items-center gap-3 pt-1">
             <a
@@ -291,6 +190,7 @@ export function CapstoneStudioView() {
     theme,
     files,
     activeFilePath,
+    activeExerciseId,
     openFile,
     updateFileContent,
     runVerificationSuite,
@@ -299,23 +199,62 @@ export function CapstoneStudioView() {
     isRunning,
     verificationStages,
     runResult,
+    beamFootprint,
+    isBackendOnline,
+    checkBackendHealth,
     switchExercise,
+    unlockedSolutionLessonIds,
+    unlockSolutionForLesson,
   } = useWorkspaceStore();
 
   const isDark = theme === 'dark';
-  const capstoneMasterLesson = CHAPTER_12_LESSONS[0];
+  const capstoneMasterLesson = CHAPTER_12_LESSONS[5] || CHAPTER_12_LESSONS[0];
 
-  // Active milestone index (0 to 4)
+  // Active milestone index (0 to 5)
   const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(0);
 
   // Bottom drawer state
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isDrawerExpanded, setIsDrawerExpanded] = useState(false);
   const [drawerTab, setDrawerTab] = useState<'stages' | 'terminal' | 'tests' | 'solution'>('stages');
   const [copiedCode, setCopiedCode] = useState(false);
+  const [mobileTab, setMobileTab] = useState<'guide' | 'code' | 'results'>('guide');
+
+  // Confirmation Modals
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
 
   const monacoRef = useRef<Monaco | null>(null);
   const editorRef = useRef<any>(null);
   const lintTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const insertTokenAtCursor = (token: string) => {
+    if (editorRef.current) {
+      const editor = editorRef.current;
+      const selection = editor.getSelection();
+      if (selection) {
+        editor.executeEdits('beamforge-capstone-mobile-toolbar', [
+          {
+            range: selection,
+            text: token,
+            forceMoveMarkers: true,
+          },
+        ]);
+      } else {
+        editor.trigger('keyboard', 'type', { text: token });
+      }
+      editor.focus();
+    }
+  };
+
+  // Continuously check Go Orchestrator backend health
+  useEffect(() => {
+    checkBackendHealth();
+    const interval = setInterval(() => {
+      checkBackendHealth();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [checkBackendHealth]);
 
   // Real-time debounced Erlang linter (300ms)
   const runLint = (code: string, filepath: string) => {
@@ -368,23 +307,18 @@ export function CapstoneStudioView() {
     }
   }, [files, switchExercise]);
 
-  // Keep activeMilestoneIndex in sync when activeFilePath changes
-  useEffect(() => {
-    const match = CAPSTONE_FILES.find((cf) => cf.path === activeFilePath);
-    if (match && match.milestoneIdx !== activeMilestoneIndex) {
-      setActiveMilestoneIndex(match.milestoneIdx);
-    }
-  }, [activeFilePath, activeMilestoneIndex]);
-
   // Active milestone spec and active rich lesson
   const activeMilestone = CH12_CAPSTONE_MILESTONES[activeMilestoneIndex] || CH12_CAPSTONE_MILESTONES[0];
   const activeMilestoneLesson = CH12_MILESTONE_LESSONS[activeMilestoneIndex] || CH12_MILESTONE_LESSONS[0];
   const activeFile = files.find((f) => f.path === activeFilePath) || files[0];
+  const currentFilePath = activeFile?.path || activeMilestone.targetFile;
+  const requiredUnlockKey = FILE_TO_MILESTONE_KEY[currentFilePath] || `ch12-m${activeMilestoneIndex + 1}`;
+  const isCurrentFileUnlocked = (unlockedSolutionLessonIds || []).includes(requiredUnlockKey);
 
-  // Handle milestone stepper pill click -> switches editor to that file and left pane to that milestone
+  // Handle milestone stepper pill click -> switches editor to target file and left pane to that milestone
   const handleMilestoneClick = (index: number) => {
     setActiveMilestoneIndex(index);
-    const targetPath = CAPSTONE_FILES[index]?.path;
+    const targetPath = CH12_CAPSTONE_MILESTONES[index]?.targetFile || CAPSTONE_FILES[index]?.path;
     if (targetPath) {
       openFile(targetPath);
     }
@@ -423,23 +357,41 @@ export function CapstoneStudioView() {
 
   const passedCount = verificationStages.filter((s) => s.status === 'passed').length;
 
-  // Reset active file to initial starter code
-  const handleResetActiveFile = () => {
+  // Reset active file to initial starter code (invoked after confirmation)
+  const handleConfirmReset = () => {
     const path = activeFile?.path || activeMilestone.targetFile;
     const starter = CH12_STARTER_FILES[path];
-    if (starter && confirm(`Reset ${activeFile?.name || path} back to initial starter code?`)) {
+    if (starter) {
       updateFileContent(path, starter);
       runLint(starter, path);
     }
   };
 
-  // Load reference solution for active file
-  const handleLoadActiveSolution = () => {
-    const path = activeFile?.path || activeMilestone.targetFile;
-    const sol = CH12_SOLUTION_FILES[path];
-    if (sol && confirm(`Load verified reference solution for ${activeFile?.name || path}?`)) {
-      updateFileContent(path, sol);
-      runLint(sol, path);
+  // Solution button click handler with Option B Modal gating
+  const handleSolutionClick = () => {
+    if (isCurrentFileUnlocked) {
+      if (isDrawerOpen && drawerTab === 'solution') {
+        setIsDrawerOpen(false);
+      } else {
+        setIsDrawerOpen(true);
+        setDrawerTab('solution');
+        if (typeof window !== 'undefined' && window.innerWidth < 768) {
+          setMobileTab('results');
+        }
+      }
+    } else {
+      setIsUnlockModalOpen(true);
+    }
+  };
+
+  // Unlock solution confirmation
+  const handleConfirmUnlockSolution = () => {
+    unlockSolutionForLesson(requiredUnlockKey);
+    setIsUnlockModalOpen(false);
+    setIsDrawerOpen(true);
+    setDrawerTab('solution');
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setMobileTab('results');
     }
   };
 
@@ -447,6 +399,9 @@ export function CapstoneStudioView() {
   const handleSubmit = async () => {
     setIsDrawerOpen(true);
     setDrawerTab('stages');
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setMobileTab('results');
+    }
     await runVerificationSuite();
   };
 
@@ -454,6 +409,9 @@ export function CapstoneStudioView() {
   const handleRun = async () => {
     setIsDrawerOpen(true);
     setDrawerTab('terminal');
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setMobileTab('results');
+    }
     await runCode();
   };
 
@@ -479,17 +437,84 @@ export function CapstoneStudioView() {
 
   return (
     <div
-      className="flex w-full overflow-hidden select-text"
+      className="flex flex-col md:flex-row w-full overflow-hidden select-text"
       style={{
-        height: 'calc(100vh - 3.5rem)',
+        height: 'calc(100dvh - 3.5rem)',
         marginTop: '3.5rem',
       }}
     >
+      {/* ── MOBILE SEGMENTED VIEW SWITCHER (< md) ── */}
+      <div
+        className="flex md:hidden items-center justify-between px-3 py-1.5 border-b flex-shrink-0"
+        style={{
+          background: isDark ? 'rgba(15,23,42,0.65)' : 'rgba(255,255,255,0.75)',
+          borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)',
+        }}
+      >
+        <div className="flex items-center gap-1.5 w-full">
+          <button
+            id="mobile-capstone-guide"
+            onClick={() => setMobileTab('guide')}
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all"
+            style={{
+              background: mobileTab === 'guide'
+                ? (isDark ? 'rgba(245,158,11,0.30)' : 'rgba(245,158,11,0.15)')
+                : 'transparent',
+              color: mobileTab === 'guide' ? '#FCD34D' : (isDark ? '#94A3B8' : '#64748B'),
+            }}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Guide</span>
+          </button>
+
+          <button
+            id="mobile-capstone-code"
+            onClick={() => setMobileTab('code')}
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all"
+            style={{
+              background: mobileTab === 'code'
+                ? (isDark ? 'rgba(0,122,255,0.25)' : 'rgba(0,122,255,0.12)')
+                : 'transparent',
+              color: mobileTab === 'code' ? (isDark ? '#60A5FA' : '#007AFF') : (isDark ? '#94A3B8' : '#64748B'),
+            }}
+          >
+            <Code2 className="w-3.5 h-3.5" />
+            <span>Code</span>
+          </button>
+
+          <button
+            id="mobile-capstone-results"
+            onClick={() => {
+              setMobileTab('results');
+              setIsDrawerOpen(true);
+            }}
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all"
+            style={{
+              background: mobileTab === 'results'
+                ? (isDark ? 'rgba(16,185,129,0.25)' : 'rgba(16,185,129,0.12)')
+                : 'transparent',
+              color: mobileTab === 'results' ? '#34D399' : (isDark ? '#94A3B8' : '#64748B'),
+            }}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Results</span>
+            {passedCount > 0 && (
+              <span
+                className="w-2 h-2 rounded-full inline-block ml-0.5"
+                style={{
+                  background: passedCount === 6 ? '#10B981' : '#F59E0B',
+                }}
+              />
+            )}
+          </button>
+        </div>
+      </div>
+
       {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* LEFT PANE (50% Width) — Interactive Milestone Textbook & Doc Cards     */}
+      {/* LEFT PANE — Interactive Milestone Textbook & Doc Cards                 */}
       {/* ══════════════════════════════════════════════════════════════════════ */}
       <div
-        className="w-1/2 h-full flex flex-col border-r overflow-hidden"
+        className={`${mobileTab === 'guide' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-1 md:h-full flex-col border-r overflow-hidden`}
         style={{
           background: isDark ? 'rgba(11, 17, 30, 0.58)' : 'rgba(255, 255, 255, 0.72)',
           backdropFilter: 'blur(28px) saturate(190%)',
@@ -521,38 +546,37 @@ export function CapstoneStudioView() {
                 CH12 CAPSTONE
               </span>
               <span className="text-xs font-bold" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
-                5-Milestone Production Blueprint
+                6-Milestone Production Blueprint
               </span>
             </div>
             <span className="text-[11px] font-mono font-semibold" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-              {passedCount}/5 Milestones Verified
+              {passedCount}/6 Milestones Verified
             </span>
           </div>
 
-          {/* Stepper Pills */}
-          <div className="grid grid-cols-5 gap-1.5">
+          {/* Stepper Pills: Horizontally scrollable with snap points on mobile, 6-col grid on desktop */}
+          <div className="flex md:grid md:grid-cols-6 gap-1.5 overflow-x-auto no-scrollbar snap-x snap-mandatory py-0.5">
             {CH12_CAPSTONE_MILESTONES.map((m, idx) => {
               const isActive = activeMilestoneIndex === idx;
               const isPassed = milestonePassStatus[idx];
-              const shortLabels = ['1. Supervisor', '2. XML Framer', '3. ETS Registry', '4. C2S StateM', '5. Router'];
 
               return (
                 <button
                   key={m.id}
                   onClick={() => handleMilestoneClick(idx)}
-                  className="flex flex-col items-center justify-center py-2 px-1 rounded-xl text-center transition-all duration-200 cursor-pointer"
+                  className="flex flex-col items-center justify-center py-2 px-2 md:px-1 rounded-xl text-center transition-all duration-200 cursor-pointer min-w-[105px] md:min-w-0 flex-shrink-0 md:flex-shrink snap-start"
                   style={{
                     background: isActive
-                      ? (isDark ? 'rgba(245, 158, 11, 0.20)' : 'rgba(245, 158, 11, 0.15)')
+                      ? (isDark ? 'rgba(245, 158, 11, 0.22)' : 'rgba(245, 158, 11, 0.16)')
                       : (isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(15, 23, 42, 0.03)'),
                     border: isActive
-                      ? (isDark ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid rgba(245, 158, 11, 0.35)')
+                      ? (isDark ? '1.5px solid #F59E0B' : '1.5px solid #D97706')
                       : (isDark ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(15, 23, 42, 0.08)'),
                     color: isActive
                       ? (isDark ? '#FCD34D' : '#D97706')
                       : (isDark ? '#94A3B8' : '#64748B'),
                     boxShadow: isActive
-                      ? (isDark ? '0 0 12px rgba(245, 158, 11, 0.20)' : '0 2px 8px rgba(245, 158, 11, 0.15)')
+                      ? (isDark ? '0 0 14px rgba(245, 158, 11, 0.30)' : '0 2px 10px rgba(245, 158, 11, 0.20)')
                       : 'none',
                     transform: isActive ? 'scale(1.02)' : 'none',
                   }}
@@ -570,7 +594,7 @@ export function CapstoneStudioView() {
                     )}
                   </div>
                   <span className="text-[10px] font-medium truncate max-w-full mt-0.5">
-                    {shortLabels[idx]}
+                    {MILESTONE_SHORT_LABELS[idx]}
                   </span>
                 </button>
               );
@@ -584,7 +608,7 @@ export function CapstoneStudioView() {
           <div className="flex items-center justify-between pb-2 border-b" style={{ borderColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.06)' }}>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold px-2 py-0.5 rounded-md" style={{ background: 'rgba(139,92,246,0.18)', color: '#8B5CF6' }}>
-                CH12 · Milestone {activeMilestone.number} of 5
+                CH12 · Milestone {activeMilestone.number} of 6
               </span>
               <span className="text-xs font-medium px-2 py-0.5 rounded-md" style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>
                 Production Capstone
@@ -679,15 +703,28 @@ export function CapstoneStudioView() {
             ))}
           </div>
 
+          {/* Mobile CTA: Open Code Editor */}
+          <div className="pt-4 md:hidden">
+            <button
+              onClick={() => setMobileTab('code')}
+              className="w-full py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 text-white shadow-md transition-all active:scale-[0.98]"
+              style={{ background: 'linear-gradient(135deg, #007AFF 0%, #0056B3 100%)' }}
+            >
+              <Code2 className="w-4 h-4" />
+              <span>Open Milestone Editor ({activeMilestone.targetFile})</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+
           <div className="h-6" />
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* RIGHT PANE (50% Width) — Focused Code Editor, Action Bar & Drawer      */}
+      {/* RIGHT PANE — Focused Code Editor, Action Bar & Drawer                   */}
       {/* ══════════════════════════════════════════════════════════════════════ */}
       <div
-        className="w-1/2 h-full flex flex-col overflow-hidden"
+        className={`${mobileTab === 'code' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-1 md:h-full flex-col overflow-hidden relative`}
         style={{
           background: isDark ? '#0B0F17' : '#FFFFFF',
         }}
@@ -706,11 +743,15 @@ export function CapstoneStudioView() {
             {CAPSTONE_FILES.map((cf) => {
               const isActive = cf.path === activeFilePath;
               const isPassed = milestonePassStatus[cf.milestoneIdx];
+              const isTarget = cf.path === activeMilestone.targetFile;
 
               return (
                 <button
                   key={cf.path}
-                  onClick={() => openFile(cf.path)}
+                  onClick={() => {
+                    openFile(cf.path);
+                    setActiveMilestoneIndex(cf.milestoneIdx);
+                  }}
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-medium whitespace-nowrap transition-all duration-200 cursor-pointer"
                   style={{
                     background: isActive
@@ -736,6 +777,18 @@ export function CapstoneStudioView() {
                   </span>
                   <FileCode className="w-3.5 h-3.5" style={{ color: isActive ? '#38BDF8' : '#64748B' }} />
                   <span>{cf.label}</span>
+                  {isTarget && (
+                    <span
+                      className="text-[9px] font-black px-1.5 py-0.5 rounded tracking-wide shadow-sm"
+                      style={{
+                        background: 'rgba(245, 158, 11, 0.25)',
+                        color: isDark ? '#FCD34D' : '#D97706',
+                        border: isDark ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid rgba(245, 158, 11, 0.35)',
+                      }}
+                    >
+                      ★ TARGET
+                    </span>
+                  )}
                   {isPassed && <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0 ml-0.5" />}
                 </button>
               );
@@ -744,7 +797,8 @@ export function CapstoneStudioView() {
 
           {/* Reset Current File Button */}
           <button
-            onClick={handleResetActiveFile}
+            id="reset-template-btn"
+            onClick={() => setIsResetModalOpen(true)}
             className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-all duration-200 shrink-0 cursor-pointer"
             style={{
               color: isDark ? '#CBD5E1' : '#334155',
@@ -779,16 +833,17 @@ export function CapstoneStudioView() {
                 runLint(newCode, activeFile.path);
               }}
               options={{
-                fontSize: 13,
+                fontSize: typeof window !== 'undefined' && window.innerWidth < 768 ? 14 : 13,
                 fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
                 fontWeight: '500',
-                fontLigatures: true,
+                fontLigatures: false,
                 lineHeight: 22,
                 minimap: { enabled: false },
                 scrollBeyondLastLine: false,
                 lineNumbers: 'on',
                 glyphMargin: false,
-                folding: true,
+                folding: typeof window !== 'undefined' && window.innerWidth < 768 ? false : true,
+                lineNumbersMinChars: typeof window !== 'undefined' && window.innerWidth < 768 ? 2 : 3,
                 automaticLayout: true,
                 tabSize: 4,
                 insertSpaces: true,
@@ -809,12 +864,38 @@ export function CapstoneStudioView() {
           )}
         </div>
 
+        {/* ── Mobile Erlang Quick-Syntax Toolbar (< md) ── */}
+        <div
+          className="flex md:hidden items-center gap-1 px-2 py-1 border-t overflow-x-auto flex-shrink-0 no-scrollbar"
+          style={{
+            background: isDark ? 'rgba(15, 23, 42, 0.90)' : 'rgba(241, 245, 249, 0.95)',
+            borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.06)',
+          }}
+        >
+          {['->', '>>', '<<', ':=', '=>', ',', ';', '.', '_', '|', '[ ]', '{ }'].map((token) => (
+            <button
+              key={token}
+              type="button"
+              onClick={() => insertTokenAtCursor(token)}
+              className="px-2.5 py-1 text-xs font-mono font-bold rounded-md flex-shrink-0 transition-transform active:scale-95"
+              style={{
+                background: isDark ? 'rgba(255, 255, 255, 0.08)' : '#FFFFFF',
+                color: isDark ? '#E2E8F0' : '#1E293B',
+                border: isDark ? '1px solid rgba(255, 255, 255, 0.12)' : '1px solid rgba(15, 23, 42, 0.10)',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+              }}
+            >
+              {token}
+            </button>
+          ))}
+        </div>
+
         {/* ── Boot.dev Action Bar ── */}
         <div
           id="lesson-action-bar"
-          className="flex items-center gap-2 px-3 flex-shrink-0 select-none"
+          className="flex items-center gap-2 px-3 py-1 flex-shrink-0 select-none pb-safe"
           style={{
-            height: '44px',
+            minHeight: '48px',
             background: isDark ? 'rgba(11, 15, 23, 0.55)' : 'rgba(241, 245, 249, 0.70)',
             backdropFilter: 'blur(20px) saturate(180%)',
             WebkitBackdropFilter: 'blur(20px) saturate(180%)',
@@ -827,39 +908,42 @@ export function CapstoneStudioView() {
           <button
             id="submit-btn"
             onClick={handleSubmit}
-            disabled={isVerifying || isRunning}
-            className="btn-submit flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50 cursor-pointer"
+            disabled={isVerifying || isRunning || !isBackendOnline}
+            title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to submit.' : 'Submit capstone milestones'}
+            className="btn-submit flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             {isVerifying ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-slate-900 border-t-transparent" />
+            ) : !isBackendOnline ? (
+              <WifiOff className="w-3.5 h-3.5 text-red-400" />
             ) : (
               <ShieldCheck className="w-3.5 h-3.5" />
             )}
-            <span>{isVerifying ? 'Verifying 5 Milestones...' : 'Submit'}</span>
+            <span>{isVerifying ? 'Verifying 6 Milestones...' : !isBackendOnline ? 'Submit (Offline)' : 'Submit'}</span>
           </button>
 
           {/* Run & Simulate Button */}
           <button
             id="run-btn"
             onClick={handleRun}
-            disabled={isRunning || isVerifying}
-            className="btn-run flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg disabled:opacity-50 cursor-pointer"
+            disabled={isRunning || isVerifying || !isBackendOnline}
+            title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to run simulation.' : 'Run capstone simulation'}
+            className="btn-run flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             {isRunning ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+            ) : !isBackendOnline ? (
+              <WifiOff className="w-3.5 h-3.5 text-red-300" />
             ) : (
               <Play className="w-3.5 h-3.5 fill-current" />
             )}
-            <span>{isRunning ? 'Running...' : 'Run'}</span>
+            <span>{isRunning ? 'Running...' : !isBackendOnline ? 'Run (Offline)' : 'Run'}</span>
           </button>
 
-          {/* Solution Toggle */}
+          {/* Solution Toggle targeting active file */}
           <button
             id="solution-btn"
-            onClick={() => {
-              setIsDrawerOpen(true);
-              setDrawerTab('solution');
-            }}
+            onClick={handleSolutionClick}
             className="glass-pill flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg cursor-pointer"
             style={{
               background: isDrawerOpen && drawerTab === 'solution'
@@ -870,6 +954,7 @@ export function CapstoneStudioView() {
                 : (isDark ? '#94A3B8' : '#64748B'),
               border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
             }}
+            title={`View solution for ${activeFile?.name || activeMilestone.targetFile}`}
           >
             <Eye className="w-3.5 h-3.5" />
             <span>Solution</span>
@@ -882,7 +967,7 @@ export function CapstoneStudioView() {
               setIsDrawerOpen(true);
               setDrawerTab('tests');
             }}
-            className="glass-pill flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg cursor-pointer"
+            className="glass-pill hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg cursor-pointer"
             style={{
               background: isDrawerOpen && drawerTab === 'tests'
                 ? (isDark ? 'rgba(0,122,255,0.20)' : 'rgba(0,122,255,0.12)')
@@ -920,12 +1005,13 @@ export function CapstoneStudioView() {
           </div>
         </div>
 
-        {/* ── Bottom Collapsible Verification & Output Drawer ── */}
+        {/* ── Bottom Collapsible Verification & Output Drawer (Desktop Only in Code Pane) ── */}
         {isDrawerOpen && (
           <div
-            className="shrink-0 flex flex-col backdrop-blur-xl"
+            className="hidden md:flex shrink-0 flex-col backdrop-blur-xl transition-all duration-300"
             style={{
-              height: '240px',
+              height: isDrawerExpanded ? '580px' : '320px',
+              maxHeight: '100%',
               background: isDark ? 'rgba(11, 15, 23, 0.95)' : 'rgba(248, 250, 252, 0.96)',
               borderTop: isDark ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(15, 23, 42, 0.08)',
             }}
@@ -955,7 +1041,7 @@ export function CapstoneStudioView() {
                       : '1px solid transparent',
                   }}
                 >
-                  Verification ({passedCount}/{verificationStages.length || 5})
+                  Verification ({passedCount}/{verificationStages.length || 6})
                 </button>
                 <button
                   onClick={() => setDrawerTab('terminal')}
@@ -1006,7 +1092,7 @@ export function CapstoneStudioView() {
                       : '1px solid transparent',
                   }}
                 >
-                  Reference Solution
+                  Solution ({activeFile?.name || 'File'})
                 </button>
               </div>
 
@@ -1077,7 +1163,14 @@ export function CapstoneStudioView() {
                     })
                   ) : (
                     <div className="text-center py-6" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                      Click <strong>Submit</strong> to compile and verify all 5 milestones against the OTP 29 test suite.
+                      Click <strong>Submit</strong> to compile and verify all 6 milestones against the OTP 29 test suite.
+                    </div>
+                  )}
+
+                  {/* BEAM VM Real Telemetry Strip placed under submit verification stages */}
+                  {beamFootprint && (
+                    <div className="pt-3">
+                      <BeamFootprintCard footprint={beamFootprint} isDark={isDark} />
                     </div>
                   )}
                 </div>
@@ -1149,61 +1242,379 @@ export function CapstoneStudioView() {
               )}
 
               {drawerTab === 'solution' && (
-                <div className="space-y-3">
-                  <div
-                    className="flex items-center justify-between p-2.5 rounded-xl"
-                    style={{
-                      background: isDark ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.08)',
-                      border: isDark ? '1px solid rgba(245, 158, 11, 0.25)' : '1px solid rgba(245, 158, 11, 0.20)',
-                    }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-amber-500" />
-                      <span className="text-xs font-bold" style={{ color: isDark ? '#FCD34D' : '#D97706' }}>
-                        Reference Solution ({activeFile?.name || 'Active File'})
-                      </span>
+                !isCurrentFileUnlocked ? (
+                  <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-3">
+                    <div
+                      className="w-10 h-10 rounded-xl flex items-center justify-center"
+                      style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B' }}
+                    >
+                      <Eye className="w-5 h-5" />
                     </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={handleCopySolution}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-                        style={{
-                          background: isDark ? 'rgba(255, 255, 255, 0.10)' : '#FFFFFF',
-                          color: isDark ? '#F8FAFC' : '#0F172A',
-                          border: isDark ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(15, 23, 42, 0.10)',
-                        }}
-                      >
-                        {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedCode ? 'Copied!' : 'Copy Code'}</span>
-                      </button>
-
-                      <button
-                        onClick={handleLoadActiveSolution}
-                        className="px-2.5 py-1 rounded-lg text-white text-xs font-bold transition-colors shadow-sm cursor-pointer"
-                        style={{ background: '#D97706' }}
-                      >
-                        Load This File Solution
-                      </button>
-                    </div>
+                    <h4 className="text-sm font-bold" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
+                      Reference Solution Locked for {activeFile?.name || activeMilestone.targetFile}
+                    </h4>
+                    <p className="text-xs max-w-sm" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                      Unlocking this module&apos;s verified reference solution will forfeit XP for this milestone.
+                    </p>
+                    <button
+                      onClick={() => setIsUnlockModalOpen(true)}
+                      className="px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                      style={{ background: '#F59E0B', color: '#000' }}
+                    >
+                      Unlock {activeFile?.name || 'Module'} Solution
+                    </button>
                   </div>
-
-                  <pre
-                    className="font-mono text-[11px] p-3 rounded-xl overflow-x-auto max-h-36 leading-relaxed"
-                    style={{
-                      background: '#0B0F17',
-                      color: '#E2E8F0',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                    }}
-                  >
-                    {CH12_SOLUTION_FILES[activeFile?.path || activeMilestone.targetFile] || 'No solution found for this file.'}
-                  </pre>
-                </div>
+                ) : (
+                  <SolutionViewerTab
+                    fileName={activeFile?.name || activeMilestone.targetFile}
+                    solutionCode={CH12_SOLUTION_FILES[activeFile?.path || activeMilestone.targetFile] || ''}
+                    solutionExplanation="Each module in this 5-module XMPP architecture fulfills a distinct OTP contract: xmpp_sup provides rest_for_one ordering, xmpp_stream_parser provides non-destructive binary slicing, xmpp_session_registry provides lockless concurrent ETS lookups with process monitors, xmpp_c2s_statem implements the 4-phase connection FSM, and xmpp_router provides priority routing with offline spooling."
+                    isDark={isDark}
+                    isExpanded={isDrawerExpanded}
+                    onToggleExpand={() => setIsDrawerExpanded((prev) => !prev)}
+                  />
+                )
               )}
             </div>
           </div>
         )}
       </div>
+
+      {/* ════════════════════════════════════════════════════════════════════
+          MOBILE DEDICATED CAPSTONE RESULTS & VERIFICATION VIEW (< md)
+          ════════════════════════════════════════════════════════════════════ */}
+      <div
+        className={`${mobileTab === 'results' ? 'w-full flex' : 'hidden'} md:hidden flex-col flex-1 min-h-0 overflow-hidden relative`}
+        style={{
+          background: isDark ? '#0B0F17' : '#FFFFFF',
+        }}
+      >
+        {/* Mobile Results Header Sub-Tabs */}
+        <div
+          className="flex items-center justify-between px-3 flex-shrink-0 border-b select-none"
+          style={{
+            height: '44px',
+            background: isDark ? 'rgba(15,23,42,0.60)' : 'rgba(248,250,252,0.80)',
+            borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)',
+          }}
+        >
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+            <button
+              onClick={() => setDrawerTab('stages')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{
+                background: drawerTab === 'stages'
+                  ? (isDark ? 'rgba(16,185,129,0.25)' : 'rgba(16,185,129,0.12)')
+                  : 'transparent',
+                color: drawerTab === 'stages'
+                  ? '#34D399'
+                  : (isDark ? '#94A3B8' : '#64748B'),
+              }}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Stages ({passedCount}/6)</span>
+            </button>
+
+            <button
+              onClick={() => setDrawerTab('terminal')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{
+                background: drawerTab === 'terminal'
+                  ? (isDark ? 'rgba(0,122,255,0.25)' : 'rgba(0,122,255,0.12)')
+                  : 'transparent',
+                color: drawerTab === 'terminal'
+                  ? (isDark ? '#60A5FA' : '#007AFF')
+                  : (isDark ? '#94A3B8' : '#64748B'),
+              }}
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              <span>Console</span>
+            </button>
+
+            <button
+              onClick={() => setDrawerTab('tests')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{
+                background: drawerTab === 'tests'
+                  ? (isDark ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.12)')
+                  : 'transparent',
+                color: drawerTab === 'tests'
+                  ? (isDark ? '#A78BFA' : '#7C3AED')
+                  : (isDark ? '#94A3B8' : '#64748B'),
+              }}
+            >
+              <FlaskConical className="w-3.5 h-3.5" />
+              <span>Tests</span>
+            </button>
+
+            <button
+              onClick={() => setDrawerTab('solution')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{
+                background: drawerTab === 'solution'
+                  ? (isDark ? 'rgba(245,158,11,0.25)' : 'rgba(245,158,11,0.12)')
+                  : 'transparent',
+                color: drawerTab === 'solution'
+                  ? (isDark ? '#FCD34D' : '#D97706')
+                  : (isDark ? '#94A3B8' : '#64748B'),
+              }}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Solution</span>
+            </button>
+          </div>
+
+          <button
+            onClick={() => setMobileTab('code')}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold transition-all text-blue-500"
+          >
+            <Code2 className="w-3.5 h-3.5" />
+            <span>Editor</span>
+          </button>
+        </div>
+
+        {/* Mobile Results Scrollable Body */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {drawerTab === 'stages' && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between pb-1">
+                <span className="text-xs font-bold uppercase tracking-wider" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                  6-Stage OTP Capstone Verification
+                </span>
+                <span
+                  className="text-xs font-bold px-2 py-0.5 rounded-full"
+                  style={{
+                    background: passedCount === 6
+                      ? 'rgba(16,185,129,0.20)'
+                      : passedCount > 0
+                      ? 'rgba(245,158,11,0.20)'
+                      : 'rgba(239,68,68,0.20)',
+                    color: passedCount === 6 ? '#10B981' : passedCount > 0 ? '#F59E0B' : '#EF4444',
+                  }}
+                >
+                  {passedCount}/6 Milestones Passed
+                </span>
+              </div>
+              {verificationStages.length > 0 ? (
+                <div className="space-y-1.5">
+                  {verificationStages.map((stage) => {
+                    const isPassed = stage.status === 'passed';
+                    const isFailed = stage.status === 'failed';
+                    return (
+                      <div
+                        key={stage.id}
+                        className="p-3 rounded-xl border flex items-start gap-2.5"
+                        style={{
+                          background: isPassed
+                            ? (isDark ? 'rgba(16, 185, 129, 0.08)' : 'rgba(16, 185, 129, 0.05)')
+                            : isFailed
+                            ? (isDark ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.05)')
+                            : (isDark ? 'rgba(15, 23, 42, 0.40)' : 'rgba(241, 245, 249, 0.60)'),
+                          borderColor: isPassed
+                            ? 'rgba(16, 185, 129, 0.30)'
+                            : isFailed
+                            ? 'rgba(239, 68, 68, 0.30)'
+                            : (isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)'),
+                        }}
+                      >
+                        <div className="mt-0.5 shrink-0">
+                          {isPassed ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                          ) : isFailed ? (
+                            <AlertCircle className="w-4 h-4 text-rose-500" />
+                          ) : (
+                            <Clock className="w-4 h-4 text-slate-400" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-xs" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
+                              {stage.title}
+                            </span>
+                            {stage.timeMs && (
+                              <span className="text-[10px] font-mono" style={{ color: isDark ? '#64748B' : '#94A3B8' }}>
+                                {stage.timeMs}ms
+                              </span>
+                            )}
+                          </div>
+                          {stage.assertionDetails && (
+                            <p className="text-[11px] font-mono mt-1 leading-relaxed select-text" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
+                              {stage.assertionDetails}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-6 text-center rounded-2xl border" style={{ borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)' }}>
+                  <ShieldCheck className="w-8 h-8 mx-auto mb-2 text-amber-500 opacity-80" />
+                  <h4 className="text-sm font-bold mb-1" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
+                    No Verification Run Yet
+                  </h4>
+                  <p className="text-xs max-w-xs mx-auto leading-relaxed mb-4" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                    Tap <strong>Submit Capstone</strong> below to grade all 5 OTP modules and the live Chaos Monkey resilience test.
+                  </p>
+                  <button
+                    onClick={handleSubmit}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-900 shadow-md inline-flex items-center gap-1.5"
+                    style={{ background: '#F59E0B' }}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Run Verification Now</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {drawerTab === 'terminal' && (
+            <div className="space-y-2">
+              <span className="text-xs font-bold uppercase tracking-wider block" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                Simulation Console Output
+              </span>
+              <pre
+                className="font-mono text-xs p-3 rounded-xl overflow-x-auto leading-relaxed select-text"
+                style={{
+                  background: isDark ? '#05080E' : '#0F172A',
+                  color: '#34D399',
+                  border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.12)',
+                  minHeight: '160px',
+                }}
+              >
+                {runResult?.stdout || '% No simulation output. Tap Run Simulation below.'}
+              </pre>
+            </div>
+          )}
+
+          {drawerTab === 'tests' && (
+            <div className="space-y-2 font-mono text-[11px]">
+              {capstoneMasterLesson?.visibleTestCases[activeMilestoneIndex] && (
+                <div
+                  className="p-3.5 rounded-xl border"
+                  style={{
+                    background: isDark ? 'rgba(15, 23, 42, 0.60)' : 'rgba(255, 255, 255, 0.70)',
+                    borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
+                  }}
+                >
+                  <div className="flex items-center justify-between font-sans mb-1.5">
+                    <span className="font-bold text-sm" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
+                      {capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].title}
+                    </span>
+                    <span className="text-[10px]" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                      {capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].id}
+                    </span>
+                  </div>
+                  <code className="text-blue-500 block mb-1.5 text-xs font-bold">
+                    {capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].erlangCall}
+                  </code>
+                  <div className="text-xs font-sans space-y-1" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
+                    <div>
+                      Expected: <span className="font-mono text-emerald-500 font-bold">{capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].expectedOutput}</span>
+                    </div>
+                    <p className="text-[11px]" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                      {capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].explanation}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {drawerTab === 'solution' && (
+            !isCurrentFileUnlocked ? (
+              <div className="flex flex-col items-center justify-center p-6 text-center space-y-3">
+                <div
+                  className="w-10 h-10 rounded-xl flex items-center justify-center"
+                  style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B' }}
+                >
+                  <Eye className="w-5 h-5" />
+                </div>
+                <h4 className="text-sm font-bold" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
+                  Reference Solution Locked for {activeFile?.name || activeMilestone.targetFile}
+                </h4>
+                <p className="text-xs max-w-sm" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                  Unlocking this module&apos;s verified reference solution will forfeit XP for this milestone.
+                </p>
+                <button
+                  onClick={() => setIsUnlockModalOpen(true)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  style={{ background: '#F59E0B', color: '#000' }}
+                >
+                  Unlock {activeFile?.name || 'Module'} Solution
+                </button>
+              </div>
+            ) : (
+              <SolutionViewerTab
+                fileName={activeFile?.name || activeMilestone.targetFile}
+                solutionCode={CH12_SOLUTION_FILES[activeFile?.path || activeMilestone.targetFile] || ''}
+                solutionExplanation="Each module in this 5-module XMPP architecture fulfills a distinct OTP contract: xmpp_sup provides rest_for_one ordering, xmpp_stream_parser provides non-destructive binary slicing, xmpp_session_registry provides lockless concurrent ETS lookups with process monitors, xmpp_c2s_statem implements the 4-phase connection FSM, and xmpp_router provides priority routing with offline spooling."
+                isDark={isDark}
+                isExpanded={isDrawerExpanded}
+                onToggleExpand={() => setIsDrawerExpanded((prev) => !prev)}
+              />
+            )
+          )}
+        </div>
+
+        {/* Mobile Results Bottom Action Bar */}
+        <div
+          className="flex items-center gap-2 p-3 border-t flex-shrink-0 pb-safe"
+          style={{
+            background: isDark ? 'rgba(11,15,23,0.85)' : 'rgba(241,245,249,0.92)',
+            borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)',
+          }}
+        >
+          <button
+            onClick={() => setMobileTab('code')}
+            className="flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
+            style={{
+              background: isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF',
+              color: isDark ? '#F8FAFC' : '#0F172A',
+              border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(15,23,42,0.10)',
+            }}
+          >
+            <Code2 className="w-3.5 h-3.5" />
+            <span>Back to Editor</span>
+          </button>
+
+          <button
+            onClick={handleRun}
+            disabled={isRunning || isVerifying || !isBackendOnline}
+            className="btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>{isRunning ? 'Running...' : 'Run Simulation'}</span>
+          </button>
+
+          <button
+            onClick={handleSubmit}
+            disabled={isVerifying || isRunning || !isBackendOnline}
+            className="btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40"
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>{isVerifying ? 'Verifying...' : 'Submit'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Confirmation & Unlock Modals */}
+      <SolutionUnlockModal
+        isOpen={isUnlockModalOpen}
+        fileName={activeFile?.name || activeMilestone.targetFile}
+        isDark={isDark}
+        onClose={() => setIsUnlockModalOpen(false)}
+        onConfirm={handleConfirmUnlockSolution}
+      />
+
+      <ResetConfirmModal
+        isOpen={isResetModalOpen}
+        fileName={activeFile?.name || activeMilestone.targetFile}
+        isDark={isDark}
+        onClose={() => setIsResetModalOpen(false)}
+        onConfirm={handleConfirmReset}
+      />
     </div>
   );
 }
