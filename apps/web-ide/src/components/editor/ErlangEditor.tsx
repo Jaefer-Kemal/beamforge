@@ -83,7 +83,7 @@ export const ErlangEditor: React.FC = () => {
               fontSize: 13,
               fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
               fontWeight: '500',
-              fontLigatures: true,
+              fontLigatures: false,
               minimap: { enabled: false },
               scrollBeyondLastLine: false,
               lineNumbers: 'on',

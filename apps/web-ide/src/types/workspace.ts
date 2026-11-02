@@ -95,9 +95,9 @@ export type LessonType =
   | 'concept_exercise'  // Concept reading + coding exercise
   | 'guided_demo'       // Pre-built runnable demo with interactive annotation
   | 'problem_set'       // Pure problem set / assignment
-  | 'capstone_studio';  // Multi-file capstone workspace (Ch. 12 only)
+  | 'capstone_studio'   // Multi-file capstone workspace (Ch. 12 only)
+  | 'incident_triage';  // Production outage triage and fix lab
 
-/** Official Erlang documentation function signature card displayed in the Left Pane */
 export interface OtpDocSignatureCard {
   /** Function name e.g. "foldl" */
   functionName: string;
@@ -125,6 +125,8 @@ export interface VisibleTestCase {
   title: string;
   /** Exact Erlang call expression string, e.g. "inventory:calculate_order_total(Inv, Orders)" */
   erlangCall: string;
+  /** Backward-compatible alias for erlangCall */
+  callStr?: string;
   /** Expected return value as formatted Erlang term string */
   expectedOutput: string;
   /** Explanation of what this test case is verifying */
@@ -172,6 +174,17 @@ export interface RunTestCaseResult {
   timeMs: number;
 }
 
+/** Real BEAM VM process telemetry captured from Erlang/OTP 29 runtime */
+export interface BeamFootprint {
+  peak_stack_words: number;
+  heap_words: number;
+  reductions: number;
+  sub_binary_leak_free: boolean;
+  tco_verified: boolean;
+  scheduler_id: number;
+  otp_release: string;
+}
+
 /** Full result payload from POST /api/v1/run */
 export interface RunResult {
   mode: 'run';
@@ -181,6 +194,8 @@ export interface RunResult {
   visibleTests: RunTestCaseResult[];
   totalDurationMs: number;
   diagnostics?: Array<{ file: string; line: number; col: number; severity: string; message: string }>;
+  beamFootprint?: BeamFootprint;
+  beam_footprint?: BeamFootprint;
 }
 
 /** Application theme mode */
@@ -214,13 +229,18 @@ export interface MentalModelCheckSpec {
 export type MentalModelCheck = MentalModelCheckSpec;
 
 export interface IncidentAlert {
-  id: string;
-  severity: 'P1-CRITICAL' | 'P2-HIGH' | 'P3-WARNING';
-  incidentTitle: string;
-  service: string;
+  id?: string;
+  incidentId?: string;
+  severity: 'CRITICAL' | 'HIGH' | 'P1-CRITICAL' | 'P2-HIGH' | 'P3-WARNING';
+  incidentTitle?: string;
+  service?: string;
+  serviceName?: string;
   symptom: string;
-  diagnosticClue: string;
-  recommendedAction: string;
+  impact?: string;
+  diagnosticClue?: string;
+  rootCauseHint?: string;
+  recommendedAction?: string;
+  fixObjective?: string;
 }
 
 /** Full lesson content matching the Boot.dev pedagogy and Glassmorphic specification */
@@ -228,7 +248,7 @@ export interface LessonContent {
   id: string; // e.g. "ch01-l01"
   chapterNumber: number;
   lessonNumber: number;
-  lessonType: LessonType | 'incident_triage';
+  lessonType: LessonType;
   title: string;
   difficulty: 'Beginner' | 'Intermediate' | 'Advanced' | 'Production';
   conceptMarkdown: string;

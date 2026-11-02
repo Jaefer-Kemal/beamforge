@@ -597,9 +597,11 @@ export function ErlangCodeBlock({ code, isDark }: { code: string; isDark: boolea
         border: isDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid #CBD5E1',
         borderLeft: isDark ? '3px solid #818CF8' : '3px solid #3730A3',
         boxShadow: isDark ? '0 4px 16px rgba(0,0,0,0.30)' : '0 2px 8px rgba(15,23,42,0.06)',
+        fontVariantLigatures: 'none',
+        fontFeatureSettings: '"liga" 0, "calt" 0, "zero" 1',
       }}
     >
-      <code>
+      <code style={{ fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0, "zero" 1' }}>
         {lines.map((line, idx) => (
           <div key={idx} className="table-row">
             <span

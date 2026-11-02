@@ -19,6 +19,7 @@ import {
   Target,
   BookOpen,
   Zap,
+  AlertTriangle,
 } from 'lucide-react';
 import { COURSE_WORLDS } from '../../data/courseWorlds';
 import { ALL_CURRICULUM_CHAPTERS } from '../../data/chapters';
@@ -178,6 +179,21 @@ function DifficultyBadge({ difficulty, isDark }: { difficulty: string; isDark: b
 
 // Lesson Type Pill
 function LessonTypeBadge({ type, isDark }: { type: string; isDark: boolean }) {
+  if (type === 'incident_triage') {
+    return (
+      <span
+        className="px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1"
+        style={{
+          background: isDark ? 'rgba(244,63,94,0.18)' : 'rgba(239,68,68,0.12)',
+          color: isDark ? '#FDA4AF' : '#BE123C',
+          border: isDark ? '1px solid rgba(244,63,94,0.30)' : '1px solid rgba(239,68,68,0.25)',
+        }}
+      >
+        <AlertTriangle className="w-3 h-3 text-rose-500 animate-pulse" />
+        <span>Incident</span>
+      </span>
+    );
+  }
   if (type === 'problem_set') {
     return (
       <span
@@ -302,15 +318,28 @@ export function CurriculumWorldMap() {
         <motion.div
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-          className="rounded-3xl p-6 md:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden border shadow-xl"
+          transition={{ duration: 0.32 }}
+          className="glass-panel p-6 md:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden"
           style={{
-            background: isDark ? 'rgba(15, 23, 42, 0.75)' : 'rgba(255, 255, 255, 0.85)',
-            backdropFilter: 'blur(30px)',
-            WebkitBackdropFilter: 'blur(30px)',
-            borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.08)',
+            background: isDark
+              ? 'linear-gradient(135deg, rgba(10,15,28,0.80) 0%, rgba(20,15,45,0.70) 100%)'
+              : 'linear-gradient(135deg, rgba(255,255,255,0.88) 0%, rgba(240,244,255,0.80) 100%)',
           }}
         >
+          {/* Prismatic shimmer strip — top-right corner accent */}
+          <div
+            aria-hidden
+            style={{
+              position: 'absolute',
+              top: 0, right: 0,
+              width: '45%',
+              height: '100%',
+              background: isDark
+                ? 'radial-gradient(ellipse 80% 100% at 100% 0%, rgba(99,102,241,0.14) 0%, rgba(56,189,248,0.08) 50%, transparent 80%)'
+                : 'radial-gradient(ellipse 80% 100% at 100% 0%, rgba(99,102,241,0.10) 0%, rgba(56,189,248,0.06) 50%, transparent 80%)',
+              pointerEvents: 'none',
+            }}
+          />
           {/* Left: Branding & Course Title */}
           <div className="flex items-center gap-5 z-10">
             <div
@@ -432,20 +461,24 @@ export function CurriculumWorldMap() {
             return (
               <motion.section
                 key={world.id}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 24 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.35, delay: worldIdx * 0.06 }}
-                className="rounded-3xl border overflow-hidden transition-all duration-300"
+                transition={{ duration: 0.38, delay: worldIdx * 0.07 }}
+                className="world-section border"
                 style={{
-                  background: isDark ? 'rgba(13, 19, 33, 0.58)' : 'rgba(255, 255, 255, 0.72)',
-                  backdropFilter: 'blur(28px) saturate(190%)',
-                  WebkitBackdropFilter: 'blur(28px) saturate(190%)',
+                  background: isDark
+                    ? `linear-gradient(160deg, rgba(10,15,28,0.68) 0%, rgba(${world.worldNumber === 1 ? '5,80,50' : world.worldNumber === 2 ? '30,30,100' : world.worldNumber === 3 ? '50,20,90' : world.worldNumber === 4 ? '0,40,100' : '80,50,0'},0.15) 100%)`
+                    : `linear-gradient(160deg, rgba(255,255,255,0.78) 0%, rgba(${world.worldNumber === 1 ? '220,255,240' : world.worldNumber === 2 ? '235,235,255' : world.worldNumber === 3 ? '245,235,255' : world.worldNumber === 4 ? '225,240,255' : '255,245,220'},0.65) 100%)`,
                   borderColor: isWorldActive
-                    ? (isDark ? 'rgba(0,122,255,0.45)' : 'rgba(0,122,255,0.35)')
-                    : (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.85)'),
-                  boxShadow: isDark
-                    ? '0 20px 50px -15px rgba(0,0,0,0.70), inset 0 1px 0 0 rgba(255,255,255,0.22), inset 0 0 0 1px rgba(255,255,255,0.04)'
-                    : '0 20px 48px -12px rgba(15,23,42,0.08), inset 0 1px 2px 0 rgba(255,255,255,1)',
+                    ? (isDark ? `${WORLD_ICON_STYLES[world.worldNumber]?.border || 'rgba(0,122,255,0.45)'}` : `${WORLD_ICON_STYLES[world.worldNumber]?.border || 'rgba(0,122,255,0.35)'}`)
+                    : (isDark ? 'rgba(255,255,255,0.09)' : 'rgba(255,255,255,0.90)'),
+                  boxShadow: isWorldActive
+                    ? (isDark
+                      ? `0 24px 60px rgba(0,0,0,0.60), inset 0 1px 0 rgba(255,255,255,0.20), 0 0 0 1px ${WORLD_ICON_STYLES[world.worldNumber]?.border || 'rgba(0,122,255,0.25)'}, 0 0 40px ${WORLD_ICON_STYLES[world.worldNumber]?.glow || 'rgba(0,122,255,0.15)'}`
+                      : `0 20px 52px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,1), 0 0 0 1px ${WORLD_ICON_STYLES[world.worldNumber]?.border || 'rgba(0,122,255,0.25)'}`)
+                    : (isDark
+                      ? '0 20px 50px rgba(0,0,0,0.50), inset 0 1px 0 rgba(255,255,255,0.16)'
+                      : '0 16px 48px rgba(15,23,42,0.06), inset 0 1px 0 rgba(255,255,255,1)'),
                 }}
               >
                 {/* ── World Banner Header ── */}
@@ -575,9 +608,7 @@ export function CurriculumWorldMap() {
                         return (
                           <div key={chNum} className="space-y-3.5">
                             {/* Chapter Header Line */}
-                            <div className="flex items-center justify-between pb-1.5 border-b"
-                              style={{ borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)' }}
-                            >
+                            <div className="flex items-center justify-between pb-2 chapter-divider">
                               <div className="flex items-center gap-2">
                                 <span
                                   className="text-xs font-extrabold px-2 py-0.5 rounded-md"
@@ -618,19 +649,28 @@ export function CurriculumWorldMap() {
                                   <div
                                     key={lesson.id}
                                     id={`syllabus-lesson-${lesson.id}`}
+                                    data-world={String(world.worldNumber)}
                                     onClick={() => handleSelectLesson(chNum, lesson.lessonNumber, lesson.id)}
-                                    className={`group rounded-2xl p-4 flex flex-col justify-between border cursor-pointer transition-all duration-200 hover:scale-[1.01] hover:shadow-lg ${
-                                      isCurrent
-                                        ? 'ring-2 ring-blue-500 shadow-blue-500/10'
-                                        : ''
+                                    className={`lesson-card flex flex-col justify-between border ${
+                                      isCurrent ? 'lesson-card-active' : ''
                                     }`}
                                     style={{
+                                      padding: '14px',
                                       background: isCurrent
                                         ? (isDark ? 'rgba(0,122,255,0.12)' : 'rgba(0,122,255,0.06)')
-                                        : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.65)'),
+                                        : isCompleted
+                                        ? (isDark ? 'rgba(16,185,129,0.06)' : 'rgba(16,185,129,0.04)')
+                                        : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.68)'),
                                       borderColor: isCurrent
-                                        ? '#007AFF'
-                                        : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)'),
+                                        ? 'rgba(0,122,255,0.40)'
+                                        : isCompleted
+                                        ? (isDark ? 'rgba(16,185,129,0.22)' : 'rgba(16,185,129,0.18)')
+                                        : (isDark ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.90)'),
+                                      boxShadow: isCurrent
+                                        ? undefined /* handled by lesson-card-active class */
+                                        : isDark
+                                        ? 'inset 0 1px 0 rgba(255,255,255,0.12), 0 2px 8px rgba(0,0,0,0.30)'
+                                        : 'inset 0 1px 0 rgba(255,255,255,1), 0 2px 8px rgba(15,23,42,0.04)',
                                     }}
                                   >
                                     <div>
@@ -676,10 +716,13 @@ export function CurriculumWorldMap() {
 
                                       {/* Lesson Title */}
                                       <h4
-                                        className="text-xs font-bold group-hover:text-blue-500 transition-colors line-clamp-2 leading-snug mb-1.5"
+                                        className="text-xs font-bold group-hover:text-blue-500 transition-colors line-clamp-2 leading-snug mb-1.5 flex items-center gap-1.5"
                                         style={{ color: isDark ? '#F8FAFC' : '#020617' }}
                                       >
-                                        {lesson.title}
+                                        {lesson.lessonType === 'incident_triage' && (
+                                          <AlertTriangle className="w-3.5 h-3.5 text-rose-500 flex-shrink-0" />
+                                        )}
+                                        <span>{lesson.title}</span>
                                       </h4>
                                     </div>
 

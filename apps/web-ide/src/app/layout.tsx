@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -20,6 +20,18 @@ export const metadata: Metadata = {
     "Boot.dev-style interactive training platform for Erlang/OTP, distributed systems, raw TCP backends, and XMPP protocol engineering — with live BEAM bytecode verification.",
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  interactiveWidget: "resizes-content",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#EEF2F6" },
+    { media: "(prefers-color-scheme: dark)", color: "#0B0F17" },
+  ],
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -36,7 +48,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased h-full w-full overflow-hidden`}
+        className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased h-full min-h-dvh w-full overflow-hidden`}
       >
         {children}
       </body>

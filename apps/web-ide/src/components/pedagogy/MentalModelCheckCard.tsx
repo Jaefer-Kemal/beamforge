@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { MentalModelCheckSpec } from '../../types/workspace';
+import { renderInlineContent } from './BeamMarkdownRenderer';
 
 export interface MentalModelCheckCardProps {
   check?: MentalModelCheckSpec;
@@ -466,7 +467,7 @@ export function MentalModelCheckCard({
             className="text-xs font-medium leading-relaxed"
             style={{ color: isDark ? '#E2E8F0' : '#1E293B' }}
           >
-            {resolvedCheck.question}
+            {renderInlineContent(resolvedCheck.question, isDark)}
           </p>
 
           {/* Optional Code Snippet */}
@@ -546,7 +547,7 @@ export function MentalModelCheckCard({
                     className="text-xs leading-relaxed flex-1 select-none"
                     style={{ color: textColor }}
                   >
-                    {option.label || option.text}
+                    {renderInlineContent(option.label || option.text || '', isDark)}
                   </span>
 
                   {/* Feedback Icon */}
@@ -594,7 +595,7 @@ export function MentalModelCheckCard({
                 )}
               </div>
               <p className="text-[11px] leading-relaxed">
-                {selectedOption.explanation}
+                {renderInlineContent(selectedOption.explanation, isDark)}
               </p>
             </div>
           )}

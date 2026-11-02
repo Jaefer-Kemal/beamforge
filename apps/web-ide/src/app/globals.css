@@ -3,87 +3,101 @@
 @tailwind utilities;
 
 /* ============================================================
-   BeamForge Global CSS — Dual-Theme Apple Glassmorphism
-   Spec 02: Daylight Frosted Glass (light) + Midnight Dark Glass (dark)
+   BeamForge Global CSS — Apple visionOS / macOS Glassmorphism
+   Dual-Theme: Daylight Frosted Glass + Midnight Translucent Glass
    ============================================================ */
 
 :root {
-  --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-jetbrains-mono: 'JetBrains Mono', monospace;
+  --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+  --font-jetbrains-mono: 'JetBrains Mono', 'SF Mono', monospace;
 
   /* ── Daylight Glass Tokens (Default Light Mode) ── */
-  --bf-bg: #EEF2F6;
-  --bf-text-primary: #0F172A;
-  --bf-text-secondary: #475569;
-  --bf-text-muted: #64748B;
+  --bf-bg: #E8ECF2;
+  --bf-text-primary: #0A0F1E;
+  --bf-text-secondary: #3D4966;
+  --bf-text-muted: #6B7A99;
 
-  --bf-glass-panel-bg: rgba(255, 255, 255, 0.78);
-  --bf-glass-panel-border: rgba(255, 255, 255, 0.85);
-  --bf-glass-panel-shadow: 0 8px 32px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.03), inset 0 1px 1px rgba(255, 255, 255, 0.95);
+  --bf-glass-panel-bg: rgba(255, 255, 255, 0.70);
+  --bf-glass-panel-border: rgba(255, 255, 255, 0.90);
+  --bf-glass-panel-shadow:
+    0 2px 4px rgba(15, 23, 42, 0.04),
+    0 8px 24px rgba(15, 23, 42, 0.06),
+    0 24px 56px rgba(15, 23, 42, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.80);
 
-  --bf-glass-popover-bg: rgba(255, 255, 255, 0.90);
-  --bf-glass-popover-border: rgba(203, 213, 225, 0.80);
-  --bf-glass-popover-shadow: 0 20px 50px rgba(15, 23, 42, 0.12), 0 8px 20px rgba(15, 23, 42, 0.06);
+  --bf-glass-popover-bg: rgba(255, 255, 255, 0.92);
+  --bf-glass-popover-border: rgba(200, 210, 230, 0.75);
+  --bf-glass-popover-shadow:
+    0 4px 8px rgba(15, 23, 42, 0.05),
+    0 16px 40px rgba(15, 23, 42, 0.10),
+    0 40px 80px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
 
-  --bf-glass-pill-bg: rgba(255, 255, 255, 0.80);
-  --bf-glass-pill-border: rgba(255, 255, 255, 0.90);
+  --bf-glass-pill-bg: rgba(255, 255, 255, 0.78);
+  --bf-glass-pill-border: rgba(255, 255, 255, 0.95);
 
-  --bf-accent-primary: #F59E0B;   /* Boot.dev Gold/Amber for Submit */
+  --bf-accent-primary: #F59E0B;
   --bf-accent-primary-hover: #D97706;
-  --bf-accent-secondary: #007AFF; /* iOS Blue for Run */
-  --bf-accent-emerald: #10B981;   /* Pass */
-  --bf-accent-crimson: #EF4444;   /* Fail */
-  --bf-accent-violet: #8B5CF6;    /* Accent / highlights */
+  --bf-accent-secondary: #007AFF;
+  --bf-accent-emerald: #10B981;
+  --bf-accent-crimson: #EF4444;
+  --bf-accent-violet: #8B5CF6;
 
-  --bf-code-bg: rgba(241, 245, 249, 0.85);
-  --bf-code-border: rgba(203, 213, 225, 0.60);
+  --bf-code-bg: rgba(241, 245, 249, 0.90);
+  --bf-code-border: rgba(203, 213, 225, 0.55);
 
-  --bf-scrollbar-thumb: rgba(148, 163, 184, 0.40);
-  --bf-scrollbar-thumb-hover: rgba(100, 116, 139, 0.70);
+  --bf-scrollbar-thumb: rgba(148, 163, 184, 0.35);
+  --bf-scrollbar-thumb-hover: rgba(100, 116, 139, 0.65);
 
   /* Luminous Aurora Mesh (Light Mode) */
-  --bf-mesh-1: rgba(56, 189, 248, 0.22);  /* sky-300 */
-  --bf-mesh-2: rgba(167, 139, 250, 0.20); /* violet-300 */
-  --bf-mesh-3: rgba(251, 191, 36, 0.16);  /* amber-300 */
-  --bf-mesh-4: rgba(52, 211, 153, 0.16);  /* emerald-300 */
+  --bf-mesh-1: rgba(99, 179, 237, 0.28);   /* sky */
+  --bf-mesh-2: rgba(167, 139, 250, 0.22);  /* violet */
+  --bf-mesh-3: rgba(251, 191, 36, 0.18);   /* amber */
+  --bf-mesh-4: rgba(52, 211, 153, 0.18);   /* emerald */
+  --bf-mesh-5: rgba(236, 72, 153, 0.12);   /* pink accent */
 }
 
 /* ── Midnight Dark Glass Override ── */
 .theme-dark {
-  --bf-bg: #07090E;
-  --bf-text-primary: #F8FAFC;
-  --bf-text-secondary: #94A3B8;
-  --bf-text-muted: #64748B;
+  --bf-bg: #060810;
+  --bf-text-primary: #F0F4FC;
+  --bf-text-secondary: #8A9CC0;
+  --bf-text-muted: #505F7A;
 
-  --bf-glass-panel-bg: rgba(13, 19, 33, 0.60);
-  --bf-glass-panel-border: rgba(255, 255, 255, 0.14);
-  --bf-glass-panel-shadow: 
-    0 24px 60px -15px rgba(0, 0, 0, 0.75),
-    0 8px 24px -6px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.24),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --bf-glass-panel-bg: rgba(10, 15, 28, 0.62);
+  --bf-glass-panel-border: rgba(255, 255, 255, 0.11);
+  --bf-glass-panel-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18),
+    0 4px 8px rgba(0, 0, 0, 0.30),
+    0 16px 40px rgba(0, 0, 0, 0.50),
+    0 40px 80px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.05);
 
-  --bf-glass-popover-bg: rgba(15, 23, 42, 0.90);
-  --bf-glass-popover-border: rgba(255, 255, 255, 0.18);
-  --bf-glass-popover-shadow: 
-    0 32px 70px -15px rgba(0, 0, 0, 0.85),
-    0 12px 30px rgba(0, 0, 0, 0.50),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.28);
+  --bf-glass-popover-bg: rgba(12, 18, 35, 0.92);
+  --bf-glass-popover-border: rgba(255, 255, 255, 0.16);
+  --bf-glass-popover-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.22),
+    0 8px 20px rgba(0, 0, 0, 0.55),
+    0 32px 70px rgba(0, 0, 0, 0.70),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
 
-  --bf-glass-pill-bg: rgba(30, 41, 59, 0.65);
-  --bf-glass-pill-border: rgba(255, 255, 255, 0.15);
+  --bf-glass-pill-bg: rgba(22, 32, 56, 0.68);
+  --bf-glass-pill-border: rgba(255, 255, 255, 0.14);
 
-  --bf-code-bg: rgba(11, 15, 23, 0.95);
-  --bf-code-border: rgba(255, 255, 255, 0.08);
+  --bf-code-bg: rgba(6, 10, 20, 0.97);
+  --bf-code-border: rgba(255, 255, 255, 0.07);
 
-  --bf-scrollbar-thumb: rgba(71, 85, 105, 0.50);
-  --bf-scrollbar-thumb-hover: rgba(100, 116, 139, 0.80);
+  --bf-scrollbar-thumb: rgba(60, 80, 110, 0.55);
+  --bf-scrollbar-thumb-hover: rgba(90, 115, 155, 0.80);
 
   /* Luminous Aurora Mesh (Dark Mode) */
-  --bf-mesh-1: rgba(56, 189, 248, 0.22);  /* Electric BEAM Cyan */
-  --bf-mesh-2: rgba(139, 92, 246, 0.20);  /* Deep OTP Violet */
-  --bf-mesh-3: rgba(245, 158, 11, 0.14);  /* Warm Amber Forge */
-  --bf-mesh-4: rgba(16, 185, 129, 0.12);  /* Emerald Process Node */
+  --bf-mesh-1: rgba(56, 189, 248, 0.20);   /* Electric BEAM Cyan */
+  --bf-mesh-2: rgba(139, 92, 246, 0.18);   /* Deep OTP Violet */
+  --bf-mesh-3: rgba(245, 158, 11, 0.12);   /* Warm Amber Forge */
+  --bf-mesh-4: rgba(16, 185, 129, 0.10);   /* Emerald Process Node */
+  --bf-mesh-5: rgba(236, 72, 153, 0.08);   /* Pink Accent */
 }
 
 /* ── Base Body + Ambient Mesh Background ── */
@@ -91,10 +105,11 @@ html,
 body {
   background-color: var(--bf-bg);
   background-image:
-    radial-gradient(ellipse 90% 60% at 50% -10%, var(--bf-mesh-1) 0%, transparent 70%),
-    radial-gradient(ellipse 70% 50% at 90% 25%, var(--bf-mesh-2) 0%, transparent 65%),
-    radial-gradient(ellipse 60% 50% at 15% 75%, var(--bf-mesh-3) 0%, transparent 60%),
-    radial-gradient(ellipse 80% 60% at 80% 85%, var(--bf-mesh-4) 0%, transparent 65%);
+    radial-gradient(ellipse 100% 65% at 50% -5%, var(--bf-mesh-1) 0%, transparent 65%),
+    radial-gradient(ellipse 75% 55% at 92% 20%, var(--bf-mesh-2) 0%, transparent 60%),
+    radial-gradient(ellipse 65% 55% at 8% 70%, var(--bf-mesh-3) 0%, transparent 58%),
+    radial-gradient(ellipse 85% 65% at 78% 90%, var(--bf-mesh-4) 0%, transparent 62%),
+    radial-gradient(ellipse 50% 40% at 30% 40%, var(--bf-mesh-5) 0%, transparent 55%);
   background-attachment: fixed;
   color: var(--bf-text-primary);
   font-family: var(--font-inter);
@@ -103,130 +118,252 @@ body {
   overflow: hidden;
   user-select: none;
   -webkit-font-smoothing: antialiased;
-  transition: background-color 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              color 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  transition: background-color 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+              color 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* ── JetBrains Mono with Programming Ligatures ── */
+/* ── JetBrains Mono with Discrete ASCII Glyphs (No Ambiguous Ligatures) ── */
 code,
 pre,
 kbd,
 samp,
 .font-mono {
   font-family: var(--font-jetbrains-mono), monospace;
-  font-feature-settings: "liga" 1, "calt" 1, "zero" 1;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0, "zero" 1;
 }
 
 /* ============================================================
-   Apple Glassmorphism Primitives (CSS Component Classes)
+   Apple visionOS Glass Primitives (CSS Component Classes)
    ============================================================ */
 
 /* Glass Panel — main content areas */
 .glass-panel {
-  background-color: var(--bf-glass-panel-bg);
-  backdrop-filter: blur(28px) saturate(190%);
-  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  background: var(--bf-glass-panel-bg);
+  backdrop-filter: blur(36px) saturate(210%) brightness(1.04);
+  -webkit-backdrop-filter: blur(36px) saturate(210%) brightness(1.04);
   border: 1px solid var(--bf-glass-panel-border);
   box-shadow: var(--bf-glass-panel-shadow);
-  border-radius: 1rem;
-  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  border-radius: 1.25rem;
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 /* Glass Popover — dropdowns and overlays */
 .glass-popover {
-  background-color: var(--bf-glass-popover-bg);
-  backdrop-filter: blur(40px) saturate(200%);
-  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  background: var(--bf-glass-popover-bg);
+  backdrop-filter: blur(52px) saturate(230%) brightness(1.06);
+  -webkit-backdrop-filter: blur(52px) saturate(230%) brightness(1.06);
   border: 1px solid var(--bf-glass-popover-border);
   box-shadow: var(--bf-glass-popover-shadow);
-  border-radius: 0.75rem;
-  transition: background-color 0.3s ease, border-color 0.3s ease;
+  border-radius: 0.875rem;
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 /* Glass Pill — buttons and tags */
 .glass-pill {
-  background-color: var(--bf-glass-pill-bg);
-  backdrop-filter: blur(24px) saturate(190%);
-  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  background: var(--bf-glass-pill-bg);
+  backdrop-filter: blur(24px) saturate(185%);
+  -webkit-backdrop-filter: blur(24px) saturate(185%);
   border: 1px solid var(--bf-glass-pill-border);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12), inset 0 1px 0 0 rgba(255, 255, 255, 0.22);
-  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 2px 8px rgba(0, 0, 0, 0.08),
+    0 6px 18px rgba(0, 0, 0, 0.06);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-pill:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18), inset 0 1px 0 0 rgba(255, 255, 255, 0.35);
+  transform: translateY(-1.5px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    0 4px 14px rgba(0, 0, 0, 0.12),
+    0 10px 28px rgba(0, 0, 0, 0.10);
 }
 
 .glass-pill:active {
-  transform: translateY(0);
+  transform: translateY(0.5px) scale(0.98);
 }
 
 /* Glass Card — for list items and expandable panels */
 .glass-card {
-  background-color: rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.85);
-  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.05), inset 0 1px 0 0 rgba(255, 255, 255, 0.90);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  background: rgba(255, 255, 255, 0.60);
+  backdrop-filter: blur(24px) saturate(185%);
+  -webkit-backdrop-filter: blur(24px) saturate(185%);
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    0 2px 6px rgba(15, 23, 42, 0.04),
+    0 8px 20px rgba(15, 23, 42, 0.05);
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .theme-dark .glass-card {
-  background-color: rgba(18, 26, 44, 0.52);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.40), inset 0 1px 0 0 rgba(255, 255, 255, 0.20);
+  background: rgba(14, 22, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 4px 12px rgba(0, 0, 0, 0.35),
+    0 12px 32px rgba(0, 0, 0, 0.28);
 }
 
 .glass-card:hover {
-  background-color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.88);
   border-color: rgba(255, 255, 255, 1);
-  box-shadow: 0 14px 32px -6px rgba(15, 23, 42, 0.10), 0 4px 12px -2px rgba(15, 23, 42, 0.04), inset 0 1px 0 0 rgba(255, 255, 255, 1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    0 4px 14px rgba(15, 23, 42, 0.08),
+    0 16px 40px rgba(15, 23, 42, 0.08);
   transform: translateY(-2px);
 }
 
 .theme-dark .glass-card:hover {
-  background-color: rgba(28, 40, 68, 0.70);
-  border-color: rgba(255, 255, 255, 0.26);
-  box-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.60), 0 0 24px rgba(56, 189, 248, 0.16), inset 0 1px 0 0 rgba(255, 255, 255, 0.38);
+  background: rgba(22, 36, 68, 0.72);
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    0 8px 24px rgba(0, 0, 0, 0.50),
+    0 20px 48px rgba(0, 0, 0, 0.38),
+    0 0 30px rgba(56, 189, 248, 0.12);
 }
 
-/* ── Submit Button: Boot.dev Amber/Gold Glass ── */
+/* ── World Section Container ── */
+.world-section {
+  backdrop-filter: blur(36px) saturate(200%) brightness(1.02);
+  -webkit-backdrop-filter: blur(36px) saturate(200%) brightness(1.02);
+  border-radius: 1.5rem;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Specular rim highlight at top of every world section */
+.world-section::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.65) 25%,
+    rgba(255, 255, 255, 0.92) 50%,
+    rgba(255, 255, 255, 0.65) 75%,
+    transparent 100%
+  );
+  border-radius: 1.5rem 1.5rem 0 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ── Lesson Card — premium tactile glass ── */
+.lesson-card {
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(20px) saturate(170%);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  border-radius: 0.875rem;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+}
+
+/* Prismatic colour accent line per world on hover */
+.lesson-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.22s ease;
+  z-index: 2;
+}
+
+.lesson-card:hover::before { opacity: 1; }
+
+.lesson-card[data-world="1"]::before {
+  background: linear-gradient(90deg, transparent, rgba(16,185,129,0.90), transparent);
+}
+.lesson-card[data-world="2"]::before {
+  background: linear-gradient(90deg, transparent, rgba(99,102,241,0.90), transparent);
+}
+.lesson-card[data-world="3"]::before {
+  background: linear-gradient(90deg, transparent, rgba(139,92,246,0.90), transparent);
+}
+.lesson-card[data-world="4"]::before {
+  background: linear-gradient(90deg, transparent, rgba(0,122,255,0.90), transparent);
+}
+.lesson-card[data-world="5"]::before {
+  background: linear-gradient(90deg, transparent, rgba(245,158,11,0.90), transparent);
+}
+
+/* Active lesson card ring glow */
+.lesson-card-active {
+  box-shadow:
+    0 0 0 1.5px #007AFF,
+    inset 0 1px 0 rgba(255, 255, 255, 0.30),
+    0 6px 18px rgba(0, 122, 255, 0.20),
+    0 16px 40px rgba(0, 122, 255, 0.12) !important;
+}
+
+/* ── Submit Button: Amber/Gold Forge ── */
 .btn-submit {
-  background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+  background: linear-gradient(145deg, #F5A623 0%, #E07B00 100%);
   color: #fff;
   font-weight: 700;
+  letter-spacing: 0.015em;
   border: none;
-  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.40), 0 2px 6px rgba(245, 158, 11, 0.25);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  border-radius: 0.625rem;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 225, 100, 0.45),
+    0 4px 12px rgba(245, 158, 11, 0.38),
+    0 2px 6px rgba(245, 158, 11, 0.22);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 0.65rem;
 }
 
 .btn-submit:hover {
-  background: linear-gradient(135deg, #FBB92D 0%, #E88B10 100%);
-  box-shadow: 0 8px 24px rgba(245, 158, 11, 0.50), 0 4px 12px rgba(245, 158, 11, 0.30);
-  transform: translateY(-1px) scale(1.01);
+  background: linear-gradient(145deg, #FBC02D 0%, #E88B0A 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 235, 120, 0.55),
+    0 8px 22px rgba(245, 158, 11, 0.52),
+    0 4px 10px rgba(245, 158, 11, 0.30);
+  transform: translateY(-1.5px) scale(1.015);
 }
 
 .btn-submit:active {
-  transform: translateY(0) scale(0.99);
+  transform: translateY(0.5px) scale(0.985);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 200, 60, 0.30),
+    0 2px 8px rgba(245, 158, 11, 0.28);
 }
 
-/* ── Run Button: iOS Blue Glass ── */
+/* ── Run Button: iOS Blue ── */
 .btn-run {
-  background: linear-gradient(135deg, #007AFF 0%, #0062CC 100%);
+  background: linear-gradient(145deg, #228BE6 0%, #005FCC 100%);
   color: #fff;
   font-weight: 600;
+  letter-spacing: 0.015em;
   border: none;
-  box-shadow: 0 4px 14px rgba(0, 122, 255, 0.35);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  border-radius: 0.625rem;
+  box-shadow:
+    inset 0 1px 0 rgba(130, 195, 255, 0.40),
+    0 4px 12px rgba(0, 122, 255, 0.32),
+    0 2px 6px rgba(0, 122, 255, 0.18);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 0.65rem;
 }
 
 .btn-run:hover {
-  background: linear-gradient(135deg, #2290FF 0%, #0571DF 100%);
-  box-shadow: 0 8px 24px rgba(0, 122, 255, 0.45);
-  transform: translateY(-1px) scale(1.01);
+  background: linear-gradient(145deg, #3A9EFF 0%, #0571DF 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(155, 215, 255, 0.52),
+    0 8px 22px rgba(0, 122, 255, 0.44),
+    0 4px 10px rgba(0, 122, 255, 0.26);
+  transform: translateY(-1.5px) scale(1.015);
+}
+
+.btn-run:active {
+  transform: translateY(0.5px) scale(0.985);
 }
 
 /* ── OTP Doc Card ── */
@@ -247,8 +384,8 @@ samp,
 
 /* ── Lesson Progress Dots (Boot.dev Connector Nodes) ── */
 @keyframes progress-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.50); }
-  50%       { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55); }
+  50%       { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
 }
 
 .lesson-dot-active {
@@ -261,7 +398,27 @@ samp,
 }
 
 .stage-spinner {
-  animation: stage-spinner 0.9s linear infinite;
+  animation: stage-spinner 0.85s linear infinite;
+}
+
+/* ── World icon ambient glow pulse ── */
+@keyframes world-glow-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%       { opacity: 0.90; }
+}
+
+.world-icon-glow { animation: world-glow-pulse 3s ease-in-out infinite; }
+
+/* ── Chapter divider ── */
+.chapter-divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--bf-glass-panel-border) 20%,
+    var(--bf-glass-panel-border) 80%,
+    transparent 100%
+  );
 }
 
 /* ── Capstone Milestone Badge ── */
@@ -315,27 +472,49 @@ samp,
   animation: pulse-packet 1.5s infinite ease-in-out;
 }
 
-/* ── Theme Transition ── */
+/* ── Theme Transition (only non-layout properties) ── */
 *,
 *::before,
 *::after {
-  transition-property: background-color, border-color, color;
+  transition-property: background-color, background, border-color, color, box-shadow, opacity;
   transition-duration: 0.25s;
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* ── Floating / Shimmer Effect on Glass TopBar ── */
-@keyframes topbar-shimmer {
-  0%   { background-position: -200% center; }
-  100% { background-position: 200% center; }
-}
-
 /* ── XP Streak Glow Animation ── */
 @keyframes xp-glow {
-  0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.30); }
-  50%       { box-shadow: 0 0 20px rgba(245, 158, 11, 0.65); }
+  0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.28); }
+  50%       { box-shadow: 0 0 24px rgba(245, 158, 11, 0.70), 0 0 8px rgba(245, 158, 11, 0.40); }
 }
 
 .xp-badge-glow {
   animation: xp-glow 2.5s ease-in-out infinite;
 }
+
+/* ── Mobile, Tablet & Android Ergonomics ── */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+button, a, input, select, textarea {
+  touch-action: manipulation;
+}
+
+/* Prevent mobile auto-zoom when focusing Monaco Editor typing buffer */
+@media (pointer: coarse), (max-width: 768px) {
+  .monaco-editor textarea.inputarea,
+  .monaco-editor .inputarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Safe Area Insets for Android gesture navigation & iOS home bar */
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+}
+
+.pt-safe {
+  padding-top: max(env(safe-area-inset-top, 0px), 8px);
+}
+

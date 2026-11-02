@@ -91,7 +91,7 @@ inventory:restock(ProcessedInv, [{1,5},{2,10}])
       typesSpec: ['List1 = List2 = [T]', 'T = term()'],
       description: 'Reverses a list. O(n). Use this at the end of accumulator loops instead of appending to the tail on every step.',
       complexityNote: 'O(n) time, O(n) space. The accumulator pattern + lists:reverse is the canonical idiom.',
-      officialUrl: 'https://www.erlang.org/doc/man/lists.html#reverse-1',
+      officialUrl: 'https://www.erlang.org/doc/apps/stdlib/lists.html#reverse/1',
       githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/lists.erl',
     },
     {
@@ -101,7 +101,7 @@ inventory:restock(ProcessedInv, [{1,5},{2,10}])
       typesSpec: ['Term1 = Term2 = Maximum = term()'],
       description: 'Returns the largest of two terms. Use max(0, Stock - Qty) to floor stock at zero.',
       complexityNote: 'O(1). BIF — implemented as a single BEAM opcode.',
-      officialUrl: 'https://www.erlang.org/doc/man/erlang.html#max-2',
+      officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#max/2',
     },
   ],
   astRules: {
@@ -272,7 +272,7 @@ export default function WorkspacePage() {
   };
 
   return (
-    <main className="flex h-screen w-screen overflow-hidden relative">
+    <main className="flex h-screen h-dvh w-screen overflow-hidden relative">
       {/* Boot.dev Top Bar (replaces TopSegmentedNav as primary navigation) */}
       <BootDevTopBar />
 
