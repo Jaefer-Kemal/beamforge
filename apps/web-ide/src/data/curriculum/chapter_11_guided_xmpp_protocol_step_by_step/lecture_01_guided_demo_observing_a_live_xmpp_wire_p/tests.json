@@ -1,0 +1,11 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch11-l01-1",
+      "title": "Run Complete 5-Phase Live XMPP Wire Protocol Demo",
+      "erlangCall": "xmpp_wire_demo:run_demo()",
+      "expectedOutput": "{ok, 8}",
+      "explanation": "Boots ephemeral C2S mock server, connects bf_xmpp_c2s_harness over TCP, and executes all 5 handshake and stanza routing phases."
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch02-03-a",
+      "title": "Handle Successful HTTP Response",
+      "erlangCall": "flow_control:handle_http_response({http_response, 200, \"{\\\"status\\\":\\\"healthy\\\"}\"})",
+      "expectedOutput": "{ok, \"{\\\"status\\\":\\\"healthy\\\"}\"}",
+      "explanation": "Matches 200 status branch in case...of."
+    },
+    {
+      "id": "tc-ch02-03-b",
+      "title": "Handle Unauthorized HTTP Response",
+      "erlangCall": "flow_control:handle_http_response({http_response, 401, []})",
+      "expectedOutput": "{error, unauthorized}",
+      "explanation": "Matches 401/403 guard branch."
+    },
+    {
+      "id": "tc-ch02-03-c",
+      "title": "Grade Optimal Latency",
+      "erlangCall": "flow_control:grade_latency(30)",
+      "expectedOutput": "optimal",
+      "explanation": "30 is < 50 ms in if...end."
+    },
+    {
+      "id": "tc-ch02-03-d",
+      "title": "Grade SLA Breach Latency",
+      "erlangCall": "flow_control:grade_latency(500)",
+      "expectedOutput": "sla_breach",
+      "explanation": "500 triggers the true -> fallback."
+    }
+  ]
+}

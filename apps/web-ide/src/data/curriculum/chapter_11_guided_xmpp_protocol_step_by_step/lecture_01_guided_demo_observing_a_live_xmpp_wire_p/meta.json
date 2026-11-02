@@ -1,0 +1,93 @@
+{
+  "id": "ch11-l01",
+  "chapterNumber": 11,
+  "lessonNumber": 1,
+  "lessonType": "guided_demo",
+  "title": "Guided Demo: Observing a Live XMPP Wire Protocol Session Transcript",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "The demonstration module boots sample_xmpp_c2s (an OTP gen_statem process) on an ephemeral TCP port and runs bf_xmpp_c2s_harness to execute the five sequential state transitions required by RFC 6120:\n1. wait_for_stream: Accepts the initial stream open and advertises SASL PLAIN authentication mechanisms.\n2. wait_for_sasl: Receives credentials and responds with <success/>.\n3. authenticated: Receives the client's IQ bind request and assigns the bound Full JID alice@localhost/obsidian.\n4. session_established: Accepts incoming chat messages and acknowledges delivery.\n5. Harness verification: Inspects the latency and protocol structure of each wire transition.",
+  "astRules": {
+    "requireTailRecursion": [],
+    "forbiddenCalls": [],
+    "requiredCalls": [
+      "sample_xmpp_c2s:start_link"
+    ],
+    "requiredConstructs": [
+      "case"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "start_link",
+      "module": "sample_xmpp_c2s",
+      "signature": "sample_xmpp_c2s:start_link(Options) -> {ok, Pid} | {error, Reason}",
+      "typesSpec": [
+        "Options = #{reg_name => atom(), active_mode => once | true}",
+        "Pid = pid()"
+      ],
+      "description": "Boots an RFC 6120 compliant C2S gen_statem process on an ephemeral port.",
+      "complexityNote": "Binds listening socket and manages state machine across wait_for_stream, wait_for_sasl, and session_established.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/gen_tcp.html#listen/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/kernel/src/gen_tcp.erl"
+    },
+    {
+      "functionName": "verify_c2s_handshake_and_routing",
+      "module": "bf_xmpp_c2s_harness",
+      "signature": "bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing(Port, ClientJid, AuthToken) -> {ok, Transcript}",
+      "typesSpec": [
+        "Port = inet:port_number()",
+        "ClientJid = binary()",
+        "AuthToken = binary()"
+      ],
+      "description": "Executes live automated socket harness verifying all 5 protocol handshake stages.",
+      "complexityNote": "Streams fragmented XML frames and coalesced messages with microsecond latency metrics.",
+      "officialUrl": "https://datatracker.ietf.org/doc/html/rfc6120",
+      "githubSourceUrl": "https://github.com/processone/ejabberd"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does the XMPP C2S protocol keep a single TCP connection open persistently rather than using short-lived HTTP requests for each chat message?",
+    "options": [
+      {
+        "id": "A",
+        "label": "To allow the server to push incoming stanzas to the client in real time with sub-millisecond latency without polling overhead.",
+        "isCorrect": true,
+        "explanation": "XMPP maintains a long-lived bidirectional XML stream over a single TCP socket so either peer can push stanzas instantaneously."
+      },
+      {
+        "id": "B",
+        "label": "Because XML documents can only be transmitted over raw TCP sockets.",
+        "isCorrect": false,
+        "explanation": "XML can be sent over any transport, but persistent streaming avoids connection renegotiation latency."
+      },
+      {
+        "id": "C",
+        "label": "Because Erlang processes cannot handle HTTP requests.",
+        "isCorrect": false,
+        "explanation": "Erlang handles HTTP effortlessly (e.g. Cowboy), but real-time messaging requires low-latency bidirectional push streams."
+      },
+      {
+        "id": "D",
+        "label": "Because SASL PLAIN authentication only works on raw sockets.",
+        "isCorrect": false,
+        "explanation": "SASL PLAIN is transport-independent; persistent connections are chosen for real-time delivery."
+      }
+    ]
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "IETF RFC 6120: XMPP Core Stream Initiation & Features",
+      "url": "https://datatracker.ietf.org/doc/html/rfc6120",
+      "category": "book_rfc",
+      "description": "Official standard for XML streams, SASL negotiation, and C2S core mechanics."
+    },
+    {
+      "title": "Learn You Some Erlang: Buckets of Sockets",
+      "url": "https://learnyousomeerlang.com/buckets-of-sockets",
+      "category": "book_rfc",
+      "description": "Pedagogical guide to Erlang gen_tcp programming and active vs passive modes."
+    }
+  ]
+}

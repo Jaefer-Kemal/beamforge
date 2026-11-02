@@ -1,0 +1,103 @@
+{
+  "id": "ch09-l04",
+  "chapterNumber": 9,
+  "lessonNumber": 4,
+  "lessonType": "concept_exercise",
+  "title": "Distributed Erlang Core: Nodes, Magic Cookies, rpc:call & pg Groups",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Integrates distributed Erlang RPC with OTP 23+ decentralized pg process groups.",
+  "astRules": {
+    "requiredCalls": [
+      "rpc:call/5",
+      "pg:join/2",
+      "pg:get_members/1",
+      "pg:leave/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "call",
+      "module": "rpc",
+      "signature": "rpc:call(Node, Module, Function, Args, Timeout) -> Res | {badrpc, Reason}",
+      "typesSpec": [
+        "Node = node()",
+        "Module = Function = atom()",
+        "Args = [term()]",
+        "Timeout = timeout()",
+        "Res = Reason = term()"
+      ],
+      "description": "Evaluates apply(Module, Function, Args) on Node and returns the corresponding value, or {badrpc, Reason} if the call fails.",
+      "complexityNote": "Synchronous network message roundtrip with timeout.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/rpc.html#call/5",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/kernel/src/rpc.erl"
+    },
+    {
+      "functionName": "join",
+      "module": "pg",
+      "signature": "pg:join(Group, PidOrPids) -> ok",
+      "typesSpec": [
+        "Group = term()",
+        "PidOrPids = pid() | [pid()]"
+      ],
+      "description": "Subscribes one or more processes to a distributed process group across the cluster.",
+      "complexityNote": "O(1) monitored process registration.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/pg.html#join/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/kernel/src/pg.erl"
+    },
+    {
+      "functionName": "get_members",
+      "module": "pg",
+      "signature": "pg:get_members(Group) -> [pid()]",
+      "typesSpec": [
+        "Group = term()"
+      ],
+      "description": "Returns all live process identifiers currently joined to the specified group.",
+      "complexityNote": "O(N) membership lookup.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/pg.html#get_members/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/kernel/src/pg.erl"
+    },
+    {
+      "functionName": "leave",
+      "module": "pg",
+      "signature": "pg:leave(Group, PidOrPids) -> ok",
+      "typesSpec": [
+        "Group = term()",
+        "PidOrPids = pid() | [pid()]"
+      ],
+      "description": "Unsubscribes one or more processes from the group.",
+      "complexityNote": "O(1) unregistration.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/pg.html#leave/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/kernel/src/pg.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why was pg introduced in OTP 23 to replace the legacy pg2 module?",
+    "options": [
+      {
+        "id": "A",
+        "label": "pg uses raw UDP packets instead of TCP for cluster routing.",
+        "isCorrect": false,
+        "explanation": "pg uses standard BEAM distributed node distribution channels over TCP/TLS."
+      },
+      {
+        "id": "B",
+        "label": "pg2 had a single central coordinator process per node, creating a bottleneck; pg uses a decentralized, lock-free architecture.",
+        "isCorrect": true,
+        "explanation": "pg was designed to replace pg2 because pg2 suffered from a single centralized coordinator process that created message bottlenecks at scale. pg is fully decentralized and lock-free."
+      },
+      {
+        "id": "C",
+        "label": "pg2 required nodes to share a physical hard drive to coordinate subscriptions.",
+        "isCorrect": false,
+        "explanation": "Neither pg nor pg2 requires shared disk storage."
+      },
+      {
+        "id": "D",
+        "label": "pg encrypts all message payloads with AES-256 by default.",
+        "isCorrect": false,
+        "explanation": "Distribution encryption is handled at the Erlang distribution layer, not by pg."
+      }
+    ]
+  }
+}

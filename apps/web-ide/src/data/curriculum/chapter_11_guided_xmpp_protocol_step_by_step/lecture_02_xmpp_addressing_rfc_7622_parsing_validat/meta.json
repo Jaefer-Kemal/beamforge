@@ -1,0 +1,87 @@
+{
+  "id": "ch11-l02",
+  "chapterNumber": 11,
+  "lessonNumber": 2,
+  "lessonType": "concept_exercise",
+  "title": "XMPP Addressing (RFC 7622): Parsing, Validating & Normalizing JIDs",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "The solution parses the JID in two stages:\n1. binary:split(JidBin, <<\"/\">>) separates the optional Resource part. If the slash exists but the resource is empty, it returns {error, invalid_jid}.\n2. parse_bare splits the bare component on <<\"@\">>, confirming that both user and domain are non-empty.\n3. binary:copy/1 is executed on User, Domain, Resource, and Bare to unpin any references to larger network buffers.\n4. to_bare and format_jid handle map and binary representations seamlessly.",
+  "astRules": {
+    "requiredCalls": [
+      "binary:split/2",
+      "binary:copy/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "split",
+      "module": "binary",
+      "signature": "binary:split(Binary, Pattern) -> [binary()]",
+      "typesSpec": [
+        "Binary = binary()",
+        "Pattern = binary() | [binary()]"
+      ],
+      "description": "Splits a binary on occurrences of Pattern into sub-binaries.",
+      "complexityNote": "Linear scan with zero-copy sub-binary creation.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#split/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl"
+    },
+    {
+      "functionName": "copy",
+      "module": "binary",
+      "signature": "binary:copy(Subject) -> binary()",
+      "typesSpec": [
+        "Subject = binary()"
+      ],
+      "description": "Allocates a fresh, independent heap binary to prevent pinning parent buffers.",
+      "complexityNote": "Forces deep copy of sub-binary, freeing parent socket buffers from GC roots.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#copy/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Under RFC 7622, what is the architectural difference between a Bare JID (user@domain) and a Full JID (user@domain/resource)?",
+    "options": [
+      {
+        "id": "A",
+        "label": "A Bare JID identifies the user account (for presence subscriptions and roster management), while a Full JID routes to a specific connected client socket session.",
+        "isCorrect": true,
+        "explanation": "Full JIDs include the bound resource identifier and correspond directly to a unique online socket session."
+      },
+      {
+        "id": "B",
+        "label": "Bare JIDs are only used on localhost, while Full JIDs are used on the internet.",
+        "isCorrect": false,
+        "explanation": "Bare and Full JIDs are used everywhere across local and federated XMPP architectures."
+      },
+      {
+        "id": "C",
+        "label": "Bare JIDs cannot receive chat messages.",
+        "isCorrect": false,
+        "explanation": "Bare JIDs can receive messages; the server routes them to the highest priority connected resource or stores them offline."
+      },
+      {
+        "id": "D",
+        "label": "Full JIDs require RSA signatures.",
+        "isCorrect": false,
+        "explanation": "JIDs are simply structured protocol addresses, not cryptographic signatures."
+      }
+    ]
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "IETF RFC 7622: Extensible Messaging and Presence Protocol (XMPP): Address Format",
+      "url": "https://datatracker.ietf.org/doc/html/rfc7622",
+      "category": "book_rfc",
+      "description": "Official RFC defining valid Bare JIDs, Full JIDs, and resourcepart constraints."
+    },
+    {
+      "title": "Erlang stdlib: binary:split/2 and binary:copy/1",
+      "url": "https://www.erlang.org/doc/apps/stdlib/binary.html",
+      "category": "erlang_docs",
+      "description": "Official documentation for sub-binary management and unpinning memory buffers."
+    }
+  ]
+}

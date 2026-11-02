@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Closed State Normal Passthrough",
+      "erlangCall": "begin {ok, CB} = circuit_breaker_statem:start_link(2, 5000), Res = circuit_breaker_statem:execute(CB, fun() -> {ok, 42} end), circuit_breaker_statem:stop(CB), Res end",
+      "expectedOutput": "{ok, 42}",
+      "explanation": "In closed state, requests execute and return successfully."
+    },
+    {
+      "id": "tc2",
+      "title": "Tripping to Open & Immediate Fast-Fail",
+      "erlangCall": "begin {ok, CB} = circuit_breaker_statem:start_link(2, 5000), catch circuit_breaker_statem:execute(CB, fun() -> error(fail1) end), catch circuit_breaker_statem:execute(CB, fun() -> error(fail2) end), Res = circuit_breaker_statem:execute(CB, fun() -> {ok, 42} end), circuit_breaker_statem:stop(CB), Res end",
+      "expectedOutput": "{error, circuit_open}",
+      "explanation": "Fails immediately without running user action fun."
+    }
+  ]
+}

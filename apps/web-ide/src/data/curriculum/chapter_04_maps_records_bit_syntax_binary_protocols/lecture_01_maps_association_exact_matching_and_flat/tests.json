@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch04-01-a",
+      "title": "Create Session Map",
+      "erlangCall": "map_registry:create_session(alice, admin)",
+      "expectedOutput": "#{login_count => 0, presence => offline, role => admin, user_id => alice}",
+      "explanation": "Initializes map with offline presence and 0 logins."
+    },
+    {
+      "id": "tc-ch04-01-b",
+      "title": "Update Presence with Exact Matching",
+      "erlangCall": "begin S = map_registry:create_session(alice, admin), map_registry:update_presence(S, alice, online) end",
+      "expectedOutput": "#{login_count => 1, presence => online, role => admin, user_id => alice}",
+      "explanation": "Matches alice and increments login_count to 1."
+    },
+    {
+      "id": "tc-ch04-01-c",
+      "title": "Reject Mismatched User Update",
+      "erlangCall": "begin S = map_registry:create_session(alice, admin), map_registry:update_presence(S, bob, online) end",
+      "expectedOutput": "{error, session_mismatch}",
+      "explanation": "Returns error when session belongs to a different user."
+    },
+    {
+      "id": "tc-ch04-01-d",
+      "title": "Verify Admin Online Session",
+      "erlangCall": "begin S = map_registry:create_session(alice, admin), S2 = map_registry:update_presence(S, alice, online), map_registry:is_admin_session(S2) end",
+      "expectedOutput": "true",
+      "explanation": "Returns true for active online admin."
+    }
+  ]
+}

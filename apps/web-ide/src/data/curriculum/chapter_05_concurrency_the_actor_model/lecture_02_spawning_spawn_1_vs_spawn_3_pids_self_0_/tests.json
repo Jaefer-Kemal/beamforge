@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch05-02-1",
+      "title": "Ping-Pong Single Roundtrip",
+      "erlangCall": "begin P = ping_actor:start_responder(), Res = ping_actor:ping(P, <<\"syn\">>), P ! stop, Res end",
+      "expectedOutput": "{ok, <<\"syn\">>}",
+      "explanation": "Sends a ping request with binary payload and receives matching pong reply."
+    },
+    {
+      "id": "tc-ch05-02-2",
+      "title": "Asynchronous Broadcast",
+      "erlangCall": "begin P1 = ping_actor:start_responder(), P2 = ping_actor:start_responder(), Res = ping_actor:broadcast([P1, P2], stop), Res end",
+      "expectedOutput": "{sent, 2}",
+      "explanation": "Broadcasts stop message asynchronously to two processes, returning {sent, 2}."
+    }
+  ]
+}

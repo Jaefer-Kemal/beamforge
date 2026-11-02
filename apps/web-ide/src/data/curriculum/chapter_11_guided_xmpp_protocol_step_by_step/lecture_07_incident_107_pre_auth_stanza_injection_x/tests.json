@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch11-l07-1",
+      "title": "Pre-Auth Stanza Rejection",
+      "erlangCall": "incident_xmpp_auth_bypass:test_pre_auth_rejection()",
+      "expectedOutput": "{ok, pre_auth_rejected}",
+      "explanation": "Verifies chat stanzas are rejected with not-authorized stream error in pre-auth states."
+    },
+    {
+      "id": "tc-ch11-l07-2",
+      "title": "XML Entity Escaping",
+      "erlangCall": "incident_xmpp_auth_bypass:test_xml_escaping()",
+      "expectedOutput": "{ok, <<\"&lt;b&gt;Tom &amp; Jerry &gt; 1&lt;/b&gt;\">>}",
+      "explanation": "Verifies recursive loop properly escapes &, <, and > into XML entities."
+    }
+  ]
+}

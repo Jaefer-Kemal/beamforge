@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch11-l08-1",
+      "title": "Priority-Based Message Routing (Desktop vs Phone vs Watch)",
+      "erlangCall": "begin P1 = spawn(fun() -> ok end), P2 = spawn(fun() -> ok end), P3 = spawn(fun() -> ok end), S0 = [], S1 = xmpp_presence_router:upsert_session(S0, <<\"alice@host/watch\">>, -5, P1, #{}), S2 = xmpp_presence_router:upsert_session(S1, <<\"alice@host/phone\">>, 5, P2, #{}), S3 = xmpp_presence_router:upsert_session(S2, <<\"alice@host/desktop\">>, 10, P3, #{}), {xmpp_presence_router:resolve_message_targets(S3, <<\"alice@host\">>), xmpp_presence_router:resolve_message_targets(S3, <<\"alice@host/phone\">>)} end",
+      "expectedOutput": "{{route_online,[P3]},{route_online,[P2]}}",
+      "explanation": "Bare JID routes to highest priority (P3 with priority 10); Full JID routes directly to specific resource (P2)."
+    },
+    {
+      "id": "tc-ch11-l08-2",
+      "title": "Pruning Dead Sessions on Process Down",
+      "erlangCall": "begin P1 = spawn(fun() -> ok end), P2 = spawn(fun() -> ok end), S0 = xmpp_presence_router:upsert_session([], <<\"bob@host/web\">>, 1, P1, #{}), S1 = xmpp_presence_router:upsert_session(S0, <<\"bob@host/cli\">>, 2, P2, #{}), S2 = xmpp_presence_router:remove_session_by_pid(S1, P1), xmpp_presence_router:resolve_message_targets(S2, <<\"bob@host/web\">>) end",
+      "expectedOutput": "{route_online,[P2]}",
+      "explanation": "After removing P1, routing to offline web resource falls back to online cli resource."
+    },
+    {
+      "id": "tc-ch11-l08-3",
+      "title": "Broadcast Presence to Subscribed Contacts",
+      "erlangCall": "begin PAlice = self(), PBob = spawn(fun() -> receive _ -> ok end end), Roster = #{<<\"alice@host\">> => [<<\"bob@host\">>]}, S0 = xmpp_presence_router:upsert_session([], <<\"alice@host/phone\">>, 5, PAlice, Roster), S1 = xmpp_presence_router:upsert_session(S0, <<\"bob@host/laptop\">>, 5, PBob, Roster), xmpp_presence_router:broadcast_presence(S1, Roster, <<\"alice@host/phone\">>, <<\"<presence/>\">>) end",
+      "expectedOutput": "1",
+      "explanation": "Delivers presence stanza to Bob (subscribed contact) while skipping sender Alice."
+    }
+  ]
+}

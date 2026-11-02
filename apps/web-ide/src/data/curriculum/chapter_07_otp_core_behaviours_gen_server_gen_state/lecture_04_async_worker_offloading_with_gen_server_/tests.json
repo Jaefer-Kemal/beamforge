@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Asynchronous Worker Report Offload",
+      "erlangCall": "begin {ok, S} = async_report_server:start_link(), Res = async_report_server:generate_report(S, \"rep_1\", fun() -> 42 * 2 end), async_report_server:stop(S), Res end",
+      "expectedOutput": "{ok, \"rep_1\", 84}",
+      "explanation": "Worker computes 84 and delivers reply directly via gen_server:reply/2."
+    },
+    {
+      "id": "tc2",
+      "title": "Process Hibernation Verification",
+      "erlangCall": "begin {ok, S} = async_report_server:start_link(), Res = async_report_server:hibernate_idle(S), async_report_server:stop(S), Res end",
+      "expectedOutput": "hibernated",
+      "explanation": "Puts idle gen_server into compact heap hibernation."
+    }
+  ]
+}

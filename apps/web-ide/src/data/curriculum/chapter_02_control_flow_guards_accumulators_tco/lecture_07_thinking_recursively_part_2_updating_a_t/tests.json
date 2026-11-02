@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch02-07-a",
+      "title": "Update Product Price in Inventory",
+      "erlangCall": "tuple_updater:update_product_price([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}], 2, 30)",
+      "expectedOutput": "[{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 30, 5}]",
+      "explanation": "Updates mouse price to 30 while keeping keyboard intact and in position."
+    },
+    {
+      "id": "tc-ch02-07-b",
+      "title": "Non-Existent Product Price Unchanged",
+      "erlangCall": "tuple_updater:update_product_price([{product, 1, \"Keyboard\", 50, 10}], 99, 100)",
+      "expectedOutput": "[{product, 1, \"Keyboard\", 50, 10}]",
+      "explanation": "TargetId 99 not found; returns original inventory intact."
+    },
+    {
+      "id": "tc-ch02-07-c",
+      "title": "Dual-Accumulator Order Partitioning",
+      "erlangCall": "tuple_updater:partition_orders([{order, 1, 10}, {order, 2, 2}, {order, 3, 5}, {order, 4, 1}], 5)",
+      "expectedOutput": "{[{order, 1, 10}, {order, 3, 5}], [{order, 2, 2}, {order, 4, 1}]}",
+      "explanation": "Splits orders into Valid (Qty >= 5) and Rejected (Qty < 5) preserving order."
+    }
+  ]
+}

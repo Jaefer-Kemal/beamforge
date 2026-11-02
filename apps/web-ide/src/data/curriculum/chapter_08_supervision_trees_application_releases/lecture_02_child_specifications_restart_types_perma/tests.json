@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Worker Spec Construction",
+      "explanation": "Builds a worker child spec with type => worker and 5000ms shutdown timeout.",
+      "erlangCall": "child_spec_factory:worker_spec(cache_srv, my_cache, [100], transient)",
+      "expectedOutput": "#{id => cache_srv, modules => [my_cache], restart => transient, shutdown => 5000, start => {my_cache, start_link, [100]}, type => worker}"
+    },
+    {
+      "id": "tc2",
+      "title": "Supervisor Spec Construction",
+      "explanation": "Builds a nested supervisor spec with type => supervisor and shutdown => infinity.",
+      "erlangCall": "child_spec_factory:supervisor_spec(sub_sup, sub_sup_mod)",
+      "expectedOutput": "#{id => sub_sup, modules => [sub_sup_mod], restart => permanent, shutdown => infinity, start => {sub_sup_mod, start_link, []}, type => supervisor}"
+    },
+    {
+      "id": "tc3",
+      "title": "Classify Restart Truth Table",
+      "explanation": "Checks transient on normal exit vs permanent on normal exit.",
+      "erlangCall": "{child_spec_factory:classify_restart(transient, normal), child_spec_factory:classify_restart(permanent, normal), child_spec_factory:classify_restart(transient, connection_lost)}",
+      "expectedOutput": "{do_not_restart, restart, restart}"
+    }
+  ]
+}

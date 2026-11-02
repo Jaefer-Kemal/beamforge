@@ -1,0 +1,56 @@
+{
+  "id": "ch06-l03",
+  "chapterNumber": 6,
+  "lessonNumber": 3,
+  "lessonType": "concept_exercise",
+  "title": "Guaranteed Resource Cleanup with try ... of ... catch ... after & Boundary Deserialization",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Uses try...of...catch...after to deserialize safely with [safe] and guarantee resource release in after blocks across all error conditions.",
+  "astRules": {
+    "requiredConstructs": [
+      "try_catch"
+    ],
+    "requiredCalls": [
+      "erlang:binary_to_term/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "binary_to_term",
+      "module": "erlang",
+      "signature": "erlang:binary_to_term(Binary, [safe]) -> Term",
+      "typesSpec": [
+        "Binary = binary()",
+        "Term = term()"
+      ],
+      "description": "Decodes an external binary into an Erlang term. [safe] prevents DoS from arbitrary atom creation.",
+      "complexityNote": "O(N) memory allocation on process heap.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#binary_to_term/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What happens to the return value of an `after` block in an Erlang `try ... catch ... after` expression?",
+    "codeSnippet": "Result = try\n    compute_result()\nafter\n    cleanup_socket(),\n    cleaned_up\nend.",
+    "options": [
+      {
+        "id": "A",
+        "label": "The return value of the after block is silently discarded; Result receives the outcome of the try (or catch) block.",
+        "isCorrect": true,
+        "explanation": "Correct! The after block is strictly for side-effects (closing ports, files, sockets). Its return value is ignored by the runtime, ensuring the caller receives the actual computation or error result."
+      },
+      {
+        "id": "B",
+        "label": "Result receives the tuple {try_result, after_result}.",
+        "isCorrect": false,
+        "explanation": "Erlang does not bundle the after return value into a tuple."
+      },
+      {
+        "id": "C",
+        "label": "The after block return value overrides the try result.",
+        "isCorrect": false,
+        "explanation": "The try result is preserved; after block values are discarded."
+      }
+    ]
+  }
+}

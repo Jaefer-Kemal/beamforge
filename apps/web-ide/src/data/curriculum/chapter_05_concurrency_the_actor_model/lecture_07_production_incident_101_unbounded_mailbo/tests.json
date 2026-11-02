@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch05-07-1",
+      "title": "Drain Unknown Messages (Mailbox Length = 0)",
+      "erlangCall": "begin {ok, P} = incident_mailbox_leak:start(), [P ! {legacy_heartbeat, os:system_time()} || _ <- lists:seq(1, 50)], ok = incident_mailbox_leak:record_metric(P, 10), ok = incident_mailbox_leak:record_metric(P, 20), [P ! {legacy_heartbeat, os:system_time()} || _ <- lists:seq(1, 50)], timer:sleep(30), Len = incident_mailbox_leak:inspect_queue_len(P), {ok, Summary} = incident_mailbox_leak:get_summary(P), incident_mailbox_leak:stop(P), {Len, Summary} end",
+      "expectedOutput": "{0, #{count => 2, total => 30}}",
+      "explanation": "Blasts 100 legacy heartbeat messages mixed with metrics; verifies mailbox length is 0 and summary stats are exact."
+    },
+    {
+      "id": "tc-ch05-07-2",
+      "title": "Client Call Timeout Fallback",
+      "erlangCall": "begin DeadPid = spawn(fun() -> ok end), timer:sleep(10), incident_mailbox_leak:get_summary(DeadPid) end",
+      "expectedOutput": "{error, timeout}",
+      "explanation": "Calls get_summary/1 against a dead process; confirms caller returns {error, timeout} within 1,000ms instead of hanging forever."
+    }
+  ]
+}

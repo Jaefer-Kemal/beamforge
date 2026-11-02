@@ -1,0 +1,53 @@
+{
+  "id": "ch01-l06",
+  "chapterNumber": 1,
+  "lessonNumber": 6,
+  "lessonType": "concept_exercise",
+  "title": "Modules, Exports, Function Arity & Compile-Time Macros",
+  "difficulty": "Beginner",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates cascading default argument delegation across arities using compile-time macros ?DEFAULT_PORT, ?DEFAULT_TIMEOUT, and ?MODULE.",
+  "astRules": {
+    "requiredCalls": [
+      "arity_calc:connect/2",
+      "arity_calc:connect/3"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "module_info",
+      "module": "erlang",
+      "signature": "Module:module_info() -> proplist()",
+      "typesSpec": [
+        "Module = atom()"
+      ],
+      "description": "Returns compilation metadata and exported functions of a module.",
+      "complexityNote": "O(1) table lookup in the code server.",
+      "officialUrl": "https://www.erlang.org/doc/system/modules.html#module_info/0",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/erts/emulator/beam/beam_emu.c"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "In Erlang, how does the compiler treat two functions named fetch/1 and fetch/2 declared in the same module?",
+    "options": [
+      {
+        "id": "A",
+        "label": "As two completely distinct functions that happen to share a name prefix",
+        "isCorrect": true,
+        "explanation": "Function identity in Erlang is strictly the pair Name/Arity. fetch/1 and fetch/2 are separate functions."
+      },
+      {
+        "id": "B",
+        "label": "As a single overloaded function where arity 1 provides an optional second parameter defaulted to undefined",
+        "isCorrect": false,
+        "explanation": "Erlang has no automatic optional parameter mechanism; default parameters must be implemented explicitly via delegation."
+      },
+      {
+        "id": "C",
+        "label": "The compiler issues a duplicate_function warning and ignores fetch/1",
+        "isCorrect": false,
+        "explanation": "They have different arities, so there is no duplicate name collision."
+      }
+    ]
+  }
+}

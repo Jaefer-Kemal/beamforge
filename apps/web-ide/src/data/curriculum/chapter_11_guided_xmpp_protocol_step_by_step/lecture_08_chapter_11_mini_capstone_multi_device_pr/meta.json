@@ -1,0 +1,89 @@
+{
+  "id": "ch11-l08",
+  "chapterNumber": 11,
+  "lessonNumber": 8,
+  "lessonType": "problem_set",
+  "title": "Chapter 11 Mini-Capstone: Multi-Device Presence Priority & Routing Engine",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "The presence router implements RFC 6121 priority routing:\n1. upsert_session normalizes Bare and Resource components and replaces matching Full JIDs.\n2. remove_session_by_pid implements an accumulator-based tail-recursive loop, cleanly pruning disconnected PIDs.\n3. resolve_message_targets checks if TargetJid is a Full JID. If the exact resource is online, it delivers to that PID. Otherwise, it filters online sessions for the Bare JID where Priority >= 0, selects the highest priority (handling ties by returning all tied PIDs), or returns {store_offline, BareJid}.\n4. broadcast_presence looks up subscribed contacts in RosterMap, adds the sender's other resources, dedupes PIDs using lists:usort/1, delivers the stanza via BEAM message passing, and returns the delivered count.",
+  "astRules": {
+    "requiredCalls": [
+      "binary:split/2",
+      "binary:copy/1",
+      "lists:usort/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "max",
+      "module": "lists",
+      "signature": "lists:max(List) -> Max",
+      "typesSpec": [
+        "List = [T, ...]",
+        "Max = T"
+      ],
+      "description": "Finds the maximum priority integer among connected client sessions.",
+      "complexityNote": "Linear O(N) traversal across session candidates.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/lists.html#max/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/lists.erl"
+    },
+    {
+      "functionName": "usort",
+      "module": "lists",
+      "signature": "lists:usort(List1) -> List2",
+      "typesSpec": [
+        "List1 = [T]",
+        "List2 = [T]"
+      ],
+      "description": "Sorts and removes duplicates from recipient PID list before fan-out.",
+      "complexityNote": "O(N log N) merge sort guaranteeing unique message delivery.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/lists.html#usort/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/lists.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "When routing a message to a Bare JID (user@domain), how does RFC 6121 select the destination among multiple online client sessions?",
+    "options": [
+      {
+        "id": "A",
+        "label": "It selects the session(s) with the highest non-negative priority (>= 0), or queues offline if all priorities are negative or no sessions exist.",
+        "isCorrect": true,
+        "explanation": "RFC 6121 Section 8.5.2 specifies priority-based dispatch; negative priorities do not receive bare JID messages."
+      },
+      {
+        "id": "B",
+        "label": "It broadcasts the message to every online session regardless of priority.",
+        "isCorrect": false,
+        "explanation": "Messages are delivered to the highest priority session; ties result in multi-delivery."
+      },
+      {
+        "id": "C",
+        "label": "It always stores the message offline first, then notifies clients via push.",
+        "isCorrect": false,
+        "explanation": "Online sessions receive instantaneous BEAM message delivery."
+      },
+      {
+        "id": "D",
+        "label": "It randomly picks an active socket PID.",
+        "isCorrect": false,
+        "explanation": "Routing is deterministic based on integer priority rankings."
+      }
+    ]
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "IETF RFC 6121: XMPP Instant Messaging and Presence (Section 8 Message Routing)",
+      "url": "https://datatracker.ietf.org/doc/html/rfc6121",
+      "category": "book_rfc",
+      "description": "RFC routing specification for priority-based multi-device delivery and roster broadcasts."
+    },
+    {
+      "title": "GitHub esl/MongooseIM: src/ejabberd_router.erl",
+      "url": "https://github.com/esl/MongooseIM/blob/master/src/ejabberd_router.erl",
+      "category": "github_ecosystem",
+      "description": "Core stanza routing pipeline handling local, remote, and offline messages."
+    }
+  ]
+}

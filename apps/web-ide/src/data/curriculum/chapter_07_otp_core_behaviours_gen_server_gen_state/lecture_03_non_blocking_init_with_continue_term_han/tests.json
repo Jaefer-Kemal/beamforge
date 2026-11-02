@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Non-Blocking Guest Session Hydration",
+      "erlangCall": "begin {ok, S} = session_ttl_server:start_link(60), Valid = session_ttl_server:is_valid(S, <<\"guest\">>), session_ttl_server:stop(S), Valid end",
+      "expectedOutput": "true",
+      "explanation": "Confirms that handle_continue populated default guest session immediately."
+    },
+    {
+      "id": "tc2",
+      "title": "Active Session Count Tracking",
+      "erlangCall": "begin {ok, S} = session_ttl_server:start_link(60), session_ttl_server:create_session(S, <<\"user_101\">>), Count = session_ttl_server:get_active_count(S), session_ttl_server:stop(S), Count end",
+      "expectedOutput": "2",
+      "explanation": "Verifies active session tally after registering user_101."
+    }
+  ]
+}

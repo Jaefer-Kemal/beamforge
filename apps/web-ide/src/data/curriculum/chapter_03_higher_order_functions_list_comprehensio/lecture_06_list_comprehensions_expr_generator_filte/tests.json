@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch03-06-a",
+      "title": "Filter Active User Names via Pattern Matching",
+      "erlangCall": "comprehension_queries:active_user_names([{user, 1, \"Alice\", active}, {user, 2, \"Bob\", suspended}, {user, 3, \"Charlie\", active}])",
+      "expectedOutput": "[\"Alice\", \"Charlie\"]",
+      "explanation": "Silently ignores suspended Bob and extracts Alice and Charlie."
+    },
+    {
+      "id": "tc-ch03-06-b",
+      "title": "Generate Cartesian Pairs",
+      "erlangCall": "comprehension_queries:matrix_cartesian([1, 2], [x, y])",
+      "expectedOutput": "[{1, x}, {1, y}, {2, x}, {2, y}]",
+      "explanation": "Generates all combinations of Xs and Ys."
+    },
+    {
+      "id": "tc-ch03-06-c",
+      "title": "Generate Fulfilled Order Receipts with Relational Join",
+      "erlangCall": "comprehension_queries:fulfilled_order_receipts([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 1}], [{order, 1, 2}, {order, 2, 5}])",
+      "expectedOutput": "[{receipt, 1, \"Keyboard\", 100}]",
+      "explanation": "Order 1 is fulfilled (2 * 50 = 100). Order 2 requests 5 but only 1 is in stock, so it is filtered out."
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "id": "ch10-l03",
+  "chapterNumber": 10,
+  "lessonNumber": 3,
+  "lessonType": "concept_exercise",
+  "title": "TCP Flow Control: {active, false} vs. {active, true} vs. {active, once} Backpressure",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "### Solution Breakdown: Bounded Flow Control Worker\n1. **Initial Arming**: In \\`init/1\\`, \\`inet:setopts(Socket, [binary, {active, once}])\\` tells the kernel to deliver exactly one incoming frame before pausing.\n2. **Backpressure Re-arming**: In \\`handle_info({tcp, ...})\\`, after transmitting the echo response, we explicitly re-arm active reception with \\`inet:setopts(Socket, [{active, once}])\\`. If the worker is delayed, packets stay safely in the OS kernel receive buffer, triggering TCP window scaling to throttle the sender.\n3. **State Telemetry**: We maintain running tallies of packets and bytes processed, updating them monotonically with zero race conditions.",
+  "astRules": {
+    "requireTailRecursion": [],
+    "forbiddenCalls": [],
+    "requiredCalls": [
+      "inet:setopts/2",
+      "gen_tcp:send/2"
+    ],
+    "requiredConstructs": [
+      "record_def"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "setopts",
+      "module": "inet",
+      "signature": "inet:setopts(Socket, Options) -> ok | {error, Reason}",
+      "typesSpec": [
+        "Socket = inet:socket()",
+        "Options = [inet:socket_setopt()]"
+      ],
+      "description": "Sets socket options such as active modes, nodelay, or buffer sizes.",
+      "complexityNote": "Modifies OS kernel socket options via ioctl/setsockopt syscalls.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/inet.html#setopts/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/kernel/src/inet.erl"
+    },
+    {
+      "functionName": "send",
+      "module": "gen_tcp",
+      "signature": "gen_tcp:send(Socket, Packet) -> ok | {error, Reason}",
+      "typesSpec": [
+        "Socket = gen_tcp:socket()",
+        "Packet = iodata()"
+      ],
+      "description": "Sends packet over connected socket descriptor.",
+      "complexityNote": "Direct synchronous write to OS socket send buffer.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/gen_tcp.html#send/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/kernel/src/gen_tcp.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "When an incoming packet arrives under {active, once}, what does the BEAM socket driver do before delivering {tcp, Socket, Data} to the process?",
+    "codeSnippet": "receive\n    {tcp, Socket, Data} ->\n        process_data(Data),\n        ok = inet:setopts(Socket, [{active, once}]),\n        loop(Socket)\nend",
+    "options": [
+      {
+        "id": "A",
+        "label": "It automatically flips the socket mode to passive ({active, false}), buffering subsequent network packets in the OS kernel until inet:setopts re-arms it.",
+        "isCorrect": true,
+        "explanation": "Correct! Under {active, once}, the VM delivers exactly one packet and reverts to passive mode. Packets accumulate in kernel TCP buffers; if full, TCP flow control shrinks the receive window and pauses the sender."
+      },
+      {
+        "id": "B",
+        "label": "It drops any packets that arrive during process_data(Data).",
+        "isCorrect": false,
+        "explanation": "TCP guarantees zero packet loss on reliable links; packets wait safely in OS kernel socket buffers."
+      },
+      {
+        "id": "C",
+        "label": "It spawns a new Erlang process for each subsequent byte.",
+        "isCorrect": false,
+        "explanation": "The same controlling process receives the next packet once inet:setopts re-arms active mode."
+      }
+    ]
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "Learn You Some Erlang: Buckets of Sockets",
+      "url": "https://learnyousomeerlang.com/buckets-of-sockets",
+      "category": "book_rfc",
+      "description": "Comprehensive pedagogical guide to socket programming in Erlang."
+    },
+    {
+      "title": "Erlang in Anger: Chapter 5 - Overload & Backpressure",
+      "url": "https://www.erlanginanger.com/",
+      "category": "book_rfc",
+      "description": "Real-world guide to diagnosing mailbox floods and configuring active-once sockets."
+    }
+  ]
+}

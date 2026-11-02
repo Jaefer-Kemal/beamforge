@@ -1,0 +1,52 @@
+{
+  "id": "ch02-l03",
+  "chapterNumber": 2,
+  "lessonNumber": 3,
+  "lessonType": "concept_exercise",
+  "title": "Branching Inside Bodies: case...of vs. if...end",
+  "difficulty": "Beginner",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates case...of pattern matching on HTTP response tuples and if...end guard chains for latency grading.",
+  "astRules": {
+    "requiredConstructs": [
+      "case_expr"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "case_expression",
+      "module": "erlang",
+      "signature": "case Expr of Pattern -> Body end.",
+      "typesSpec": [
+        "Expr = term()",
+        "Pattern = term()"
+      ],
+      "description": "Evaluates Expr and executes the first matching pattern branch.",
+      "complexityNote": "Compiled into efficient jump tables and pattern decoders.",
+      "officialUrl": "https://www.erlang.org/doc/reference_manual/expressions.html#case"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What occurs if an Erlang if...end expression evaluates without any condition matching and without a true -> branch?",
+    "options": [
+      {
+        "id": "A",
+        "label": "The process crashes with an if_clause runtime exception",
+        "isCorrect": true,
+        "explanation": "Erlang if statements must match at least one branch; otherwise an if_clause exception is raised."
+      },
+      {
+        "id": "B",
+        "label": "The if statement silently returns the atom undefined",
+        "isCorrect": false,
+        "explanation": "Erlang never supplies implicit return values; unhandled cases crash explicitly."
+      },
+      {
+        "id": "C",
+        "label": "The expression re-evaluates the first clause in an infinite loop",
+        "isCorrect": false,
+        "explanation": "Erlang evaluates conditions once from top to bottom."
+      }
+    ]
+  }
+}

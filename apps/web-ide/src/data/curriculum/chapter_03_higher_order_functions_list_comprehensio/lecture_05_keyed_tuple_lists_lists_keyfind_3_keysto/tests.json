@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch03-05-a",
+      "title": "Find Product By ID in Keylist",
+      "erlangCall": "keylist_config:find_product_by_id([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 4}], 2)",
+      "expectedOutput": "{ok, {product, 2, \"Mouse\", 25, 4}}",
+      "explanation": "Matches key 2 at index 2."
+    },
+    {
+      "id": "tc-ch03-05-b",
+      "title": "Find Product By ID - Missing Product",
+      "erlangCall": "keylist_config:find_product_by_id([{product, 1, \"Keyboard\", 50, 10}], 999)",
+      "expectedOutput": "{error, not_found}",
+      "explanation": "Returns {error, not_found} when keyfind returns false."
+    },
+    {
+      "id": "tc-ch03-05-c",
+      "title": "Upsert Product in Keylist",
+      "erlangCall": "keylist_config:upsert_product([{product, 1, \"Keyboard\", 50, 10}], {product, 1, \"Keyboard\", 45, 12})",
+      "expectedOutput": "[{product, 1, \"Keyboard\", 45, 12}]",
+      "explanation": "Replaces product 1 in-place with new price and stock."
+    },
+    {
+      "id": "tc-ch03-05-d",
+      "title": "Read Socket Options Proplist",
+      "erlangCall": "keylist_config:read_socket_options([binary, {port, 9090}, {active, once}])",
+      "expectedOutput": "{socket_cfg, 9090, once, true}",
+      "explanation": "Port is 9090, active mode is once, and binary is true."
+    }
+  ]
+}

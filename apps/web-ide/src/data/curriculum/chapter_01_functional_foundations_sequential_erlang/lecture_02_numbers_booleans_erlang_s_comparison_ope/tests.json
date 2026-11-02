@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch01-02-a",
+      "title": "Calculate Integer Bandwidth",
+      "erlangCall": "basic_types:calculate_bandwidth(1250, 2)",
+      "expectedOutput": "5000",
+      "explanation": "(1250 * 8) div 2 = 5000 bps."
+    },
+    {
+      "id": "tc-ch01-02-b",
+      "title": "Exact Equality Match Check",
+      "erlangCall": "basic_types:is_exact_match(42, 42.0)",
+      "expectedOutput": "false",
+      "explanation": "Integer 42 is not identical in type to Float 42.0 under =:=."
+    },
+    {
+      "id": "tc-ch01-02-c",
+      "title": "Bandwidth Quota Within Limit Check",
+      "erlangCall": "basic_types:is_within_quota(450, 500, false)",
+      "expectedOutput": "true",
+      "explanation": "UsedMb (450) is >= 0 and =< LimitMb (500)."
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "id": "ch08-l03",
+  "chapterNumber": 8,
+  "lessonNumber": 3,
+  "lessonType": "concept_exercise",
+  "title": "Restart Intensity Blizzards (intensity/period) & Upward Crash Escalation",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "Implements the sliding-window crash intensity rate limiter algorithm and calculates downstream reverse-order termination and forward-order restart plans for rest_for_one pipelines.",
+  "astRules": {
+    "requiredConstructs": [
+      "guards"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "sup_flags",
+      "module": "supervisor",
+      "signature": "sup_flags() = #{strategy => strategy(), intensity => non_neg_integer(), period => pos_integer()}",
+      "typesSpec": [
+        "intensity => non_neg_integer()",
+        "period => pos_integer()"
+      ],
+      "description": "Defines restart frequency threshold (intensity / period). If exceeded, supervisor terminates itself with shutdown to escalate upward.",
+      "complexityNote": "Maintained as an O(N) timestamp queue inside the supervisor loop.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/supervisor.html#type-sup_flags"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "When a supervisor exceeds its MaxR restarts within MaxT seconds, why does it shut itself down instead of just giving up on that single worker?",
+    "options": [
+      {
+        "id": "A",
+        "label": "To escalate the failure up the supervision tree, allowing a higher-level supervisor with a broader architectural perspective to restart the entire subsystem.",
+        "isCorrect": true,
+        "explanation": "Supervisors isolate failures locally until their restart budget is exhausted. When exceeded, escalating to the parent supervisor prevents infinite localized loops."
+      },
+      {
+        "id": "B",
+        "label": "Because the supervisor process runs out of memory from storing crash timestamps.",
+        "isCorrect": false,
+        "explanation": "The timestamp queue is tiny (pruned to MaxT seconds); shutdown is a deliberate architectural escalation mechanism."
+      },
+      {
+        "id": "C",
+        "label": "Because the BEAM VM automatically sends a kill signal to any supervisor whose worker crashes.",
+        "isCorrect": false,
+        "explanation": "The BEAM VM never kills supervisors automatically; the supervisor decides to terminate itself via its sup_flags contract."
+      },
+      {
+        "id": "D",
+        "label": "To reboot the host operating system.",
+        "isCorrect": false,
+        "explanation": "Erlang supervision trees operate purely within the user-space BEAM runtime."
+      }
+    ]
+  },
+  "visualScene": "supervision_rest_for_one_ets_heir"
+}

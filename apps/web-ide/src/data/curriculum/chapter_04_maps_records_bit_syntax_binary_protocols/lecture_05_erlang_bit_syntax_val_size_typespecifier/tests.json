@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch04-05-a",
+      "title": "Pack 3-Byte Network Header",
+      "erlangCall": "bit_packer:pack_header(4, 2, 1024)",
+      "expectedOutput": "<<66, 4, 0>>",
+      "explanation": "Version 4 (4 bits) + Flags 2 (4 bits) = 66; 1024 in 16 bits = <<4, 0>>."
+    },
+    {
+      "id": "tc-ch04-05-b",
+      "title": "Unpack Header and Extract Payload",
+      "erlangCall": "bit_packer:unpack_header(<<66, 4, 0, \"PAYLOAD\">>)",
+      "expectedOutput": "{ok, 4, 2, 1024, <<\"PAYLOAD\">>}",
+      "explanation": "Unpacks 4, 2, 1024 and extracts trailing binary payload."
+    },
+    {
+      "id": "tc-ch04-05-c",
+      "title": "Reject Truncated Binary",
+      "erlangCall": "bit_packer:unpack_header(<<66, 4>>)",
+      "expectedOutput": "{error, insufficient_bytes}",
+      "explanation": "Header requires at least 3 bytes."
+    },
+    {
+      "id": "tc-ch04-05-d",
+      "title": "Encode Tagged UTF8 Payload",
+      "erlangCall": "bit_packer:encode_utf8_tagged(<<\"HELLO\">>)",
+      "expectedOutput": "<<1, 0, 5, \"HELLO\">>",
+      "explanation": "Tag 1 (1 byte) + Length 5 (2 bytes) + <<\"HELLO\">> (5 bytes)."
+    }
+  ]
+}

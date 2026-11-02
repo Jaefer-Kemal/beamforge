@@ -1,0 +1,28 @@
+{
+  "id": "ch12-m2",
+  "title": "Milestone 2: Incremental XML Stream Framer (xmpp_stream_parser)",
+  "mentalModelCheck": {
+    "question": "Why MUST xmpp_stream_parser call binary:copy/1 when extracting stanza attributes from TCP chunks?",
+    "codeSnippet": "<<Header:10/binary, User:4/binary, Rest/binary>> = PacketBin,\n%% Storing User into persistent session state",
+    "options": [
+      {
+        "id": "A",
+        "label": "Without binary:copy/1, the 4-byte slice pins the entire 64KB off-heap ProcBin in memory, preventing GC from freeing it.",
+        "isCorrect": true,
+        "explanation": "Correct! BEAM reference-counted binaries (>64 bytes) cannot be freed until all sub-binary slices are GC-collected. Calling binary:copy/1 forces a local heap copy, unpinning the 64KB TCP buffer."
+      },
+      {
+        "id": "B",
+        "label": "Binary slices cannot be matched with Erlang pattern matching without copying.",
+        "isCorrect": false,
+        "explanation": "Binary pattern matching works natively on slices without copying."
+      },
+      {
+        "id": "C",
+        "label": "binary:copy/1 encrypts the binary before storing it in the ETS table.",
+        "isCorrect": false,
+        "explanation": "binary:copy/1 merely copies the binary bytes into fresh unreferenced memory."
+      }
+    ]
+  }
+}

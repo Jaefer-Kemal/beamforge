@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Quota Enforcement & Token Consumption",
+      "erlangCall": "begin {ok, S} = rate_limiter_srv:start_link(10, 3), {allow, 7} = rate_limiter_srv:check_request(S, <<\"client_a\">>, 3), Res = rate_limiter_srv:check_request(S, <<\"client_a\">>, 5), rate_limiter_srv:stop(S), Res end",
+      "expectedOutput": "{allow, 2}",
+      "explanation": "Deducts 3 and 5 tokens from 10 capacity, leaving 2 tokens."
+    },
+    {
+      "id": "tc2",
+      "title": "Denial When Cost Exceeds Remaining Tokens",
+      "erlangCall": "begin {ok, S} = rate_limiter_srv:start_link(10, 3), {allow, 2} = rate_limiter_srv:check_request(S, <<\"client_b\">>, 8), Res = rate_limiter_srv:check_request(S, <<\"client_b\">>, 5), rate_limiter_srv:stop(S), Res end",
+      "expectedOutput": "{deny, 2}",
+      "explanation": "Denies request when 5 tokens are requested but only 2 remain."
+    },
+    {
+      "id": "tc3",
+      "title": "Batch Refill All Clients",
+      "erlangCall": "begin {ok, S} = rate_limiter_srv:start_link(10, 3), {allow, 0} = rate_limiter_srv:check_request(S, <<\"client_c\">>, 10), rate_limiter_srv:refill_all(S), Res = rate_limiter_srv:check_request(S, <<\"client_c\">>, 2), rate_limiter_srv:stop(S), Res end",
+      "expectedOutput": "{allow, 1}",
+      "explanation": "Refills tokens and caps strictly at max_tokens."
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "id": "ch05-l08",
+  "chapterNumber": 5,
+  "lessonNumber": 8,
+  "lessonType": "problem_set",
+  "title": "Chapter 5 Problem Set: Concurrent Bank Ledger & Order Actor (ledger_actor.erl)",
+  "difficulty": "Production",
+  "xpReward": 100,
+  "solutionExplanation": "Implements an in-memory concurrent banking ledger actor with tail-recursive loop, atomic deposit/withdraw/transfer, and dual-accumulator batch execution.",
+  "astRules": {
+    "requireTailRecursion": [
+      "loop/1"
+    ],
+    "requiredConstructs": [
+      "receive_after"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "spawn",
+      "module": "erlang",
+      "signature": "spawn(Fun) -> pid()",
+      "typesSpec": [
+        "Fun = fun(() -> any())"
+      ],
+      "description": "Creates a concurrent process with its own private heap and returns its unique PID.",
+      "complexityNote": "O(1) allocation (~2.5 KB base heap).",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#spawn/1"
+    },
+    {
+      "functionName": "make_ref",
+      "module": "erlang",
+      "signature": "erlang:make_ref() -> reference()",
+      "typesSpec": [
+        "reference() = 128-bit unique token"
+      ],
+      "description": "Returns an almost unique reference token used for request-reply correlation.",
+      "complexityNote": "O(1) atomic counter increment.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#make_ref/0"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why is an in-memory Erlang ledger actor immune to double-spend race conditions even when 1,000 concurrent client processes attempt to withdraw the same $100 balance simultaneously?",
+    "codeSnippet": "%% 1,000 client processes blasting simultaneous withdrawals:\n[spawn(fun() -> ledger_actor:process_transaction(Ledger, {withdraw, 1, 100}) end)\n || _ <- lists:seq(1, 1000)].",
+    "options": [
+      {
+        "id": "A",
+        "label": "The ledger actor process serializes all incoming withdrawal messages sequentially through its private mailbox, processing one transaction at a time and updating its state before inspecting the next message.",
+        "isCorrect": true,
+        "explanation": "Correct! The Actor Model eliminates race conditions through sequential mailbox processing. Even if 1,000 messages arrive at the same microsecond, they queue up in the mailbox and are handled one at a time."
+      },
+      {
+        "id": "B",
+        "label": "Erlang uses Linux kernel hardware locks to freeze RAM addresses.",
+        "isCorrect": false,
+        "explanation": "Erlang does not use hardware memory locks; state is isolated to the process heap."
+      },
+      {
+        "id": "C",
+        "label": "The compiler converts concurrent withdrawals into SQL transactions.",
+        "isCorrect": false,
+        "explanation": "Erlang actor state is purely in-memory; no SQL database is involved."
+      }
+    ]
+  },
+  "visualScene": "mailbox_selective_receive"
+}

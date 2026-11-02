@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch06-05-1",
+      "title": "Supervisor Reports Active Worker",
+      "erlangCall": "begin {ok, Sup, W1} = exit_trapper:start_supervised(fun() -> receive stop -> ok end end), {ok, Reported} = exit_trapper:get_worker_pid(Sup), Sup ! stop, W1 =:= Reported end",
+      "expectedOutput": "true",
+      "explanation": "Supervisor correctly initialized and returned worker pid."
+    },
+    {
+      "id": "tc-ch06-05-2",
+      "title": "Automatic Respawn on Abnormal Crash",
+      "erlangCall": "begin {ok, Sup, W1} = exit_trapper:start_supervised(fun() -> receive stop -> ok end end), exit_trapper:kill_worker(Sup, badarith), timer:sleep(50), {ok, W2} = exit_trapper:get_worker_pid(Sup), Sup ! stop, {is_process_alive(W1), is_process_alive(W2), W1 =/= W2} end",
+      "expectedOutput": "{false, true, true}",
+      "explanation": "When W1 died, supervisor trapped exit and spawned fresh worker W2."
+    },
+    {
+      "id": "tc-ch06-05-3",
+      "title": "Untrappable Kill Signal Simulation",
+      "erlangCall": "exit_trapper:simulate_exit_truth_table(true, kill)",
+      "expectedOutput": "{died, killed}",
+      "explanation": "Even with trap_exit=true, kill terminates process and reports killed."
+    }
+  ]
+}

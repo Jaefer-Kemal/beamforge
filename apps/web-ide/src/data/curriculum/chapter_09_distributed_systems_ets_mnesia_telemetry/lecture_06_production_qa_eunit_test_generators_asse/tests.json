@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Fee Calculation and Transfer Validation",
+      "erlangCall": "begin Fee = ledger_specs_and_tests:calculate_fee(1000, usd), {ok, Rem} = ledger_specs_and_tests:validate_transfer_spec(1000, 500, usd), {Fee, Rem} end",
+      "expectedOutput": "{15, 493}",
+      "explanation": "Tests fee calculation (1.5%) and balance deduction."
+    },
+    {
+      "id": "tc2",
+      "title": "Run Built-in EUnit Test Suite",
+      "erlangCall": "ledger_specs_and_tests:run_unit_checks()",
+      "expectedOutput": "ok",
+      "explanation": "Executes EUnit test generator suites and confirms all assertions pass."
+    }
+  ]
+}

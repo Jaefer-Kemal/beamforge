@@ -1,0 +1,66 @@
+{
+  "id": "ch04-l07",
+  "chapterNumber": 4,
+  "lessonNumber": 7,
+  "lessonType": "concept_exercise",
+  "title": "Under the Hood: Off-Heap ProcBin Refc Binaries & Avoiding Sub-Binary Leaks (binary:copy/1)",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates sub-binary unpinning via binary:copy/1 and memory diagnostic inspection using binary:referenced_byte_size/1.",
+  "astRules": {
+    "requiredCalls": [
+      "binary:copy/1",
+      "binary:referenced_byte_size/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "binary:copy/1",
+      "module": "binary",
+      "signature": "copy(Subject) -> binary()",
+      "typesSpec": [
+        "Subject = binary()",
+        "Returns independent standalone copy of Subject"
+      ],
+      "description": "Creates a standalone heap copy of a binary or sub-binary, severing off-heap buffer references.",
+      "complexityNote": "O(N) copy, frees large pinned refc binary buffers.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#copy/1"
+    },
+    {
+      "functionName": "binary:referenced_byte_size/1",
+      "module": "binary",
+      "signature": "referenced_byte_size(Subject) -> non_neg_integer()",
+      "typesSpec": [
+        "Subject = binary()",
+        "Returns bytes pinned by Subject"
+      ],
+      "description": "Returns the size in bytes of the underlying off-heap binary buffer referenced by Subject.",
+      "complexityNote": "O(1) header inspection.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#referenced_byte_size/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "When pattern matching <<Header:16/binary, _Rest/binary>> from a 64 MB video packet, why does calling binary:copy(Header) resolve the memory leak?",
+    "options": [
+      {
+        "id": "A",
+        "label": "binary:copy/1 forces the 16 bytes into a fresh Heap Binary (< 64 bytes), allowing the 64 MB ProcBin reference count to drop to 0 and get freed",
+        "isCorrect": true,
+        "explanation": "By copying the 16-byte slice, you allocate a private heap binary. The original 64 MB off-heap ProcBin no longer has any references pinning it, allowing immediate GC reclamation."
+      },
+      {
+        "id": "B",
+        "label": "binary:copy/1 compresses the binary using gzip",
+        "isCorrect": false,
+        "explanation": "binary:copy/1 performs term cloning to unpin off-heap buffers, not compression."
+      },
+      {
+        "id": "C",
+        "label": "binary:copy/1 moves the binary to an ETS table",
+        "isCorrect": false,
+        "explanation": "binary:copy/1 produces a normal Erlang binary on the calling process heap."
+      }
+    ]
+  },
+  "visualScene": "sub_binary_procbin_refc"
+}

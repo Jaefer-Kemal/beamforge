@@ -1,0 +1,74 @@
+{
+  "id": "ch06-l01",
+  "chapterNumber": 6,
+  "lessonNumber": 1,
+  "lessonType": "concept_exercise",
+  "title": "Sequential Exceptions: throw, error, exit & Pattern Matching try...catch",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements check_payment using throw for domain rejections, error for type bugs, and exit for zero payment aborts, with safe_check normalizing each class distinctly.",
+  "astRules": {
+    "requiredConstructs": [
+      "try_catch"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "error",
+      "module": "erlang",
+      "signature": "erlang:error(Reason) -> no_return()",
+      "typesSpec": [
+        "Reason = term()"
+      ],
+      "description": "Stops execution of the calling process with reason {Reason, Stacktrace}. Used for runtime bugs.",
+      "complexityNote": "O(1) exception unwinding.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#error/1"
+    },
+    {
+      "functionName": "throw",
+      "module": "erlang",
+      "signature": "throw(Any) -> no_return()",
+      "typesSpec": [
+        "Any = term()"
+      ],
+      "description": "Throws a non-local value designed to be caught by an enclosing try/catch expression.",
+      "complexityNote": "O(1) stack unwind to the nearest catch frame.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#throw/1"
+    },
+    {
+      "functionName": "exit",
+      "module": "erlang",
+      "signature": "exit(Reason) -> no_return()",
+      "typesSpec": [
+        "Reason = term()"
+      ],
+      "description": "Terminates the process with deliberate exit Reason. Triggers exit signal propagation.",
+      "complexityNote": "O(1) process termination trigger.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#exit/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "In Erlang, what happens if you write `try Expr catch Reason -> handle(Reason) end` without specifying an exception class prefix?",
+    "codeSnippet": "try\n    1 / 0\ncatch\n    Reason -> {caught, Reason}\nend.",
+    "options": [
+      {
+        "id": "A",
+        "label": "The expression crashes with badarith because omitting the class prefix defaults strictly to matching `throw`, failing to catch runtime errors.",
+        "isCorrect": true,
+        "explanation": "Correct! In Erlang syntax, `catch Pattern ->` without a class prefix matches only `throw:Pattern`. Runtime bugs like `badarith` raise `error:badarith`, which will bypass the catch and crash the process."
+      },
+      {
+        "id": "B",
+        "label": "The clause catches all throws, errors, and exits identically.",
+        "isCorrect": false,
+        "explanation": "To catch all three classes, you must explicitly specify `Class:Reason ->`."
+      },
+      {
+        "id": "C",
+        "label": "The compiler throws a syntax error rejecting catch clauses without class prefixes.",
+        "isCorrect": false,
+        "explanation": "Omitting the prefix is valid syntax, but it strictly restricts matching to throws."
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch06-08-1",
+      "title": "Architectural Decision Matrix",
+      "erlangCall": "{my_gen_server:choose_primitive(client_to_server_request), my_gen_server:choose_primitive(tightly_coupled_peers)}",
+      "expectedOutput": "{use_monitor, use_link}",
+      "explanation": "Confirms correct primitive selection for client calls vs tightly-coupled peers."
+    },
+    {
+      "id": "tc-ch06-08-2",
+      "title": "0ms Crash Detection on Server Mid-Call Crash",
+      "erlangCall": "begin CrashPid = spawn(fun() -> receive {'$gen_call', {From, MRef}, crash} -> exit(fatal_database_error) end end), my_gen_server:call(CrashPid, crash, 5000) end",
+      "expectedOutput": "{error, {server_crashed, fatal_database_error}}",
+      "explanation": "Caller returned immediately upon server crash via monitor DOWN message."
+    }
+  ]
+}

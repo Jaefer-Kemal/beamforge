@@ -1,0 +1,65 @@
+{
+  "id": "ch03-l01",
+  "chapterNumber": 3,
+  "lessonNumber": 1,
+  "lessonType": "concept_exercise",
+  "title": "First-Class Functions: Anonymous fun Closures & fun Mod:Fun/Arity Captures",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates anonymous closures capturing lexical variables, unary function guards with is_function/2, remote function capture, and strategy factory patterns.",
+  "astRules": {
+    "requiredConstructs": [
+      "fun_expr"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "fun_expression",
+      "module": "erlang",
+      "signature": "fun(Arg1, ...) -> Body end",
+      "typesSpec": [
+        "Arg = term()",
+        "Returns fun((...) -> term())"
+      ],
+      "description": "First-class lexical closure capturing enclosing scope variables into process heap environment.",
+      "complexityNote": "O(1) allocation of environment vector on process heap.",
+      "officialUrl": "https://www.erlang.org/doc/reference_manual/expressions.html#fun-expressions"
+    },
+    {
+      "functionName": "is_function/2",
+      "module": "erlang",
+      "signature": "is_function(Term, Arity) -> boolean()",
+      "typesSpec": [
+        "Term = term()",
+        "Arity = arity()",
+        "Returns boolean()"
+      ],
+      "description": "Guard BIF returning true if Term is a function expecting exactly Arity arguments.",
+      "complexityNote": "O(1) BIF header tag and arity check.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#is_function/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What is the primary operational difference between fun(X) -> erlang:abs(X) end and fun erlang:abs/1?",
+    "options": [
+      {
+        "id": "A",
+        "label": "The remote capture fun erlang:abs/1 resolves dynamically through the module export table, supporting hot code reloading and avoiding an extra function call frame",
+        "isCorrect": true,
+        "explanation": "Remote captures dynamically dispatch to the latest version of the module and avoid redundant lambda wrapper allocations."
+      },
+      {
+        "id": "B",
+        "label": "The capture fun erlang:abs/1 runs synchronously in C while the lambda runs in Erlang bytecode",
+        "isCorrect": false,
+        "explanation": "Both execute the underlying BIF; the difference lies in dispatch mechanism and closure environment allocation."
+      },
+      {
+        "id": "C",
+        "label": "Only the lambda can accept negative integers",
+        "isCorrect": false,
+        "explanation": "Both accept all numeric terms valid for erlang:abs/1."
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch05-05-1",
+      "title": "Put and Get via Registered Name",
+      "erlangCall": "begin catch named_kv_actor:stop(), {ok, _} = named_kv_actor:start_registered(), ok = named_kv_actor:put(<<\"session_token\">>, <<\"active_123\">>), Res = named_kv_actor:get(<<\"session_token\">>), named_kv_actor:stop(), Res end",
+      "expectedOutput": "{ok, <<\"active_123\">>}",
+      "explanation": "Performs put and get operations using make_ref() correlation against registered named actor."
+    },
+    {
+      "id": "tc-ch05-05-2",
+      "title": "Lookup Missing Key",
+      "erlangCall": "begin catch named_kv_actor:stop(), {ok, _} = named_kv_actor:start_registered(), Res = named_kv_actor:get(<<\"non_existent\">>), named_kv_actor:stop(), Res end",
+      "expectedOutput": "{error, not_found}",
+      "explanation": "Returns {error, not_found} when querying an absent key from the actor map."
+    }
+  ]
+}

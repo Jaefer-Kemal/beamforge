@@ -1,0 +1,57 @@
+{
+  "id": "ch06-l08",
+  "chapterNumber": 6,
+  "lessonNumber": 8,
+  "lessonType": "concept_exercise",
+  "title": "Architectural Decision Lab (Links vs. Monitors) & Building my_gen_server:call/3",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "Implements the architectural decision matrix and reconstructs the OTP gen:do_call/4 synchronous protocol pairing calls with monitors.",
+  "astRules": {
+    "requiredCalls": [
+      "erlang:monitor/2",
+      "erlang:demonitor/2"
+    ],
+    "requiredConstructs": [
+      "receive_after"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "monitor",
+      "module": "erlang",
+      "signature": "erlang:monitor(process, ServerPid) -> reference()",
+      "typesSpec": [
+        "ServerPid = pid()"
+      ],
+      "description": "Creates temporary monitor providing 0ms notification if ServerPid crashes.",
+      "complexityNote": "O(1) operation.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#monitor/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why should a client process use a monitor rather than a link when querying a shared server actor?",
+    "codeSnippet": "%% Architecture Question:\n%% Client <0.100.0> calls DatabaseServer <0.200.0>",
+    "options": [
+      {
+        "id": "A",
+        "label": "A monitor is unidirectional, allowing the client to detect a server crash in 0ms without sharing the server’s fate or dying itself.",
+        "isCorrect": true,
+        "explanation": "Correct! If the client linked to the server, a crash in the server would terminate the client too. Monitors provide safe observation without fate-sharing."
+      },
+      {
+        "id": "B",
+        "label": "Links cannot transmit messages longer than 64 bytes.",
+        "isCorrect": false,
+        "explanation": "Links are signals, not message transports; message size is irrelevant."
+      },
+      {
+        "id": "C",
+        "label": "Monitors allow the client to alter the server’s internal state directly.",
+        "isCorrect": false,
+        "explanation": "Monitors never grant access to another process’s state."
+      }
+    ]
+  },
+  "visualScene": "links_monitors_signals"
+}

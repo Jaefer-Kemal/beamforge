@@ -1,0 +1,59 @@
+{
+  "id": "ch08-l02",
+  "chapterNumber": 8,
+  "lessonNumber": 2,
+  "lessonType": "concept_exercise",
+  "title": "Child Specifications, Restart Types (permanent/transient/temporary) & Shutdown Semantics",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Constructs standardized child specification maps for workers and supervisors with shutdown => infinity protection, and implements the OTP Restart Type Truth Table.",
+  "astRules": {
+    "requiredConstructs": [
+      "guards"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "child_spec",
+      "module": "supervisor",
+      "signature": "child_spec() = #{id => term(), start => {M, F, A}, restart => restart(), shutdown => shutdown(), type => worker | supervisor, modules => [module()]}",
+      "typesSpec": [
+        "restart() = permanent | transient | temporary",
+        "shutdown() = brutal_kill | timeout() | infinity"
+      ],
+      "description": "Map representation of a supervised child process, controlling start MFA, restart policy, shutdown timeout, and tree node type.",
+      "complexityNote": "Static declarative specification compiled in supervisor init.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/supervisor.html#type-child_spec"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does OTP require nested child supervisors to have shutdown => infinity instead of a numeric timeout like 5000?",
+    "options": [
+      {
+        "id": "A",
+        "label": "A child supervisor needs sufficient time to terminate all of its own children in reverse order before it can exit; killing it prematurely leaves orphaned grandchild processes.",
+        "isCorrect": true,
+        "explanation": "Supervisors must wait indefinitely for their children to finish terminating. The top-level application master manages the ultimate release shutdown timeout."
+      },
+      {
+        "id": "B",
+        "label": "Erlang timers cannot run inside supervisor processes.",
+        "isCorrect": false,
+        "explanation": "Supervisors can use timers; infinity is used to guarantee hierarchical clean shutdown without orphan leaks."
+      },
+      {
+        "id": "C",
+        "label": "infinity makes the child process unkillable by OS signals.",
+        "isCorrect": false,
+        "explanation": "OS signals kill the entire BEAM runtime; shutdown affects internal OTP supervisor exit signals."
+      },
+      {
+        "id": "D",
+        "label": "numeric timeouts are only allowed on transient workers.",
+        "isCorrect": false,
+        "explanation": "numeric timeouts are allowed on any worker process regardless of restart type."
+      }
+    ]
+  },
+  "visualScene": "supervision_rest_for_one_ets_heir"
+}

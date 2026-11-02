@@ -1,0 +1,75 @@
+{
+  "id": "ch09-l03",
+  "chapterNumber": 9,
+  "lessonNumber": 3,
+  "lessonType": "concept_exercise",
+  "title": "Surviving Worker Crashes: The ETS Heir Handshake & ets:give_away/3",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "Implements the ETS heir failover handshake pattern ensuring zero data loss during process crashes.",
+  "astRules": {
+    "requiredCalls": [
+      "ets:new/2",
+      "ets:give_away/3"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "give_away",
+      "module": "ets",
+      "signature": "ets:give_away(Tab, Pid, GiftData) -> true",
+      "typesSpec": [
+        "Tab = tab()",
+        "Pid = pid()",
+        "GiftData = term()"
+      ],
+      "description": "Transfers ownership of an ETS table to another process without table destruction or data copying.",
+      "complexityNote": "O(1) ownership pointer swap in C runtime.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#give_away/3",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl"
+    },
+    {
+      "functionName": "setopts",
+      "module": "ets",
+      "signature": "ets:setopts(Tab, Opts) -> true",
+      "typesSpec": [
+        "Tab = tab()",
+        "Opts = {heir, pid() | none, term()}"
+      ],
+      "description": "Dynamically updates table options such as the designated heir process.",
+      "complexityNote": "O(1) configuration update.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#setopts/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What happens to a public named ETS table if the creating process terminates and NO heir was configured?",
+    "options": [
+      {
+        "id": "A",
+        "label": "The table is adopted by the supervisor process of the deceased worker.",
+        "isCorrect": false,
+        "explanation": "Supervisors do not automatically adopt orphaned ETS tables unless explicitly configured as heir."
+      },
+      {
+        "id": "B",
+        "label": "The table remains in RAM indefinitely until the BEAM node halts.",
+        "isCorrect": false,
+        "explanation": "ETS table lifetimes are strictly bound to their creator; without an heir, the table is deleted immediately."
+      },
+      {
+        "id": "C",
+        "label": "The BEAM runtime immediately deletes the table and frees all allocated memory.",
+        "isCorrect": true,
+        "explanation": "In Erlang, an ETS table lifetime is bound to its owner. If the owner process dies without an active heir, the BEAM VM wipes the table immediately."
+      },
+      {
+        "id": "D",
+        "label": "The table is converted to a DETS disk file automatically.",
+        "isCorrect": false,
+        "explanation": "BEAM never writes ETS tables to disk automatically."
+      }
+    ]
+  },
+  "visualScene": "supervision_rest_for_one_ets_heir"
+}

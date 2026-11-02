@@ -1,0 +1,64 @@
+{
+  "id": "ch09-l08",
+  "chapterNumber": 9,
+  "lessonNumber": 8,
+  "lessonType": "problem_set",
+  "title": "Chapter 9 Problem Set: Fault-Tolerant ETS Session Store with Heir Failover",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "Implements a fault-tolerant session cache architecture using a supervisor, an heir table manager, and a gen_server worker with atomic hit tracking.",
+  "astRules": {
+    "requiredCalls": [
+      "ets:new/2",
+      "ets:insert/2",
+      "ets:lookup/2",
+      "ets:give_away/3"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "give_away",
+      "module": "ets",
+      "signature": "ets:give_away(Tab, Pid, GiftData) -> true",
+      "typesSpec": [
+        "Tab = tab()",
+        "Pid = pid()",
+        "GiftData = term()"
+      ],
+      "description": "Transfers ownership of an ETS table to another process without table destruction.",
+      "complexityNote": "O(1) pointer transfer.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#give_away/3",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why should table_manager be started BEFORE session_cache in the supervision child specification list?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Supervisors fail compilation if workers are not alphabetical.",
+        "isCorrect": false,
+        "explanation": "Supervisor child specifications can be listed in any arbitrary order."
+      },
+      {
+        "id": "B",
+        "label": "session_cache needs whereis(table_manager) to return a live PID when it specifies the {heir, HeirPid, Data} option in ets:new/2.",
+        "isCorrect": true,
+        "explanation": "Because session_cache configures {heir, whereis(table_manager), Tag} upon creating the ETS table, table_manager must already be registered and running."
+      },
+      {
+        "id": "C",
+        "label": "table_manager creates the ETS table and inserts mock data.",
+        "isCorrect": false,
+        "explanation": "session_cache creates the active ETS table and uses table_manager solely as heir guardian."
+      },
+      {
+        "id": "D",
+        "label": "table_manager is a supervisor, so it must start before workers.",
+        "isCorrect": false,
+        "explanation": "table_manager is a worker gen_server, not a supervisor."
+      }
+    ]
+  },
+  "visualScene": "supervision_rest_for_one_ets_heir"
+}

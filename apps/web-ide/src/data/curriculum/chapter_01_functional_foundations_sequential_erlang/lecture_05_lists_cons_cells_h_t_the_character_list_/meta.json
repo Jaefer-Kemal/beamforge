@@ -1,0 +1,50 @@
+{
+  "id": "ch01-l05",
+  "chapterNumber": 1,
+  "lessonNumber": 5,
+  "lessonType": "concept_exercise",
+  "title": "Lists, Cons Cells [H | T] & The Character List Mystery",
+  "difficulty": "Beginner",
+  "xpReward": 100,
+  "solutionExplanation": "Utilizes cons operator [H | T] for O(1) prepending, front-element pattern destructuring, and string codepoint extraction.",
+  "astRules": {
+    "requiredCalls": []
+  },
+  "otpDocCards": [
+    {
+      "functionName": "hd_and_tl",
+      "module": "erlang",
+      "signature": "hd(List) -> term(), tl(List) -> list()",
+      "typesSpec": [
+        "List = [term(), ...]"
+      ],
+      "description": "Returns the head and tail of a non-empty list.",
+      "complexityNote": "O(1) BIF reading cons cell pointers directly.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#hd/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does appending an item with (List ++ [Item]) perform significantly worse than prepending with [Item | List]?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Because the BEAM must scan and re-allocate every cons cell in the left list from beginning to end to point to the new item",
+        "isCorrect": true,
+        "explanation": "Lists are singly-linked. Adding to the end requires traversing and copying all N previous nodes."
+      },
+      {
+        "id": "B",
+        "label": "Because the ++ operator triggers an operating system system call to allocate virtual memory",
+        "isCorrect": false,
+        "explanation": "List concatenation is handled by the emulator allocator on the process heap, not an OS syscall."
+      },
+      {
+        "id": "C",
+        "label": "Because Erlang locks the entire node whenever ++ is evaluated to prevent race conditions",
+        "isCorrect": false,
+        "explanation": "Erlang processes have independent private heaps; no locks are involved in list concatenation."
+      }
+    ]
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "id": "ch03-l05",
+  "chapterNumber": 3,
+  "lessonNumber": 5,
+  "lessonType": "concept_exercise",
+  "title": "Keyed Tuple Lists (lists:keyfind/3, keystore/4) & proplists",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates C BIF keylist search/update with lists:keyfind/3 and lists:keystore/4 alongside proplist option parsing.",
+  "astRules": {
+    "requiredCalls": [
+      "lists:keyfind/3",
+      "lists:keystore/4",
+      "proplists:get_value/3"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "lists:keyfind/3",
+      "module": "lists",
+      "signature": "keyfind(Key, N, TupleList) -> Tuple | false",
+      "typesSpec": [
+        "Key = term()",
+        "N = pos_integer()",
+        "TupleList = [tuple()]"
+      ],
+      "description": "Searches the list of tuples for the first tuple whose Nth element matches Key. Implemented as a C BIF in ERTS.",
+      "complexityNote": "O(N) linear search, optimized in C.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/lists.html#keyfind/3"
+    },
+    {
+      "functionName": "proplists:get_value/3",
+      "module": "proplists",
+      "signature": "get_value(Key, List, Default) -> term()",
+      "typesSpec": [
+        "Key = term()",
+        "List = [term()]",
+        "Default = term()"
+      ],
+      "description": "Returns the value of a key in a proplist, or Default if missing.",
+      "complexityNote": "O(N) search.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/proplists.html#get_value/3"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "In the tuple {product, 42, \"Laptop\", 1200, 5}, what position integer N must be passed to lists:keyfind to match against product ID 42?",
+    "options": [
+      {
+        "id": "A",
+        "label": "2, because Erlang tuple positions are strictly 1-indexed, so position 1 is the atom product and position 2 is 42",
+        "isCorrect": true,
+        "explanation": "In Erlang, element(1, Tuple) is the first element, so ID 42 is at position 2."
+      },
+      {
+        "id": "B",
+        "label": "1, because arrays and tuples in computer science are 0-indexed",
+        "isCorrect": false,
+        "explanation": "Erlang tuples are 1-indexed in all BIFs (element/2, setelement/3, lists:keyfind/3)."
+      },
+      {
+        "id": "C",
+        "label": "0, to specify the key offset relative to the tuple tag",
+        "isCorrect": false,
+        "explanation": "Position must be a positive integer >= 1."
+      }
+    ]
+  }
+}

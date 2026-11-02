@@ -1,0 +1,53 @@
+{
+  "id": "ch06-l07",
+  "chapterNumber": 6,
+  "lessonNumber": 7,
+  "lessonType": "concept_exercise",
+  "title": "Race Conditions & Mailbox Hygiene: Why demonitor(Ref, [flush]) is Mandatory",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates the monitor race condition and why demonitor(Ref, [flush]) is mandatory to prevent Save Queue memory pollution.",
+  "astRules": {
+    "requiredCalls": [
+      "erlang:demonitor/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "demonitor",
+      "module": "erlang",
+      "signature": "erlang:demonitor(MonitorRef, [flush]) -> boolean()",
+      "typesSpec": [
+        "MonitorRef = reference()"
+      ],
+      "description": "Disables monitor and purges any already-delivered DOWN message for MonitorRef from mailbox.",
+      "complexityNote": "O(M) scan of mailbox messages, but O(1) in typical clean mailboxes.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#demonitor/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why is `erlang:demonitor(MRef, [flush])` mandatory over plain `erlang:demonitor(MRef)` when finishing a synchronous call?",
+    "codeSnippet": "receive\n    {done, WorkerPid, Result} ->\n        erlang:demonitor(MRef, [flush])\nend.",
+    "options": [
+      {
+        "id": "A",
+        "label": "If the worker terminated right as it sent its reply, its 'DOWN' message is already queued in the mailbox; [flush] purges it atomically to prevent mailbox memory leaks.",
+        "isCorrect": true,
+        "explanation": "Correct! Plain demonitor only prevents future DOWN messages. If the DOWN message arrived before demonitor was called, [flush] scans and deletes it, keeping the mailbox pristine."
+      },
+      {
+        "id": "B",
+        "label": "Plain demonitor crashes the target worker process.",
+        "isCorrect": false,
+        "explanation": "demonitor does not affect the target worker; it only affects the caller."
+      },
+      {
+        "id": "C",
+        "label": "[flush] is required to save the return value to ETS.",
+        "isCorrect": false,
+        "explanation": "demonitor has nothing to do with ETS tables."
+      }
+    ]
+  },
+  "visualScene": "links_monitors_signals"
+}

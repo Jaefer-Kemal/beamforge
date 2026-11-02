@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch01-07-a",
+      "title": "Route Status Code 200",
+      "erlangCall": "clause_router:describe_status(200)",
+      "expectedOutput": "{ok, success}",
+      "explanation": "Matches first clause for 200."
+    },
+    {
+      "id": "tc-ch01-07-b",
+      "title": "Empty List Head or Default",
+      "erlangCall": "clause_router:head_or_default([], 999)",
+      "expectedOutput": "999",
+      "explanation": "Matches second clause for empty list and returns default."
+    },
+    {
+      "id": "tc-ch01-07-c",
+      "title": "Match Identical Pair Tuple",
+      "erlangCall": "clause_router:verify_identical_pair({omega, omega})",
+      "expectedOutput": "{matched, omega}",
+      "explanation": "Matches {X, X} repeated pattern variable clause."
+    }
+  ]
+}

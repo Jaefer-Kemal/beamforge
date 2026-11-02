@@ -1,0 +1,68 @@
+{
+  "id": "ch03-l03",
+  "chapterNumber": 3,
+  "lessonNumber": 3,
+  "lessonType": "concept_exercise",
+  "title": "Boolean Predicates & Single-Pass Partitioning (lists:all/2, lists:any/2, lists:partition/2)",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements collection validation using lists:all/2 and lists:any/2 with short-circuiting, and single-pass order splitting via lists:partition/2.",
+  "astRules": {
+    "requiredCalls": [
+      "lists:all/2",
+      "lists:any/2",
+      "lists:partition/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "lists:all/2",
+      "module": "lists",
+      "signature": "all(Pred, List) -> boolean()",
+      "typesSpec": [
+        "Pred = fun((T) -> boolean())",
+        "List = [T]",
+        "Returns boolean()"
+      ],
+      "description": "Returns true if Pred returns true for all elements in List. Short-circuits on first false. Returns true for [].",
+      "complexityNote": "O(N) worst-case time, short-circuit O(1) best-case.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/lists.html#all/2"
+    },
+    {
+      "functionName": "lists:partition/2",
+      "module": "lists",
+      "signature": "partition(Pred, List) -> {Satisfying, NotSatisfying}",
+      "typesSpec": [
+        "Pred = fun((T) -> boolean())",
+        "List = [T]",
+        "Returns {[T], [T]}"
+      ],
+      "description": "Partitions List into two lists based on whether Pred evaluates to true or false in a single pass.",
+      "complexityNote": "Single-pass O(N) tail-recursive dual accumulation.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/lists.html#partition/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What is the return value of lists:all(fun(X) -> X > 10 end, []) and why?",
+    "options": [
+      {
+        "id": "A",
+        "label": "true, because of the mathematical principle of vacuous truth: no element exists that violates the predicate",
+        "isCorrect": true,
+        "explanation": "In formal predicate calculus, the universal quantification over an empty set evaluates to true."
+      },
+      {
+        "id": "B",
+        "label": "false, because there are no elements to satisfy the condition",
+        "isCorrect": false,
+        "explanation": "lists:any returns false on empty lists; lists:all returns true."
+      },
+      {
+        "id": "C",
+        "label": "It raises a badarg exception because empty lists are invalid inputs for predicates",
+        "isCorrect": false,
+        "explanation": "Empty lists are standard valid inputs for all collection predicates in stdlib."
+      }
+    ]
+  }
+}

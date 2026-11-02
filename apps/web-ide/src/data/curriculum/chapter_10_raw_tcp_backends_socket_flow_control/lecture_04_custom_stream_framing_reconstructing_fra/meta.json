@@ -1,0 +1,83 @@
+{
+  "id": "ch10-l04",
+  "chapterNumber": 10,
+  "lessonNumber": 4,
+  "lessonType": "concept_exercise",
+  "title": "Custom Stream Framing: Reconstructing Fragmented & Coalesced Raw TCP Byte Streams",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "### Solution Breakdown: Zero-Leak Stream Framing\n1. **Binary Concatenation**: `<<OldBufferBin/binary, IncomingChunkBin/binary>>` stitches incoming network slices without intermediary string conversion.\n2. **Recursive Splitting**: `binary:split(Buffer, <<\"\\r\\n\">>)` strips the CRLF delimiter and isolates the first complete line.\n3. **Memory Unpinning via `binary:copy/1`**: Both the extracted line tokens and the remaining partial slice are copied into independent binaries, guaranteeing that long-lived process heaps never retain references to temporary 64 KB socket buffers.",
+  "astRules": {
+    "requireTailRecursion": [
+      "extract_lines/2"
+    ],
+    "forbiddenCalls": [],
+    "requiredCalls": [
+      "binary:split/2",
+      "binary:copy/1"
+    ],
+    "requiredConstructs": [
+      "bit_syntax"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "split",
+      "module": "binary",
+      "signature": "binary:split(Subject, Pattern) -> [binary()]",
+      "typesSpec": [
+        "Subject = binary()",
+        "Pattern = binary() | [binary()]"
+      ],
+      "description": "Splits Subject into sub-binaries based on the first occurrence of Pattern.",
+      "complexityNote": "O(N) search with sub-binary slice allocation.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#split/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl"
+    },
+    {
+      "functionName": "copy",
+      "module": "binary",
+      "signature": "binary:copy(Subject) -> binary()",
+      "typesSpec": [
+        "Subject = binary()"
+      ],
+      "description": "Creates a deep copy of Subject, unpinning it from underlying ProcBin memory.",
+      "complexityNote": "Allocates independent memory chunk in O(N) time.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#copy/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "When splitting an accumulated binary stream on \"\\r\\n\", why is calling binary:copy/1 on the remaining buffer essential for long-lived processes?",
+    "codeSnippet": "case binary:split(Buffer, <<\"\\r\\n\">>) of\n    [Line, Rest] -> extract_lines(Rest, [binary:copy(Line) | Acc]);\n    [Incomplete] -> {lists:reverse(Acc), binary:copy(Incomplete)}\nend",
+    "options": [
+      {
+        "id": "A",
+        "label": "In Erlang, binary:split/2 creates sub-binaries that retain a reference to the entire original buffer. If that buffer was a 64KB ProcBin, omitting binary:copy/1 prevents the 64KB off-heap chunk from being garbage collected.",
+        "isCorrect": true,
+        "explanation": "Precisely! A sub-binary is only a 24-byte pointer to an off-heap ProcBin. Without binary:copy/1, keeping even 3 bytes of remainder pins the entire 64KB socket chunk in memory, causing massive memory leaks across thousands of connections."
+      },
+      {
+        "id": "B",
+        "label": "binary:copy/1 reverses the endianness of the bytes to big-endian.",
+        "isCorrect": false,
+        "explanation": "binary:copy/1 performs a deep byte copy; it has nothing to do with byte order."
+      },
+      {
+        "id": "C",
+        "label": "The BEAM VM will crash if a binary is passed between processes without being copied.",
+        "isCorrect": false,
+        "explanation": "The BEAM seamlessly passes binaries across processes; binary:copy/1 is purely a memory-retention optimization."
+      }
+    ]
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "Official Erlang stdlib: binary Module Reference",
+      "url": "https://www.erlang.org/doc/apps/stdlib/binary.html",
+      "category": "erlang_docs",
+      "description": "Functions for bit-level pattern matching and zero-copy binary transformations."
+    }
+  ]
+}

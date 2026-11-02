@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Runtime Config Get and Set",
+      "explanation": "Sets currency to USD and retrieves it with fallback default.",
+      "erlangCall": "begin commerce_app:set_app_config(currency, \"USD\"), commerce_app:get_app_config(currency, \"EUR\") end",
+      "expectedOutput": "\"USD\""
+    },
+    {
+      "id": "tc2",
+      "title": "Runtime Config Fallback Default",
+      "explanation": "Retrieves nonexistent key max_connections and returns default 100.",
+      "erlangCall": "commerce_app:get_app_config(max_connections, 100)",
+      "expectedOutput": "100"
+    },
+    {
+      "id": "tc3",
+      "title": "Supervisor Init Flags",
+      "explanation": "Verifies supervisor init returns strategy => one_for_one and empty child specs.",
+      "erlangCall": "begin {ok, {Flags, Specs}} = commerce_app:init([]), {maps:get(strategy, Flags), Specs} end",
+      "expectedOutput": "{one_for_one, []}"
+    }
+  ]
+}

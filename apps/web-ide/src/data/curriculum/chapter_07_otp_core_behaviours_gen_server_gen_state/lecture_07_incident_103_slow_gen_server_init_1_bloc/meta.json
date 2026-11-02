@@ -1,0 +1,63 @@
+{
+  "id": "ch07-l07",
+  "chapterNumber": 7,
+  "lessonNumber": 7,
+  "lessonType": "incident_triage",
+  "title": "Incident #103: Slow gen_server:init/1 Blocking Supervisor Startup",
+  "difficulty": "Production",
+  "xpReward": 100,
+  "solutionExplanation": "Resolves supervisor boot timeout incident INC-103 by returning {continue, {hydrate, SeedRules}} from init/1 in 0ms and compiling firewall rules inside handle_continue/2.",
+  "astRules": {
+    "requiredCalls": [
+      "gen_server:start_link/3"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "handle_continue",
+      "module": "gen_server",
+      "signature": "Mod:handle_continue(Continue, State) -> {noreply, NewState}",
+      "typesSpec": [
+        "Continue = term()",
+        "State = term()",
+        "NewState = term()"
+      ],
+      "description": "Invoked by gen_server immediately after init/1 or handle_call/cast returns {..., {continue, Continue}}.",
+      "complexityNote": "Executed before any message in the process mailbox is dispatched.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/gen_server.html#Module:handle_continue/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does moving heavy startup logic into handle_continue/2 fix supervisor timeout crashes?",
+    "codeSnippet": "init(Rules) ->\n    {ok, #{status => booting, rules => #{}}, {continue, {hydrate, Rules}}}.",
+    "options": [
+      {
+        "id": "A",
+        "label": "start_link returns {ok, Pid} to the supervisor immediately, allowing the supervisor to complete child registration while hydration proceeds without blocking boot.",
+        "isCorrect": true,
+        "explanation": "Correct! The supervisor child registration completes in microseconds, preventing supervision timeouts during rolling releases."
+      },
+      {
+        "id": "B",
+        "label": "handle_continue runs on a separate remote computer.",
+        "isCorrect": false,
+        "explanation": "handle_continue runs inside the same local BEAM process."
+      },
+      {
+        "id": "C",
+        "label": "It increases the supervisor timeout from 5 seconds to 10 minutes.",
+        "isCorrect": false,
+        "explanation": "Supervisor timeouts are not modified; the initialization latency is removed."
+      }
+    ]
+  },
+  "incidentAlert": {
+    "incidentId": "INC-103",
+    "severity": "CRITICAL",
+    "serviceName": "firewall-rule-hydrator",
+    "symptom": "During rolling deployments, the root supervisor times out and aborts boot whenever the firewall rule list exceeds 5,000 entries.",
+    "impact": "Cluster nodes fail health checks and get killed by Kubernetes during rolling updates, causing service outages.",
+    "rootCauseHint": "incident_blocking_init:init/1 performs synchronous rule compilation and normalization directly inside init/1 before returning {ok, State}, blocking gen_server:start_link/3.",
+    "fixObjective": "Refactor init/1 to return {ok, #{status => booting, raw => SeedRules, rules => #{}}, {continue, {hydrate, SeedRules}}} immediately, and move rule compilation into handle_continue({hydrate, SeedRules}, State) setting status => ready."
+  }
+}

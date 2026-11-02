@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Crash Burst Within Budget",
+      "explanation": "Tests 3 crashes within window with MaxR = 3 (within budget).",
+      "erlangCall": "escalation_analyzer:evaluate_crash_burst([10, 12, 14], 3, 5)",
+      "expectedOutput": "{within_budget, 3, 3}"
+    },
+    {
+      "id": "tc2",
+      "title": "Crash Burst Exceeds Budget (Escalate)",
+      "explanation": "Tests 4 crashes within 5-second window with MaxR = 3 (triggers escalation).",
+      "erlangCall": "escalation_analyzer:evaluate_crash_burst([10, 11, 12, 13], 3, 5)",
+      "expectedOutput": "{escalate_to_parent, 4, 3}"
+    },
+    {
+      "id": "tc3",
+      "title": "Plan Escalation Action (rest_for_one)",
+      "explanation": "Downstream reverse shutdown and forward restart order when middle child pricing_cache crashes.",
+      "erlangCall": "escalation_analyzer:plan_escalation_action([db_pool, pricing_cache, order_gateway], pricing_cache)",
+      "expectedOutput": "{stop_in_reverse_order, [order_gateway, pricing_cache], restart_in_order, [pricing_cache, order_gateway]}"
+    }
+  ]
+}

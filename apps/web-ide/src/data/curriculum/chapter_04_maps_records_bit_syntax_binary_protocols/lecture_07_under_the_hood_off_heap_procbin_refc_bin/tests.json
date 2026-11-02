@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch04-07-a",
+      "title": "Extract Safe 16-Byte Token Unpinned",
+      "erlangCall": "binary_unpinner:extract_token_safe(<<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16, \"REMAINDER_OF_LARGE_PACKET\">>)",
+      "expectedOutput": "{ok, <<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16>>}",
+      "explanation": "Extracts 16 bytes and unpins from parent buffer."
+    },
+    {
+      "id": "tc-ch04-07-b",
+      "title": "Reject Truncated Token Packet",
+      "erlangCall": "binary_unpinner:extract_token_safe(<<1,2,3>>)",
+      "expectedOutput": "{error, insufficient_data}",
+      "explanation": "Fails when packet has fewer than 16 bytes."
+    },
+    {
+      "id": "tc-ch04-07-c",
+      "title": "Slice Packet Safely with Copy",
+      "erlangCall": "binary_unpinner:slice_packet_safe(<<\"ABCDEFGHIJ\">>, 4)",
+      "expectedOutput": "<<\"ABCD\">>",
+      "explanation": "Slices exactly 4 bytes unpinned."
+    },
+    {
+      "id": "tc-ch04-07-d",
+      "title": "Inspect Refc Ratio of Copied Binary",
+      "erlangCall": "binary_unpinner:inspect_refc_ratio(binary:copy(<<\"SMALL_HEAP_BIN\">>))",
+      "expectedOutput": "{14, 14}",
+      "explanation": "Small binaries <= 64 bytes copied to heap have identical byte_size and referenced_byte_size."
+    }
+  ]
+}

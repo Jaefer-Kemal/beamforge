@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Atomic Endpoint Counter Updates",
+      "erlangCall": "begin catch ets:delete(telemetry_store), ok = ets_telemetry:init_table(), 1 = ets_telemetry:record_endpoint_hit(<<\"/api/v1/checkout\">>, 1), 5 = ets_telemetry:record_endpoint_hit(<<\"/api/v1/checkout\">>, 4), ets_telemetry:get_endpoint_hits(<<\"/api/v1/checkout\">>) end",
+      "expectedOutput": "5",
+      "explanation": "Verifies table creation and atomic update_counter increments."
+    },
+    {
+      "id": "tc2",
+      "title": "Store and Lookup User Profile",
+      "erlangCall": "begin ok = ets_telemetry:init_table(), ok = ets_telemetry:put_user_profile(101, <<\"Alice\">>, admin), {ok, P} = ets_telemetry:get_user_profile(101), {maps:get(name, P), maps:get(role, P)} end",
+      "expectedOutput": "{<<\"Alice\">>, admin}",
+      "explanation": "Verifies structured key indexing and map decoding."
+    }
+  ]
+}

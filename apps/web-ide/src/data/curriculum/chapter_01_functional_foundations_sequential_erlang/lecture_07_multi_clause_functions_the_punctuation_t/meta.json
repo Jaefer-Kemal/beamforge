@@ -1,0 +1,50 @@
+{
+  "id": "ch01-l07",
+  "chapterNumber": 1,
+  "lessonNumber": 7,
+  "lessonType": "concept_exercise",
+  "title": "Multi-Clause Functions & The Punctuation Triad (, ; .)",
+  "difficulty": "Beginner",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates multi-clause function dispatch, the punctuation triad (; vs .), and repeated pattern variable matching.",
+  "astRules": {
+    "requiredConstructs": []
+  },
+  "otpDocCards": [
+    {
+      "functionName": "function_clause",
+      "module": "erlang",
+      "signature": "function_clause exception",
+      "typesSpec": [
+        "Exception = {function_clause, [{Mod, Fun, Args, Loc}]}"
+      ],
+      "description": "Exception raised when no clause pattern in a function matches the supplied arguments.",
+      "complexityNote": "Standard runtime error reporting top-to-bottom clause exhaustion.",
+      "officialUrl": "https://www.erlang.org/doc/reference_manual/errors.html#exceptions",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/erts/emulator/beam/beam_emu.c"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "In an Erlang multi-clause function, what happens if you end the first clause with a period (.) instead of a semicolon (;)?",
+    "options": [
+      {
+        "id": "A",
+        "label": "The compiler terminates the function definition prematurely and throws a syntax error on the next clause",
+        "isCorrect": true,
+        "explanation": "A period marks the full stop of the entire function. Semicolons must separate individual clauses."
+      },
+      {
+        "id": "B",
+        "label": "The compiler treats the period as an automatic fallback return statement",
+        "isCorrect": false,
+        "explanation": "Erlang has no return keyword or fallback punctuation; the period only terminates definitions."
+      },
+      {
+        "id": "C",
+        "label": "The BEAM VM executes both clauses concurrently on separate schedulers",
+        "isCorrect": false,
+        "explanation": "Punctuation controls sequential syntax compilation, not concurrent execution."
+      }
+    ]
+  }
+}

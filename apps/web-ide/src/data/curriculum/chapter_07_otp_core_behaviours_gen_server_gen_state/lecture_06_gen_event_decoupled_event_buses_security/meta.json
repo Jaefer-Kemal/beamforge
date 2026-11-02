@@ -1,0 +1,67 @@
+{
+  "id": "ch07-l06",
+  "chapterNumber": 7,
+  "lessonNumber": 6,
+  "lessonType": "concept_exercise",
+  "title": "gen_event: Decoupled Event Buses & Security Audit Loggers",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements an isolated, dynamically attachable security audit event handler using gen_event to track failed logins and trigger brute-force alerts.",
+  "astRules": {
+    "requiredCalls": [
+      "gen_event:add_handler/3",
+      "gen_event:call/3"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "add_handler",
+      "module": "gen_event",
+      "signature": "gen_event:add_handler(EventMgrRef, Handler, Args) -> ok | {'EXIT', Reason} | term()",
+      "typesSpec": [
+        "EventMgrRef = pid() | atom()",
+        "Handler = module() | {module(), Id :: term()}",
+        "Args = term()"
+      ],
+      "description": "Adds a new event handler to the event manager EventMgrRef.",
+      "complexityNote": "O(1) handler registration.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/gen_event.html#add_handler/3"
+    },
+    {
+      "functionName": "notify",
+      "module": "gen_event",
+      "signature": "gen_event:notify(EventMgrRef, Event) -> ok",
+      "typesSpec": [
+        "EventMgrRef = pid() | atom()",
+        "Event = term()"
+      ],
+      "description": "Sends an event notification to an event manager, notifying all installed handlers.",
+      "complexityNote": "Iterates through N registered handlers sequentially.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/gen_event.html#notify/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What happens inside a gen_event manager process if an individual handler crashes with a runtime error during handle_event/2?",
+    "codeSnippet": "handle_event({bad_event, _}, _State) ->\n    1 / 0. %% Deliberate crash",
+    "options": [
+      {
+        "id": "A",
+        "label": "The event manager catches the exception, removes the faulty handler, and continues running normal event dispatch for all other attached handlers.",
+        "isCorrect": true,
+        "explanation": "Correct! gen_event provides strict fault isolation: one broken handler module cannot crash the shared event bus."
+      },
+      {
+        "id": "B",
+        "label": "The entire BEAM node reboots to restore memory consistency.",
+        "isCorrect": false,
+        "explanation": "The BEAM node is completely unaffected."
+      },
+      {
+        "id": "C",
+        "label": "The manager forwards the crash exception to every client in the cluster.",
+        "isCorrect": false,
+        "explanation": "Exceptions are trapped locally by the gen_event process."
+      }
+    ]
+  }
+}

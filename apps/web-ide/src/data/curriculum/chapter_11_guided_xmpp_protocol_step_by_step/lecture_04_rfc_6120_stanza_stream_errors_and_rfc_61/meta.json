@@ -1,0 +1,75 @@
+{
+  "id": "ch11-l04",
+  "chapterNumber": 11,
+  "lessonNumber": 4,
+  "lessonType": "concept_exercise",
+  "title": "RFC 6120 Stanza & Stream Errors and RFC 6121 Roster Subscriptions",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements RFC 6120 structured error classification and RFC 6121 presence subscription state machines.",
+  "astRules": {
+    "requiredCalls": [
+      "classify_error_condition/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "classify_error_condition",
+      "module": "xmpp_error_and_roster",
+      "signature": "classify_error_condition(ConditionAtom) -> {TypeBin, ElementBin}",
+      "typesSpec": [
+        "ConditionAtom = atom()",
+        "TypeBin = binary()",
+        "ElementBin = binary()"
+      ],
+      "description": "Maps RFC 6120 error condition atoms to type and element name binaries.",
+      "complexityNote": "O(1) pattern matching jump table.",
+      "officialUrl": "https://datatracker.ietf.org/doc/html/rfc6120#section-8",
+      "githubSourceUrl": "https://github.com/erlang/otp"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "According to RFC 6120 Section 8, which error type must accompany the <not-authorized/> condition when a client attempts a command without logging in?",
+    "options": [
+      {
+        "id": "A",
+        "label": "auth (prerequisite authentication or authorization failed)",
+        "isCorrect": true,
+        "explanation": "RFC 6120 Section 8.3 defines auth as the formal error type for not-authorized and forbidden conditions."
+      },
+      {
+        "id": "B",
+        "label": "cancel (the request cannot be retried under any circumstances)",
+        "isCorrect": false,
+        "explanation": "cancel is reserved for fatal errors like item-not-found or service-unavailable."
+      },
+      {
+        "id": "C",
+        "label": "modify (the request syntax is invalid)",
+        "isCorrect": false,
+        "explanation": "modify is used for bad-request or invalid XML parameters."
+      },
+      {
+        "id": "D",
+        "label": "wait (the server is temporarily overloaded)",
+        "isCorrect": false,
+        "explanation": "wait is used for rate limits and resource-constraint."
+      }
+    ]
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "RFC 6120: Section 8 (Extended Stanza and Stream Errors)",
+      "url": "https://datatracker.ietf.org/doc/html/rfc6120#section-8",
+      "category": "book_rfc",
+      "description": "Official IETF specification for XMPP stanza and stream error types and conditions."
+    },
+    {
+      "title": "RFC 6121: Section 3 (Managing Roster Subscriptions)",
+      "url": "https://datatracker.ietf.org/doc/html/rfc6121#section-3",
+      "category": "book_rfc",
+      "description": "Official IETF specification for mutual presence subscription state machines."
+    }
+  ]
+}

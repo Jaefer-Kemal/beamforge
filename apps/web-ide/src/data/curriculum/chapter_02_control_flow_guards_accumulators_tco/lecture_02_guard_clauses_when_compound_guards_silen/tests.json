@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch02-02-a",
+      "title": "Validate Unprivileged Port",
+      "erlangCall": "guard_validator:validate_port(8080)",
+      "expectedOutput": "{ok, unprivileged_port}",
+      "explanation": "Port 8080 is within [1024, 65535]."
+    },
+    {
+      "id": "tc-ch02-02-b",
+      "title": "Classify Freezing Temperature",
+      "erlangCall": "guard_validator:classify_temperature(-5)",
+      "expectedOutput": "freezing",
+      "explanation": "-5 is a number and =< 0."
+    },
+    {
+      "id": "tc-ch02-02-c",
+      "title": "Safe Ratio Above Threshold",
+      "erlangCall": "guard_validator:safe_ratio(10, 2)",
+      "expectedOutput": "high_ratio",
+      "explanation": "10 / 2 = 5.0 which is >= 2.0."
+    },
+    {
+      "id": "tc-ch02-02-d",
+      "title": "Safe Ratio Division By Zero Fallback",
+      "erlangCall": "guard_validator:safe_ratio(10, 0)",
+      "expectedOutput": "{error, invalid_ratio}",
+      "explanation": "B =:= 0 silently fails ratio guard and triggers fallback."
+    }
+  ]
+}

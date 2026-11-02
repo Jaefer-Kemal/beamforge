@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch02-01-a",
+      "title": "Extract Valid IPv4 Route",
+      "erlangCall": "deep_match:extract_route({packet, {header, 4, {route, \"10.0.0.1\", \"10.0.0.2\"}}, [ping, 1]})",
+      "expectedOutput": "{ok, ipv4, \"10.0.0.1\", \"10.0.0.2\"}",
+      "explanation": "Deeply matches nested route tuple in header."
+    },
+    {
+      "id": "tc-ch02-01-b",
+      "title": "Reject Unsupported Version",
+      "erlangCall": "deep_match:extract_route({packet, {header, 5, {route, \"10.0.0.1\", \"10.0.0.2\"}}, []})",
+      "expectedOutput": "{error, {unsupported_version, 5}}",
+      "explanation": "Version 5 triggers the version fallback clause."
+    },
+    {
+      "id": "tc-ch02-01-c",
+      "title": "Forward IPv4 Envelope with Aliasing",
+      "erlangCall": "deep_match:repackage_envelope({packet, {header, 4, {route, \"src_host\", \"dst_host\"}}, [data, 42]})",
+      "expectedOutput": "{forwarded, \"dst_host\", {packet, {header, 4, {route, \"src_host\", \"dst_host\"}}, [data, 42]}}",
+      "explanation": "Simultaneously extracts destination and returns intact FullPacket."
+    }
+  ]
+}

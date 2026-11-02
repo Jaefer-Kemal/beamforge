@@ -1,0 +1,68 @@
+{
+  "id": "ch03-l02",
+  "chapterNumber": 3,
+  "lessonNumber": 2,
+  "lessonType": "concept_exercise",
+  "title": "Transforming & Filtering Collections (lists:map/2, lists:filter/2, lists:filtermap/2)",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Utilizes lists:map/2 for 1-to-1 price transformations, lists:filter/2 for status filtering, and lists:filtermap/2 for single-pass metric sanitization.",
+  "astRules": {
+    "requiredCalls": [
+      "lists:map/2",
+      "lists:filter/2",
+      "lists:filtermap/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "lists:map/2",
+      "module": "lists",
+      "signature": "map(Fun, List1) -> List2",
+      "typesSpec": [
+        "Fun = fun((A) -> B)",
+        "List1 = [A]",
+        "List2 = [B]"
+      ],
+      "description": "Transforms every element in List1 by applying Fun, preserving length and order.",
+      "complexityNote": "O(N) time, O(N) memory allocation.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/lists.html#map/2"
+    },
+    {
+      "functionName": "lists:filtermap/2",
+      "module": "lists",
+      "signature": "filtermap(Fun, List1) -> List2",
+      "typesSpec": [
+        "Fun = fun((A) -> boolean() | {true, B})",
+        "List1 = [A]",
+        "List2 = [B]"
+      ],
+      "description": "Calls Fun on elements of List1; returns List2 containing elements where Fun returned true or {true, Val}.",
+      "complexityNote": "Single-pass O(N) filtering and transformation avoiding intermediate lists.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/lists.html#filtermap/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why is lists:filtermap/2 preferred over lists:map(F, lists:filter(P, List)) in high-throughput Erlang servers?",
+    "options": [
+      {
+        "id": "A",
+        "label": "It traverses the list exactly once and avoids allocating a throwaway intermediate list on the process heap",
+        "isCorrect": true,
+        "explanation": "Chaining filter then map creates an intermediate list that immediately triggers garbage collection; filtermap builds the final result in a single pass."
+      },
+      {
+        "id": "B",
+        "label": "lists:filtermap/2 executes concurrently across multiple BEAM schedulers",
+        "isCorrect": false,
+        "explanation": "lists module functions are sequential and execute inside the calling process."
+      },
+      {
+        "id": "C",
+        "label": "lists:map cannot operate on tuples",
+        "isCorrect": false,
+        "explanation": "lists:map accepts any Erlang term, including tuples."
+      }
+    ]
+  }
+}

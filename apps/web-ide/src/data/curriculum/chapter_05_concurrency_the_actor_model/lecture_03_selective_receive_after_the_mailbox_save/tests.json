@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch05-03-1",
+      "title": "Priority Drain (Urgent Ahead of Normal)",
+      "erlangCall": "begin self() ! {normal, 1}, self() ! {urgent, 99}, self() ! {normal, 2}, priority_mailbox:receive_urgent_first(3) end",
+      "expectedOutput": "[99, 1, 2]",
+      "explanation": "Urgent message 99 is extracted ahead of normal messages 1 and 2."
+    },
+    {
+      "id": "tc-ch05-03-2",
+      "title": "Client Request Timeout Fallback",
+      "erlangCall": "begin Dummy = spawn(fun() -> receive after 500 -> ok end end), priority_mailbox:request_with_timeout(Dummy, ping, 40) end",
+      "expectedOutput": "{error, timeout}",
+      "explanation": "Returns {error, timeout} within 40ms when querying a non-responsive worker."
+    },
+    {
+      "id": "tc-ch05-03-3",
+      "title": "Non-Blocking Mailbox Flush",
+      "erlangCall": "begin self() ! a, self() ! b, self() ! c, priority_mailbox:flush_mailbox() end",
+      "expectedOutput": "[a, b, c]",
+      "explanation": "Drains all pending messages in FIFO order using after 0."
+    }
+  ]
+}

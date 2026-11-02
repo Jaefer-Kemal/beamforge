@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Start Checkout Supervisor Pipeline",
+      "explanation": "Starts checkout_sup and confirms all three pipeline workers are alive.",
+      "erlangCall": "begin case whereis(checkout_sup) of undefined -> ok; OldSup1 -> unlink(OldSup1), exit(OldSup1, shutdown), timer:sleep(20) end, {ok, Sup} = checkout_sup:start_link(), {ok, #{db_pid := Db, cache_pid := Cache, gateway_pid := Gw}} = checkout_sup:get_pipeline_pids(), unlink(Sup), catch supervisor:stop(Sup), is_pid(Db) andalso is_pid(Cache) andalso is_pid(Gw) end",
+      "expectedOutput": "true"
+    },
+    {
+      "id": "tc2",
+      "title": "Chaos Test: Gateway Crash (Isolated)",
+      "explanation": "Kills order_gateway; confirms DB and Cache PIDs are preserved while Gateway restarts with new PID.",
+      "erlangCall": "begin case whereis(checkout_sup) of undefined -> ok; OldSup2 -> unlink(OldSup2), exit(OldSup2, shutdown), timer:sleep(20) end, {ok, Sup} = checkout_sup:start_link(), {ok, #{db_pid := Db1, cache_pid := Cache1, gateway_pid := Gw1}} = checkout_sup:get_pipeline_pids(), exit(Gw1, kill), timer:sleep(50), {ok, #{db_pid := Db2, cache_pid := Cache2, gateway_pid := Gw2}} = checkout_sup:get_pipeline_pids(), unlink(Sup), catch supervisor:stop(Sup), {Db1 =:= Db2, Cache1 =:= Cache2, Gw1 =/= Gw2} end",
+      "expectedOutput": "{true, true, true}"
+    },
+    {
+      "id": "tc3",
+      "title": "Chaos Test: Cache Crash (Cascades to Gateway)",
+      "explanation": "Kills pricing_cache; confirms Cache and Gateway restart with new PIDs while DB Pool PID is untouched.",
+      "erlangCall": "begin case whereis(checkout_sup) of undefined -> ok; OldSup3 -> unlink(OldSup3), exit(OldSup3, shutdown), timer:sleep(20) end, {ok, Sup} = checkout_sup:start_link(), {ok, #{db_pid := Db1, cache_pid := Cache1, gateway_pid := Gw1}} = checkout_sup:get_pipeline_pids(), exit(Cache1, kill), timer:sleep(50), {ok, #{db_pid := Db2, cache_pid := Cache2, gateway_pid := Gw2}} = checkout_sup:get_pipeline_pids(), unlink(Sup), catch supervisor:stop(Sup), {Db1 =:= Db2, Cache1 =/= Cache2, Gw1 =/= Gw2} end",
+      "expectedOutput": "{true, true, true}"
+    }
+  ]
+}

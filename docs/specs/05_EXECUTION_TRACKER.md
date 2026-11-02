@@ -992,6 +992,28 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `services/orchestrator`: `go build ./...` passed with 0 errors.
   - `services/orchestrator`: `go test -v -count=1 -run 'TestChapter12Verification' ./internal/bridge` passed 100% across all 6 milestones and Chaos Monkey.
 
+## Phase 46: Curriculum Directory Decomposition & Mathematical Parity Verification
+- [x] **46.1: Non-Destructive Decomposition Script (`scripts/decompose_curriculum.ts`)**:
+  - Built an automated decomposition engine transforming monolithic `ch01.ts..ch12.ts` files into modular lecture directories under `apps/web-ide/src/data/curriculum/chapter_XX/lecture_YY/`.
+  - Structured every lecture cleanly into:
+    - `guide.md`: pure GitHub-flavored markdown textbook instructions.
+    - `starter.erl`: Right pane editor template.
+    - `solution.erl`: verified reference solution.
+    - `starter/<modName>.erl` & `solution/<modName>.erl`: module-named Erlang files for instant CLI compilation.
+    - `tests.json`: visible and hidden EUnit test cases.
+    - `meta.json`: metadata, AST rules, OTP doc cards, mental model checks, and incident alerts.
+  - Preserved Chapter 12 Capstone multi-file architecture with `milestone_lessons/`, `starter/`, `solution/`, and `milestones.json`.
+  - **Zero file deletion**: Original monolithic source files (`apps/web-ide/src/data/chapters/ch01.ts..ch12.ts` and `curriculumCatalog.ts`) remain 100% intact and untouched as authoritative reference backups.
+- [x] **46.2: Mathematical Parity Verification Loop (`scripts/verify_curriculum_parity.ts`)**:
+  - Validated all 88 lectures across all 12 chapters with deep equality.
+  - 100% character-for-character match on `conceptMarkdown`, starter templates, solutions, and tests.
+- [x] **46.3: Pure BEAM Compiler Verification**:
+  - Compiled all 96 Erlang solution files across the decomposed curriculum directly with `erlc.exe -W0`.
+  - 96/96 files compiled with 0 errors.
+- [x] **46.4: Next.js & TypeScript Verification**:
+  - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
+  - `apps/web-ide`: `npm run build` passed with 0 errors (5/5 static pages).
+
 
 
 

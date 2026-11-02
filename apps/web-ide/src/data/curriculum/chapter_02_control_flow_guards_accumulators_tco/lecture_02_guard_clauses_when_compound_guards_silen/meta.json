@@ -1,0 +1,51 @@
+{
+  "id": "ch02-l02",
+  "chapterNumber": 2,
+  "lessonNumber": 2,
+  "lessonType": "concept_exercise",
+  "title": "Guard Clauses (when), Compound Guards & Silent Guard Failure",
+  "difficulty": "Beginner",
+  "xpReward": 100,
+  "solutionExplanation": "Enforces numerical bounds using when is_integer, when is_number, and safe division guards.",
+  "astRules": {
+    "requiredConstructs": [
+      "guards"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "guard_sequences",
+      "module": "erlang",
+      "signature": "Name(Arg) when GuardSequence -> Body.",
+      "typesSpec": [
+        "GuardSequence = [guard_expr()]"
+      ],
+      "description": "Pure predicate assertions compiled into single-cycle CPU tests.",
+      "complexityNote": "Guards never trigger garbage collection and run directly in registers.",
+      "officialUrl": "https://www.erlang.org/doc/reference_manual/expressions.html#guard-sequences"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What happens if an arithmetic exception (e.g. division by zero) occurs inside an Erlang guard clause?",
+    "options": [
+      {
+        "id": "A",
+        "label": "The guard silently catches the exception, evaluates to false, and Erlang tests the next clause",
+        "isCorrect": true,
+        "explanation": "In Erlang guards, exceptions never crash the process; they safely fail to false."
+      },
+      {
+        "id": "B",
+        "label": "The entire BEAM emulator crashes with a core dump",
+        "isCorrect": false,
+        "explanation": "The BEAM VM is fault-tolerant and isolates guard evaluations."
+      },
+      {
+        "id": "C",
+        "label": "The process terminates immediately with {badarith, ...}",
+        "isCorrect": false,
+        "explanation": "Expressions in function bodies crash with badarith, but inside guards they fail silently to false."
+      }
+    ]
+  }
+}

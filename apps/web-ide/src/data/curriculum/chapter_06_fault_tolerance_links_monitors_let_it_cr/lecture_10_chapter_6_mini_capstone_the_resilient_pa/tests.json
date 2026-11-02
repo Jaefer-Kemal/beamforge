@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch06-10-1",
+      "title": "Settling Valid Transaction",
+      "erlangCall": "begin {ok, W} = payment_system:start_system(3), Res = payment_system:charge(W, <<\"req_1\">>, 250, usd), payment_system:stop_system(W), Res end",
+      "expectedOutput": "{ok, #{amount => 250, currency => usd, status => settled, tx_id => <<\"req_1\">>}}",
+      "explanation": "Charges 250 USD and returns settled receipt map."
+    },
+    {
+      "id": "tc-ch06-10-2",
+      "title": "Idempotency Protection Against Double-Charge",
+      "erlangCall": "begin {ok, W} = payment_system:start_system(3), {ok, _} = payment_system:charge(W, <<\"req_dup\">>, 100, usd), Res = payment_system:charge(W, <<\"req_dup\">>, 100, usd), payment_system:stop_system(W), Res end",
+      "expectedOutput": "{ok, {already_processed, #{amount => 100, currency => usd, status => settled, tx_id => <<\"req_dup\">>}}}",
+      "explanation": "Second charge with identical RequestId returns already_processed without re-charging."
+    },
+    {
+      "id": "tc-ch06-10-3",
+      "title": "Worker Crash Recovery and Transaction Store Survival",
+      "erlangCall": "begin {ok, W} = payment_system:start_system(3), {ok, _} = payment_system:charge(W, <<\"req_saved\">>, 50, eur), {ok, OldW, NewW} = payment_system:trigger_crash_test(W), Txs = payment_system:get_processed_txs(W), payment_system:stop_system(W), {OldW =/= NewW, maps:is_key(<<\"req_saved\">>, Txs)} end",
+      "expectedOutput": "{true, true}",
+      "explanation": "Worker crashed and was replaced with a new PID, while tx_store survived 100% intact."
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch06-07-1",
+      "title": "Zero Lingering DOWN Messages With [flush]",
+      "erlangCall": "monitor_hygiene:call_with_clean_mailbox(fun(X) -> X * 2 end, 21)",
+      "expectedOutput": "{ok, 42, 0}",
+      "explanation": "Worker exited immediately after reply; [flush] purged the DOWN message, leaving 0 lingering messages."
+    },
+    {
+      "id": "tc-ch06-07-2",
+      "title": "Mailbox Drain Helper Count",
+      "erlangCall": "begin self() ! {'DOWN', make_ref(), process, self(), test}, monitor_hygiene:count_lingering_downs() end",
+      "expectedOutput": "1",
+      "explanation": "Verifies that count_lingering_downs accurately drains and tallies un-flushed DOWN messages."
+    }
+  ]
+}

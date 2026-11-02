@@ -1,0 +1,65 @@
+{
+  "id": "ch06-l09",
+  "chapterNumber": 6,
+  "lessonNumber": 9,
+  "lessonType": "incident_triage",
+  "title": "🚨 Production Incident #102: Hanging Client Calls When Worker Crashes Mid-Request",
+  "difficulty": "Production",
+  "xpReward": 100,
+  "solutionExplanation": "Fixes production incident by attaching a temporary monitor in call_pricing_worker to detect worker crashes in 0ms without waiting for timeouts.",
+  "astRules": {
+    "requiredCalls": [
+      "erlang:monitor/2",
+      "erlang:demonitor/2"
+    ],
+    "requiredConstructs": [
+      "receive_after"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "monitor",
+      "module": "erlang",
+      "signature": "erlang:monitor(process, WorkerPid) -> reference()",
+      "typesSpec": [
+        "WorkerPid = pid()"
+      ],
+      "description": "Enables instant notification if WorkerPid crashes during request.",
+      "complexityNote": "O(1) operation.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#monitor/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What is the root cause of client calls freezing for 5,000ms when a worker crashes mid-request?",
+    "codeSnippet": "call(Pid, Msg) ->\n    Ref = make_ref(),\n    Pid ! {req, self(), Ref, Msg},\n    receive {reply, Ref, Res} -> Res after 5000 -> timeout end.",
+    "options": [
+      {
+        "id": "A",
+        "label": "The client is neither linked to nor monitoring the worker; when the worker crashes, the client has no way of knowing it died and must wait for the full timeout to expire.",
+        "isCorrect": true,
+        "explanation": "Correct! Without a monitor, the caller is blind to process crashes. Attaching a monitor notifies the caller instantly via a DOWN message."
+      },
+      {
+        "id": "B",
+        "label": "The BEAM kernel locks the caller’s socket during worker crashes.",
+        "isCorrect": false,
+        "explanation": "Erlang does not lock sockets on process crashes."
+      },
+      {
+        "id": "C",
+        "label": "make_ref() generates duplicate references when workers crash.",
+        "isCorrect": false,
+        "explanation": "make_ref() generates globally unique 128-bit references."
+      }
+    ]
+  },
+  "incidentAlert": {
+    "incidentId": "INC-102",
+    "severity": "CRITICAL",
+    "serviceName": "checkout-pricing-rpc",
+    "symptom": "Whenever a malformed SKU triggers a badarith crash inside pricing_worker, 100% of calling HTTP checkout handlers freeze for 5,000ms before timing out, exhausting the web connection pool.",
+    "rootCauseHint": "call_pricing_worker/2 uses raw make_ref() and receive ... after 5000 without monitoring the worker PID. When the worker crashes 1ms into the request, no reply is ever sent and the caller sits blind until the 5s timer expires.",
+    "fixObjective": "Attach MRef = erlang:monitor(process, WorkerPid) before sending the request, demonitor with [flush] on reply, and handle {'DOWN', MRef, process, WorkerPid, Reason} to return {error, {worker_down, Reason}} in <10ms."
+  },
+  "visualScene": "links_monitors_signals"
+}

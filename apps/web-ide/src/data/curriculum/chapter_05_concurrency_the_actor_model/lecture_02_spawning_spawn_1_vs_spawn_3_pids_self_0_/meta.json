@@ -1,0 +1,69 @@
+{
+  "id": "ch05-l02",
+  "chapterNumber": 5,
+  "lessonNumber": 2,
+  "lessonType": "concept_exercise",
+  "title": "Spawning (spawn/1 vs. spawn/3), PIDs (self/0) & Asynchronous Message Passing (!)",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Spawns a tail-recursive responder loop that pattern-matches {ping, CallerPid, Payload}, sends {pong, self(), Payload}, and uses receive ... after for timeout-safe ping/2 calls.",
+  "astRules": {
+    "requiredCalls": [
+      "erlang:self/0"
+    ],
+    "requireTailRecursion": [
+      "responder_loop/0"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "spawn",
+      "module": "erlang",
+      "signature": "spawn(Module, Function, Args) -> pid()",
+      "typesSpec": [
+        "Module = atom()",
+        "Function = atom()",
+        "Args = [term()]"
+      ],
+      "description": "Creates a new concurrent process executing Module:Function(Args) with its own isolated heap.",
+      "complexityNote": "O(1) allocation (~2.5 KB base footprint).",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#spawn/3"
+    },
+    {
+      "functionName": "self",
+      "module": "erlang",
+      "signature": "self() -> pid()",
+      "typesSpec": [
+        "pid() = process identifier"
+      ],
+      "description": "Returns the process identifier (PID) of the currently executing process.",
+      "complexityNote": "O(1) register lookup.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#self/0"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does an Erlang process need to include `self()` inside its request message tuple when communicating with an actor?",
+    "codeSnippet": "%% Sending a request to a worker:\nWorkerPid ! {calculate_tax, self(), OrderTotal}.",
+    "options": [
+      {
+        "id": "A",
+        "label": "The BEAM message passing mechanism does not include implicit return addresses; the recipient actor cannot know where to send its reply unless the caller explicitly passes its PID.",
+        "isCorrect": true,
+        "explanation": "Correct! Erlang messages are raw terms placed into mailboxes. Because the runtime does not attach caller metadata to messages, request-reply protocols must explicitly pass self() so the responder knows the destination PID."
+      },
+      {
+        "id": "B",
+        "label": "The BEAM will crash with a badarg error if an outgoing message tuple does not contain a PID.",
+        "isCorrect": false,
+        "explanation": "Any valid Erlang term can be sent via !. Including self() is a protocol convention for replies, not a syntax requirement."
+      },
+      {
+        "id": "C",
+        "label": "Including self() locks the recipient process so no other process can message it.",
+        "isCorrect": false,
+        "explanation": "Erlang processes never lock. Other processes can send messages to WorkerPid concurrently without contention."
+      }
+    ]
+  },
+  "visualScene": "mailbox_selective_receive"
+}

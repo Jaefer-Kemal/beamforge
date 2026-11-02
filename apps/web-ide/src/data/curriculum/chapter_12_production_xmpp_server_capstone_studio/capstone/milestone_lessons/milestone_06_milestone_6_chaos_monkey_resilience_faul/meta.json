@@ -1,0 +1,28 @@
+{
+  "id": "ch12-m6",
+  "title": "Milestone 6: Chaos Monkey Resilience & Fault-Injection (xmpp_sup)",
+  "mentalModelCheck": {
+    "question": "When xmpp_session_registry terminates abnormally under rest_for_one, why is xmpp_router terminated and restarted even if it experienced no internal errors?",
+    "codeSnippet": "#{strategy => rest_for_one, intensity => 5, period => 10}\n[RegistryChildSpec, RouterChildSpec]",
+    "options": [
+      {
+        "id": "A",
+        "label": "The router depends on the registry's ETS table. Restarting the router ensures it reconnects to the newly created ETS table rather than crashing on stale references.",
+        "isCorrect": true,
+        "explanation": "Correct! Under rest_for_one, child processes booted after the failed process are terminated and restarted in forward sequence, guaranteeing all downstream dependencies re-synchronize with the fresh upstream state."
+      },
+      {
+        "id": "B",
+        "label": "In OTP, rest_for_one is an alias for one_for_all and terminates all processes unconditionally.",
+        "isCorrect": false,
+        "explanation": "rest_for_one only terminates siblings started after the failed process; earlier siblings remain unaffected."
+      },
+      {
+        "id": "C",
+        "label": "The BEAM runtime automatically kills all processes that share the same atom table.",
+        "isCorrect": false,
+        "explanation": "Process isolation guarantees that one process crash does not kill others unless linked or managed by a supervisor."
+      }
+    ]
+  }
+}

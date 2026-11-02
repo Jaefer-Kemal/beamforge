@@ -1,0 +1,82 @@
+{
+  "id": "ch11-l07",
+  "chapterNumber": 11,
+  "lessonNumber": 7,
+  "lessonType": "incident_triage",
+  "title": "Incident #107: Pre-Auth Stanza Injection & XML Entity Attacks",
+  "difficulty": "Advanced",
+  "xpReward": 125,
+  "solutionExplanation": "Enforces pre-auth security gates and recursive XML entity escaping to neutralize injection attacks.",
+  "astRules": {
+    "requiredCalls": [
+      "escape_xml_text/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "escape_xml_text",
+      "module": "incident_xmpp_auth_bypass",
+      "signature": "escape_xml_text(Bin) -> EscapedBin",
+      "typesSpec": [
+        "Bin = binary()",
+        "EscapedBin = binary()"
+      ],
+      "description": "Recursively escapes &, <, and > characters into XML entities.",
+      "complexityNote": "Tail-recursive binary fold in O(N) time.",
+      "officialUrl": "https://datatracker.ietf.org/doc/html/rfc6120",
+      "githubSourceUrl": "https://github.com/erlang/otp"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "In Incident #107, what allowed unauthenticated attackers to inject fake admin commands into the session?",
+    "options": [
+      {
+        "id": "A",
+        "label": "The connection state machine processed incoming <message> stanzas before the client finished SASL PLAIN authentication, and lacked an XML character escape loop.",
+        "isCorrect": true,
+        "explanation": "Failing to reject pre-auth stanzas and neglecting to escape &, <, > characters allows authentication bypass and XML injection."
+      },
+      {
+        "id": "B",
+        "label": "The server used MD5 password hashing instead of SHA-256.",
+        "isCorrect": false,
+        "explanation": "The bug was architectural: pre-auth stanza dispatch and unescaped entity strings."
+      },
+      {
+        "id": "C",
+        "label": "The Erlang runtime crashed on large payloads.",
+        "isCorrect": false,
+        "explanation": "The BEAM handles large payloads effortlessly; this was an application security failure."
+      },
+      {
+        "id": "D",
+        "label": "The client used an expired TLS certificate.",
+        "isCorrect": false,
+        "explanation": "The incident occurred over plain C2S TCP streams without pre-auth state validation."
+      }
+    ]
+  },
+  "incidentAlert": {
+    "incidentId": "INC-107",
+    "severity": "CRITICAL",
+    "serviceName": "xmpp-c2s-gateway",
+    "symptom": "Unauthenticated sockets can inject arbitrary stanzas and corrupt client XML streams with unescaped characters.",
+    "impact": "Privilege escalation and client disconnection cascades across the cluster.",
+    "diagnosticClue": "Connection state machine processed stanzas before SASL auth, and lacked XML entity escaping."
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "OWASP XML External Entity (XXE) Prevention Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html",
+      "category": "github_ecosystem",
+      "description": "Industry best practices for parsing XML safely and neutralizing malicious payload injections."
+    },
+    {
+      "title": "RFC 6120: Section 4.9.3.10 (Stream Error: not-authorized)",
+      "url": "https://datatracker.ietf.org/doc/html/rfc6120#section-4.9.3.10",
+      "category": "book_rfc",
+      "description": "Specification for stream-level not-authorized termination conditions."
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch10-l04-1",
+      "title": "Buffer Incomplete TCP Fragment",
+      "erlangCall": "tcp_frame_buffer:append_and_extract_lines(<<>>, <<\"HELLO\\r\\nWOR\">>)",
+      "expectedOutput": "{[<<\"HELLO\">>],<<\"WOR\">>}",
+      "explanation": "Extracts single complete line \"HELLO\" and leaves partial fragment \"WOR\" in remainder."
+    },
+    {
+      "id": "tc-ch10-l04-2",
+      "title": "Complete Fragment and Extract Coalesced Burst",
+      "erlangCall": "tcp_frame_buffer:append_and_extract_lines(<<\"WOR\">>, <<\"LD\\r\\nFOO\\r\\nBAR\\r\\n\">>)",
+      "expectedOutput": "{[<<\"WORLD\">>,<<\"FOO\">>,<<\"BAR\">>],<<>>}",
+      "explanation": "Completes \"WORLD\" and extracts coalesced \"FOO\" and \"BAR\" lines with zero remainder."
+    }
+  ]
+}

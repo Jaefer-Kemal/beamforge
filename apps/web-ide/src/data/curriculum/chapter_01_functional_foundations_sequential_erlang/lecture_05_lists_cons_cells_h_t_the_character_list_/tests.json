@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch01-05-a",
+      "title": "Prepend Element to List",
+      "erlangCall": "list_ops:prepend_item(10, [20, 30])",
+      "expectedOutput": "[10, 20, 30]",
+      "explanation": "Prepends 10 to front of list in O(1) time."
+    },
+    {
+      "id": "tc-ch01-05-b",
+      "title": "Swap First Two List Elements",
+      "erlangCall": "list_ops:swap_first_two([alpha, beta, gamma, delta])",
+      "expectedOutput": "[beta, alpha, gamma, delta]",
+      "explanation": "Destructures [A, B | Rest] and reconstructs [B, A | Rest]."
+    },
+    {
+      "id": "tc-ch01-05-c",
+      "title": "Extract Integer ASCII Codepoint",
+      "erlangCall": "list_ops:ascii_initial(\"Erlang\")",
+      "expectedOutput": "{char_code, 69}",
+      "explanation": "Destructures string head codepoint $E = 69."
+    }
+  ]
+}

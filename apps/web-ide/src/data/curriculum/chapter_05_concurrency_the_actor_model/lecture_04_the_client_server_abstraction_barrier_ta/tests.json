@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch05-04-1",
+      "title": "Initial Value and Increment",
+      "erlangCall": "begin P = counter_actor:start(10), ok = counter_actor:increment(P, 5), Res = counter_actor:get_value(P), counter_actor:stop(P), Res end",
+      "expectedOutput": "{ok, 15}",
+      "explanation": "Initializes counter with 10, increments by 5, and retrieves 15."
+    },
+    {
+      "id": "tc-ch05-04-2",
+      "title": "Increment and Decrement Sequence",
+      "erlangCall": "begin P = counter_actor:start(0), counter_actor:increment(P, 50), counter_actor:decrement(P, 20), Res = counter_actor:get_value(P), counter_actor:stop(P), Res end",
+      "expectedOutput": "{ok, 30}",
+      "explanation": "Applies increment of 50 followed by decrement of 20, verifying final value 30."
+    }
+  ]
+}

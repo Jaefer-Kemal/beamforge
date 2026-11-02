@@ -1,0 +1,66 @@
+{
+  "id": "ch06-l04",
+  "chapterNumber": 6,
+  "lessonNumber": 4,
+  "lessonType": "concept_exercise",
+  "title": "Bidirectional Process Links (link/1, spawn_link/1) & Normal vs. Abnormal Exit Signals",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements a two-stage linked pipeline demonstrating normal exit survival vs abnormal exit propagation.",
+  "astRules": {
+    "requiredCalls": [
+      "erlang:spawn_link/1",
+      "erlang:link/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "spawn_link",
+      "module": "erlang",
+      "signature": "spawn_link(Fun) -> pid()",
+      "typesSpec": [
+        "Fun = function()",
+        "pid()"
+      ],
+      "description": "Atomically creates a new process and establishes a bidirectional link with caller.",
+      "complexityNote": "O(1) allocation and lock-free link registration.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#spawn_link/1"
+    },
+    {
+      "functionName": "link",
+      "module": "erlang",
+      "signature": "link(Pid) -> true",
+      "typesSpec": [
+        "Pid = pid() | port()"
+      ],
+      "description": "Creates a bidirectional link between caller and target Pid.",
+      "complexityNote": "O(1). If Pid is dead, sends {EXIT, Pid, noproc}.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#link/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "When process A and process B are linked, what happens to process B if process A terminates with `exit(normal)`?",
+    "codeSnippet": "link(PidB),\nexit(normal).",
+    "options": [
+      {
+        "id": "A",
+        "label": "Process B ignores the normal exit signal and continues executing undisturbed (unless it is explicitly trapping exits).",
+        "isCorrect": true,
+        "explanation": "Correct! By definition, an exit signal with reason `normal` indicates clean task completion. Non-trapping linked peers ignore `normal` exit signals and stay alive."
+      },
+      {
+        "id": "B",
+        "label": "Process B terminates immediately with reason normal.",
+        "isCorrect": false,
+        "explanation": "Only abnormal exit reasons terminate non-trapping linked peers."
+      },
+      {
+        "id": "C",
+        "label": "The BEAM scheduler pauses process B until a supervisor wakes it up.",
+        "isCorrect": false,
+        "explanation": "Process B is not paused; it continues running without interruption."
+      }
+    ]
+  },
+  "visualScene": "links_monitors_signals"
+}

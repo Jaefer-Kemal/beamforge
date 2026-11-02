@@ -1,0 +1,67 @@
+{
+  "id": "ch06-l05",
+  "chapterNumber": 6,
+  "lessonNumber": 5,
+  "lessonType": "concept_exercise",
+  "title": "Trapping Exits (process_flag(trap_exit, true)), The Exit Signal Truth Table & Untrappable kill",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "Implements supervisor primitives using trap_exit to convert exit signals into mailbox messages and respawn crashed workers, proving the complete exit signal truth table.",
+  "astRules": {
+    "requiredCalls": [
+      "erlang:process_flag/2",
+      "erlang:spawn_link/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "process_flag",
+      "module": "erlang",
+      "signature": "process_flag(trap_exit, true) -> boolean()",
+      "typesSpec": [
+        "trap_exit",
+        "boolean()"
+      ],
+      "description": "Enables exit signal trapping, converting incoming exits into mailbox messages.",
+      "complexityNote": "O(1) process control block update.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#process_flag/2"
+    },
+    {
+      "functionName": "exit",
+      "module": "erlang",
+      "signature": "exit(Pid, Reason) -> true",
+      "typesSpec": [
+        "Pid = pid()",
+        "Reason = term()"
+      ],
+      "description": "Sends exit signal with Reason to target Pid. If Reason is kill, target terminates unconditionally.",
+      "complexityNote": "O(1) signal dispatch.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#exit/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does sending `exit(WorkerPid, kill)` terminate a worker even if that worker has executed `process_flag(trap_exit, true)`?",
+    "codeSnippet": "process_flag(trap_exit, true),\n%% Inside another process:\nexit(WorkerPid, kill).",
+    "options": [
+      {
+        "id": "A",
+        "label": "The atom `kill` is Erlang’s untrappable nuclear signal; the runtime bypasses mailbox trapping and terminates the process unconditionally.",
+        "isCorrect": true,
+        "explanation": "Correct! `kill` is unconditionally untrappable. The BEAM runtime terminates the process directly, rewriting the reason to `killed` for linked peers so supervisors survive."
+      },
+      {
+        "id": "B",
+        "label": "Trapping exits only works for throws, not exits.",
+        "isCorrect": false,
+        "explanation": "Trapping exits is specifically for exit signals."
+      },
+      {
+        "id": "C",
+        "label": "The target process traps the signal as {EXIT, Pid, kill}.",
+        "isCorrect": false,
+        "explanation": "A process can never trap `kill`."
+      }
+    ]
+  },
+  "visualScene": "links_monitors_signals"
+}

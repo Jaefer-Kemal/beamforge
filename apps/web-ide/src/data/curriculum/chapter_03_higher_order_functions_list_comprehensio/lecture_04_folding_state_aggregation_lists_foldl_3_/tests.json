@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch03-04-a",
+      "title": "Calculate Ledger Summary with Multi-Value Accumulator",
+      "erlangCall": "hof_fold:sum_ledger([{entry, 100, credit}, {entry, 40, debit}, {entry, 50, credit}])",
+      "expectedOutput": "{ledger_summary, 150, 40, 110}",
+      "explanation": "TotalCredit = 150, TotalDebit = 40, NetBalance = 150 - 40 = 110."
+    },
+    {
+      "id": "tc-ch03-04-b",
+      "title": "Find Min and Max Latencies in Stream",
+      "erlangCall": "hof_fold:min_max_latency([45, 12, 88, 30, 95, 20])",
+      "expectedOutput": "{12, 95}",
+      "explanation": "Lowest latency is 12 ms, peak latency is 95 ms."
+    },
+    {
+      "id": "tc-ch03-04-c",
+      "title": "Reverse List Using foldl",
+      "erlangCall": "hof_fold:reverse_with_fold([alpha, beta, gamma])",
+      "expectedOutput": "[gamma, beta, alpha]",
+      "explanation": "Prepends elements in order: alpha, then beta, then gamma."
+    }
+  ]
+}

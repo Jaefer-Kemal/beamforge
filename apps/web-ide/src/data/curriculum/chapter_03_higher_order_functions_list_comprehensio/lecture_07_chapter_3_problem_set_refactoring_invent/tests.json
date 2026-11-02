@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch03-07-a",
+      "title": "Calculate Total Inventory Valuation",
+      "erlangCall": "inventory_hof:total_inventory_valuation([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 4}])",
+      "expectedOutput": "600",
+      "explanation": "(50 * 10) + (25 * 4) = 500 + 100 = 600."
+    },
+    {
+      "id": "tc-ch03-07-b",
+      "title": "Emit Critical Stock Alerts with filtermap",
+      "erlangCall": "inventory_hof:critical_stock_alerts([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 2}], 5)",
+      "expectedOutput": "[{alert, 2, \"Mouse\", 2}]",
+      "explanation": "Only Mouse has Stock <= 5."
+    },
+    {
+      "id": "tc-ch03-07-c",
+      "title": "Apply Orders with Keylists",
+      "erlangCall": "inventory_hof:apply_orders_with_keylists([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}], [{order, 1, 3}, {order, 2, 10}])",
+      "expectedOutput": "[{product, 1, \"Keyboard\", 50, 7}, {product, 2, \"Mouse\", 25, 5}]",
+      "explanation": "Deducts 3 from P1. P2 requested 10 but only 5 in stock, so P2 remains unchanged."
+    },
+    {
+      "id": "tc-ch03-07-d",
+      "title": "Aggregate SLA Logs into Summary Tuple",
+      "erlangCall": "inventory_hof:aggregate_sla_logs([{log, api_auth, 40, ok}, {log, api_pay, 120, error}, {log, api_auth, 60, ok}])",
+      "expectedOutput": "{sla_summary, 3, 1, 220}",
+      "explanation": "Total requests = 3, error count = 1, total latency = 40 + 120 + 60 = 220 ms."
+    }
+  ]
+}

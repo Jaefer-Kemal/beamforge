@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch06-06-1",
+      "title": "Successful Task Execution",
+      "erlangCall": "worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000)",
+      "expectedOutput": "{ok, 42}",
+      "explanation": "Worker completed calculation and monitor flushed cleanly."
+    },
+    {
+      "id": "tc-ch06-06-2",
+      "title": "Crash Isolation: Caller Survives Badarith",
+      "erlangCall": "worker_watcher:run_monitored_task(fun() -> 1 / 0 end, 1000)",
+      "expectedOutput": "{error, {crashed, badarith}}",
+      "explanation": "Worker division by zero caught via DOWN message; caller unhurt."
+    },
+    {
+      "id": "tc-ch06-06-3",
+      "title": "Dead-PID Noproc Invariant",
+      "erlangCall": "begin Dead = spawn(fun() -> ok end), timer:sleep(30), worker_watcher:probe_pid_status(Dead) end",
+      "expectedOutput": "{dead, noproc}",
+      "explanation": "Confirmed probe_pid_status returns {dead, noproc} on already-dead PID."
+    }
+  ]
+}

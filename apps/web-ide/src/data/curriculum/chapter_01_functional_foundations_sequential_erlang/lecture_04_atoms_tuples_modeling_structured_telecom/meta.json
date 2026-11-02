@@ -1,0 +1,50 @@
+{
+  "id": "ch01-l04",
+  "chapterNumber": 1,
+  "lessonNumber": 4,
+  "lessonType": "concept_exercise",
+  "title": "Atoms & Tuples: Modeling Structured Telecom Events",
+  "difficulty": "Beginner",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates tagged tuple construction, element extraction, and field swapping using pattern matching.",
+  "astRules": {
+    "requiredCalls": []
+  },
+  "otpDocCards": [
+    {
+      "functionName": "tuple_size",
+      "module": "erlang",
+      "signature": "tuple_size(Tuple) -> integer() >= 0",
+      "typesSpec": [
+        "Tuple = tuple()"
+      ],
+      "description": "Returns the number of elements in a tuple in O(1) time.",
+      "complexityNote": "O(1) BIF reading the tuple header arity word directly.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#tuple_size/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why is comparing two atoms like (Status =:= active) faster than comparing two strings like (\"active\" =:= \"active\")?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Because strings are compiled to regular expressions in Erlang",
+        "isCorrect": false,
+        "explanation": "Strings in Erlang are lists of integer codepoints, not regexes."
+      },
+      {
+        "id": "B",
+        "label": "Because atoms are interned in a global table, reducing comparison to a single-cycle integer pointer check",
+        "isCorrect": true,
+        "explanation": "Atoms exist once in the Atom Table. Comparing them is an O(1) pointer comparison; comparing strings requires traversing list nodes."
+      },
+      {
+        "id": "C",
+        "label": "Because atoms are stored directly in CPU registers rather than on the heap",
+        "isCorrect": false,
+        "explanation": "Atoms are represented as tagged pointer words referencing the Atom Table."
+      }
+    ]
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "id": "ch08-l04",
+  "chapterNumber": 8,
+  "lessonNumber": 4,
+  "lessonType": "concept_exercise",
+  "title": "Dynamic Worker Supervision (simple_one_for_one & supervisor:start_child)",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements a clean simple_one_for_one supervisor with a single template child spec referencing companion module session_worker, dynamic start_child appending, and active count introspection.",
+  "astRules": {
+    "requiredCalls": [
+      "supervisor:start_link/3",
+      "supervisor:start_child/2",
+      "supervisor:count_children/1",
+      "supervisor:terminate_child/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "start_child",
+      "module": "supervisor",
+      "signature": "supervisor:start_child(SupRef, ChildSpec | [Arg]) -> {ok, Child} | {ok, Child, Info} | {error, Reason}",
+      "typesSpec": [
+        "SupRef = pid() | atom()",
+        "Arg = term()",
+        "Child = pid()"
+      ],
+      "description": "For simple_one_for_one supervisors, appends the arguments list to the template start MFA and spawns a dynamic worker.",
+      "complexityNote": "Synchronous child spawn and link. Returns when child init/1 completes.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/supervisor.html#start_child/2"
+    },
+    {
+      "functionName": "count_children",
+      "module": "supervisor",
+      "signature": "supervisor:count_children(SupRef) -> #{specs := integer(), active := integer(), supervisors := integer(), workers := integer()}",
+      "typesSpec": [
+        "SupRef = pid() | atom()"
+      ],
+      "description": "Returns telemetry counts of child specifications, active processes, and worker vs supervisor nodes.",
+      "complexityNote": "O(N) iteration over internal supervisor child tracking list.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/supervisor.html#count_children/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does simple_one_for_one allow only ONE child specification template inside init/1?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Because simple_one_for_one is designed as a factory for an arbitrary number of identical dynamic workers spawned on demand.",
+        "isCorrect": true,
+        "explanation": "simple_one_for_one treats its single child specification as a blueprint template. All dynamic children share the same module, restart policy, and shutdown timeout."
+      },
+      {
+        "id": "B",
+        "label": "Because the BEAM VM memory limit prevents supervisors from holding more than one map.",
+        "isCorrect": false,
+        "explanation": "Supervisors can hold many specs in other strategies; simple_one_for_one is conceptually a homogeneous worker factory."
+      },
+      {
+        "id": "C",
+        "label": "Because simple_one_for_one can only ever run one process at a time.",
+        "isCorrect": false,
+        "explanation": "It can run millions of simultaneous dynamic workers, all spawned from the single template."
+      },
+      {
+        "id": "D",
+        "label": "Because dynamic workers are forbidden from using gen_server.",
+        "isCorrect": false,
+        "explanation": "Dynamic workers almost always implement gen_server or gen_statem."
+      }
+    ]
+  },
+  "visualScene": "supervision_rest_for_one_ets_heir"
+}

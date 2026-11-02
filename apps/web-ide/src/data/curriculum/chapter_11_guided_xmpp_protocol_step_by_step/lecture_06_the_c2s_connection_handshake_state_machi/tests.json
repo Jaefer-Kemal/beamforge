@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch11-l06-1",
+      "title": "Initial Stream Open and Transition to wait_for_sasl",
+      "erlangCall": "begin S0 = xmpp_c2s_fsm:init(<<\"localhost\">>), {reply, _, S1} = xmpp_c2s_fsm:handle_event({stream_open, <<\"localhost\">>}, S0), xmpp_c2s_fsm:get_state(S1) end",
+      "expectedOutput": "wait_for_sasl",
+      "explanation": "Transitions from wait_for_stream to wait_for_sasl upon receiving stream_open."
+    },
+    {
+      "id": "tc-ch11-l06-2",
+      "title": "Reject Chat Message Before Authentication",
+      "erlangCall": "begin S0 = xmpp_c2s_fsm:init(<<\"localhost\">>), {reply, _, S1} = xmpp_c2s_fsm:handle_event({stream_open, <<\"localhost\">>}, S0), {error, Reason, _} = xmpp_c2s_fsm:handle_event({chat_message, <<\"bob\">>, <<\"1\">>, <<\"hi\">>}, S1), Reason end",
+      "expectedOutput": "not_authorized",
+      "explanation": "Rejects chat messages in wait_for_sasl state with not_authorized."
+    },
+    {
+      "id": "tc-ch11-l06-3",
+      "title": "Complete SASL Auth and Resource Binding",
+      "erlangCall": "begin S0 = xmpp_c2s_fsm:init(<<\"localhost\">>), {reply, _, S1} = xmpp_c2s_fsm:handle_event({stream_open, <<\"localhost\">>}, S0), Token = base64:encode(<<0, \"alice\", 0, \"secret\">>), {reply, _, S2} = xmpp_c2s_fsm:handle_event({auth_plain, Token}, S1), {reply, _, S3} = xmpp_c2s_fsm:handle_event({bind_resource, <<\"b1\">>, <<\"mobile\">>}, S2), {xmpp_c2s_fsm:get_state(S3), maps:get(full_jid, S3)} end",
+      "expectedOutput": "{session_established,<<\"alice@localhost/mobile\">>}",
+      "explanation": "Authenticates with SASL PLAIN, binds resource, and establishes Full JID session."
+    }
+  ]
+}

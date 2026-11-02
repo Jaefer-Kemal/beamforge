@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch11-l02-1",
+      "title": "Parse Full JID with Resource",
+      "erlangCall": "xmpp_jid:parse(<<\"alice@localhost/mobile\">>)",
+      "expectedOutput": "{ok,#{bare => <<\"alice@localhost\">>,domain => <<\"localhost\">>,resource => <<\"mobile\">>,user => <<\"alice\">>}}",
+      "explanation": "Parses Full JID into user, domain, resource, and bare components."
+    },
+    {
+      "id": "tc-ch11-l02-2",
+      "title": "Parse Bare JID without Resource",
+      "erlangCall": "xmpp_jid:parse(<<\"bob@localhost\">>)",
+      "expectedOutput": "{ok,#{bare => <<\"bob@localhost\">>,domain => <<\"localhost\">>,resource => <<>>,user => <<\"bob\">>}}",
+      "explanation": "Parses Bare JID and normalizes resource to empty binary <<>>."
+    },
+    {
+      "id": "tc-ch11-l02-3",
+      "title": "Reject Malformed JIDs",
+      "erlangCall": "{xmpp_jid:parse(<<\"@localhost\">>), xmpp_jid:parse(<<\"alice@\">>), xmpp_jid:parse(<<\"alice@localhost/\">>)}",
+      "expectedOutput": "{{error,invalid_jid},{error,invalid_jid},{error,invalid_jid}}",
+      "explanation": "Rejects empty user, empty domain, and trailing slash without resource."
+    }
+  ]
+}

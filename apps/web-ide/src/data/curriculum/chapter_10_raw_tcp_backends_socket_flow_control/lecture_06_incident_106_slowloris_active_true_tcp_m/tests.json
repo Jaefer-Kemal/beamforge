@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch10-l06-1",
+      "title": "Audit Socket Options ({active, once})",
+      "erlangCall": "incident_tcp_active_true:audit_socket_opts()",
+      "expectedOutput": "{ok, active_once_enforced}",
+      "explanation": "Confirms recommended_socket_opts/0 specifies {active, once} and rejects {active, true}."
+    },
+    {
+      "id": "tc-ch10-l06-2",
+      "title": "Buffer Fragmented TCP Packets with Unpinning",
+      "erlangCall": "incident_tcp_active_true:test_framing()",
+      "expectedOutput": "{ok, [<<\"PING\">>, <<\"PONG\">>], <<\"PARTIAL\">>}",
+      "explanation": "Feeds fragmented TCP chunks, confirming complete lines are extracted and partial remainder is unpinned."
+    }
+  ]
+}

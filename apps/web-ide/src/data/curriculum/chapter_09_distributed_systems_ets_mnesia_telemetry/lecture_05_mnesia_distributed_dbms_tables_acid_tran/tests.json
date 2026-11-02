@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Atomic Transfer Between Wallets",
+      "erlangCall": "begin ok = mnesia_ledger:setup_mnesia_table(), ok = mnesia_ledger:upsert_wallet(alice, 100), ok = mnesia_ledger:upsert_wallet(bob, 50), {ok, 60, 90} = mnesia_ledger:atomic_transfer(alice, bob, 40), mnesia_ledger:get_wallet_balance(alice) end",
+      "expectedOutput": "{ok, 60}",
+      "explanation": "Tests setting up accounts, atomic debit/credit, and balance retrieval."
+    },
+    {
+      "id": "tc2",
+      "title": "Overdraft Rollback Invariant",
+      "erlangCall": "begin {error, insufficient_funds} = mnesia_ledger:atomic_transfer(alice, bob, 500), {mnesia_ledger:get_wallet_balance(alice), mnesia_ledger:get_wallet_balance(bob)} end",
+      "expectedOutput": "{{ok, 60}, {ok, 90}}",
+      "explanation": "Verifies that aborting on insufficient funds rolls back all changes completely."
+    }
+  ]
+}

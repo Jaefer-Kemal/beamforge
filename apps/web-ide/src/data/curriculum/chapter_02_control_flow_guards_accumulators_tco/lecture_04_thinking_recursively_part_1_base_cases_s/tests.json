@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch02-04-a",
+      "title": "Find Existing Product by ID",
+      "erlangCall": "recursive_search:find_product([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}], 2)",
+      "expectedOutput": "{ok, {product, 2, \"Mouse\", 25, 5}}",
+      "explanation": "Finds product 2 in the second tuple position."
+    },
+    {
+      "id": "tc-ch02-04-b",
+      "title": "Return not_found for Non-Existent Product",
+      "erlangCall": "recursive_search:find_product([{product, 1, \"Keyboard\", 50, 10}], 99)",
+      "expectedOutput": "not_found",
+      "explanation": "Traverses to base case [] and returns not_found."
+    },
+    {
+      "id": "tc-ch02-04-c",
+      "title": "Contains Item Positive Check",
+      "erlangCall": "recursive_search:contains_item([apple, banana, cherry], banana)",
+      "expectedOutput": "true",
+      "explanation": "Finds banana at head of sublist."
+    },
+    {
+      "id": "tc-ch02-04-d",
+      "title": "Contains Item Negative Check",
+      "erlangCall": "recursive_search:contains_item([apple, banana, cherry], date)",
+      "expectedOutput": "false",
+      "explanation": "Item not in list; returns false at base case."
+    }
+  ]
+}

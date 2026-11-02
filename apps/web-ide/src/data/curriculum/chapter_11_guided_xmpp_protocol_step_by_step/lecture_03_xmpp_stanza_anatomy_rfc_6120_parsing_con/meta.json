@@ -1,0 +1,80 @@
+{
+  "id": "ch11-l03",
+  "chapterNumber": 11,
+  "lessonNumber": 3,
+  "lessonType": "concept_exercise",
+  "title": "XMPP Stanza Anatomy (RFC 6120): Parsing & Constructing Stanzas",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "The solution implements binary string scanning and XML construction:\n1. classify_xml_packet detects top-level tag names (stream:stream, auth, iq, presence, message) and extracts attributes using extract_attr.\n2. extract_attr supports both single-quote ('val') and double-quote (\"val\") delimiters without string escape ambiguity, returning binary:copy/1 to prevent memory pinning.\n3. build_stream_features, build_bind_result, and build_chat_message use IO lists (iolist_to_binary/1) to assemble wire XML with zero-copy efficiency.",
+  "astRules": {
+    "requiredCalls": [
+      "binary:copy/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "match",
+      "module": "binary",
+      "signature": "binary:match(Subject, Pattern) -> {Start, Length} | nomatch",
+      "typesSpec": [
+        "Subject = binary()",
+        "Pattern = binary() | [binary()]"
+      ],
+      "description": "Searches for first occurrence of Pattern in Subject.",
+      "complexityNote": "Boyer-Moore accelerated byte search in BEAM runtime.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#match/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl"
+    },
+    {
+      "functionName": "iolist_to_binary",
+      "module": "erlang",
+      "signature": "iolist_to_binary(IoList) -> binary()",
+      "typesSpec": [
+        "IoList = iolist()"
+      ],
+      "description": "Flattens deep nested IO lists and binaries into a contiguous binary.",
+      "complexityNote": "Zero intermediate string copying; directly allocates destination buffer.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#iolist_to_binary/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/erts/preloaded/src/erlang.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does an XMPP <iq type=\"get\"> stanza strictly require the recipient to return an <iq type=\"result\"> or <iq type=\"error\"> with the exact same id attribute?",
+    "options": [
+      {
+        "id": "A",
+        "label": "To enable asynchronous request-response RPC matching over the persistent stream without head-of-line blocking.",
+        "isCorrect": true,
+        "explanation": "Because stanzas are multiplexed asynchronously over a single TCP stream, the client uses the unique id attribute to match responses to requests."
+      },
+      {
+        "id": "B",
+        "label": "Because Erlang processes will crash if the id is missing.",
+        "isCorrect": false,
+        "explanation": "It is an RFC 6120 protocol specification requirement for multiplexed RPC correlation."
+      },
+      {
+        "id": "C",
+        "label": "To encrypt the payload for privacy.",
+        "isCorrect": false,
+        "explanation": "The id attribute provides correlation, not encryption."
+      },
+      {
+        "id": "D",
+        "label": "Because the XML parser cannot parse closing tags without an id.",
+        "isCorrect": false,
+        "explanation": "XML parsers do not require id attributes to parse closing tags."
+      }
+    ]
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "IETF RFC 6120: XMPP XML Stanzas (<iq>, <presence>, <message>)",
+      "url": "https://datatracker.ietf.org/doc/html/rfc6120",
+      "category": "book_rfc",
+      "description": "Specification of standard XML stanza payload structures and attribute semantics."
+    }
+  ]
+}

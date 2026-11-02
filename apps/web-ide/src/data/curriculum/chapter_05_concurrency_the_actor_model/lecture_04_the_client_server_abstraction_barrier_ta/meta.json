@@ -1,0 +1,53 @@
+{
+  "id": "ch05-l04",
+  "chapterNumber": 5,
+  "lessonNumber": 4,
+  "lessonType": "concept_exercise",
+  "title": "The Client-Server Abstraction Barrier & Tail-Recursive Actor State Loops",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements tail-recursive loop/1 with O(1) stack memory and provides clean Client API functions that encapsulate message formats and request-reply synchronization.",
+  "astRules": {
+    "requireTailRecursion": [
+      "loop/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "spawn",
+      "module": "erlang",
+      "signature": "spawn(Fun) -> pid()",
+      "typesSpec": [
+        "Fun = fun(() -> any())"
+      ],
+      "description": "Spawns a new concurrent process executing the given anonymous closure and returns its PID.",
+      "complexityNote": "O(1) allocation (~2.5 KB base heap).",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#spawn/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "When caller process `<0.100.0>` invokes `counter_actor:get_value(ServerPid)`, in which process does the code of `get_value/1` execute?",
+    "codeSnippet": "%% Caller code:\n{ok, Val} = counter_actor:get_value(CounterPid).",
+    "options": [
+      {
+        "id": "A",
+        "label": "Inside caller process <0.100.0>, where self() evaluates to <0.100.0> so the counter actor knows where to send its reply message.",
+        "isCorrect": true,
+        "explanation": "Correct! Client API functions execute entirely inside the caller's process. Inside get_value/1, self() evaluates to the caller's PID, which is packed into the request tuple so the server loop can respond."
+      },
+      {
+        "id": "B",
+        "label": "Inside CounterPid, because the function is defined in counter_actor.erl.",
+        "isCorrect": false,
+        "explanation": "Function location in source code does not dictate execution process. Functions run in whichever process invokes them."
+      },
+      {
+        "id": "C",
+        "label": "Inside a shared operating system thread managed by the kernel.",
+        "isCorrect": false,
+        "explanation": "BEAM processes never share threads or execution contexts."
+      }
+    ]
+  },
+  "visualScene": "mailbox_selective_receive"
+}

@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch11-l05-1",
+      "title": "Extract Stream Header and Partial IQ",
+      "erlangCall": "xmpp_xml_framer:extract_frames(<<>>, <<\"<stream:stream to='localhost'> <iq type='get'\">>)",
+      "expectedOutput": "{[<<\"<stream:stream to='localhost'>\">>],<<\"<iq type='get'\">>}",
+      "explanation": "Extracts stream opening tag and leaves unclosed <iq in remainder buffer."
+    },
+    {
+      "id": "tc-ch11-l05-2",
+      "title": "Complete Fragmented IQ and Coalesced Presence",
+      "erlangCall": "xmpp_xml_framer:extract_frames(<<\"<iq type='get'\">>, <<\" id='1'><ping/></iq><presence/>\">>)",
+      "expectedOutput": "{[<<\"<iq type='get' id='1'><ping/></iq>\">>,<<\"<presence/>\">>],<<>>}",
+      "explanation": "Completes fragmented IQ and extracts subsequent coalesced presence."
+    }
+  ]
+}

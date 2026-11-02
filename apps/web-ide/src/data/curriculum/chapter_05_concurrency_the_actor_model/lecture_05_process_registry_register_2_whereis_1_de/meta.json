@@ -1,0 +1,81 @@
+{
+  "id": "ch05-l05",
+  "chapterNumber": 5,
+  "lessonNumber": 5,
+  "lessonType": "concept_exercise",
+  "title": "Process Registry (register/2, whereis/1), Dead-PID vs. Unregistered-Atom Semantics & make_ref() Correlation",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "Implements process registration under named_kv_actor with whereis guards and make_ref() request-reply correlation to prevent stale reply bugs.",
+  "astRules": {
+    "requiredCalls": [
+      "erlang:make_ref/0",
+      "erlang:register/2",
+      "erlang:whereis/1"
+    ],
+    "requireTailRecursion": [
+      "loop/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "register",
+      "module": "erlang",
+      "signature": "erlang:register(RegName, Pid) -> true",
+      "typesSpec": [
+        "RegName = atom()",
+        "Pid = pid()"
+      ],
+      "description": "Associates an atom name with a process identifier in the local node process registry.",
+      "complexityNote": "O(1) hash table registration.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#register/2"
+    },
+    {
+      "functionName": "whereis",
+      "module": "erlang",
+      "signature": "erlang:whereis(RegName) -> pid() | undefined",
+      "typesSpec": [
+        "RegName = atom()"
+      ],
+      "description": "Looks up the process identifier associated with the registered atom name, or returns undefined.",
+      "complexityNote": "O(1) registry lookup.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#whereis/1"
+    },
+    {
+      "functionName": "make_ref",
+      "module": "erlang",
+      "signature": "erlang:make_ref() -> reference()",
+      "typesSpec": [
+        "reference() = 128-bit unique reference"
+      ],
+      "description": "Returns an almost unique reference token used for request-reply correlation and avoiding stale replies.",
+      "complexityNote": "O(1) atomic counter increment.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#make_ref/0"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does evaluating `unregistered_atom ! {ping, self()}` crash the sender process with a badarg error, whereas sending to an exited PID does not crash?",
+    "codeSnippet": "%% Scenario A:\nDeadPid ! {ping, self()}. %% Evaluates cleanly, drops message.\n\n%% Scenario B:\nwhereis(named_service) == undefined.\nnamed_service ! {ping, self()}. %% CRASHES sender with badarg!",
+    "options": [
+      {
+        "id": "A",
+        "label": "The BEAM treats sending to an unregistered atom name as an invalid destination argument (raising badarg), whereas sending to a dead PID is a valid operation that quietly drops the message.",
+        "isCorrect": true,
+        "explanation": "Correct! When sending to an atom, the runtime attempts to look up the atom in the process registry table. If the atom is unregistered, the destination does not exist and the send primitive raises a badarg exception in the caller."
+      },
+      {
+        "id": "B",
+        "label": "Sending to an atom always spawns a new process automatically.",
+        "isCorrect": false,
+        "explanation": "Sending to an atom does not spawn processes; it requires prior registration via register/2."
+      },
+      {
+        "id": "C",
+        "label": "Sending to a dead PID crashes the entire BEAM operating system.",
+        "isCorrect": false,
+        "explanation": "Sending to a dead PID is completely safe and returns the message term itself."
+      }
+    ]
+  },
+  "visualScene": "mailbox_selective_receive"
+}

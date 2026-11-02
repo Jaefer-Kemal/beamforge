@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch06-01-1",
+      "title": "Approved Payment",
+      "erlangCall": "exception_classifier:safe_check({payment, 150, usd})",
+      "expectedOutput": "{approved, 150, usd}",
+      "explanation": "Valid positive USD payment passes checks and returns approved tuple."
+    },
+    {
+      "id": "tc-ch06-01-2",
+      "title": "Caught Throw: Negative Amount Rejection",
+      "erlangCall": "exception_classifier:safe_check({payment, -50, eur})",
+      "expectedOutput": "{rejected, negative_amount}",
+      "explanation": "Negative amount triggers throw(negative_amount), caught and formatted as rejected."
+    },
+    {
+      "id": "tc-ch06-01-3",
+      "title": "Caught Error: Bad Amount Type Bug",
+      "erlangCall": "exception_classifier:safe_check({payment, \"150\", usd})",
+      "expectedOutput": "{bug_detected, bad_amount_type}",
+      "explanation": "String amount raises error(bad_amount_type), caught and mapped to bug_detected."
+    },
+    {
+      "id": "tc-ch06-01-4",
+      "title": "Caught Exit: Zero Payment Abort",
+      "erlangCall": "exception_classifier:safe_check({payment, 0, etb})",
+      "expectedOutput": "{process_aborted, zero_payment_abort}",
+      "explanation": "Zero payment triggers exit(zero_payment_abort), safely intercepted in safe_check."
+    }
+  ]
+}

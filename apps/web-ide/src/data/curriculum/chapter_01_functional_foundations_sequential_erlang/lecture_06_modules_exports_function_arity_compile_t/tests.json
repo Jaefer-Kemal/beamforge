@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch01-06-a",
+      "title": "Connect with Default Port and Timeout (Arity 1)",
+      "erlangCall": "arity_calc:connect(localhost)",
+      "expectedOutput": "{connection, arity_calc, localhost, 80, 5000}",
+      "explanation": "Cascades connect(localhost) -> connect(localhost, 80) -> connect(localhost, 80, 5000)."
+    },
+    {
+      "id": "tc-ch01-06-b",
+      "title": "Connect with Explicit Port (Arity 2)",
+      "erlangCall": "arity_calc:connect(localhost, 8080)",
+      "expectedOutput": "{connection, arity_calc, localhost, 8080, 5000}",
+      "explanation": "Cascades connect(localhost, 8080) -> connect(localhost, 8080, 5000)."
+    },
+    {
+      "id": "tc-ch01-06-c",
+      "title": "Connect with Full Parameters (Arity 3)",
+      "erlangCall": "arity_calc:connect(localhost, 8080, 2500)",
+      "expectedOutput": "{connection, arity_calc, localhost, 8080, 2500}",
+      "explanation": "Directly returns 5-tuple with explicit timeout."
+    }
+  ]
+}

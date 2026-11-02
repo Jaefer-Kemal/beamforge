@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch04-06-a",
+      "title": "Split HTTP Header into Key and Value",
+      "erlangCall": "binary_scanner:split_key_value(<<\"Authorization: Bearer_token_123\">>)",
+      "expectedOutput": "{ok, <<\"Authorization\">>, <<\"Bearer_token_123\">>}",
+      "explanation": "Splits on the first <<\": \">>."
+    },
+    {
+      "id": "tc-ch04-06-b",
+      "title": "Reject Header Without Delimiter",
+      "erlangCall": "binary_scanner:split_key_value(<<\"InvalidHeaderContent\">>)",
+      "expectedOutput": "{error, malformed_header}",
+      "explanation": "Returns error when delimiter is missing."
+    },
+    {
+      "id": "tc-ch04-06-c",
+      "title": "Extract Non-Empty Lines with trim_all",
+      "erlangCall": "binary_scanner:extract_lines(<<\"line1\r\n\r\nline2\r\nline3\r\n\">>)",
+      "expectedOutput": "[<<\"line1\">>, <<\"line2\">>, <<\"line3\">>]",
+      "explanation": "Splits on CRLF and trims empty lines."
+    },
+    {
+      "id": "tc-ch04-06-d",
+      "title": "XOR Mask Payload via Binary Comprehension",
+      "erlangCall": "binary_scanner:xor_mask_payload(<<16#AA, 16#55>>, 16#FF)",
+      "expectedOutput": "<<85, 170>>",
+      "explanation": "0xAA xor 0xFF = 0x55 (85); 0x55 xor 0xFF = 0xAA (170)."
+    }
+  ]
+}

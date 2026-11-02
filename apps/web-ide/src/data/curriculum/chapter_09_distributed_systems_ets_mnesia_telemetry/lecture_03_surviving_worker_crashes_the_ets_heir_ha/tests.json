@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Heir Transfer Survival and Reclaim",
+      "erlangCall": "begin catch ets:delete(resilient_cache), {ok, Guardian} = ets_heir_handshake:start_guardian(), Creator = spawn(fun() -> Tab = ets_heir_handshake:create_resilient_table(resilient_cache, Guardian), ets:insert(Tab, {k1, <<\"persistent_value\">>}), timer:sleep(10), exit(intentional_crash) end), timer:sleep(50), Info = ets:info(resilient_cache), OwnerIsGuardian = (proplists:get_value(owner, Info) =:= Guardian), ok = ets_heir_handshake:reclaim_table(Guardian, resilient_cache), [{k1, Val}] = ets:lookup(resilient_cache, k1), Guardian ! stop, {OwnerIsGuardian, Val} end",
+      "expectedOutput": "{true, <<\"persistent_value\">>}",
+      "explanation": "Verifies table ownership moves to guardian on crash and data is fully reclaimed."
+    },
+    {
+      "id": "tc2",
+      "title": "Verify Heir Survival Demo",
+      "erlangCall": "ets_heir_handshake:verify_heir_survival_demo()",
+      "expectedOutput": "[{session_1, active}]",
+      "explanation": "Demonstrates end-to-end crash survival with ETS lookup validation."
+    }
+  ]
+}

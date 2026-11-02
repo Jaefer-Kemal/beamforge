@@ -1,0 +1,94 @@
+{
+  "id": "ch10-l07",
+  "chapterNumber": 10,
+  "lessonNumber": 7,
+  "lessonType": "problem_set",
+  "title": "Chapter 10 Mini-Capstone: High-Throughput TCP Key-Value Backend Server",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "### Mini-Capstone Architecture\n1. **Pipeline Integration**: Combines `gen_tcp` passive listening, asynchronous client handoff via `controlling_process/2`, and bounded `{active, once}` flow control.\n2. **Stream Framing**: `extract_lines/2` isolates complete CRLF commands and uses `binary:copy/1` to prevent memory pinning.\n3. **High-Performance Storage**: The shared named ETS table provides lock-free O(1) concurrent reading and writing outside process heaps, matching production Redis and Memcached architectures.",
+  "astRules": {
+    "requireTailRecursion": [
+      "accept_loop/2",
+      "worker_loop/3",
+      "extract_lines/2"
+    ],
+    "forbiddenCalls": [],
+    "requiredCalls": [
+      "inet:setopts/2",
+      "gen_tcp:send/2",
+      "ets:insert/2",
+      "ets:lookup/2"
+    ],
+    "requiredConstructs": [
+      "bit_syntax"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "insert",
+      "module": "ets",
+      "signature": "ets:insert(Tab, TupleOrTuples) -> true",
+      "typesSpec": [
+        "Tab = tab()",
+        "TupleOrTuples = tuple() | [tuple()]"
+      ],
+      "description": "Inserts one or more objects into an ETS table.",
+      "complexityNote": "O(1) in shared off-heap C memory.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#insert/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/ets.erl"
+    },
+    {
+      "functionName": "lookup",
+      "module": "ets",
+      "signature": "ets:lookup(Tab, Key) -> [tuple()]",
+      "typesSpec": [
+        "Tab = tab()",
+        "Key = term()"
+      ],
+      "description": "Retrieves objects matching Key from ETS table.",
+      "complexityNote": "Lock-free O(1) read with read_concurrency enabled.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#lookup/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/ets.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does pairing an ETS table ({read_concurrency, true}, {write_concurrency, true}) with an acceptor pool achieve linear scalability across multi-core CPUs?",
+    "codeSnippet": "ets:new(tcp_kv_table, [set, public, named_table, {read_concurrency, true}, {write_concurrency, true}])",
+    "options": [
+      {
+        "id": "A",
+        "label": "ETS tables live outside individual process heaps in C memory with fine-grained lock striping; multiple connection workers can read and write concurrently without blocking each other or triggering garbage collection pauses.",
+        "isCorrect": true,
+        "explanation": "Precisely! ETS tables are stored in global C memory. Multiple worker processes across CPU cores access the table concurrently with minimal lock contention, providing database-grade throughput."
+      },
+      {
+        "id": "B",
+        "label": "ETS tables automatically serialize all operations through a single master process.",
+        "isCorrect": false,
+        "explanation": "Public ETS tables allow direct concurrent access from any process without routing through a single owner process."
+      },
+      {
+        "id": "C",
+        "label": "ETS tables compress all keys using zlib before storing them.",
+        "isCorrect": false,
+        "explanation": "ETS stores terms in raw native BEAM representation without compression."
+      }
+    ]
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "Redis Protocol specification (RESP)",
+      "url": "https://redis.io/docs/reference/protocol-spec/",
+      "category": "book_rfc",
+      "description": "Industry standard wire framing for in-memory key-value stores."
+    },
+    {
+      "title": "Erlang stdlib: ets Module Reference",
+      "url": "https://www.erlang.org/doc/apps/stdlib/ets.html",
+      "category": "erlang_docs",
+      "description": "High performance in-memory term storage tables in C."
+    }
+  ]
+}

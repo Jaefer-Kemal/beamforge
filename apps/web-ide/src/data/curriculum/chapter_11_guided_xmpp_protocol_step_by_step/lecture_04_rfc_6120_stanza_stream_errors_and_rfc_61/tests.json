@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch11-l04-1",
+      "title": "Error Condition Classification",
+      "erlangCall": "{xmpp_error_and_roster:classify_error_condition(not_authorized), xmpp_error_and_roster:classify_error_condition(item_not_found)}",
+      "expectedOutput": "{{<<\"auth\">>, <<\"not-authorized\">>}, {<<\"cancel\">>, <<\"item-not-found\">>}}",
+      "explanation": "Verifies mapping of RFC 6120 error condition atoms to type and element binaries."
+    },
+    {
+      "id": "tc-ch11-l04-2",
+      "title": "Structured Stanza Error Synthesis",
+      "erlangCall": "xmpp_error_and_roster:build_stanza_error(<<\"message\">>, <<\"msg_1\">>, <<\"bob@localhost\">>, item_not_found)",
+      "expectedOutput": "<message type='error' id='msg_1' to='bob@localhost'><error type='cancel'><item-not-found xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></message>",
+      "explanation": "Verifies structured XML stanza error formatting."
+    },
+    {
+      "id": "tc-ch11-l04-3",
+      "title": "Roster Subscription State Transitions",
+      "erlangCall": "begin S1 = xmpp_error_and_roster:transition_subscription(none, outbound_subscribed), S2 = xmpp_error_and_roster:transition_subscription(S1, inbound_subscribed), {S1, S2} end",
+      "expectedOutput": "{to, both}",
+      "explanation": "Verifies mutual subscription transition logic from none to to to both."
+    }
+  ]
+}

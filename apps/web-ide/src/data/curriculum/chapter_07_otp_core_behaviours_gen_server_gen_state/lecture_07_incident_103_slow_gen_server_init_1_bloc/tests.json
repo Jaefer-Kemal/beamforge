@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Non-Blocking Init 3-Tuple Return Contract",
+      "erlangCall": "begin {ok, State, Cont} = incident_blocking_init:init([{\"item1\", 100}]), {maps:get(status, State), Cont} end",
+      "expectedOutput": "{booting, {continue, {hydrate, [{\"item1\", 100}]}}}",
+      "explanation": "Verifies init/1 returns 3-element tuple with continue without blocking supervisor."
+    },
+    {
+      "id": "tc2",
+      "title": "Asynchronous Hydration & Status Verification",
+      "erlangCall": "begin {ok, S} = incident_blocking_init:start_link([{\"alpha\", 99}]), Status = incident_blocking_init:get_status(S), gen_server:stop(S), Status end",
+      "expectedOutput": "ready",
+      "explanation": "Verifies status transitioned to ready after handle_continue executed."
+    }
+  ]
+}

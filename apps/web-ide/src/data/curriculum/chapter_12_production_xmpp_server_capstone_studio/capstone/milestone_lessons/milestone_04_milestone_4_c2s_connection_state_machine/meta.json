@@ -1,0 +1,28 @@
+{
+  "id": "ch12-m4",
+  "title": "Milestone 4: C2S Connection State Machine (xmpp_c2s_statem)",
+  "mentalModelCheck": {
+    "question": "In gen_statem with callback_mode state_functions, how is protocol phase isolation guaranteed?",
+    "codeSnippet": "wait_for_sasl({call, From}, {feed_xml, Xml}, Data) -> ...\nsession_established({call, From}, {feed_xml, Xml}, Data) -> ...",
+    "options": [
+      {
+        "id": "A",
+        "label": "Each state is a separate Erlang function clause; messages not handled in the current state function cannot accidentally trigger handlers from another state.",
+        "isCorrect": true,
+        "explanation": "Correct! In state_functions mode, each state is isolated to its own function clauses, eliminating the risk of cross-state logic leaks."
+      },
+      {
+        "id": "B",
+        "label": "gen_statem creates a separate BEAM OS thread for every state function.",
+        "isCorrect": false,
+        "explanation": "A gen_statem is a single Erlang process running sequentially on the BEAM scheduler."
+      },
+      {
+        "id": "C",
+        "label": "All state transitions must write to ETS before proceeding.",
+        "isCorrect": false,
+        "explanation": "State transitions occur purely in memory within the process state."
+      }
+    ]
+  }
+}

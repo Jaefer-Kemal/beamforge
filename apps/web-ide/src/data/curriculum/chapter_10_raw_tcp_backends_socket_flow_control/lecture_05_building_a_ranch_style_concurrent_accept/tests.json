@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch10-l05-1",
+      "title": "Start Acceptor Pool & Connect 2 Clients",
+      "erlangCall": "begin {ok, Mgr, Port} = tcp_acceptor_pool:start_pool(0, 3), {ok, S1} = gen_tcp:connect(\"127.0.0.1\", Port, [binary, {packet, raw}, {active, false}], 2000), {ok, S2} = gen_tcp:connect(\"127.0.0.1\", Port, [binary, {packet, raw}, {active, false}], 2000), timer:sleep(50), Cnt = tcp_acceptor_pool:get_active_workers(Mgr), ok = gen_tcp:send(S1, <<\"PING\\r\\n\">>), {ok, Rep} = gen_tcp:recv(S1, 0, 2000), gen_tcp:close(S1), gen_tcp:close(S2), tcp_acceptor_pool:stop_pool(Mgr), {Cnt, Rep} end",
+      "expectedOutput": "{2,<<\"+REPLY: PING\\r\\n\">>}",
+      "explanation": "Verifies 2 concurrent connections accepted and request/reply executed."
+    },
+    {
+      "id": "tc-ch10-l05-2",
+      "title": "Direct Socket Handoff to Worker",
+      "erlangCall": "begin {ok, L} = gen_tcp:listen(0, [binary, {active, false}]), {ok, Port} = inet:port(L), Receiver = spawn(fun() -> receive {socket_assigned, S} -> inet:setopts(S, [{active, once}]), receive {tcp, S, <<\"HI\\r\\n\">>} -> ok = gen_tcp:send(S, <<\"ACK\\r\\n\">>) end end end), {ok, Client} = gen_tcp:connect(\"127.0.0.1\", Port, [binary, {active, false}], 2000), {ok, ServerSock} = gen_tcp:accept(L, 2000), ok = tcp_acceptor_pool:handoff_socket(ServerSock, Receiver), ok = gen_tcp:send(Client, <<\"HI\\r\\n\">>), {ok, Rep} = gen_tcp:recv(Client, 0, 2000), gen_tcp:close(Client), gen_tcp:close(L), Rep end",
+      "expectedOutput": "<<\"ACK\\r\\n\">>",
+      "explanation": "Directly validates handoff_socket/2 transfers controlling process and signals receiver."
+    }
+  ]
+}

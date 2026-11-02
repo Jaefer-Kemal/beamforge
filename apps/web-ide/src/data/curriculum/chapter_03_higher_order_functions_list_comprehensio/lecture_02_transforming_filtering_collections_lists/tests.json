@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch03-02-a",
+      "title": "Apply 10% Discount with lists:map",
+      "erlangCall": "hof_transform:discount_prices([{product, 1, \"Keyboard\", 100}, {product, 2, \"Mouse\", 50}], 10)",
+      "expectedOutput": "[{product, 1, \"Keyboard\", 90}, {product, 2, \"Mouse\", 45}]",
+      "explanation": "100 - 10 = 90; 50 - 5 = 45."
+    },
+    {
+      "id": "tc-ch03-02-b",
+      "title": "Filter Active Sessions with lists:filter",
+      "erlangCall": "hof_transform:active_sessions([{session, 101, active}, {session, 102, expired}, {session, 103, active}])",
+      "expectedOutput": "[{session, 101, active}, {session, 103, active}]",
+      "explanation": "Discards expired session 102."
+    },
+    {
+      "id": "tc-ch03-02-c",
+      "title": "Sanitize Metrics in Single Pass with lists:filtermap",
+      "erlangCall": "hof_transform:sanitize_metrics([{cpu_load, 14.8}, {fan_speed, -10}, {memory_usage, 65.2}])",
+      "expectedOutput": "[{cpu_load, 15}, {memory_usage, 65}]",
+      "explanation": "Discards negative fan_speed and rounds 14.8 to 15 and 65.2 to 65."
+    }
+  ]
+}

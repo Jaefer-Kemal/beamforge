@@ -1,0 +1,75 @@
+{
+  "id": "ch08-l05",
+  "chapterNumber": 8,
+  "lessonNumber": 5,
+  "lessonType": "concept_exercise",
+  "title": "OTP Applications: .app.src, -behaviour(application) & Runtime Configuration",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements both application and root supervisor behaviours, managing application start/stop lifecycles and runtime configuration parameters via application:get_env and set_env.",
+  "astRules": {
+    "requiredCalls": [
+      "application:get_env/3",
+      "application:set_env/3",
+      "supervisor:start_link/3"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "start",
+      "module": "application",
+      "signature": "application:start(Application) -> ok | {error, Reason}",
+      "typesSpec": [
+        "Application = atom()",
+        "Reason = term()"
+      ],
+      "description": "Loads and starts an OTP application and all of its dependencies, spawning its application master and root supervisor.",
+      "complexityNote": "Synchronous boot. Fails if dependencies are not already started.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/application.html#start/1"
+    },
+    {
+      "functionName": "get_env",
+      "module": "application",
+      "signature": "application:get_env(Application, Par, Def) -> Val",
+      "typesSpec": [
+        "Application = atom()",
+        "Par = atom()",
+        "Def = term()",
+        "Val = term()"
+      ],
+      "description": "Fetches configuration parameter Par for Application. If undefined, returns Def.",
+      "complexityNote": "Fast O(1) concurrent ETS read inside application controller.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/application.html#get_env/3"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Who invokes the start/2 callback of an OTP application module?",
+    "options": [
+      {
+        "id": "A",
+        "label": "The BEAM Application Master process, when the application is booted via application:start/1 or an OTP release.",
+        "isCorrect": true,
+        "explanation": "The Application Master is an internal OTP process created to isolate and manage the lifecycle of each running application."
+      },
+      {
+        "id": "B",
+        "label": "The developer manually from the terminal shell.",
+        "isCorrect": false,
+        "explanation": "Developers call application:start(App); the Application Master invokes the callback Mod:start/2."
+      },
+      {
+        "id": "C",
+        "label": "The Linux systemd service manager directly.",
+        "isCorrect": false,
+        "explanation": "systemd starts the Erlang runtime node (erl/beam.smp); OTP manages its own internal application tree."
+      },
+      {
+        "id": "D",
+        "label": "The first client that makes an HTTP request.",
+        "isCorrect": false,
+        "explanation": "Applications boot deterministically on node startup, not lazily on request."
+      }
+    ]
+  },
+  "visualScene": "supervision_rest_for_one_ets_heir"
+}

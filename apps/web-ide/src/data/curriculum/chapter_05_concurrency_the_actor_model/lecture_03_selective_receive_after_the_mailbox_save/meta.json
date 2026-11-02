@@ -1,0 +1,54 @@
+{
+  "id": "ch05-l03",
+  "chapterNumber": 5,
+  "lessonNumber": 3,
+  "lessonType": "concept_exercise",
+  "title": "Selective receive ... after: The Mailbox Save Queue, Timeouts & after 0 Non-Blocking Flush",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Uses receive ... after 0 to selectively prioritize {urgent, Payload} over {normal, Payload}, implements timeout guards, and flushes mailboxes using after 0 loops.",
+  "astRules": {
+    "requiredConstructs": [
+      "receive_after"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "send",
+      "module": "erlang",
+      "signature": "erlang:send(Dest, Msg) -> Msg",
+      "typesSpec": [
+        "Dest = pid() | atom()",
+        "Msg = term()"
+      ],
+      "description": "Sends a message asynchronously to Dest, returning Msg. Equivalent to the ! operator.",
+      "complexityNote": "O(1) mailbox enqueue.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#send/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What happens to messages in an actor’s mailbox that fail to match any pattern in the currently executing `receive` block?",
+    "codeSnippet": "%% Mailbox contains: [{normal, 1}, {urgent, 99}]\nreceive\n    {urgent, Val} -> Val\nend.",
+    "options": [
+      {
+        "id": "A",
+        "label": "They are temporarily moved into the internal Save Queue while the mailbox is scanned, and automatically spliced back to the front of the mailbox once a match is found.",
+        "isCorrect": true,
+        "explanation": "Correct! The BEAM preserves unmatched messages in an internal Save Queue. When a message matches, all saved messages are returned to the head of the mailbox in their original order."
+      },
+      {
+        "id": "B",
+        "label": "They are permanently discarded and immediately reclaimed by the garbage collector.",
+        "isCorrect": false,
+        "explanation": "Erlang never discards unmatched messages unless you explicitly write a catch-all clause (_ -> ok) to discard them."
+      },
+      {
+        "id": "C",
+        "label": "They cause the process to crash immediately with a badmatch exception.",
+        "isCorrect": false,
+        "explanation": "Unmatched receive messages never cause exceptions; the process simply moves them to the Save Queue and checks the next message."
+      }
+    ]
+  },
+  "visualScene": "mailbox_selective_receive"
+}

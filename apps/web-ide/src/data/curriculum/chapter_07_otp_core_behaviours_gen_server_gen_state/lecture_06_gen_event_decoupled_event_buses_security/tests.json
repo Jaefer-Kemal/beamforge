@@ -1,0 +1,11 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Threshold Alert Triggering on Brute-Force Pattern",
+      "erlangCall": "begin {ok, Mgr} = gen_event:start_link(), ok = security_audit_handler:add_to_manager(Mgr, 3), gen_event:sync_notify(Mgr, {login_failed, <<\"192.168.1.5\">>}), gen_event:sync_notify(Mgr, {login_failed, <<\"192.168.1.5\">>}), gen_event:sync_notify(Mgr, {login_failed, <<\"192.168.1.5\">>}), Res = security_audit_handler:get_ip_status(Mgr, <<\"192.168.1.5\">>), gen_event:stop(Mgr), Res end",
+      "expectedOutput": "{ok, #{alert => true, attempts => 3}}",
+      "explanation": "Three consecutive failed logins toggle alert flag to true."
+    }
+  ]
+}

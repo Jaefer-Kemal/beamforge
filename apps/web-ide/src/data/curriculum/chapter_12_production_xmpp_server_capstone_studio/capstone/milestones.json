@@ -1,0 +1,85 @@
+[
+  {
+    "id": "m1-sup",
+    "number": 1,
+    "title": "Root Supervisor Tree (xmpp_sup)",
+    "targetFile": "src/xmpp_sup.erl",
+    "targetFunctions": [
+      "start_link/0",
+      "init/1"
+    ],
+    "description": "Configure the root OTP supervisor using rest_for_one restart strategy with intensity 5 and period 10. Order child specs so xmpp_session_registry boots before xmpp_router to prevent stale ETS lookups.",
+    "verificationHint": "Call xmpp_sup:start_link(), inspect child processes with supervisor:which_children(xmpp_sup), and verify both xmpp_session_registry and xmpp_router are running as supervised permanent workers."
+  },
+  {
+    "id": "m2-parser",
+    "number": 2,
+    "title": "Incremental XML Stream Framer (xmpp_stream_parser)",
+    "targetFile": "src/xmpp_stream_parser.erl",
+    "targetFunctions": [
+      "new_buffer/0",
+      "feed_chunk/2",
+      "extract_attr/2",
+      "extract_tag_body/2"
+    ],
+    "description": "Implement binary packet framing over fragmented TCP streams. Handle <stream:stream>, <auth>, <iq>, <ping/>, and <message> stanzas while calling binary:copy/1 to unpin heap memory and prevent sub-binary retention leaks.",
+    "verificationHint": "Feed partial chunks like <<\"<stream:st\">> followed by <<\"ream to='localhost'>\">>. Verify the parser emits [{stream_open, <<\"localhost\">>}] with an empty leftover buffer."
+  },
+  {
+    "id": "m3-registry",
+    "number": 3,
+    "title": "Concurrent ETS Session Registry & Monitors (xmpp_session_registry)",
+    "targetFile": "src/xmpp_session_registry.erl",
+    "targetFunctions": [
+      "start_link/0",
+      "register_session/3",
+      "unregister_session/1",
+      "lookup_by_jid/1",
+      "list_all_sessions/0",
+      "parse_jid/1"
+    ],
+    "description": "Manage concurrent user sessions inside a high-throughput public ETS table with {read_concurrency, true}. Monitor C2S pids and automatically purge sessions upon receiving process 'DOWN' messages.",
+    "verificationHint": "Register two sessions for the same bare JID with different priorities. Verify lookup_by_jid returns the highest-priority PID, and that killing that PID causes the monitor to fall back to the surviving session."
+  },
+  {
+    "id": "m4-statem",
+    "number": 4,
+    "title": "C2S Connection State Machine (xmpp_c2s_statem)",
+    "targetFile": "src/xmpp_c2s_statem.erl",
+    "targetFunctions": [
+      "start_link/1",
+      "feed_xml/2",
+      "get_session_info/1",
+      "stop/1"
+    ],
+    "description": "Build the client-to-server connection lifecycle as an OTP gen_statem using state_functions: wait_for_stream -> wait_for_sasl -> authenticated -> session_established, with active-once TCP flow control.",
+    "verificationHint": "Step through stream opening, SASL PLAIN authentication, and IQ resource binding. Confirm transition to session_established and registration in xmpp_session_registry."
+  },
+  {
+    "id": "m5-router",
+    "number": 5,
+    "title": "Stanza Router & Offline Store (xmpp_router)",
+    "targetFile": "src/xmpp_router.erl",
+    "targetFunctions": [
+      "start_link/0",
+      "route_stanza/3",
+      "pop_offline_messages/1",
+      "get_offline_count/1"
+    ],
+    "description": "Dispatch messages to online C2S processes via lookup_by_jid/1. If the recipient is offline, spool the stanza into the in-memory offline message store for retrieval on next login.",
+    "verificationHint": "Route a message between two active C2S pids, then route to an unregistered user. Verify the offline message is queued and retrievable via pop_offline_messages/1."
+  },
+  {
+    "id": "m6-chaos",
+    "number": 6,
+    "title": "Chaos Monkey Resilience & 5-Module Integration (xmpp_sup)",
+    "targetFile": "src/xmpp_sup.erl",
+    "targetFunctions": [
+      "start_link/0",
+      "stop/0",
+      "init/1"
+    ],
+    "description": "Subject the 5-module cluster to dynamic fault injection. Verify that killing xmpp_session_registry triggers rest_for_one supervisor cascades, safely terminating and restarting xmpp_router while preserving tree stability.",
+    "verificationHint": "Boot xmpp_sup, inject an abnormal exit into xmpp_session_registry, and verify the supervisor restarts both registry and router with fresh PIDs."
+  }
+]

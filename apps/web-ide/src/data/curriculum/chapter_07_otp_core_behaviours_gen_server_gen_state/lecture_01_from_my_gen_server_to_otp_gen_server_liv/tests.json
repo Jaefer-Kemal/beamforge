@@ -1,0 +1,11 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Run Guided Demo & Verify Final State",
+      "erlangCall": "otp_intro_demo:run_demo()",
+      "expectedOutput": "#{final_count => 35, live_state => #{counter => 35, ops => 3}}",
+      "explanation": "Spawns server, performs 2 increments and 1 call, inspects live state via sys:get_state/1, and stops cleanly."
+    }
+  ]
+}

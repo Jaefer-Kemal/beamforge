@@ -1,0 +1,11 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch10-l03-1",
+      "title": "Start Server and Exchange Flow-Controlled Packet",
+      "erlangCall": "begin {ok, ListenPid, Port} = tcp_flow_worker:start_server(), {ok, S} = gen_tcp:connect(\"127.0.0.1\", Port, [binary, {packet, raw}, {active, false}], 2000), ok = gen_tcp:send(S, <<\"TEST_PING\\r\\n\">>), {ok, Rep} = gen_tcp:recv(S, 0, 2000), gen_tcp:close(S), tcp_flow_worker:stop_server(ListenPid), Rep end",
+      "expectedOutput": "<<\"+ACK: TEST_PING\\r\\n\">>",
+      "explanation": "Verifies server startup, client connection, and bounded echo reply."
+    }
+  ]
+}

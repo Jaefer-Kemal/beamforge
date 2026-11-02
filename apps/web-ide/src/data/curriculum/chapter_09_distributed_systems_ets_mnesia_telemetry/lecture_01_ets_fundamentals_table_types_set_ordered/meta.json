@@ -1,0 +1,103 @@
+{
+  "id": "ch09-l01",
+  "chapterNumber": 9,
+  "lessonNumber": 1,
+  "lessonType": "concept_exercise",
+  "title": "ETS Fundamentals: Table Types (set, ordered_set, bag), keypos & Atomic Counters",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Configures a named ETS table with concurrent read/write flags and uses atomic update_counter and off-heap lookups.",
+  "astRules": {
+    "requiredCalls": [
+      "ets:new/2",
+      "ets:update_counter/4",
+      "ets:insert/2",
+      "ets:lookup/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "new",
+      "module": "ets",
+      "signature": "ets:new(Name, Options) -> tid() | atom()",
+      "typesSpec": [
+        "Name = atom()",
+        "Options = [set | ordered_set | bag | duplicate_bag | public | protected | private | named_table | {keypos, integer()} | {read_concurrency, boolean()} | {write_concurrency, boolean()}]"
+      ],
+      "description": "Creates a new off-heap ETS table with the specified concurrency, type, and access properties.",
+      "complexityNote": "O(1) table allocation in C runtime memory.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#new/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl"
+    },
+    {
+      "functionName": "update_counter",
+      "module": "ets",
+      "signature": "ets:update_counter(Tab, Key, {Pos, Incr}, Default) -> integer()",
+      "typesSpec": [
+        "Tab = tab()",
+        "Key = term()",
+        "Pos = Incr = integer()",
+        "Default = tuple()"
+      ],
+      "description": "Performs a hardware atomic update of an integer field in an ETS table without locking the entire table.",
+      "complexityNote": "Lock-free hardware atomic operation.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#update_counter/4",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl"
+    },
+    {
+      "functionName": "insert",
+      "module": "ets",
+      "signature": "ets:insert(Tab, ObjectOrObjects) -> true",
+      "typesSpec": [
+        "Tab = tab()",
+        "ObjectOrObjects = tuple() | [tuple()]"
+      ],
+      "description": "Inserts one or more objects into table Tab. For set tables, existing entries with the same key are overwritten.",
+      "complexityNote": "O(1) for set; O(log N) for ordered_set.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#insert/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl"
+    },
+    {
+      "functionName": "lookup",
+      "module": "ets",
+      "signature": "ets:lookup(Tab, Key) -> [tuple()]",
+      "typesSpec": [
+        "Tab = tab()",
+        "Key = term()"
+      ],
+      "description": "Returns a list of all objects with key Key in table Tab. For set tables, returns [] or a single element list.",
+      "complexityNote": "O(1) hash lookup in off-heap C memory.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#lookup/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does storing 10,000,000 active user sessions in an ETS table not cause Garbage Collection pauses on worker processes?",
+    "options": [
+      {
+        "id": "A",
+        "label": "ETS tables compress terms into gzip binaries on the worker heap before saving them.",
+        "isCorrect": false,
+        "explanation": "ETS does not gzip terms; it stores native Erlang terms directly in off-heap C memory."
+      },
+      {
+        "id": "B",
+        "label": "ETS memory is managed in off-heap C memory by the ERTS runtime, outside any process garbage collection heap.",
+        "isCorrect": true,
+        "explanation": "ETS tables are allocated outside process heaps in ERTS off-heap C memory. Because individual worker heaps do not contain the ETS table data, the garbage collector never scans them during process execution."
+      },
+      {
+        "id": "C",
+        "label": "Worker processes automatically spawn hidden threads that sweep ETS tables in the background.",
+        "isCorrect": false,
+        "explanation": "Worker processes do not manage ETS memory; the ERTS C allocator manages table memory."
+      },
+      {
+        "id": "D",
+        "label": "The BEAM VM disables garbage collection completely when a module calls ets:new/2.",
+        "isCorrect": false,
+        "explanation": "Garbage collection continues running normally on process heaps for local variables."
+      }
+    ]
+  }
+}

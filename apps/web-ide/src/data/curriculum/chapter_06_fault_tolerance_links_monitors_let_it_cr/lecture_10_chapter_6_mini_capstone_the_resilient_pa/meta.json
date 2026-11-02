@@ -1,0 +1,58 @@
+{
+  "id": "ch06-l10",
+  "chapterNumber": 6,
+  "lessonNumber": 10,
+  "lessonType": "problem_set",
+  "title": "Chapter 6 Mini-Capstone: The Resilient Payment Gateway, Watcher & Idempotent Store (payment_system.erl)",
+  "difficulty": "Production",
+  "xpReward": 100,
+  "solutionExplanation": "Implements a complete resilient payment gateway with a durable Watcher coordinator, idempotent transaction store, and monitored worker crash recovery.",
+  "astRules": {
+    "requiredCalls": [
+      "erlang:spawn_monitor/1",
+      "erlang:monitor/2"
+    ],
+    "requireTailRecursion": [
+      "watcher_loop/1",
+      "worker_loop/0"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "spawn_monitor",
+      "module": "erlang",
+      "signature": "spawn_monitor(Fun) -> {pid(), reference()}",
+      "typesSpec": [
+        "Fun = function()"
+      ],
+      "description": "Atomically creates and monitors worker.",
+      "complexityNote": "O(1) allocation.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#spawn_monitor/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "In the resilient payment gateway architecture, why does the Watcher store completed transactions rather than the Payment Worker?",
+    "codeSnippet": "%% Watcher State:\n#{worker_pid => W, tx_store => SettledTxs}",
+    "options": [
+      {
+        "id": "A",
+        "label": "The worker is a disposable process that may crash on corrupted payloads; keeping durable financial history in the Watcher ensures all settled transactions survive worker crashes.",
+        "isCorrect": true,
+        "explanation": "Correct! Isolating volatile worker tasks from durable state is the core principle of Erlang fault tolerance. Workers are disposable; the Watcher guarantees state continuity."
+      },
+      {
+        "id": "B",
+        "label": "Erlang worker processes cannot write to maps.",
+        "isCorrect": false,
+        "explanation": "Any process can write to maps."
+      },
+      {
+        "id": "C",
+        "label": "The Watcher runs directly in the Linux kernel.",
+        "isCorrect": false,
+        "explanation": "Both Watcher and Worker are standard user-space BEAM processes."
+      }
+    ]
+  },
+  "visualScene": "links_monitors_signals"
+}

@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch06-09-1",
+      "title": "Valid Pricing Query",
+      "erlangCall": "begin {ok, W} = incident_hanging_call:start_pricing_worker(), Res = incident_hanging_call:call_pricing_worker(W, widget_a), W ! stop, Res end",
+      "expectedOutput": "{ok, 49.99}",
+      "explanation": "Normal item pricing query returns {ok, 49.99} cleanly."
+    },
+    {
+      "id": "tc-ch06-09-2",
+      "title": "Fast-Fail Crash Notification (< 100ms)",
+      "erlangCall": "begin {ok, W} = incident_hanging_call:start_pricing_worker(), incident_hanging_call:call_pricing_worker(W, poison_item) end",
+      "expectedOutput": "{error, {worker_down, badarith}}",
+      "explanation": "Poison item crashed worker with badarith; caller unblocked in <10ms via monitor DOWN message."
+    }
+  ]
+}

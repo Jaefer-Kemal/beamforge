@@ -1,0 +1,82 @@
+{
+  "id": "ch11-l05",
+  "chapterNumber": 11,
+  "lessonNumber": 5,
+  "lessonType": "concept_exercise",
+  "title": "Incremental XML Stream Framing Over Fragmented TCP Sockets",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "The framer handles arbitrary byte fragmentation:\n1. extract_loop trims leading whitespace using ASCII byte comparisons (32, 13, 10, 9) and repeatedly calls try_extract_frame until no more complete XML elements can be formed.\n2. If the buffer begins with <stream:stream, it extracts the opening tag up to >.\n3. For child tags, it parses the TagName, checks if the tag is self-closing (<tag ... />), and if not, searches for the matching closing tag </tag>.\n4. If a tag is incomplete, it returns need_more and copies the remaining slice using binary:copy/1 to prevent sub-binary leaks.",
+  "astRules": {
+    "requiredCalls": [
+      "binary:copy/1",
+      "binary:match/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "part",
+      "module": "binary",
+      "signature": "binary:part(Subject, Start, Length) -> binary()",
+      "typesSpec": [
+        "Subject = binary()",
+        "Start = non_neg_integer()",
+        "Length = integer()"
+      ],
+      "description": "Extracts a slice from Subject as a sub-binary.",
+      "complexityNote": "Constant O(1) time sub-binary slicing.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#part/3",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl"
+    },
+    {
+      "functionName": "copy",
+      "module": "binary",
+      "signature": "binary:copy(Subject) -> binary()",
+      "typesSpec": [
+        "Subject = binary()"
+      ],
+      "description": "Forces clean allocation of remaining unparsed buffer bytes.",
+      "complexityNote": "Prevents long-lived connection processes from retaining socket buffers.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#copy/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why MUST an incremental XML stream framer call binary:copy/1 when extracting attribute values or stanza bodies from a TCP buffer?",
+    "options": [
+      {
+        "id": "A",
+        "label": "To prevent sub-binary retention leaks where a tiny extracted slice pins a large 64 KB refc binary in process heap memory.",
+        "isCorrect": true,
+        "explanation": "Sub-binaries retain reference counters to their parent binary. binary:copy/1 copies the small slice and releases the refc binary."
+      },
+      {
+        "id": "B",
+        "label": "Because Erlang binaries are immutable and cannot be read without copying.",
+        "isCorrect": false,
+        "explanation": "Binaries are read directly via pattern matching; binary:copy/1 is used specifically for memory unpinning."
+      },
+      {
+        "id": "C",
+        "label": "Because gen_statem will reject uncopied binaries with a badmatch error.",
+        "isCorrect": false,
+        "explanation": "gen_statem accepts any term; memory management is an engineering optimization."
+      },
+      {
+        "id": "D",
+        "label": "To convert the binary to a null-terminated C string.",
+        "isCorrect": false,
+        "explanation": "Erlang binaries are length-prefixed, not null-terminated."
+      }
+    ]
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "IETF RFC 6120: Section 4.3 XML Streams & Framing",
+      "url": "https://datatracker.ietf.org/doc/html/rfc6120",
+      "category": "book_rfc",
+      "description": "Detailed requirements for parsing open XML streams and child elements."
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "id": "ch10-l01",
+  "chapterNumber": 10,
+  "lessonNumber": 1,
+  "lessonType": "guided_demo",
+  "title": "Guided Demo: Inside gen_tcp:listen/2, accept/1, connect/3 & Live TCP Socket Telemetry",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "### How the TCP Socket Lifecycle Operates\n1. **Ephemeral Port Allocation**: Calling `gen_tcp:listen(0, ...)` delegates port selection to the host kernel, preventing port binding clashes.\n2. **Asynchronous Handshake Isolation**: By running `gen_tcp:accept/2` in a separate acceptor process, the main application process remains completely non-blocking.\n3. **Synchronous Passive Transfer**: The client transmits binary messages and synchronously awaits matching replies via `gen_tcp:recv/3`.\n4. **Clean Resource Deallocation**: Both socket descriptors are closed explicitly with `gen_tcp:close/1`, immediately relinquishing kernel network memory.",
+  "astRules": {
+    "requireTailRecursion": [
+      "echo_loop/3"
+    ],
+    "forbiddenCalls": [],
+    "requiredCalls": [
+      "gen_tcp:listen/2",
+      "gen_tcp:accept/1",
+      "gen_tcp:send/2",
+      "gen_tcp:recv/3"
+    ],
+    "requiredConstructs": [
+      "receive_after"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "listen",
+      "module": "gen_tcp",
+      "signature": "gen_tcp:listen(Port, Options) -> {ok, ListenSocket} | {error, Reason}",
+      "typesSpec": [
+        "Port = inet:port_number()",
+        "Options = [gen_tcp:listen_option()]",
+        "ListenSocket = gen_tcp:socket()"
+      ],
+      "description": "Binds an OS port and sets up a listening socket descriptor ready to accept client connections.",
+      "complexityNote": "Binds kernel socket and enters listen state in O(1) time.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/gen_tcp.html#listen/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/kernel/src/gen_tcp.erl"
+    },
+    {
+      "functionName": "accept",
+      "module": "gen_tcp",
+      "signature": "gen_tcp:accept(ListenSocket, Timeout) -> {ok, Socket} | {error, Reason}",
+      "typesSpec": [
+        "ListenSocket = gen_tcp:socket()",
+        "Timeout = timeout()",
+        "Socket = gen_tcp:socket()"
+      ],
+      "description": "Blocks the calling process until a client completes the 3-way TCP handshake, returning a dedicated ClientSocket.",
+      "complexityNote": "Suspends the Erlang process until an incoming SYN handshake arrives.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/gen_tcp.html#accept/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/kernel/src/gen_tcp.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What is the critical architectural difference between a ListenSocket and an accepted ClientSocket in Erlang?",
+    "codeSnippet": "{ok, ListenSocket} = gen_tcp:listen(0, [binary, {active, false}]),\n{ok, ClientSocket} = gen_tcp:accept(ListenSocket).",
+    "options": [
+      {
+        "id": "A",
+        "label": "ListenSocket only listens for incoming 3-way handshakes and cannot transfer payload data; ClientSocket is a dedicated two-way communication pipe for one connected client.",
+        "isCorrect": true,
+        "explanation": "Exactly. Think of ListenSocket as the front desk of a hotel welcoming visitors, while ClientSocket is the private telephone line inside a guest room."
+      },
+      {
+        "id": "B",
+        "label": "ListenSocket uses UDP under the hood, while ClientSocket automatically upgrades to TCP.",
+        "isCorrect": false,
+        "explanation": "Both sockets are strictly TCP; gen_udp is a completely separate Erlang module."
+      },
+      {
+        "id": "C",
+        "label": "ListenSocket handles all incoming message payloads, while ClientSocket only handles disconnects.",
+        "isCorrect": false,
+        "explanation": "ListenSocket never receives data packets. All data exchanges occur exclusively through ClientSocket."
+      }
+    ]
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "Official Erlang kernel: gen_tcp Module Reference",
+      "url": "https://www.erlang.org/doc/apps/kernel/gen_tcp.html",
+      "category": "erlang_docs",
+      "description": "Complete API documentation for Erlang TCP socket operations."
+    },
+    {
+      "title": "Official Erlang kernel: inet Module Reference",
+      "url": "https://www.erlang.org/doc/apps/kernel/inet.html",
+      "category": "erlang_docs",
+      "description": "Functions for inspecting socket ports, IP addresses, and kernel telemetry statistics."
+    }
+  ]
+}

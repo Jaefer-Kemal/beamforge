@@ -1,0 +1,81 @@
+{
+  "id": "ch06-l06",
+  "chapterNumber": 6,
+  "lessonNumber": 6,
+  "lessonType": "concept_exercise",
+  "title": "Unidirectional Monitors (erlang:monitor/2, spawn_monitor/1), 'DOWN' Messages & The noproc Invariant",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates unidirectional process monitors, crash isolation, timeout worker termination, and the noproc dead-PID invariant.",
+  "astRules": {
+    "requiredCalls": [
+      "erlang:spawn_monitor/1",
+      "erlang:monitor/2",
+      "erlang:demonitor/2"
+    ],
+    "requiredConstructs": [
+      "receive_after"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "spawn_monitor",
+      "module": "erlang",
+      "signature": "spawn_monitor(Fun) -> {pid(), reference()}",
+      "typesSpec": [
+        "Fun = function()",
+        "{pid(), reference()}"
+      ],
+      "description": "Atomically creates a new process and starts a monitor to watch it.",
+      "complexityNote": "O(1) allocation with atomic monitor setup.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#spawn_monitor/1"
+    },
+    {
+      "functionName": "monitor",
+      "module": "erlang",
+      "signature": "erlang:monitor(process, Item) -> reference()",
+      "typesSpec": [
+        "Item = pid() | atom()"
+      ],
+      "description": "Starts monitoring target. If target is dead, sends noproc DOWN message.",
+      "complexityNote": "O(1) table registration.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#monitor/2"
+    },
+    {
+      "functionName": "demonitor",
+      "module": "erlang",
+      "signature": "demonitor(Ref, [flush]) -> boolean()",
+      "typesSpec": [
+        "Ref = reference()"
+      ],
+      "description": "Removes monitor and flushes any pending DOWN message from mailbox.",
+      "complexityNote": "O(1) deletion plus scan of mailbox.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#demonitor/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What message does the BEAM deliver if you call `erlang:monitor(process, DeadPid)` on a process that already terminated?",
+    "codeSnippet": "DeadPid = spawn(fun() -> ok end),\ntimer:sleep(50),\nMRef = erlang:monitor(process, DeadPid).",
+    "options": [
+      {
+        "id": "A",
+        "label": "The runtime places `{'DOWN', MRef, process, DeadPid, noproc}` into the caller’s mailbox immediately, avoiding any check-then-act race conditions.",
+        "isCorrect": true,
+        "explanation": "Correct! The BEAM guarantees that monitoring a non-existent process immediately delivers `{'DOWN', MRef, process, DeadPid, noproc}`, completely preventing check-then-monitor race conditions."
+      },
+      {
+        "id": "B",
+        "label": "erlang:monitor/2 crashes with badarg.",
+        "isCorrect": false,
+        "explanation": "erlang:monitor/2 does not crash on dead PIDs; it sends a noproc DOWN message."
+      },
+      {
+        "id": "C",
+        "label": "The caller hangs waiting for an exit signal.",
+        "isCorrect": false,
+        "explanation": "Monitors do not wait or block callers."
+      }
+    ]
+  },
+  "visualScene": "links_monitors_signals"
+}

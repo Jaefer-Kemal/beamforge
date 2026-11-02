@@ -1,0 +1,89 @@
+{
+  "id": "ch10-l06",
+  "chapterNumber": 10,
+  "lessonNumber": 6,
+  "lessonType": "incident_triage",
+  "title": "Incident #106: Slowloris & {active, true} TCP Mailbox OOM Crash",
+  "difficulty": "Production",
+  "xpReward": 100,
+  "solutionExplanation": "### Incident #106 Triage Verification\n1. **Flow Control Enforced**: Switching from `{active, true}` to `{active, once}` ensures the OS kernel buffers packets when the worker process is busy, triggering TCP window backpressure to throttle senders.\n2. **Buffer Concatenation**: Prepending `OldBuffer` preserves partial command tokens across network chunk boundaries.\n3. **Memory Unpinning**: Executing `binary:copy/1` decouples the retained sub-binary remainder from the underlying 64 KB socket buffer, eliminating memory leaks.",
+  "astRules": {
+    "requireTailRecursion": [
+      "extract_lines/2"
+    ],
+    "forbiddenCalls": [],
+    "requiredCalls": [
+      "binary:split/2",
+      "binary:copy/1"
+    ],
+    "requiredConstructs": [
+      "bit_syntax"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "setopts",
+      "module": "inet",
+      "signature": "inet:setopts(Socket, Options) -> ok | {error, posix()}",
+      "typesSpec": [
+        "Socket = gen_tcp:socket()",
+        "Options = [{active, once | true | false}]"
+      ],
+      "description": "Sets options for a socket. {active, once} re-arms the socket for a single incoming message, providing robust backpressure flow control.",
+      "complexityNote": "O(1) socket option modification.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/inet.html#setopts/2"
+    },
+    {
+      "functionName": "copy",
+      "module": "binary",
+      "signature": "binary:copy(Subject) -> binary()",
+      "typesSpec": [
+        "Subject = binary()"
+      ],
+      "description": "Creates a deep copy of a binary or sub-binary, unpinning it from the underlying ProcBin refc buffer and freeing memory.",
+      "complexityNote": "O(N) where N is the length of Subject.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#copy/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What is the immediate consequence at the OS TCP stack when an Erlang process receives a packet on an {active, once} socket and takes 50ms to call inet:setopts(Socket, [{active, once}])?",
+    "codeSnippet": "%% Worker receives packet and takes 50ms to process:\nhandle_info({tcp, Socket, Data}, State) ->\n    expensive_computation(Data),\n    ok = inet:setopts(Socket, [{active, once}]),\n    {noreply, State}.",
+    "options": [
+      {
+        "id": "A",
+        "label": "The socket flips to passive mode; incoming packets accumulate in the OS kernel receive buffer, eventually triggering TCP Zero Window backpressure to throttle the sender.",
+        "isCorrect": true,
+        "explanation": "Exactly! While your process is busy, incoming bytes remain in the OS kernel buffer. If that buffer fills, the OS advertises Window Size 0, forcing the client hardware to pause transmission with zero BEAM memory allocation."
+      },
+      {
+        "id": "B",
+        "label": "The BEAM drops all incoming packets immediately to prevent memory growth.",
+        "isCorrect": false,
+        "explanation": "TCP is a reliable protocol; packets are never dropped silently. The OS buffers them and signals window backpressure to the peer."
+      },
+      {
+        "id": "C",
+        "label": "The BEAM automatically closes the connection after 10ms.",
+        "isCorrect": false,
+        "explanation": "The connection remains open and healthy. Only the active reception mode is paused until inet:setopts/2 re-arms it."
+      }
+    ]
+  },
+  "incidentAlert": {
+    "incidentId": "INC-106",
+    "severity": "CRITICAL",
+    "serviceName": "edge-tcp-ingestion-gateway",
+    "symptom": "Under a 5,000 packet/sec client burst, connection worker mailboxes spike to 80,000 queued messages, memory balloons to 8 GB, and partial commands split across two TCP packets are silently corrupted!",
+    "rootCauseHint": "recommended_socket_opts/0 configures {active, true} (disabling TCP backpressure), and buffer_and_extract_lines(OldBuffer, Chunk) ignores OldBuffer when splitting on \r\n and omits binary:copy/1!",
+    "fixObjective": "Change {active, true} to {active, once} in recommended_socket_opts/0, and fix buffer_and_extract_lines/2 to concatenate <<OldBuffer/binary, Chunk/binary>>, extract complete \r\n lines, and unpin both lines and the trailing remainder with binary:copy/1."
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "Erlang in Anger: Chapter 5 - Overload & Backpressure",
+      "url": "https://www.erlanginanger.com/",
+      "category": "book_rfc",
+      "description": "Production handbook on handling socket overload and preventing node crashes."
+    }
+  ]
+}

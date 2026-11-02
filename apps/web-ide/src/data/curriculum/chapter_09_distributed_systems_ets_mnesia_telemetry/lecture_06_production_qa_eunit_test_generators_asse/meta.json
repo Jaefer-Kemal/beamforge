@@ -1,0 +1,59 @@
+{
+  "id": "ch09-l06",
+  "chapterNumber": 9,
+  "lessonNumber": 6,
+  "lessonType": "concept_exercise",
+  "title": "Production QA: EUnit Test Generators (?_assertEqual) & Dialyzer Specs",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Combines Dialyzer type specs with EUnit assertions and test generators to provide static and runtime quality assurance.",
+  "astRules": {
+    "requiredCalls": [
+      "ledger_specs_and_tests:calculate_fee/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "assert",
+      "module": "eunit",
+      "signature": "?assertEqual(Expect, Expr)",
+      "typesSpec": [
+        "Expect = term()",
+        "Expr = term()"
+      ],
+      "description": "EUnit assertion macro checking that Expr evaluates to Expect using exact term identity (=:=).",
+      "complexityNote": "Compile-time macro expansion.",
+      "officialUrl": "https://www.erlang.org/doc/apps/eunit/index.html",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/eunit/src/eunit.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "How does Dialyzer success typing differ from traditional static type checkers (like Rust or TypeScript)?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Dialyzer requires 100% of variables to have explicit type annotations before compilation.",
+        "isCorrect": false,
+        "explanation": "Dialyzer infers success types automatically even with zero annotations."
+      },
+      {
+        "id": "B",
+        "label": "Dialyzer assumes all code is correct by default and only complains when it can mathematically prove that a function call will always fail.",
+        "isCorrect": true,
+        "explanation": "Success typing works under the assumption that code is correct unless proven otherwise. Dialyzer only flags an error when it has mathematical certainty that a branch or call will always crash."
+      },
+      {
+        "id": "C",
+        "label": "Dialyzer converts Erlang code into C++ before analyzing memory pointers.",
+        "isCorrect": false,
+        "explanation": "Dialyzer analyzes BEAM Core Erlang bytecode directly."
+      },
+      {
+        "id": "D",
+        "label": "Dialyzer runs tests with random mock inputs to observe crashes at runtime.",
+        "isCorrect": false,
+        "explanation": "Dialyzer is a purely static analyzer; it never executes code."
+      }
+    ]
+  }
+}

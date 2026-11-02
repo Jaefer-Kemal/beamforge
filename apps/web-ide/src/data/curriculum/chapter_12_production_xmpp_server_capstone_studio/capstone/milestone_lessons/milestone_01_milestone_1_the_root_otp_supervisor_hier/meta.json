@@ -1,0 +1,28 @@
+{
+  "id": "ch12-m1",
+  "title": "Milestone 1: The Root OTP Supervisor Hierarchy (xmpp_sup)",
+  "mentalModelCheck": {
+    "question": "In xmpp_sup, why is xmpp_session_registry ordered before xmpp_router under rest_for_one?",
+    "codeSnippet": "#{strategy => rest_for_one, intensity => 5, period => 10}\n[RegistryChildSpec, RouterChildSpec]",
+    "options": [
+      {
+        "id": "A",
+        "label": "The router depends on the ETS table owned by the registry; crashing the registry restarts the router, but a router crash leaves the registry and client sessions intact.",
+        "isCorrect": true,
+        "explanation": "Correct! Under rest_for_one, child processes booted AFTER the crashed child are killed and restarted. Because router queries registry's ETS table, restarting registry cleanly restarts router without dropping all client sessions when only the router fails."
+      },
+      {
+        "id": "B",
+        "label": "rest_for_one requires supervisor children to be declared in alphabetical order by registered name.",
+        "isCorrect": false,
+        "explanation": "Child spec ordering in rest_for_one dictates startup sequence and crash termination cascades, not alphabetical sorting."
+      },
+      {
+        "id": "C",
+        "label": "If xmpp_router crashes, the registry must always restart to clear all active sessions.",
+        "isCorrect": false,
+        "explanation": "Router crashes should NOT kill the session registry; disconnecting online users due to a routing error would violate fault isolation."
+      }
+    ]
+  }
+}

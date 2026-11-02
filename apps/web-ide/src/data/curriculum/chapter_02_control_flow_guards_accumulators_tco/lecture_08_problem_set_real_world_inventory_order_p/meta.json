@@ -1,0 +1,65 @@
+{
+  "id": "ch02-l08",
+  "chapterNumber": 2,
+  "lessonNumber": 8,
+  "lessonType": "problem_set",
+  "title": "Problem Set: Real-World Inventory Order Processor",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements full multi-list tail-recursive order fulfillment, total price calculation, and inventory restocking with strict TCO and O(1) stack space.",
+  "astRules": {
+    "requireTailRecursion": [
+      "process_order/2",
+      "calculate_order_total/2",
+      "restock/2"
+    ],
+    "forbiddenCalls": [
+      "lists:sum",
+      "lists:map",
+      "lists:foldl",
+      "lists:filter",
+      "lists:foldr"
+    ],
+    "forbiddenConstructs": [
+      "list_comprehension"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "pure_recursion_composition",
+      "module": "erlang",
+      "signature": "Loop(Data, Acc) -> Result.",
+      "typesSpec": [
+        "Data = [term()]",
+        "Acc = term()"
+      ],
+      "description": "Multi-list tail-recursive state progression.",
+      "complexityNote": "Zero-copy garbage collection with bounded O(1) process stack.",
+      "officialUrl": "https://www.erlang.org/doc/efficiency_guide/processes.html"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does calculate_order_total/2 return 175 for orders [{order, 1, 2}, {order, 2, 3}, {order, 3, 5}] against products P1($50, stock 10), P2($25, stock 5), and P3($200, stock 2)?",
+    "options": [
+      {
+        "id": "A",
+        "label": "P1 is fulfilled (2 * 50 = 100), P2 is fulfilled (3 * 25 = 75), but P3 requires 5 when stock is only 2, so P3 is unfulfilled (0), giving 100 + 75 + 0 = 175",
+        "isCorrect": true,
+        "explanation": "Unfulfillable orders contribute 0 to the total order value without halting execution."
+      },
+      {
+        "id": "B",
+        "label": "Because the function applies a 10% volume discount across all orders",
+        "isCorrect": false,
+        "explanation": "There are no volume discounts; prices are evaluated directly from inventory."
+      },
+      {
+        "id": "C",
+        "label": "P3 raises a badarith exception that is caught by a supervisor",
+        "isCorrect": false,
+        "explanation": "Stock insufficiency is handled purely with pattern matching and guard clauses."
+      }
+    ]
+  },
+  "visualScene": "tco_vs_body_stack"
+}

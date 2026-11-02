@@ -1,0 +1,46 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-cap-1",
+      "title": "Milestone 1: Supervision Tree Boot",
+      "erlangCall": "begin catch xmpp_sup:stop(), {ok, SupPid} = xmpp_sup:start_link(), Res = is_pid(SupPid) andalso is_process_alive(SupPid), xmpp_sup:stop(), Res end",
+      "expectedOutput": "true",
+      "explanation": "Verifies the root supervisor boots with rest_for_one strategy and launches both workers."
+    },
+    {
+      "id": "tc-cap-2",
+      "title": "Milestone 2: Fragmented XML Stream Framer",
+      "erlangCall": "xmpp_stream_parser:feed_chunk(<<\"<stream:str\">>, <<\"eam to='localhost'><ping id='p1'/>\">>)",
+      "expectedOutput": "{[{stream_open, <<\"localhost\">>}, {ping, <<\"p1\">>}], <<>>}",
+      "explanation": "Verifies the stream parser handles packet boundaries and unpins sub-binaries with binary:copy/1."
+    },
+    {
+      "id": "tc-cap-3",
+      "title": "Milestone 3: ETS Session Registry & Highest Priority Lookup",
+      "erlangCall": "begin catch xmpp_session_registry:stop(), {ok, _} = xmpp_session_registry:start_link(), ok = xmpp_session_registry:register_session(<<\"alice@localhost/mobile\">>, 5, self()), ok = xmpp_session_registry:register_session(<<\"alice@localhost/desktop\">>, 10, self()), Res = xmpp_session_registry:lookup_by_jid(<<\"alice@localhost\">>), xmpp_session_registry:stop(), Res =:= [self()] end",
+      "expectedOutput": "true",
+      "explanation": "Verifies session registration and bare JID priority dispatch."
+    },
+    {
+      "id": "tc-cap-4",
+      "title": "Milestone 4: C2S Handshake State Transitions",
+      "erlangCall": "begin {ok, C2SPid} = xmpp_c2s_statem:start_link(#{}), {ok, wait_for_sasl, _} = xmpp_c2s_statem:feed_xml(C2SPid, <<\"<stream:stream to='localhost'>\">>), {ok, AuthState, _} = xmpp_c2s_statem:feed_xml(C2SPid, <<\"<auth mechanism='PLAIN'>alice</auth>\">>), xmpp_c2s_statem:stop(C2SPid), AuthState end",
+      "expectedOutput": "authenticated",
+      "explanation": "Verifies SASL authentication advances state machine from wait_for_sasl to authenticated."
+    },
+    {
+      "id": "tc-cap-5",
+      "title": "Milestone 5: Routing & Offline Fallback Queue",
+      "erlangCall": "begin catch xmpp_router:stop(), {ok, _} = xmpp_router:start_link(), {queued_offline, Bare} = xmpp_router:route_stanza(<<\"alice@localhost\">>, <<\"bob@localhost\">>, <<\"<message>Hi</message>\">>), Count = xmpp_router:get_offline_count(<<\"bob@localhost\">>), xmpp_router:stop(), {Bare, Count} end",
+      "expectedOutput": "{<<\"bob@localhost\">>, 1}",
+      "explanation": "Verifies message routing falls back to the in-memory offline message store when recipient is offline."
+    },
+    {
+      "id": "tc-cap-6",
+      "title": "Milestone 6: Chaos Monkey Supervision Resilience",
+      "erlangCall": "begin catch xmpp_sup:stop(), {ok, _} = xmpp_sup:start_link(), Reg1 = whereis(xmpp_session_registry), exit(Reg1, kill), timer:sleep(60), Reg2 = whereis(xmpp_session_registry), xmpp_sup:stop(), Reg2 =/= undefined andalso Reg2 =/= Reg1 end",
+      "expectedOutput": "true",
+      "explanation": "Verifies that killing the session registry triggers rest_for_one supervisor restart of both registry and router without bringing down the root tree."
+    }
+  ]
+}

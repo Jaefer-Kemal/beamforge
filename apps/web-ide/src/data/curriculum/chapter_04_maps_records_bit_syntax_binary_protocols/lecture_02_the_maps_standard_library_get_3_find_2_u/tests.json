@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch04-02-a",
+      "title": "Safe Load Lookup with Default",
+      "erlangCall": "map_stdlib:safe_get_load(#{node_a => 42}, node_b)",
+      "expectedOutput": "0",
+      "explanation": "Returns 0 when node_b is absent."
+    },
+    {
+      "id": "tc-ch04-02-b",
+      "title": "Increment Tag Counts via update_with",
+      "erlangCall": "map_stdlib:increment_tag_counts([api, web, api, db, api], #{})",
+      "expectedOutput": "#{api => 3, db => 1, web => 1}",
+      "explanation": "Tallies occurrences of each tag."
+    },
+    {
+      "id": "tc-ch04-02-c",
+      "title": "Merge Configs and Strip Sensitive Keys",
+      "erlangCall": "map_stdlib:merge_configs(#{port => 8080, timeout => 5000}, #{port => 9000, secret_key => bad_secret, debug_token => 1234})",
+      "expectedOutput": "#{port => 9000, timeout => 5000}",
+      "explanation": "Port 9000 overrides 8080, while secret_key and debug_token are stripped."
+    },
+    {
+      "id": "tc-ch04-02-d",
+      "title": "Sum Map Values with maps:fold",
+      "erlangCall": "map_stdlib:sum_map_values(#{cpu => 25, mem => 45, io => 10})",
+      "expectedOutput": "80",
+      "explanation": "25 + 45 + 10 = 80."
+    }
+  ]
+}

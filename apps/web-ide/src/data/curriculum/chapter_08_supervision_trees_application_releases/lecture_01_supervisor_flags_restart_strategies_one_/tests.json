@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Build Valid Sup Flags Map",
+      "explanation": "Validates strategy atom and returns standardized #{strategy, intensity, period} map.",
+      "erlangCall": "strategy_planner:build_sup_flags(rest_for_one, 3, 5)",
+      "expectedOutput": "#{intensity => 3, period => 5, strategy => rest_for_one}"
+    },
+    {
+      "id": "tc2",
+      "title": "Select Strategy for Topology",
+      "explanation": "Maps dependent_pipeline to rest_for_one and unknown to error tuple.",
+      "erlangCall": "{strategy_planner:select_strategy_for_topology(dependent_pipeline), strategy_planner:select_strategy_for_topology(unknown)}",
+      "expectedOutput": "{rest_for_one, {error, unknown_topology}}"
+    },
+    {
+      "id": "tc3",
+      "title": "Calculate Restart Budget",
+      "explanation": "Computes max_rate_per_sec as a float from MaxCrashes and WindowSeconds.",
+      "erlangCall": "maps:get(max_rate_per_sec, strategy_planner:calculate_restart_budget(10, 2))",
+      "expectedOutput": "5.0"
+    }
+  ]
+}

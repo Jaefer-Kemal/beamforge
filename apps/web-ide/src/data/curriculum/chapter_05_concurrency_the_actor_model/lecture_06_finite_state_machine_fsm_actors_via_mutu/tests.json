@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch05-06-1",
+      "title": "Unlock with Correct Code",
+      "erlangCall": "begin P = door_lock_fsm:start(<<\"1234\">>), Res = door_lock_fsm:enter_code(P, <<\"1234\">>), State = door_lock_fsm:get_state(P), door_lock_fsm:stop(P), {Res, State} end",
+      "expectedOutput": "{{ok, unlocked}, unlocked}",
+      "explanation": "Enters correct code, transitions to unlocked state, and confirms state is unlocked."
+    },
+    {
+      "id": "tc-ch05-06-2",
+      "title": "Wrong Code Failed Attempts Counter",
+      "erlangCall": "begin P = door_lock_fsm:start(<<\"secret\">>), Err1 = door_lock_fsm:enter_code(P, <<\"wrong1\">>), Err2 = door_lock_fsm:enter_code(P, <<\"wrong2\">>), State = door_lock_fsm:get_state(P), door_lock_fsm:stop(P), {Err1, Err2, State} end",
+      "expectedOutput": "{{error, {wrong_code, 1}}, {error, {wrong_code, 2}}, {locked, 2}}",
+      "explanation": "Enters incorrect code twice, verifying failed attempts counter increments from 1 to 2."
+    },
+    {
+      "id": "tc-ch05-06-3",
+      "title": "Locking and Re-locking State Transitions",
+      "erlangCall": "begin P = door_lock_fsm:start(1111), {ok, unlocked} = door_lock_fsm:enter_code(P, 1111), ok = door_lock_fsm:lock(P), State = door_lock_fsm:get_state(P), door_lock_fsm:stop(P), State end",
+      "expectedOutput": "{locked, 0}",
+      "explanation": "Unlocks door, locks it again, and confirms state is locked with 0 failed attempts."
+    }
+  ]
+}

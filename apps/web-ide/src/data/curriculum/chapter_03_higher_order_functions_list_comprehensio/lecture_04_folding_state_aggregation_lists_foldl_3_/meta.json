@@ -1,0 +1,54 @@
+{
+  "id": "ch03-l04",
+  "chapterNumber": 3,
+  "lessonNumber": 4,
+  "lessonType": "concept_exercise",
+  "title": "Folding & State Aggregation (lists:foldl/3 vs. lists:foldr/3)",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates tail-recursive state aggregation using lists:foldl/3 with multi-accumulator tuples and list inversion patterns.",
+  "astRules": {
+    "requiredCalls": [
+      "lists:foldl/3"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "lists:foldl/3",
+      "module": "lists",
+      "signature": "foldl(Fun, Acc0, List) -> Acc1",
+      "typesSpec": [
+        "Fun = fun((Elem, AccIn) -> AccOut)",
+        "Acc0 = term()",
+        "List = [term()]"
+      ],
+      "description": "Calls Fun(Elem, AccIn) on successive elements of List, left to right. Strictly tail-recursive.",
+      "complexityNote": "O(N) time, O(1) stack memory.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/lists.html#foldl/3"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does lists:foldl(fun(Elem, Acc) -> [Elem | Acc] end, [], [1, 2, 3]) return [3, 2, 1] instead of [1, 2, 3]?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Because foldl visits elements from left to right, prepending each new element onto the head of the accumulator list (LIFO stack behavior)",
+        "isCorrect": true,
+        "explanation": "1 is prepended -> [1]; then 2 is prepended -> [2, 1]; then 3 is prepended -> [3, 2, 1]."
+      },
+      {
+        "id": "B",
+        "label": "Because the BEAM VM reverses lists internally before evaluating foldl",
+        "isCorrect": false,
+        "explanation": "foldl processes the input list in its original forward order; prepending to the head of a singly linked list is what reverses the order."
+      },
+      {
+        "id": "C",
+        "label": "Because foldl is body-recursive and unwinds the stack backwards",
+        "isCorrect": false,
+        "explanation": "foldl is strictly tail-recursive, not body-recursive."
+      }
+    ]
+  },
+  "visualScene": "tco_vs_body_stack"
+}

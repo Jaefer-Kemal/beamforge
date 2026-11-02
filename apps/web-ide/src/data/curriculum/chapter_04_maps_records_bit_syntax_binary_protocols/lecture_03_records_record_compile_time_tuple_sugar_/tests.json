@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch04-03-a",
+      "title": "Create Frame Record",
+      "erlangCall": "record_frames:new_frame(1, ack, ok)",
+      "expectedOutput": "{frame, 1, ack, ok}",
+      "explanation": "Record compiles into tagged 4-tuple {frame, seq, type, payload}."
+    },
+    {
+      "id": "tc-ch04-03-b",
+      "title": "Advance Sequence Number",
+      "erlangCall": "begin F = record_frames:new_frame(10, data, ping), record_frames:advance_seq(F) end",
+      "expectedOutput": "{frame, 11, data, ping}",
+      "explanation": "Increments seq from 10 to 11."
+    },
+    {
+      "id": "tc-ch04-03-c",
+      "title": "Inspect #frame.seq Index Position",
+      "erlangCall": "record_frames:frame_seq_index()",
+      "expectedOutput": "2",
+      "explanation": "Tuple position of seq in {frame, seq, type, payload} is 2."
+    },
+    {
+      "id": "tc-ch04-03-d",
+      "title": "Find Frame by Sequence Number in List",
+      "erlangCall": "record_frames:find_frame_by_seq([{frame, 1, data, hello}, {frame, 2, ack, world}], 2)",
+      "expectedOutput": "{ok, {frame, 2, ack, world}}",
+      "explanation": "Locates frame 2 using lists:keyfind and #frame.seq."
+    }
+  ]
+}

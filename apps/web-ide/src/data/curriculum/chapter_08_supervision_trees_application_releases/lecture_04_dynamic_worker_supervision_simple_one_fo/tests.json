@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Spawn and Count Dynamic Sessions",
+      "explanation": "Starts dynamic_session_sup and spawns two sessions; verifies count is 2.",
+      "erlangCall": "begin {ok, Sup} = dynamic_session_sup:start_link(), {ok, _} = dynamic_session_sup:start_session(Sup, <<\"s1\">>, <<\"u1\">>), {ok, _} = dynamic_session_sup:start_session(Sup, <<\"s2\">>, <<\"u2\">>), C = dynamic_session_sup:count_sessions(Sup), unlink(Sup), exit(Sup, shutdown), C end",
+      "expectedOutput": "2"
+    },
+    {
+      "id": "tc2",
+      "title": "Verify Separate Worker State",
+      "explanation": "Queries companion session_worker:get_info to verify separate module state isolation.",
+      "erlangCall": "begin {ok, Sup} = dynamic_session_sup:start_link(), {ok, P} = dynamic_session_sup:start_session(Sup, <<\"sess_99\">>, <<\"alice\">>), {ok, Info} = session_worker:get_info(P), unlink(Sup), exit(Sup, shutdown), maps:get(user_id, Info) end",
+      "expectedOutput": "<<\"alice\">>"
+    },
+    {
+      "id": "tc3",
+      "title": "Terminate Dynamic Session",
+      "explanation": "Terminates one child process and asserts session count decrements from 2 to 1.",
+      "erlangCall": "begin {ok, Sup} = dynamic_session_sup:start_link(), {ok, P1} = dynamic_session_sup:start_session(Sup, <<\"s1\">>, <<\"u1\">>), {ok, _P2} = dynamic_session_sup:start_session(Sup, <<\"s2\">>, <<\"u2\">>), ok = dynamic_session_sup:terminate_session(Sup, P1), C = dynamic_session_sup:count_sessions(Sup), unlink(Sup), exit(Sup, shutdown), C end",
+      "expectedOutput": "1"
+    }
+  ]
+}

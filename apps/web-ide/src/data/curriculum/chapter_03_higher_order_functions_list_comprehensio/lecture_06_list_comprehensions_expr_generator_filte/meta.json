@@ -1,0 +1,51 @@
+{
+  "id": "ch03-l06",
+  "chapterNumber": 3,
+  "lessonNumber": 6,
+  "lessonType": "concept_exercise",
+  "title": "List Comprehensions ([Expr || Generator, Filter]), Pattern Filtering & Joins",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements declarative list comprehensions with pattern-matching generators and multi-generator relational joins.",
+  "astRules": {
+    "requiredConstructs": [
+      "list_comprehension"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "list_comprehensions",
+      "module": "erlang",
+      "signature": "[Expr || Qualifier1, ...]",
+      "typesSpec": [
+        "Qualifier = Pattern <- List | boolean()"
+      ],
+      "description": "Syntactic sugar for map and filter combinations with automatic pattern-matching filtering and nested generator looping.",
+      "complexityNote": "Compiled by BEAM into optimized tail-recursive accumulator loops.",
+      "officialUrl": "https://www.erlang.org/doc/reference_manual/expressions.html#list-comprehensions"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What happens in [Name || {user, Id, Name, active} <- Users] if Users contains {user, 2, \"Bob\", suspended}?",
+    "options": [
+      {
+        "id": "A",
+        "label": "The element is silently skipped by the generator pattern match without raising any exceptions",
+        "isCorrect": true,
+        "explanation": "Comprehension generators silently discard elements that fail the left-hand pattern match."
+      },
+      {
+        "id": "B",
+        "label": "The BEAM VM raises a function_clause or badmatch exception",
+        "isCorrect": false,
+        "explanation": "Generators filter out non-matching elements rather than crashing."
+      },
+      {
+        "id": "C",
+        "label": "Bob is emitted as undefined in the output list",
+        "isCorrect": false,
+        "explanation": "Non-matching elements are completely omitted from the resulting list."
+      }
+    ]
+  }
+}

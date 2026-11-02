@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch06-03-1",
+      "title": "Safe Deserialization of Valid Term",
+      "erlangCall": "boundary_parser:safe_parse_payload(term_to_binary({user, 101, <<\"Alice\">>}))",
+      "expectedOutput": "{ok, {user, 101, <<\"Alice\">>}}",
+      "explanation": "Valid serialized binary decodes into the original Erlang term cleanly."
+    },
+    {
+      "id": "tc-ch06-03-2",
+      "title": "Guaranteed Resource Release on Deliberate Crash",
+      "erlangCall": "begin P = spawn(fun() -> receive {release, R} -> receive {get, From} -> From ! R end end end), boundary_parser:with_resource_cleanup(fun() -> res_42 end, fun(_) -> erlang:error(boom) end, fun(R) -> P ! {release, R} end), P ! {get, self()}, receive Msg -> Msg after 200 -> timeout end end",
+      "expectedOutput": "res_42",
+      "explanation": "Confirms that ReleaseFun executed inside after despite ActionFun raising error(boom)."
+    },
+    {
+      "id": "tc-ch06-03-3",
+      "title": "Transaction Log Processing with File Close Notification",
+      "erlangCall": "begin boundary_parser:process_transaction_log([<<\"tx_1\">>, <<\"CORRUPT_LINE\">>], self()), receive Msg -> Msg after 200 -> timeout end end",
+      "expectedOutput": "file_handle_closed",
+      "explanation": "Close notification sent to caller pid in after block even after corrupt line aborted processing."
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "id": "ch04-l08",
+  "chapterNumber": 4,
+  "lessonNumber": 8,
+  "lessonType": "problem_set",
+  "title": "Chapter 4 Problem Set: Binary Network Packet & Multi-Frame TLV Stream Parser (packet_parser.erl)",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "Complete TLV binary protocol engine with bit syntax parsing, record construction, tail-recursive stream aggregation with fragment preservation, and encode_frame packing.",
+  "astRules": {
+    "requiredConstructs": [
+      "record_def",
+      "bit_syntax"
+    ],
+    "requiredCalls": [
+      "binary:copy/1"
+    ],
+    "requireTailRecursion": [
+      "parse_tlv_stream/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "bit_syntax_pattern",
+      "module": "erlang",
+      "signature": "<<Version:4, Type:4, Len:16/big, Payload:Len/binary, Rest/binary>>",
+      "typesSpec": [
+        "Arbitrary bit segment destructuring",
+        "Variable-length binary segment matching"
+      ],
+      "description": "Single-instruction matching of network protocol frame headers and payloads.",
+      "complexityNote": "Executed directly in BEAM parser loop with zero buffer copies.",
+      "officialUrl": "https://www.erlang.org/doc/programming_examples/bit_syntax.html"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does parse_tlv_stream return {partial, ParsedFrames, TrailingBytes} when the last frame is incomplete?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Because TCP is a stream protocol where packets can be fragmented; the socket worker must buffer the trailing bytes and prepend them to the next incoming packet",
+        "isCorrect": true,
+        "explanation": "TCP delivers an unbroken stream of bytes with no guarantee of packet frame boundaries. Partial frames must be saved until subsequent TCP packets arrive."
+      },
+      {
+        "id": "B",
+        "label": "Because the BEAM VM garbage collector requires all trailing bytes to be saved in an ETS table",
+        "isCorrect": false,
+        "explanation": "It is a network stream framing pattern, not related to ETS or garbage collection."
+      },
+      {
+        "id": "C",
+        "label": "Because Erlang cannot parse binaries with an odd number of bytes",
+        "isCorrect": false,
+        "explanation": "Erlang parses binaries of any byte count or bit count without restriction."
+      }
+    ]
+  },
+  "visualScene": "sub_binary_procbin_refc"
+}

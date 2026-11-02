@@ -1,0 +1,103 @@
+{
+  "id": "ch09-l05",
+  "chapterNumber": 9,
+  "lessonNumber": 5,
+  "lessonType": "concept_exercise",
+  "title": "Mnesia Distributed DBMS: Tables, ACID Transactions & Rollback",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements an atomic wallet ledger using Mnesia transactions with strict abort rollback semantics.",
+  "astRules": {
+    "requiredConstructs": [
+      "record_def"
+    ],
+    "requiredCalls": [
+      "mnesia:transaction/1",
+      "mnesia:read/2",
+      "mnesia:write/1",
+      "mnesia:abort/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "transaction",
+      "module": "mnesia",
+      "signature": "mnesia:transaction(Fun) -> {atomic, Result} | {aborted, Reason}",
+      "typesSpec": [
+        "Fun = fun(() -> Result)",
+        "Result = Reason = term()"
+      ],
+      "description": "Executes the functional closure Fun within an atomic, isolated Mnesia transaction with automatic rollback.",
+      "complexityNote": "Acquires row/table locks and buffers writes in transaction journal.",
+      "officialUrl": "https://www.erlang.org/doc/apps/mnesia/mnesia.html#transaction/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/mnesia/src/mnesia.erl"
+    },
+    {
+      "functionName": "read",
+      "module": "mnesia",
+      "signature": "mnesia:read(Tab, Key) -> [Record]",
+      "typesSpec": [
+        "Tab = atom()",
+        "Key = term()",
+        "Record = tuple()"
+      ],
+      "description": "Reads all records with Key from table Tab within the current transaction, acquiring read locks.",
+      "complexityNote": "O(1) hash lookup with lock acquisition.",
+      "officialUrl": "https://www.erlang.org/doc/apps/mnesia/mnesia.html#read/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/mnesia/src/mnesia.erl"
+    },
+    {
+      "functionName": "write",
+      "module": "mnesia",
+      "signature": "mnesia:write(Record) -> ok",
+      "typesSpec": [
+        "Record = tuple()"
+      ],
+      "description": "Writes Record into the table specified by element 1 of the record within the current transaction.",
+      "complexityNote": "Buffers modification in the local transaction store.",
+      "officialUrl": "https://www.erlang.org/doc/apps/mnesia/mnesia.html#write/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/mnesia/src/mnesia.erl"
+    },
+    {
+      "functionName": "abort",
+      "module": "mnesia",
+      "signature": "mnesia:abort(Reason) -> no_return()",
+      "typesSpec": [
+        "Reason = term()"
+      ],
+      "description": "Terminates the current transaction immediately, rolling back all buffered modifications and releasing locks.",
+      "complexityNote": "O(1) instant rollback.",
+      "officialUrl": "https://www.erlang.org/doc/apps/mnesia/mnesia.html#abort/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/mnesia/src/mnesia.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What occurs when a fun passed to mnesia:transaction/1 calls mnesia:abort(insufficient_funds) after having already written to another table?",
+    "options": [
+      {
+        "id": "A",
+        "label": "The writes already completed remain committed, while subsequent writes are cancelled.",
+        "isCorrect": false,
+        "explanation": "Mnesia transactions are atomic; partial commits are never allowed."
+      },
+      {
+        "id": "B",
+        "label": "Mnesia pauses the node and writes the error to crash.dump.",
+        "isCorrect": false,
+        "explanation": "Aborting a transaction is a normal operational event and does not crash the BEAM node."
+      },
+      {
+        "id": "C",
+        "label": "100% of writes inside that transaction are discarded and rolled back; no table changes are committed.",
+        "isCorrect": true,
+        "explanation": "Mnesia transactions provide full ACID atomicity. If mnesia:abort/1 is called or an unhandled exception occurs, all writes buffered during that transaction are discarded and rolled back."
+      },
+      {
+        "id": "D",
+        "label": "The transaction retries indefinitely until sufficient funds are deposited.",
+        "isCorrect": false,
+        "explanation": "Transactions only retry on transient lock conflicts, not on explicit mnesia:abort/1."
+      }
+    ]
+  }
+}

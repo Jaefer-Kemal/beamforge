@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Credit and Query Balances",
+      "erlangCall": "begin {ok, W} = wallet_server:start_link(#{<<\"USD\">> => 100}), wallet_server:credit(W, <<\"EUR\">>, 50), timer:sleep(20), Bals = wallet_server:get_balances(W), wallet_server:stop(W), Bals end",
+      "expectedOutput": "#{<<\"EUR\">> => 50, <<\"USD\">> => 100}",
+      "explanation": "Asynchronously credits 50 EUR and retrieves current balance map."
+    },
+    {
+      "id": "tc2",
+      "title": "Debit with Insufficient Funds",
+      "erlangCall": "begin {ok, W} = wallet_server:start_link(#{<<\"USD\">> => 100}), Err = wallet_server:debit(W, <<\"USD\">>, 1000), wallet_server:stop(W), Err end",
+      "expectedOutput": "{error, insufficient_funds}",
+      "explanation": "Rejects overdraft without modifying balances."
+    }
+  ]
+}

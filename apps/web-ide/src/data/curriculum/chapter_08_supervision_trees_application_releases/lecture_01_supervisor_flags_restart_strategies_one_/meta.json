@@ -1,0 +1,59 @@
+{
+  "id": "ch08-l01",
+  "chapterNumber": 8,
+  "lessonNumber": 1,
+  "lessonType": "concept_exercise",
+  "title": "Supervisor Flags & Restart Strategies: one_for_one, rest_for_one, and one_for_all",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Validates supervisor flag arguments, maps architectural topology descriptors to OTP restart strategy atoms, and calculates fractional restart frequency budgets.",
+  "astRules": {
+    "requiredConstructs": [
+      "guards"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "init",
+      "module": "supervisor",
+      "signature": "Module:init(Args) -> {ok, {SupFlags, [ChildSpec]}} | ignore",
+      "typesSpec": [
+        "SupFlags = #{strategy => strategy(), intensity => non_neg_integer(), period => pos_integer()}",
+        "strategy() = one_for_one | rest_for_one | one_for_all | simple_one_for_one"
+      ],
+      "description": "Initializes the supervisor, defining the restart strategy, crash frequency limit, and initial child specifications.",
+      "complexityNote": "O(1) initialization. Executed synchronously during supervisor:start_link.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/supervisor.html#Module:init/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "In a supervision tree with children [db_pool, pricing_cache, order_gateway] under rest_for_one, what happens when pricing_cache crashes?",
+    "options": [
+      {
+        "id": "A",
+        "label": "pricing_cache and downstream order_gateway are restarted; upstream db_pool is untouched.",
+        "isCorrect": true,
+        "explanation": "rest_for_one terminates and restarts the crashed worker and any worker started after it in the child spec list, preserving upstream dependencies."
+      },
+      {
+        "id": "B",
+        "label": "All three workers (db_pool, pricing_cache, order_gateway) are terminated and restarted.",
+        "isCorrect": false,
+        "explanation": "That is the behavior of one_for_all, not rest_for_one."
+      },
+      {
+        "id": "C",
+        "label": "Only pricing_cache is restarted; order_gateway continues running uninterrupted.",
+        "isCorrect": false,
+        "explanation": "That is the behavior of one_for_one, which would leave order_gateway holding dead cache references."
+      },
+      {
+        "id": "D",
+        "label": "db_pool and pricing_cache restart; order_gateway is untouched.",
+        "isCorrect": false,
+        "explanation": "rest_for_one restarts downstream workers, never preceding upstream workers."
+      }
+    ]
+  },
+  "visualScene": "supervision_rest_for_one_ets_heir"
+}

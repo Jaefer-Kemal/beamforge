@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch03-03-a",
+      "title": "Check All In Stock - Positive",
+      "erlangCall": "hof_predicates:all_in_stock([{product, 1, \"A\", 10, 5}, {product, 2, \"B\", 20, 1}])",
+      "expectedOutput": "true",
+      "explanation": "Both products have Stock > 0."
+    },
+    {
+      "id": "tc-ch03-03-b",
+      "title": "Check All In Stock - Out of Stock Detected",
+      "erlangCall": "hof_predicates:all_in_stock([{product, 1, \"A\", 10, 5}, {product, 2, \"B\", 20, 0}])",
+      "expectedOutput": "false",
+      "explanation": "Product 2 has Stock = 0, causing lists:all to short-circuit and return false."
+    },
+    {
+      "id": "tc-ch03-03-c",
+      "title": "Detect Critical Error in Logs",
+      "erlangCall": "hof_predicates:has_critical_error([{log, info, \"boot\"}, {log, critical, \"disk full\"}, {log, warn, \"high mem\"}])",
+      "expectedOutput": "true",
+      "explanation": "Finds log with level critical."
+    },
+    {
+      "id": "tc-ch03-03-d",
+      "title": "Split Orders into Standard and Bulk",
+      "erlangCall": "hof_predicates:split_orders_by_stock([{order, 1, 5}, {order, 2, 20}, {order, 3, 2}], 10)",
+      "expectedOutput": "{[{order, 1, 5}, {order, 3, 2}], [{order, 2, 20}]}",
+      "explanation": "Partitions into Standard (Qty <= 10) and Bulk (Qty > 10)."
+    }
+  ]
+}

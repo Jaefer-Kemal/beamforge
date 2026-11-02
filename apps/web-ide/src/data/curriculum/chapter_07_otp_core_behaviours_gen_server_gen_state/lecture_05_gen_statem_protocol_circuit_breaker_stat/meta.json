@@ -1,0 +1,55 @@
+{
+  "id": "ch07-l05",
+  "chapterNumber": 7,
+  "lessonNumber": 5,
+  "lessonType": "concept_exercise",
+  "title": "gen_statem: Protocol & Circuit Breaker State Machines",
+  "difficulty": "Production",
+  "xpReward": 100,
+  "solutionExplanation": "Implements a 3-state circuit breaker using gen_statem state_functions callback mode and state_timeout to self-heal from open to half_open automatically.",
+  "astRules": {
+    "requiredCalls": [
+      "gen_statem:start_link/3",
+      "gen_statem:call/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "call",
+      "module": "gen_statem",
+      "signature": "gen_statem:call(ServerRef, Request) -> Reply",
+      "typesSpec": [
+        "ServerRef = pid() | atom()",
+        "Request = term()",
+        "Reply = term()"
+      ],
+      "description": "Synchronously sends a request to a gen_statem process and waits for a reply.",
+      "complexityNote": "O(1) synchronous message round-trip.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/gen_statem.html#call/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does a circuit breaker in the open state immediately reject client calls without invoking the provided action function?",
+    "codeSnippet": "open({call, From}, {execute, _ActionFun}, Data) ->\n    {keep_state, Data, [{reply, From, {error, circuit_open}}]}.",
+    "options": [
+      {
+        "id": "A",
+        "label": "To protect failing downstream services from being overwhelmed by traffic, and to prevent client connection pools from exhausting on slow network timeouts.",
+        "isCorrect": true,
+        "explanation": "Correct! Fast-failing immediately in 0ms sheds load from failing backend resources and keeps caller threads responsive."
+      },
+      {
+        "id": "B",
+        "label": "Erlang disables network sockets when a process enters open state.",
+        "isCorrect": false,
+        "explanation": "The state machine is purely application-level logic; sockets are not automatically modified."
+      },
+      {
+        "id": "C",
+        "label": "Action functions can only be executed when the computer is connected to AC power.",
+        "isCorrect": false,
+        "explanation": "Action functions are standard Erlang lambdas."
+      }
+    ]
+  }
+}

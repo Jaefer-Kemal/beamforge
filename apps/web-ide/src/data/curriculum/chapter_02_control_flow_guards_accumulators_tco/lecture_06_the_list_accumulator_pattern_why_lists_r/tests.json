@@ -1,0 +1,11 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch02-06-a",
+      "title": "Filter Valid Confirmed Order IDs",
+      "erlangCall": "acc_filter:keep_valid_orders([{order, 1, 5, confirmed}, {order, 2, 0, confirmed}, {order, 3, 10, pending}, {order, 4, 8, confirmed}])",
+      "expectedOutput": "[1, 4]",
+      "explanation": "Extracts IDs 1 and 4 in original order, ignoring zero-qty and pending orders."
+    }
+  ]
+}

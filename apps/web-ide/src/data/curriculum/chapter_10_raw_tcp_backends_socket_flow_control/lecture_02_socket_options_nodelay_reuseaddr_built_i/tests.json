@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch10-l02-1",
+      "title": "Build Low-Latency Options for {packet, 4}",
+      "erlangCall": "tcp_socket_opts:build_low_latency_opts(4)",
+      "expectedOutput": "[binary,{packet,4},{active,once},{nodelay,true},{reuseaddr,true}]",
+      "explanation": "Validates packet mode 4 and generates complete low-latency socket configuration."
+    },
+    {
+      "id": "tc-ch10-l02-2",
+      "title": "Reject Invalid Packet Mode",
+      "erlangCall": "tcp_socket_opts:build_low_latency_opts(udp_invalid)",
+      "expectedOutput": "{error,invalid_packet_mode}",
+      "explanation": "Rejects invalid packet modes with {error, invalid_packet_mode}."
+    },
+    {
+      "id": "tc-ch10-l02-3",
+      "title": "Classify Incoming TCP Data Event",
+      "erlangCall": "tcp_socket_opts:classify_socket_event({tcp, make_ref(), <<\"XMPP_STANZA\">>})",
+      "expectedOutput": "{data,11,<<\"XMPP_STANZA\">>}",
+      "explanation": "Extracts data length and payload binary from active TCP message."
+    },
+    {
+      "id": "tc-ch10-l02-4",
+      "title": "Manually Encode {packet, 4} Wire Frame",
+      "erlangCall": "tcp_socket_opts:encode_length_prefixed(<<\"PING\">>)",
+      "expectedOutput": "<<0,0,0,4,80,73,78,71>>",
+      "explanation": "Prepends 4-byte big-endian integer length (4) onto \"PING\" (80, 73, 78, 71)."
+    }
+  ]
+}

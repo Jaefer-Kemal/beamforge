@@ -1,0 +1,65 @@
+{
+  "id": "ch05-l06",
+  "chapterNumber": 5,
+  "lessonNumber": 6,
+  "lessonType": "concept_exercise",
+  "title": "Finite State Machine (FSM) Actors via Mutual Tail Recursion",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "Models finite state machines via mutual tail recursion across locked/2 and unlocked/1, executing state transitions in O(1) stack space with make_ref() correlation.",
+  "astRules": {
+    "requireTailRecursion": [
+      "locked/2",
+      "unlocked/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "spawn",
+      "module": "erlang",
+      "signature": "spawn(Fun) -> pid()",
+      "typesSpec": [
+        "Fun = fun(() -> any())"
+      ],
+      "description": "Spawns a new concurrent process executing the given anonymous closure and returns its PID.",
+      "complexityNote": "O(1) allocation (~2.5 KB base heap).",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#spawn/1"
+    },
+    {
+      "functionName": "make_ref",
+      "module": "erlang",
+      "signature": "erlang:make_ref() -> reference()",
+      "typesSpec": [
+        "reference() = 128-bit unique reference"
+      ],
+      "description": "Returns an almost unique reference token used for request-reply correlation.",
+      "complexityNote": "O(1) atomic counter increment.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#make_ref/0"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does an actor alternating between `locked/2` and `unlocked/1` via mutual tail recursion never run out of stack memory even after billions of transitions?",
+    "codeSnippet": "%% Transitioning from locked to unlocked:\nlocked(Code, Attempts) ->\n    receive\n        {enter_code, From, Ref, Code} ->\n            From ! {reply, Ref, {ok, unlocked}},\n            unlocked(Code)  %% Calling another function in tail position!\n    end.",
+    "options": [
+      {
+        "id": "A",
+        "label": "The BEAM compiler applies Tail-Call Optimization (call_only / call_last) across mutually recursive functions, completely deallocating the caller’s stack frame before jumping to the target function in O(1) space.",
+        "isCorrect": true,
+        "explanation": "Correct! Tail-Call Optimization in the BEAM applies to any function call in the tail position, regardless of whether it calls itself or another function. The stack frame is reused in O(1) constant space."
+      },
+      {
+        "id": "B",
+        "label": "Mutual recursion only works up to 1,024 transitions before switching to disk storage.",
+        "isCorrect": false,
+        "explanation": "Erlang tail calls can recurse infinitely without limit or disk spilling."
+      },
+      {
+        "id": "C",
+        "label": "The operating system kernel resets the thread stack whenever a different function is called.",
+        "isCorrect": false,
+        "explanation": "BEAM stack management occurs entirely in user-space inside the virtual machine."
+      }
+    ]
+  },
+  "visualScene": "mailbox_selective_receive"
+}

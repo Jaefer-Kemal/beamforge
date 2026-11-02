@@ -1,0 +1,52 @@
+{
+  "id": "ch04-l05",
+  "chapterNumber": 4,
+  "lessonNumber": 5,
+  "lessonType": "concept_exercise",
+  "title": "Erlang Bit Syntax (<<Val:Size/TypeSpecifiers>>): Bit-Level Protocol Packing & Endianness",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates <<V:4, F:4, L:16/big>> packing, pattern matching with trailing binary capture, and length-prefixed encoding.",
+  "astRules": {
+    "requiredConstructs": [
+      "bit_syntax"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "bit_syntax",
+      "module": "erlang",
+      "signature": "<<Val:Size/TypeSpecifiers>>",
+      "typesSpec": [
+        "Size = integer()",
+        "TypeSpecifiers = integer | binary | big | little | utf8"
+      ],
+      "description": "Declarative bit-level data packing and destructuring.",
+      "complexityNote": "Executed using hardware vector instructions in ERTS.",
+      "officialUrl": "https://www.erlang.org/doc/programming_examples/bit_syntax.html"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What is the binary representation of <<4:4, 2:4, 1024:16/big>>?",
+    "options": [
+      {
+        "id": "A",
+        "label": "<<66, 4, 0>> (0x42 = 0100 0010 = 66, and 1024 in 16-bit big-endian is 0x0400 = 4, 0)",
+        "isCorrect": true,
+        "explanation": "4 (0100) and 2 (0010) pack into the first byte (01000010 = 66); 1024 is high byte 4 and low byte 0."
+      },
+      {
+        "id": "B",
+        "label": "<<4, 2, 10, 24>>",
+        "isCorrect": false,
+        "explanation": "4 and 2 are 4-bit nibbles that pack together into a single 8-bit byte."
+      },
+      {
+        "id": "C",
+        "label": "<<66, 0, 4>>",
+        "isCorrect": false,
+        "explanation": "<<66, 0, 4>> would be little-endian; big-endian places the high byte 4 first."
+      }
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch05-08-1",
+      "title": "Initial Account Balances",
+      "erlangCall": "begin Accounts = [{account, 1, <<\"Alice\">>, 100}, {account, 2, <<\"Bob\">>, 50}], P = ledger_actor:start(Accounts), B1 = ledger_actor:get_balance(P, 1), B2 = ledger_actor:get_balance(P, 2), ledger_actor:stop(P), {B1, B2} end",
+      "expectedOutput": "{{ok, 100}, {ok, 50}}",
+      "explanation": "Retrieves verified initial balances for Alice and Bob."
+    },
+    {
+      "id": "tc-ch05-08-2",
+      "title": "Deposit and Insufficient Funds Withdrawal",
+      "erlangCall": "begin Accounts = [{account, 1, <<\"Alice\">>, 100}], P = ledger_actor:start(Accounts), {ok, 150} = ledger_actor:process_transaction(P, {deposit, 1, 50}), Err = ledger_actor:process_transaction(P, {withdraw, 1, 200}), {ok, Final} = ledger_actor:get_balance(P, 1), ledger_actor:stop(P), {Err, Final} end",
+      "expectedOutput": "{{error, insufficient_funds}, 150}",
+      "explanation": "Deposits 50 (balance becomes 150), rejects 200 withdrawal and preserves 150 balance."
+    },
+    {
+      "id": "tc-ch05-08-3",
+      "title": "Atomic Inter-Account Transfer",
+      "erlangCall": "begin Accounts = [{account, 1, <<\"Alice\">>, 100}, {account, 2, <<\"Bob\">>, 50}], P = ledger_actor:start(Accounts), {ok, 70} = ledger_actor:process_transaction(P, {transfer, 1, 2, 30}), {ok, B2} = ledger_actor:get_balance(P, 2), ledger_actor:stop(P), B2 end",
+      "expectedOutput": "80",
+      "explanation": "Transfers 30 from Alice to Bob, leaving Alice with 70 and Bob with 80."
+    },
+    {
+      "id": "tc-ch05-08-4",
+      "title": "Batch Processing Transactions",
+      "erlangCall": "begin Accounts = [{account, 1, <<\"Alice\">>, 100}, {account, 2, <<\"Bob\">>, 50}], P = ledger_actor:start(Accounts), Txs = [{deposit, 1, 20}, {withdraw, 2, 100}, {transfer, 1, 2, 40}], {ok, App, Rej} = ledger_actor:process_batch(P, Txs), {ok, B1} = ledger_actor:get_balance(P, 1), {ok, B2} = ledger_actor:get_balance(P, 2), ledger_actor:stop(P), {App, Rej, B1, B2} end",
+      "expectedOutput": "{2, 1, 80, 90}",
+      "explanation": "Applies valid deposit and transfer, rejects invalid withdrawal, returning final balances 80 and 90."
+    }
+  ]
+}

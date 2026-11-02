@@ -1,0 +1,64 @@
+{
+  "id": "ch09-l07",
+  "chapterNumber": 9,
+  "lessonNumber": 7,
+  "lessonType": "incident_triage",
+  "title": "Incident #105: ETS Session Wipeout When Cache Worker Crashes",
+  "difficulty": "Production",
+  "xpReward": 100,
+  "solutionExplanation": "Adds {heir, HeirPid, keep_alive} to ets:new/2 options and implements ets:give_away/3 in transfer_to_restarted_worker to safely preserve session tables across worker crashes.",
+  "otpDocCards": [
+    {
+      "functionName": "give_away",
+      "module": "ets",
+      "signature": "ets:give_away(Tab, Pid, GiftData) -> true",
+      "typesSpec": [
+        "Tab = tab()",
+        "Pid = pid()",
+        "GiftData = term()"
+      ],
+      "description": "Changes the owner of table Tab to Pid. The new owner receives an {'ETS-TRANSFER', Tab, FromPid, GiftData} message.",
+      "complexityNote": "O(1) pointer transfer in the ETS registry.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#give_away/3",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "When an owning worker crashes, what message does the designated heir process receive in its mailbox from ERTS?",
+    "options": [
+      {
+        "id": "A",
+        "label": "{'EXIT', WorkerPid, killed}",
+        "isCorrect": false,
+        "explanation": "Exit signals are sent to linked processes when trapping exits, not the ETS transfer message."
+      },
+      {
+        "id": "B",
+        "label": "{'ETS-TRANSFER', TableId, DeadOwnerPid, HeirData}",
+        "isCorrect": true,
+        "explanation": "ERTS automatically delivers {'ETS-TRANSFER', TableId, DeadOwnerPid, HeirData} to the heir process mailbox, transferring legal ownership without deleting table rows."
+      },
+      {
+        "id": "C",
+        "label": "{reclaim_cache, TableId}",
+        "isCorrect": false,
+        "explanation": "This is not an ERTS system message."
+      },
+      {
+        "id": "D",
+        "label": "{'DOWN', Ref, process, WorkerPid, crash}",
+        "isCorrect": false,
+        "explanation": "DOWN messages are sent by process monitors, not the ETS heir mechanism."
+      }
+    ]
+  },
+  "incidentAlert": {
+    "incidentId": "INC-105",
+    "severity": "CRITICAL",
+    "serviceName": "ets-session-cache",
+    "symptom": "Every time a malformed request crashes the session_cache worker, all 250,000 logged-in users are simultaneously logged out and forced to re-authenticate!",
+    "rootCauseHint": "create_session_table/1 calls ets:new(incident_sessions_tab, [set, public, named_table]) without a {heir, HeirPid, keep_alive} option, and transfer_to_restarted_worker/2 fails to call ets:give_away/3.",
+    "fixObjective": "Add {heir, HeirPid, keep_alive} to ets:new/2 in create_session_table/1 and implement ets:give_away(Tab, NewWorkerPid, keep_alive) in transfer_to_restarted_worker/2."
+  },
+  "visualScene": "supervision_rest_for_one_ets_heir"
+}

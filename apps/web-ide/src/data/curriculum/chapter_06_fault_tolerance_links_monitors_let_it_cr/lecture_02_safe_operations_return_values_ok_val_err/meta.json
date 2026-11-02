@@ -1,0 +1,61 @@
+{
+  "id": "ch06-l02",
+  "chapterNumber": 6,
+  "lessonNumber": 2,
+  "lessonType": "concept_exercise",
+  "title": "Safe Operations & Return Values ({ok, Val} | {error, Reason}) vs. Exceptions",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements safe tagged tuple returns across division, integer checking, email binary pattern matching, and a sequential checkout validation pipeline.",
+  "astRules": {},
+  "otpDocCards": [
+    {
+      "functionName": "split",
+      "module": "binary",
+      "signature": "binary:split(Subject, Pattern) -> [binary()]",
+      "typesSpec": [
+        "Subject = binary()",
+        "Pattern = binary() | [binary()]"
+      ],
+      "description": "Splits Subject into binary chunks separated by Pattern.",
+      "complexityNote": "O(N) optimized Boyer-Moore search.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#split/2"
+    },
+    {
+      "functionName": "match",
+      "module": "binary",
+      "signature": "binary:match(Subject, Pattern) -> {Pos, Len} | nomatch",
+      "typesSpec": [
+        "Subject = binary()",
+        "Pattern = binary()"
+      ],
+      "description": "Searches for the first occurrence of Pattern in Subject.",
+      "complexityNote": "O(N) zero-copy byte scan.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#match/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does idiomatic Erlang insist on returning `{error, Reason}` for user input validation rather than calling `erlang:error(invalid_input)`?",
+    "codeSnippet": "%% Approach A:\nvalidate(Amount) -> erlang:error(invalid_amount).\n\n%% Approach B:\nvalidate(Amount) -> {error, invalid_amount}.",
+    "options": [
+      {
+        "id": "A",
+        "label": "User input validation errors are normal, expected business data; returning `{error, Reason}` forces callers to handle failure explicitly without crashing supervisors or risking DoS.",
+        "isCorrect": true,
+        "explanation": "Correct! Expected domain failures are data terms. Raising exceptions on user input causes unnecessary process crashes and risks Denial-of-Service under hostile client traffic."
+      },
+      {
+        "id": "B",
+        "label": "The BEAM runtime automatically blocks any process that calls erlang:error.",
+        "isCorrect": false,
+        "explanation": "erlang:error does not block processes; it causes immediate process unwinding."
+      },
+      {
+        "id": "C",
+        "label": "Tagged tuples execute 100x faster than boolean returns.",
+        "isCorrect": false,
+        "explanation": "The difference is architectural clarity and error-handling discipline, not raw instruction speed."
+      }
+    ]
+  }
+}

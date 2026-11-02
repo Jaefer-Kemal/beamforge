@@ -1,0 +1,35 @@
+{
+  "id": "ch12-capstone",
+  "chapterNumber": 12,
+  "lessonNumber": 1,
+  "lessonType": "capstone_studio",
+  "title": "Capstone: 5-Module Production OTP XMPP Server",
+  "difficulty": "Production",
+  "xpReward": 500,
+  "solutionExplanation": "The 5-module XMPP server coordinates stream framing, stateful connection FSMs, concurrent session tables, and routing under an OTP rest_for_one supervision hierarchy. All sub-binaries are copied to prevent memory bloat, and process monitors guarantee automatic session pruning upon client disconnection.",
+  "visualScene": "xmpp_5_module_capstone_arch",
+  "mentalModelCheck": {
+    "question": "In the BeamForge XMPP Server, why is xmpp_sup configured with rest_for_one with xmpp_session_registry ordered before xmpp_router?",
+    "codeSnippet": "Children = [\n    #{id => xmpp_session_registry, start => {xmpp_session_registry, start_link, []}},\n    #{id => xmpp_router, start => {xmpp_router, start_link, []}}\n]",
+    "options": [
+      {
+        "id": "A",
+        "label": "The router depends directly on the registry's ETS table. Under rest_for_one, if the registry crashes, the router is automatically terminated and restarted against the fresh registry, while a router crash does not kill the registry.",
+        "isCorrect": true,
+        "explanation": "Correct! xmpp_router directly queries xmpp_session_registry's in-memory ETS table. If the registry crashed under one_for_one, the router would hold dead table handles. Under rest_for_one, downstream router is restarted cleanly, but upstream registry is safe if router crashes."
+      },
+      {
+        "id": "B",
+        "label": "rest_for_one is the only supervisor strategy that supports gen_statem processes.",
+        "isCorrect": false,
+        "explanation": "All OTP supervisor strategies support any worker behaviour (gen_server, gen_statem, etc.)."
+      },
+      {
+        "id": "C",
+        "label": "The router requires higher CPU priority than the registry.",
+        "isCorrect": false,
+        "explanation": "Supervisor child order defines startup sequence and crash restart cascades, not BEAM CPU priority."
+      }
+    ]
+  }
+}

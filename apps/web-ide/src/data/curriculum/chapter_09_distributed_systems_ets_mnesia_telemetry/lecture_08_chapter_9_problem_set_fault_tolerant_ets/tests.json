@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Session Operations and Atomic Hit Counter",
+      "erlangCall": "begin [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [session_cache, table_manager, session_sup]], timer:sleep(20), {ok, _} = session_cache:start_pipeline(), ok = session_cache:put_session(<<\"s1\">>, 101, #{ip => <<\"127.0.0.1\">>}), {ok, 1} = session_cache:increment_hits(<<\"s1\">>), {ok, 2} = session_cache:increment_hits(<<\"s1\">>), {ok, Sess} = session_cache:get_session(<<\"s1\">>), Hits = maps:get(hit_count, Sess), session_cache:stop_pipeline(), Hits end",
+      "expectedOutput": "2",
+      "explanation": "Verifies pipeline boot, insertion, and atomic counter updates."
+    },
+    {
+      "id": "tc2",
+      "title": "Chaos Test: Kill Worker -> Zero-Data-Loss Failover",
+      "erlangCall": "begin [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [session_cache, table_manager, session_sup]], timer:sleep(20), {ok, _} = session_cache:start_pipeline(), ok = session_cache:put_session(<<\"sess_a\">>, 999, #{role => admin}), {ok, 1} = session_cache:increment_hits(<<\"sess_a\">>), OldPid = whereis(session_cache), exit(OldPid, kill), timer:sleep(60), NewPid = whereis(session_cache), {ok, SessA} = session_cache:get_session(<<\"sess_a\">>), session_cache:stop_pipeline(), {OldPid =/= NewPid, maps:get(hit_count, SessA)} end",
+      "expectedOutput": "{true, 1}",
+      "explanation": "Kills worker with kill signal, verifies new PID from supervisor, and confirms 100% data preservation."
+    }
+  ]
+}

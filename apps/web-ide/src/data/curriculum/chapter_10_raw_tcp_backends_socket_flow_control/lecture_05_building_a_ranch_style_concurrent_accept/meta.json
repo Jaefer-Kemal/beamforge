@@ -1,0 +1,86 @@
+{
+  "id": "ch10-l05",
+  "chapterNumber": 10,
+  "lessonNumber": 5,
+  "lessonType": "concept_exercise",
+  "title": "Building a Ranch-Style Concurrent Acceptor Pool & gen_tcp:controlling_process/2 Handoff",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "### Solution Breakdown: High-Concurrency Socket Handoff\n1. **Controlling Process Transfer**: `gen_tcp:controlling_process(ClientSocket, WorkerPid)` assigns the worker as the designated port owner before any data packets are read.\n2. **Readiness Signal**: After handoff succeeds, the acceptor transmits `{socket_ready, ClientSocket}` to awaken the worker thread.\n3. **Concurrent Acceptor Loops**: Spawning multiple processes that call `gen_tcp:accept(ListenSocket)` concurrently allows the operating system kernel to distribute incoming connections across CPU cores with zero synchronization locks.",
+  "astRules": {
+    "requireTailRecursion": [
+      "manager_loop/3",
+      "pool_worker_loop/2"
+    ],
+    "forbiddenCalls": [],
+    "requiredCalls": [
+      "gen_tcp:controlling_process/2",
+      "gen_tcp:listen/2",
+      "gen_tcp:accept/1"
+    ],
+    "requiredConstructs": [
+      "receive_after"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "controlling_process",
+      "module": "gen_tcp",
+      "signature": "gen_tcp:controlling_process(Socket, Pid) -> ok | {error, Reason}",
+      "typesSpec": [
+        "Socket = gen_tcp:socket()",
+        "Pid = pid()"
+      ],
+      "description": "Assigns a new controlling process to the socket. All subsequent events are delivered to Pid.",
+      "complexityNote": "Transfers port ownership in O(1) time.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/gen_tcp.html#controlling_process/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/kernel/src/gen_tcp.erl"
+    },
+    {
+      "functionName": "accept",
+      "module": "gen_tcp",
+      "signature": "gen_tcp:accept(ListenSocket) -> {ok, Socket} | {error, Reason}",
+      "typesSpec": [
+        "ListenSocket = gen_tcp:socket()",
+        "Socket = gen_tcp:socket()"
+      ],
+      "description": "Accepts an incoming TCP connection request on a listening socket descriptor.",
+      "complexityNote": "Blocks caller until a client completes the 3-way handshake.",
+      "officialUrl": "https://www.erlang.org/doc/apps/kernel/gen_tcp.html#accept/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/kernel/src/gen_tcp.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why must the ListenSocket be opened in passive mode ({active, false}) when using an acceptor pool with connection workers?",
+    "codeSnippet": "ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],\n{ok, ListenSocket} = gen_tcp:listen(Port, ListenOpts).",
+    "options": [
+      {
+        "id": "A",
+        "label": "If the socket were active, incoming client data would arrive in the acceptor process's mailbox before gen_tcp:controlling_process/2 finishes transferring ownership to the newly spawned worker.",
+        "isCorrect": true,
+        "explanation": "Precisely! By keeping the socket in passive mode during handshake and handoff, incoming data waits safely in OS kernel buffers until the worker is spawned, takes ownership, and explicitly arms {active, once}."
+      },
+      {
+        "id": "B",
+        "label": "Passive mode is required by the Linux kernel to support multiple CPU cores.",
+        "isCorrect": false,
+        "explanation": "Linux supports active sockets across all cores; the passive requirement is an Erlang concurrency handoff invariant."
+      },
+      {
+        "id": "C",
+        "label": "Active mode sockets cannot be closed by a supervisor.",
+        "isCorrect": false,
+        "explanation": "Supervisors can close any socket descriptor regardless of active mode."
+      }
+    ]
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "Nine Nines: Ranch User Guide",
+      "url": "https://ninenines.eu/docs/en/ranch/2.1/guide/",
+      "category": "github_ecosystem",
+      "description": "Architectural documentation for the Ranch socket acceptor pool library."
+    }
+  ]
+}

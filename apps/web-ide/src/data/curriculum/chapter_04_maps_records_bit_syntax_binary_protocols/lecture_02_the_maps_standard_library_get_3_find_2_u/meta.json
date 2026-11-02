@@ -1,0 +1,68 @@
+{
+  "id": "ch04-l02",
+  "chapterNumber": 4,
+  "lessonNumber": 2,
+  "lessonType": "concept_exercise",
+  "title": "The maps Standard Library: get/3, find/2, update_with/4, merge/2 & fold/3",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates maps:get/3 fallback defaults, atomic histogram counting via maps:update_with/4, config sanitization via maps:merge/2 and maps:without/2, and maps:fold/3 aggregation.",
+  "astRules": {
+    "requiredCalls": [
+      "maps:get/3",
+      "maps:update_with/4",
+      "maps:merge/2",
+      "maps:fold/3"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "maps:update_with/4",
+      "module": "maps",
+      "signature": "update_with(Key, Fun, Init, Map1) -> Map2",
+      "typesSpec": [
+        "Key = term()",
+        "Fun = fun((Val) -> Val)",
+        "Init = Val = term()"
+      ],
+      "description": "Updates value for Key with Fun, or initializes with Init if Key is absent.",
+      "complexityNote": "Single-pass O(log N) lookup and update.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/maps.html#update_with/4"
+    },
+    {
+      "functionName": "maps:fold/3",
+      "module": "maps",
+      "signature": "fold(Fun, Init, Map) -> Acc",
+      "typesSpec": [
+        "Fun = fun((Key, Value, AccIn) -> AccOut)",
+        "Acc = term()"
+      ],
+      "description": "Folds over key-value pairs without intermediate list allocations.",
+      "complexityNote": "O(N) direct traversal of FlatMap arrays or HAMT trie.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/maps.html#fold/3"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "In maps:merge(Defaults, Overrides), what happens if a key exists in both maps?",
+    "options": [
+      {
+        "id": "A",
+        "label": "The value from Overrides (the second map argument) overwrites the value from Defaults",
+        "isCorrect": true,
+        "explanation": "In maps:merge/2, the second map always takes precedence when duplicate keys are present."
+      },
+      {
+        "id": "B",
+        "label": "The BEAM VM raises a {badkey, conflict} exception",
+        "isCorrect": false,
+        "explanation": "maps:merge/2 does not crash on conflicts; it resolves them in favor of the second argument."
+      },
+      {
+        "id": "C",
+        "label": "The value from Defaults is preserved unless Overrides is non-empty",
+        "isCorrect": false,
+        "explanation": "The second map argument always wins on duplicate keys."
+      }
+    ]
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "id": "ch02-l05",
+  "chapterNumber": 2,
+  "lessonNumber": 5,
+  "lessonType": "concept_exercise",
+  "title": "Body Recursion vs. Tail-Call Optimization (TCO) on the BEAM Stack",
+  "difficulty": "Beginner",
+  "xpReward": 100,
+  "solutionExplanation": "Implements tail-recursive loops with private accumulator helpers, compiling into call_last BEAM opcodes.",
+  "astRules": {
+    "requireTailRecursion": [
+      "sum_packets/1",
+      "count_packets/1"
+    ],
+    "forbiddenCalls": [
+      "lists:sum/1",
+      "erlang:length/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "tail_call_optimization",
+      "module": "erts",
+      "signature": "call_last Function/Arity",
+      "typesSpec": [
+        "Instruction = beam_opcode()"
+      ],
+      "description": "BEAM opcode that reuses the current stack frame for recursive iterations.",
+      "complexityNote": "Guarantees O(1) stack space regardless of list length.",
+      "officialUrl": "https://www.erlang.org/doc/efficiency_guide/myths.html#tail_recursive"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does sum([H|T], Acc) -> sum(T, Acc + H) execute in O(1) stack space while sum([H|T]) -> H + sum(T) consumes O(N) stack frames?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Because the recursive call is the very last operation, allowing the BEAM VM to overwrite the active stack frame with call_last",
+        "isCorrect": true,
+        "explanation": "In tail position, no computation remains to be performed after returning, so the stack frame is reused."
+      },
+      {
+        "id": "B",
+        "label": "Because Erlang converts tail-recursive functions into C pointers in the runtime",
+        "isCorrect": false,
+        "explanation": "Erlang compiles to BEAM bytecode instructions, not C pointers."
+      },
+      {
+        "id": "C",
+        "label": "Because the accumulator allocates memory on the global heap instead of the process stack",
+        "isCorrect": false,
+        "explanation": "Accumulators are arguments stored in CPU registers and stack slots."
+      }
+    ]
+  },
+  "visualScene": "tco_vs_body_stack"
+}

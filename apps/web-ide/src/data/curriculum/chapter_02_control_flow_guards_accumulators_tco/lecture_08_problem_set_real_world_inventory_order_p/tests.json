@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch02-08-a",
+      "title": "Process Multiple Orders with Partial Fulfillment",
+      "erlangCall": "inventory:process_order([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}, {product, 3, \"Monitor\", 200, 2}], [{order, 1, 2}, {order, 2, 3}, {order, 3, 5}])",
+      "expectedOutput": "[{product, 1, \"Keyboard\", 50, 8}, {product, 2, \"Mouse\", 25, 2}, {product, 3, \"Monitor\", 200, 2}]",
+      "explanation": "Deducts 2 from P1 and 3 from P2. P3 requested 5 but only 2 in stock, so P3 remains unchanged."
+    },
+    {
+      "id": "tc-ch02-08-b",
+      "title": "Calculate Order Total with Fulfilled Items",
+      "erlangCall": "inventory:calculate_order_total([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}, {product, 3, \"Monitor\", 200, 2}], [{order, 1, 2}, {order, 2, 3}, {order, 3, 5}])",
+      "expectedOutput": "175",
+      "explanation": "(2 * 50) + (3 * 25) = 100 + 75 = 175. P3 is unfulfillable so adds 0."
+    },
+    {
+      "id": "tc-ch02-08-c",
+      "title": "Restock Products in Inventory",
+      "erlangCall": "inventory:restock([{product, 1, \"Keyboard\", 50, 8}, {product, 2, \"Mouse\", 25, 2}, {product, 3, \"Monitor\", 200, 2}], [{1, 5}, {2, 10}])",
+      "expectedOutput": "[{product, 1, \"Keyboard\", 50, 13}, {product, 2, \"Mouse\", 25, 12}, {product, 3, \"Monitor\", 200, 2}]",
+      "explanation": "Adds 5 to P1 stock (8 + 5 = 13) and 10 to P2 stock (2 + 10 = 12). P3 remains 2."
+    }
+  ]
+}

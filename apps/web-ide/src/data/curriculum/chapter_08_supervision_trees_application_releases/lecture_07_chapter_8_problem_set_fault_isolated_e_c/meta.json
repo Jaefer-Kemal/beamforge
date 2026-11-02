@@ -1,0 +1,61 @@
+{
+  "id": "ch08-l07",
+  "chapterNumber": 8,
+  "lessonNumber": 7,
+  "lessonType": "problem_set",
+  "title": "Chapter 8 Problem Set: Fault-Isolated E-Commerce Checkout Supervision Tree",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "Implements the production rest_for_one checkout supervision tree with 3 permanent workers cleanly separated into checkout_worker.erl, verified by automated multi-stage chaos tests.",
+  "astRules": {
+    "requiredCalls": [
+      "supervisor:start_link/3",
+      "supervisor:which_children/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "start_link",
+      "module": "supervisor",
+      "signature": "supervisor:start_link(SupName, Module, Args) -> {ok, Pid} | {error, Reason}",
+      "typesSpec": [
+        "SupName = {local, atom()} | {global, term()}",
+        "Module = module()",
+        "Args = term()"
+      ],
+      "description": "Creates a supervisor process as part of a supervision tree, registering it locally and linking to caller.",
+      "complexityNote": "Synchronous boot. Returns only when init/1 and all permanent children have started.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/supervisor.html#start_link/3"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "In checkout_sup with children [db_pool, pricing_cache, order_gateway] under rest_for_one, why does order_gateway crashing NOT restart pricing_cache?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Because order_gateway is downstream of pricing_cache; in rest_for_one, failures only propagate to children started AFTER the crashed child.",
+        "isCorrect": true,
+        "explanation": "rest_for_one protects upstream dependencies from downstream failures."
+      },
+      {
+        "id": "B",
+        "label": "Because pricing_cache uses temporary restart.",
+        "isCorrect": false,
+        "explanation": "All 3 children use permanent restarts."
+      },
+      {
+        "id": "C",
+        "label": "Because order_gateway is supervised by a different supervisor.",
+        "isCorrect": false,
+        "explanation": "All 3 children are in the same checkout_sup supervisor."
+      },
+      {
+        "id": "D",
+        "label": "Because the supervisor drops exit signals from the last child.",
+        "isCorrect": false,
+        "explanation": "The supervisor processes exit signals from all children, but applies the strategy rules to decide which peers to restart."
+      }
+    ]
+  },
+  "visualScene": "supervision_rest_for_one_ets_heir"
+}

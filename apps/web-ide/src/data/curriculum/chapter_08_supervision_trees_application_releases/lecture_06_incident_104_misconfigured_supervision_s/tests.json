@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Supervisor Strategy & Restarts Audit",
+      "explanation": "Audits init/1 to confirm rest_for_one and permanent across all three workers.",
+      "erlangCall": "incident_wrong_strategy:audit_flags()",
+      "expectedOutput": "{ok, rest_for_one, [permanent, permanent, permanent]}"
+    },
+    {
+      "id": "tc2",
+      "title": "Live Chaos Cascade Test",
+      "explanation": "Kills worker_cache and confirms worker_db stays unharmed while downstream worker_http restarts.",
+      "erlangCall": "incident_wrong_strategy:test_chaos_cascade()",
+      "expectedOutput": "{ok, db_unaffected, downstream_restarted}"
+    }
+  ]
+}

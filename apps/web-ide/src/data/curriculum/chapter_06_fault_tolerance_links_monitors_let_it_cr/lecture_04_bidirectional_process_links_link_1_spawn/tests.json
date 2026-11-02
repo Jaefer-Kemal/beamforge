@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch06-04-1",
+      "title": "Two-Stage Pipeline Computation",
+      "erlangCall": "begin {ok, W1, W2} = linked_pipeline:start_linked_pipeline(), {ok, Res} = linked_pipeline:compute(W1, 3), {Res, is_process_alive(W1), is_process_alive(W2)} end",
+      "expectedOutput": "{36, true, true}",
+      "explanation": "3 doubled to 6 by Stage 1, squared to 36 by Stage 2. Both processes alive."
+    },
+    {
+      "id": "tc-ch06-04-2",
+      "title": "Normal Exit Leaves Linked Peer Alive",
+      "erlangCall": "begin {ok, W1, W2} = linked_pipeline:start_linked_pipeline(), ok = linked_pipeline:stop_stage1_normal(W1), timer:sleep(40), {is_process_alive(W1), is_process_alive(W2)} end",
+      "expectedOutput": "{false, true}",
+      "explanation": "Stage 1 exited with normal; Stage 2 ignored normal signal and remained alive."
+    },
+    {
+      "id": "tc-ch06-04-3",
+      "title": "Abnormal Crash Propagates Across Link",
+      "erlangCall": "begin {ok, W1, W2} = linked_pipeline:start_linked_pipeline(), ok = linked_pipeline:crash_stage1(W1, fatal_crash), timer:sleep(40), {is_process_alive(W1), is_process_alive(W2)} end",
+      "expectedOutput": "{false, false}",
+      "explanation": "Abnormal crash in Stage 1 propagated across link, terminating Stage 2."
+    }
+  ]
+}

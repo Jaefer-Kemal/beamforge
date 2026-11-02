@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Table Options Heir Audit",
+      "erlangCall": "incident_ets_wipeout:audit_table_heir()",
+      "expectedOutput": "{ok, heir_configured}",
+      "explanation": "Audits ets:info(Tab, heir) verifying that HeirPid is registered with keep_alive."
+    },
+    {
+      "id": "tc2",
+      "title": "Heir Transfer Survival & Restitution",
+      "erlangCall": "incident_ets_wipeout:test_heir_handover()",
+      "expectedOutput": "{ok, 3, survived}",
+      "explanation": "Stores 3 sessions, crashes worker; heir receives table, gives away to new worker, and confirms all 3 sessions survived."
+    }
+  ]
+}

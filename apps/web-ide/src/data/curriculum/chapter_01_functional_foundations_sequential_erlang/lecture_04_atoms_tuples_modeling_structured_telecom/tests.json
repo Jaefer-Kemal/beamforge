@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch01-04-a",
+      "title": "Create Tagged Telecom Event",
+      "erlangCall": "telecom_events:make_event(101, alice, bob)",
+      "expectedOutput": "{call_event, 101, alice, bob, 0}",
+      "explanation": "Constructs tagged 5-tuple with 0 initial duration."
+    },
+    {
+      "id": "tc-ch01-04-b",
+      "title": "Extract Caller from Event Tuple",
+      "erlangCall": "telecom_events:extract_caller({call_event, 101, alice, bob, 45})",
+      "expectedOutput": "alice",
+      "explanation": "Extracts caller atom alice via pattern matching."
+    },
+    {
+      "id": "tc-ch01-04-c",
+      "title": "Swap Caller and Callee Endpoints",
+      "erlangCall": "telecom_events:swap_endpoints({call_event, 101, alice, bob, 45})",
+      "expectedOutput": "{call_event, 101, bob, alice, 45}",
+      "explanation": "Swaps alice and bob positions while preserving Id and Duration."
+    }
+  ]
+}

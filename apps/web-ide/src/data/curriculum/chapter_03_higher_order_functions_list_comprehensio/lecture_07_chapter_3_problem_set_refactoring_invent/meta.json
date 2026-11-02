@@ -1,0 +1,70 @@
+{
+  "id": "ch03-l07",
+  "chapterNumber": 3,
+  "lessonNumber": 7,
+  "lessonType": "problem_set",
+  "title": "Chapter 3 Problem Set: Refactoring Inventory Analytics & SLA Log Aggregator (inventory_hof.erl)",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Synthesizes foldl reductions, single-pass filtermap alerts, keyfind/keystore order updates, and SLA log aggregation without forward references.",
+  "astRules": {
+    "requiredCalls": [
+      "lists:foldl/3",
+      "lists:filtermap/2",
+      "lists:keyfind/3",
+      "lists:keystore/4"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "lists:foldl/3",
+      "module": "lists",
+      "signature": "foldl(Fun, Acc0, List) -> Acc1",
+      "typesSpec": [
+        "Fun = fun((Elem, AccIn) -> AccOut)",
+        "Acc0 = term()",
+        "List = [term()]"
+      ],
+      "description": "Tail-recursive collection fold operator.",
+      "complexityNote": "O(N) time, O(1) stack words.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/lists.html#foldl/3"
+    },
+    {
+      "functionName": "lists:keyfind/3",
+      "module": "lists",
+      "signature": "keyfind(Key, N, TupleList) -> Tuple | false",
+      "typesSpec": [
+        "Key = term()",
+        "N = pos_integer()",
+        "TupleList = [tuple()]"
+      ],
+      "description": "C BIF searching for tuple by key at position N.",
+      "complexityNote": "O(N) fast C traversal.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/lists.html#keyfind/3"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "How does apply_orders_with_keylists maintain list order when updating products?",
+    "options": [
+      {
+        "id": "A",
+        "label": "lists:keystore replaces the matching tuple in its exact existing index position within the list",
+        "isCorrect": true,
+        "explanation": "lists:keystore preserves the original positions of all existing tuples in the list."
+      },
+      {
+        "id": "B",
+        "label": "It moves the modified tuple to the end of the list automatically",
+        "isCorrect": false,
+        "explanation": "It only appends if the key did not previously exist."
+      },
+      {
+        "id": "C",
+        "label": "It sorts the list numerically by product ID after every replacement",
+        "isCorrect": false,
+        "explanation": "lists:keystore does not sort elements; it maintains existing sequence."
+      }
+    ]
+  },
+  "visualScene": "tco_vs_body_stack"
+}

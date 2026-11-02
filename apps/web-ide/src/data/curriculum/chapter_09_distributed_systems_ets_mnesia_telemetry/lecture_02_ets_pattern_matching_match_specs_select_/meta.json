@@ -1,0 +1,88 @@
+{
+  "id": "ch09-l02",
+  "chapterNumber": 9,
+  "lessonNumber": 2,
+  "lessonType": "concept_exercise",
+  "title": "ETS Pattern Matching, Match Specs (select, select_delete) & protected Reads",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Uses {keypos, 2} to index records by token and compiles match specifications for select and atomic select_delete.",
+  "astRules": {
+    "requiredCalls": [
+      "ets:new/2",
+      "ets:select_delete/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "select_delete",
+      "module": "ets",
+      "signature": "ets:select_delete(Tab, MatchSpec) -> NumDeleted",
+      "typesSpec": [
+        "Tab = tab()",
+        "MatchSpec = match_spec()",
+        "NumDeleted = integer()"
+      ],
+      "description": "Atomically deletes all records matching the match specification from table Tab inside ERTS C memory.",
+      "complexityNote": "O(N) table scan executing entirely in off-heap C memory.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#select_delete/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl"
+    },
+    {
+      "functionName": "select",
+      "module": "ets",
+      "signature": "ets:select(Tab, MatchSpec) -> [Match]",
+      "typesSpec": [
+        "Tab = tab()",
+        "MatchSpec = match_spec()",
+        "Match = term()"
+      ],
+      "description": "Searches the table Tab using a match specification, returning only matching rows transformed to the result format.",
+      "complexityNote": "O(N) scan without copying non-matching terms to process heap.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#select/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl"
+    },
+    {
+      "functionName": "match_object",
+      "module": "ets",
+      "signature": "ets:match_object(Tab, Pattern) -> [tuple()]",
+      "typesSpec": [
+        "Tab = tab()",
+        "Pattern = tuple()"
+      ],
+      "description": "Returns all objects in table Tab that match the specified tuple pattern containing _ wildcards.",
+      "complexityNote": "O(N) scan for set; O(log N) if key is fixed.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/ets.html#match_object/2",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why is using ets:select_delete/2 superior to fetching records with ets:tab2list/1, filtering in Erlang, and calling ets:delete/2 in a loop?",
+    "options": [
+      {
+        "id": "A",
+        "label": "tab2list/1 encrypts the data before returning it to the Erlang process.",
+        "isCorrect": false,
+        "explanation": "tab2list/1 returns unencrypted raw terms."
+      },
+      {
+        "id": "B",
+        "label": "ets:select_delete/2 evaluates filters and frees rows directly in the C runtime without copying millions of terms to the process heap.",
+        "isCorrect": true,
+        "explanation": "tab2list/1 copies every single tuple out of off-heap C memory and onto the calling process heap, generating massive garbage collection pressure. ets:select_delete/2 filters and deletes rows directly in C memory."
+      },
+      {
+        "id": "C",
+        "label": "ets:delete/2 does not work on named tables.",
+        "isCorrect": false,
+        "explanation": "ets:delete/2 works fine on named tables."
+      },
+      {
+        "id": "D",
+        "label": "tab2list/1 automatically deletes the ETS table after being called.",
+        "isCorrect": false,
+        "explanation": "tab2list/1 is a read-only operation."
+      }
+    ]
+  }
+}

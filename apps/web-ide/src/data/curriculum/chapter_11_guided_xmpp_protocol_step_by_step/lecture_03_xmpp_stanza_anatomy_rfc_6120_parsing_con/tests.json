@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch11-l03-1",
+      "title": "Classify Stream Open and IQ Packet",
+      "erlangCall": "{xmpp_stanza:classify_xml_packet(<<\"<stream:stream to='localhost' version='1.0'>\">>), xmpp_stanza:classify_xml_packet(<<\"<iq type='get' id='ping_42'><ping/></iq>\">>)}",
+      "expectedOutput": "{{stream_open,<<\"localhost\">>},{iq,<<\"ping_42\">>,<<\"get\">>}}",
+      "explanation": "Classifies stream_open and extracts id and type from iq stanza."
+    },
+    {
+      "id": "tc-ch11-l03-2",
+      "title": "Build Bind Result IQ XML",
+      "erlangCall": "xmpp_stanza:build_bind_result(<<\"bind_1\">>, <<\"alice@localhost/macbook\">>)",
+      "expectedOutput": "<<\"<iq type='result' id='bind_1'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>alice@localhost/macbook</jid></bind></iq>\">>",
+      "explanation": "Constructs valid XML IQ bind result with matching id and bound jid."
+    },
+    {
+      "id": "tc-ch11-l03-3",
+      "title": "Build Chat Message XML",
+      "erlangCall": "xmpp_stanza:build_chat_message(<<\"alice@localhost\">>, <<\"bob@localhost\">>, <<\"msg_01\">>, <<\"Hello BEAM\">>)",
+      "expectedOutput": "<<\"<message from='alice@localhost' to='bob@localhost' id='msg_01' type='chat'><body>Hello BEAM</body></message>\">>",
+      "explanation": "Constructs standard XMPP chat message with from, to, id, and body."
+    }
+  ]
+}

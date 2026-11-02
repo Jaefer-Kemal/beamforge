@@ -1,0 +1,53 @@
+{
+  "id": "ch01-l08",
+  "chapterNumber": 1,
+  "lessonNumber": 8,
+  "lessonType": "problem_set",
+  "title": "Problem Set: Telecom CDR Packet Classifier & Billing Engine",
+  "difficulty": "Beginner",
+  "xpReward": 100,
+  "solutionExplanation": "Implements full multi-clause packet routing, empty payload guarding, and arity delegation for standard/premium/internal CDR billing.",
+  "astRules": {
+    "requiredCalls": [
+      "telecom_foundations:bill_call/3"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "pattern_matching_clauses",
+      "module": "erlang",
+      "signature": "Fun(Pattern1) -> Body1; Fun(Pattern2) -> Body2.",
+      "typesSpec": [
+        "Pattern = term()",
+        "Body = term()"
+      ],
+      "description": "Multi-clause function definition with sequential pattern dispatch.",
+      "complexityNote": "O(1) compiled BEAM jump table for literal atom/integer tags.",
+      "officialUrl": "https://www.erlang.org/doc/reference_manual/functions.html",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/erts/emulator/beam/beam_emu.c"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does bill_call(100, internal, 10) return {ok, 0} rather than calculating a connection fee?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Because the clause matching plan type \"internal\" specifies {ok, 0} regardless of duration or connection fee",
+        "isCorrect": true,
+        "explanation": "The internal plan clause ignores duration and fees, returning {ok, 0} for free company communications."
+      },
+      {
+        "id": "B",
+        "label": "Because Erlang integer division automatically rounds negative fees down to zero",
+        "isCorrect": false,
+        "explanation": "No division is performed in bill_call; the clause directly returns the constant literal 0."
+      },
+      {
+        "id": "C",
+        "label": "Because the connection fee is subtracted from the duration in a post-processing filter",
+        "isCorrect": false,
+        "explanation": "There is no post-processing filter; clauses return their evaluated body directly."
+      }
+    ]
+  }
+}

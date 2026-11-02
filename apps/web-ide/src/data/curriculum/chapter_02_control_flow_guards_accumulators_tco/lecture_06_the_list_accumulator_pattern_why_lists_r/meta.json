@@ -1,0 +1,58 @@
+{
+  "id": "ch02-l06",
+  "chapterNumber": 2,
+  "lessonNumber": 6,
+  "lessonType": "concept_exercise",
+  "title": "The List Accumulator Pattern & Why lists:reverse/1 is Mandatory",
+  "difficulty": "Beginner",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates tail-recursive list accumulation using [Item | Acc] and base-case lists:reverse/1 order preservation.",
+  "astRules": {
+    "requireTailRecursion": [
+      "keep_valid_orders/1"
+    ],
+    "requiredCalls": [
+      "lists:reverse/1"
+    ],
+    "forbiddenCalls": [
+      "lists:filter/2",
+      "lists:map/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "reverse",
+      "module": "lists",
+      "signature": "lists:reverse(List1) -> List2",
+      "typesSpec": [
+        "List1 = List2 = [term()]"
+      ],
+      "description": "Reverses the order of elements in List1.",
+      "complexityNote": "Executed as a native C BIF in O(N) time with zero Erlang reduction overhead.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/lists.html#reverse/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why is prepending with [H | Acc] and reversing once with lists:reverse(Acc) vastly superior to Acc ++ [H]?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Acc ++ [H] copies the accumulator on every step resulting in O(N^2) time, while prepend + reverse is strictly O(N)",
+        "isCorrect": true,
+        "explanation": "In singly-linked lists, appending requires walking and copying the entire left list. Prepending takes 1 pointer allocation."
+      },
+      {
+        "id": "B",
+        "label": "The ++ operator only supports lists of strings and fails on integers",
+        "isCorrect": false,
+        "explanation": "The ++ operator works on any Erlang list, but exhibits quadratic performance in loops."
+      },
+      {
+        "id": "C",
+        "label": "The BEAM VM garbage collector cannot free memory used by the ++ operator",
+        "isCorrect": false,
+        "explanation": "Both operators use standard garbage collected heap memory."
+      }
+    ]
+  }
+}

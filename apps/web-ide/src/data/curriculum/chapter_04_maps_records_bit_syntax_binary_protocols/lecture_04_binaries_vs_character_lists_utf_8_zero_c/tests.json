@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch04-04-a",
+      "title": "Compare String vs Binary Memory Footprint",
+      "erlangCall": "iolist_builder:string_vs_binary_bytes(\"hello\")",
+      "expectedOutput": "{size_comparison, 80, 5, <<\"hello\">>}",
+      "explanation": "5 cons cells take 80 bytes; binary takes 5 bytes."
+    },
+    {
+      "id": "tc-ch04-04-b",
+      "title": "Build HTTP Response IOList",
+      "erlangCall": "iolist_builder:build_http_response_iolist(200, <<\"{\"status\":\"ok\"}\">>)",
+      "expectedOutput": "[<<\"HTTP/1.1 \">>, <<\"200\">>, <<\" OK\r\nContent-Length: \">>, <<\"15\">>, <<\"\r\n\r\n\">>, <<\"{\"status\":\"ok\"}\">>]",
+      "explanation": "Assembles nested zero-copy IOList with Content-Length 15."
+    },
+    {
+      "id": "tc-ch04-04-c",
+      "title": "Measure and Flatten IOList",
+      "erlangCall": "iolist_builder:flatten_iolist([<<\"PING\">>, [<<\"-\">>, <<\"PONG\">>]])",
+      "expectedOutput": "{9, <<\"PING-PONG\">>}",
+      "explanation": "Size is 9 bytes and flat binary is <<\"PING-PONG\">>."
+    }
+  ]
+}

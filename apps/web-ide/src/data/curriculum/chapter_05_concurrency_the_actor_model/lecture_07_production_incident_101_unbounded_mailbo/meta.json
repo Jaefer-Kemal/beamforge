@@ -1,0 +1,65 @@
+{
+  "id": "ch05-l07",
+  "chapterNumber": 5,
+  "lessonNumber": 7,
+  "lessonType": "incident_triage",
+  "title": "🚨 Production Incident #101: Unbounded Mailbox Memory Leak in Telemetry Actor",
+  "difficulty": "Production",
+  "xpReward": 100,
+  "solutionExplanation": "Adds a catch-all `_Unknown -> loop(State)` clause to the actor receive loop to purge unhandled messages from the Save Queue, and adds `after 1000 -> {error, timeout}` to protect client callers.",
+  "astRules": {
+    "requireTailRecursion": [
+      "loop/1"
+    ],
+    "requiredConstructs": [
+      "receive_after"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "process_info",
+      "module": "erlang",
+      "signature": "erlang:process_info(Pid, Item) -> {Item, Info} | undefined",
+      "typesSpec": [
+        "Pid = pid()",
+        "Item = message_queue_len | memory | heap_size"
+      ],
+      "description": "Returns real-time runtime telemetry for a process. Use message_queue_len to verify the mailbox is cleanly drained.",
+      "complexityNote": "O(1) runtime memory inspection.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#process_info/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What is the fatal production consequence of omitting a catch-all `_Other -> loop(State)` clause in an actor’s `receive` block?",
+    "codeSnippet": "loop(State) ->\n    receive\n        {metric, V} -> loop(update(V, State))\n        %% Missing catch-all!\n    end.",
+    "options": [
+      {
+        "id": "A",
+        "label": "Unmatched messages accumulate indefinitely in the BEAM Save Queue, consuming gigabytes of heap memory and degrading message scan times from O(1) to O(N).",
+        "isCorrect": true,
+        "explanation": "Correct! When messages fail to match any pattern, the BEAM saves them in the Save Queue. As thousands of unmatched messages accumulate, memory balloons and every receive must linearly scan the entire backlog."
+      },
+      {
+        "id": "B",
+        "label": "The BEAM immediately throws a function_clause exception and terminates the VM.",
+        "isCorrect": false,
+        "explanation": "Receive blocks do not crash on unmatched messages; they simply save them."
+      },
+      {
+        "id": "C",
+        "label": "The actor automatically forwards unhandled messages to the process registry.",
+        "isCorrect": false,
+        "explanation": "The runtime does not automatically forward unhandled messages."
+      }
+    ]
+  },
+  "incidentAlert": {
+    "incidentId": "INC-101",
+    "severity": "CRITICAL",
+    "serviceName": "telemetry-aggregator-actor",
+    "symptom": "Node memory consumption climbs from 120 MB to 14 GB over 2 hours; get_summary/1 latency degrades from 0.2ms to 4,800ms before OOM killer terminates the container.",
+    "rootCauseHint": "Legacy IoT sensors are broadcasting {legacy_heartbeat, Node, Ts} and {debug_trace, Bin} tuples to the telemetry actor. Because loop/2 only matches {record_metric, Val} and {get_summary, From, Ref}, unmatched messages accumulate in the BEAM Save Queue forever!",
+    "fixObjective": "Add a catch-all clause in loop/2 to discard unexpected noise messages without losing state, and add a 1,000ms timeout guard in get_summary/1."
+  },
+  "visualScene": "mailbox_selective_receive"
+}

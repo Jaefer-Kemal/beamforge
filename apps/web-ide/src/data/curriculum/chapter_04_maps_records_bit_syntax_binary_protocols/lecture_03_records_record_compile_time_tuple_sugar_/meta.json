@@ -1,0 +1,55 @@
+{
+  "id": "ch04-l03",
+  "chapterNumber": 4,
+  "lessonNumber": 3,
+  "lessonType": "concept_exercise",
+  "title": "Records (-record): Compile-Time Tuple Sugar, #rec.field Indices & Header Files",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Declares -record(frame, {...}) and demonstrates record instantiation, update, #frame.seq tuple offset extraction, and lists:keyfind integration.",
+  "astRules": {
+    "requiredConstructs": [
+      "record_def"
+    ],
+    "requiredCalls": [
+      "lists:keyfind/3"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "record_syntax",
+      "module": "erlang",
+      "signature": "#record_name{field = Val}",
+      "typesSpec": [
+        "Compile-time tuple abstraction",
+        "Zero runtime key dictionary"
+      ],
+      "description": "Tagged tuple wrapper providing named field access with O(1) tuple speed.",
+      "complexityNote": "Exact same speed and memory footprint as raw tagged tuples.",
+      "officialUrl": "https://www.erlang.org/doc/reference_manual/records.html"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What does the expression #frame.seq evaluate to at compile time for -record(frame, {seq = 0, type = data, payload}).?",
+    "options": [
+      {
+        "id": "A",
+        "label": "The integer 2, representing the 1-indexed tuple position of seq within the underlying {frame, Seq, Type, Payload} tuple",
+        "isCorrect": true,
+        "explanation": "In Erlang tuples, element 1 is the record tag frame, so seq is at index 2."
+      },
+      {
+        "id": "B",
+        "label": "The default value 0 defined in the record specification",
+        "isCorrect": false,
+        "explanation": "Default values are only used when instantiating new records without explicit values; #record.field is an index offset."
+      },
+      {
+        "id": "C",
+        "label": "The atom seq",
+        "isCorrect": false,
+        "explanation": "#record.field evaluates to an integer index, not an atom."
+      }
+    ]
+  }
+}

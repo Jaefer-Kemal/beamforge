@@ -1,0 +1,11 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch10-l01-1",
+      "title": "Execute End-to-End Live TCP Socket Demo",
+      "erlangCall": "maps:get(frames_exchanged, tcp_live_demo:run_demo())",
+      "expectedOutput": "3",
+      "explanation": "Opens ephemeral loopback port, connects real client, exchanges 3 frames, and closes cleanly."
+    }
+  ]
+}

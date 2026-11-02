@@ -1,0 +1,66 @@
+{
+  "id": "ch04-l04",
+  "chapterNumber": 4,
+  "lessonNumber": 4,
+  "lessonType": "concept_exercise",
+  "title": "Binaries (<<...>>) vs. Character Lists, UTF-8 & Zero-Copy IOLists",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates 16x memory savings of binaries over character lists, nested zero-copy IOList construction for HTTP, and iolist_size/iolist_to_binary handling.",
+  "astRules": {
+    "requiredCalls": [
+      "erlang:list_to_binary/1",
+      "erlang:iolist_to_binary/1",
+      "erlang:iolist_size/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "iolist_to_binary/1",
+      "module": "erlang",
+      "signature": "iolist_to_binary(IoListOrBinary) -> binary()",
+      "typesSpec": [
+        "IoListOrBinary = iolist()",
+        "Returns binary()"
+      ],
+      "description": "Flattens an iolist into a single binary using optimized C buffer copies.",
+      "complexityNote": "O(N) single-pass allocation and copy.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#iolist_to_binary/1"
+    },
+    {
+      "functionName": "iolist_size/1",
+      "module": "erlang",
+      "signature": "iolist_size(Item) -> non_neg_integer()",
+      "typesSpec": [
+        "Item = iolist() | binary()",
+        "Returns integer()"
+      ],
+      "description": "Calculates the size of an iolist in bytes without allocating or flattening.",
+      "complexityNote": "O(N) traversal without memory allocations.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#iolist_size/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does gen_tcp:send(Socket, [HeaderBin, BodyBin]) outperform concatenating <<HeaderBin/binary, BodyBin/binary>> before sending?",
+    "options": [
+      {
+        "id": "A",
+        "label": "The BEAM passes the IOList pointers directly to the OS kernel writev() system call, streaming the disjoint buffers onto the network wire without allocating a copy in RAM",
+        "isCorrect": true,
+        "explanation": "Scatter-gather I/O bypasses user-space buffer concatenation completely."
+      },
+      {
+        "id": "B",
+        "label": "The IOList is automatically compressed by the Erlang compiler before transmission",
+        "isCorrect": false,
+        "explanation": "IOLists are not compressed; they are emitted as disjoint memory vectors."
+      },
+      {
+        "id": "C",
+        "label": "Because Erlang sockets only support linked lists, not binaries",
+        "isCorrect": false,
+        "explanation": "Erlang sockets support raw binaries, iolists, and iodata."
+      }
+    ]
+  }
+}

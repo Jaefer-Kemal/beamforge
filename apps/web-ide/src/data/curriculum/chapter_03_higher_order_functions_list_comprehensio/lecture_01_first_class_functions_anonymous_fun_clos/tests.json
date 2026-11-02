@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch03-01-a",
+      "title": "Generate and Invoke Multiplier Closure",
+      "erlangCall": "begin Mul3 = hof_basics:make_multiplier(3), Mul3(15) end",
+      "expectedOutput": "45",
+      "explanation": "make_multiplier(3) captures Factor=3 and multiplies 15 * 3 = 45."
+    },
+    {
+      "id": "tc-ch03-01-b",
+      "title": "Apply Function Twice to Value",
+      "erlangCall": "hof_basics:apply_twice(fun(X) -> X + 10 end, 5)",
+      "expectedOutput": "25",
+      "explanation": "5 + 10 = 15; 15 + 10 = 25."
+    },
+    {
+      "id": "tc-ch03-01-c",
+      "title": "Invoke Captured fun erlang:abs/1",
+      "erlangCall": "begin AbsRef = hof_basics:math_capture(), AbsRef(-99) end",
+      "expectedOutput": "99",
+      "explanation": "Invokes captured BIF erlang:abs/1 directly."
+    },
+    {
+      "id": "tc-ch03-01-d",
+      "title": "Execute VIP Pricing Strategy",
+      "erlangCall": "begin Strategy = hof_basics:choose_pricing_strategy(vip), Strategy(100) end",
+      "expectedOutput": "80",
+      "explanation": "(100 * 80) div 100 = 80."
+    }
+  ]
+}

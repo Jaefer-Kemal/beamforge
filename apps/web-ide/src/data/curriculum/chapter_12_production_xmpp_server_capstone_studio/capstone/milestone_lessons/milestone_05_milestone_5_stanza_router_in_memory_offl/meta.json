@@ -1,0 +1,28 @@
+{
+  "id": "ch12-m5",
+  "title": "Milestone 5: Stanza Router & In-Memory Offline Store (xmpp_router)",
+  "mentalModelCheck": {
+    "question": "When routing a stanza to a bare JID with multiple active resources, how does xmpp_router dispatch the message?",
+    "codeSnippet": "xmpp_router:route_stanza(FromJid, <<\"alice@localhost\">>, StanzaXml)",
+    "options": [
+      {
+        "id": "A",
+        "label": "It queries xmpp_session_registry:lookup_by_jid/1, which returns the PID with the highest numerical priority.",
+        "isCorrect": true,
+        "explanation": "Correct! Under RFC 6121, bare JID dispatch routes to the session resource possessing the highest numerical priority, or spools offline if none are online."
+      },
+      {
+        "id": "B",
+        "label": "It broadcasts the stanza to every connected user on the server.",
+        "isCorrect": false,
+        "explanation": "Stanzas are strictly routed to the recipient's registered sessions."
+      },
+      {
+        "id": "C",
+        "label": "It rejects bare JIDs with an error because full JIDs are required.",
+        "isCorrect": false,
+        "explanation": "Bare JIDs are standard in XMPP; the server resolves them to the active session with highest priority."
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch02-05-a",
+      "title": "Sum Packet Sizes with TCO",
+      "erlangCall": "tco_counter:sum_packets([10, 20, 30, 40])",
+      "expectedOutput": "100",
+      "explanation": "Tail-recursively sums 10 + 20 + 30 + 40 = 100."
+    },
+    {
+      "id": "tc-ch02-05-b",
+      "title": "Count Packets with TCO",
+      "erlangCall": "tco_counter:count_packets([a, b, c, d, e])",
+      "expectedOutput": "5",
+      "explanation": "Tail-recursively counts 5 items in O(1) stack space."
+    }
+  ]
+}

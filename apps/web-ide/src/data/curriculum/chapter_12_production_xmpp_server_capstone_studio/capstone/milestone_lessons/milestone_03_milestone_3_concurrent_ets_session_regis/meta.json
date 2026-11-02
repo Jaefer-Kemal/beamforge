@@ -1,0 +1,28 @@
+{
+  "id": "ch12-m3",
+  "title": "Milestone 3: Concurrent ETS Session Registry & Process Monitors (xmpp_session_registry)",
+  "mentalModelCheck": {
+    "question": "Why does xmpp_session_registry use erlang:monitor/2 instead of link/1 when tracking client C2S processes?",
+    "codeSnippet": "MRef = erlang:monitor(process, C2sPid),\nets:insert(?TAB, {FullJid, BareJid, Resource, Priority, C2sPid, MRef})",
+    "options": [
+      {
+        "id": "A",
+        "label": "Monitors are unidirectional: if a client connection drops, the registry receives a {'DOWN', ...} message without being killed by exit signals.",
+        "isCorrect": true,
+        "explanation": "Correct! Process links are bidirectional and propagate exit signals. A client crash would crash the registry unless trapped. Monitors deliver a non-fatal message directly to handle_info/2."
+      },
+      {
+        "id": "B",
+        "label": "Erlang only allows up to 1024 links per node, whereas monitors are unlimited.",
+        "isCorrect": false,
+        "explanation": "BEAM supports millions of both links and monitors; the distinction is bidirectional exit propagation vs unidirectional messaging."
+      },
+      {
+        "id": "C",
+        "label": "Monitors automatically restart crashed processes without a supervisor.",
+        "isCorrect": false,
+        "explanation": "Monitors only notify the observer; supervisors are responsible for process restarts."
+      }
+    ]
+  }
+}

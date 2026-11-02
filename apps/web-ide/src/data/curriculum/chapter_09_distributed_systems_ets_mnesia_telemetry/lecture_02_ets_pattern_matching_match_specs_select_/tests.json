@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Query Users by Role",
+      "erlangCall": "begin catch ets:delete(auth_token_table), ok = ets_query_engine:init_auth_table(), ok = ets_query_engine:store_token(<<\"tok_1\">>, 101, admin, 9999), ok = ets_query_engine:store_token(<<\"tok_2\">>, 102, member, 9999), ok = ets_query_engine:store_token(<<\"tok_3\">>, 101, admin, 9999), ets_query_engine:find_users_by_role(admin) end",
+      "expectedOutput": "[101]",
+      "explanation": "Finds user IDs matching admin role and deduplicates results."
+    },
+    {
+      "id": "tc2",
+      "title": "Delete Expired Tokens",
+      "erlangCall": "begin catch ets:delete(auth_token_table), ok = ets_query_engine:init_auth_table(), ok = ets_query_engine:store_token(<<\"exp_1\">>, 201, guest, 100), ok = ets_query_engine:store_token(<<\"exp_2\">>, 202, guest, 200), ok = ets_query_engine:store_token(<<\"valid\">>, 203, guest, 500), DelCount = ets_query_engine:delete_expired_tokens(300), ValidFound = (ets:lookup(auth_token_table, <<\"valid\">>) =/= []), {DelCount, ValidFound} end",
+      "expectedOutput": "{2, true}",
+      "explanation": "Deletes expired tokens while preserving unexpired tokens."
+    }
+  ]
+}

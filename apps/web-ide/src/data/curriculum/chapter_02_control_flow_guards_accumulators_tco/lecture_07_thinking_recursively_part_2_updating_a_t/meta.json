@@ -1,0 +1,60 @@
+{
+  "id": "ch02-l07",
+  "chapterNumber": 2,
+  "lessonNumber": 7,
+  "lessonType": "concept_exercise",
+  "title": "Thinking Recursively (Part 2): Updating a Tuple in a List & Dual Accumulators",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements tail-recursive list updates and dual-accumulator partitioning with O(1) stack space.",
+  "astRules": {
+    "requireTailRecursion": [
+      "update_product_price/3",
+      "partition_orders/2"
+    ],
+    "requiredCalls": [
+      "lists:reverse/1"
+    ],
+    "forbiddenCalls": [
+      "lists:partition/2",
+      "lists:keyreplace/4"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "partition_pattern",
+      "module": "lists",
+      "signature": "partition(Pred, List) -> {Satisfying, NotSatisfying}",
+      "typesSpec": [
+        "Pred = fun((term()) -> boolean())",
+        "List = [term()]"
+      ],
+      "description": "Single-pass dual-accumulator partitioning.",
+      "complexityNote": "Processes stream in O(N) time with minimal heap garbage.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/lists.html#partition/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "When updating a single tuple in an immutable list using tail recursion, why must you continue recursing on Rest after finding the match?",
+    "options": [
+      {
+        "id": "A",
+        "label": "To accumulate the remaining elements of the list so they are preserved in the final reversed list",
+        "isCorrect": true,
+        "explanation": "Stopping immediately would drop all elements that appeared after the target item in the original list."
+      },
+      {
+        "id": "B",
+        "label": "Because the BEAM bytecode verifier requires every function to process at least 1,000 items",
+        "isCorrect": false,
+        "explanation": "Erlang has no arbitrary item threshold; lists of any length are supported."
+      },
+      {
+        "id": "C",
+        "label": "To check if the TargetId exists multiple times in the global atom table",
+        "isCorrect": false,
+        "explanation": "Product IDs are integers, not atoms."
+      }
+    ]
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "id": "ch02-l01",
+  "chapterNumber": 2,
+  "lessonNumber": 1,
+  "lessonType": "concept_exercise",
+  "title": "Deep Pattern Matching in Function Heads & Simultaneous Aliasing",
+  "difficulty": "Beginner",
+  "xpReward": 100,
+  "solutionExplanation": "Uses nested tuple patterns directly in function heads with top-to-bottom clause ordering and pattern aliasing.",
+  "astRules": {
+    "forbiddenCalls": [
+      "erlang:element/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "pattern_matching_heads",
+      "module": "erlang",
+      "signature": "Name(Pattern = Var) -> Body.",
+      "typesSpec": [
+        "Pattern = term()",
+        "Var = term()"
+      ],
+      "description": "Multi-clause pattern matching and simultaneous term aliasing in function heads.",
+      "complexityNote": "Compiled by BEAM into O(1) decision trees of jump tables.",
+      "officialUrl": "https://www.erlang.org/doc/reference_manual/functions.html#pattern-matching"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What is the primary operational benefit of using simultaneous aliasing ({packet, ...} = FullPacket) in a function head?",
+    "options": [
+      {
+        "id": "A",
+        "label": "It avoids reconstructing the outer tuple, pointing directly to the existing term on the heap in O(1)",
+        "isCorrect": true,
+        "explanation": "Aliasing binds the existing heap term to FullPacket without allocating memory or rebuilding fields."
+      },
+      {
+        "id": "B",
+        "label": "It converts the tuple into an Erlang ETS table record automatically",
+        "isCorrect": false,
+        "explanation": "ETS tables are separate in-memory storage facilities and are not related to pattern matching."
+      },
+      {
+        "id": "C",
+        "label": "It creates a mutable reference that updates the caller environment",
+        "isCorrect": false,
+        "explanation": "Erlang terms are strictly immutable; aliasing creates a local variable binding to the existing immutable term."
+      }
+    ]
+  }
+}

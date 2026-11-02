@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc1",
+      "title": "Cluster Node Info and Self RPC",
+      "erlangCall": "begin Info = cluster_pubsub_pg:cluster_node_info(), {ok, Alive} = cluster_pubsub_pg:safe_remote_call(node(), erlang, is_alive, []), {maps:get(alive, Info), Alive} end",
+      "expectedOutput": "{false, false}",
+      "explanation": "Verifies node introspection and local RPC execution."
+    },
+    {
+      "id": "tc2",
+      "title": "Decentralized pg Topic Join and Publish",
+      "erlangCall": "begin Self = self(), ok = cluster_pubsub_pg:join_topic(<<\"alerts\">>, Self), {published, 1} = cluster_pubsub_pg:publish_to_topic(<<\"alerts\">>, <<\"cluster_overload\">>), Msg = receive {pubsub, <<\"alerts\">>, M} -> M after 100 -> timeout end, ok = cluster_pubsub_pg:leave_topic(<<\"alerts\">>, Self), Msg end",
+      "expectedOutput": "<<\"cluster_overload\">>",
+      "explanation": "Tests joining a topic, publishing, receiving the message, and leaving."
+    }
+  ]
+}

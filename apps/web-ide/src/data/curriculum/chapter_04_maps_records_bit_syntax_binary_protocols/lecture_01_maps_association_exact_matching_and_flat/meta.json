@@ -1,0 +1,52 @@
+{
+  "id": "ch04-l01",
+  "chapterNumber": 4,
+  "lessonNumber": 1,
+  "lessonType": "concept_exercise",
+  "title": "Maps (#{}): Association (=>), Exact Matching (:=), and FlatMap vs. HAMT Internals",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates map construction with =>, exact pattern matching and updates with :=, and multi-clause role verification.",
+  "astRules": {
+    "requiredConstructs": [
+      "map_exact_match"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "map_expressions",
+      "module": "erlang",
+      "signature": "#{Key => Val} / #{Key := Val}",
+      "typesSpec": [
+        "Key = term()",
+        "Val = term()"
+      ],
+      "description": "Construct, pattern match, and update associative key-value maps.",
+      "complexityNote": "FlatMap for <=32 keys (shared key tuple), HAMT for >32 keys (O(log32 N)).",
+      "officialUrl": "https://www.erlang.org/doc/reference_manual/expressions.html#map-expressions"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What is the primary operational safeguard of using Map#{key := Val} over Map#{key => Val} when updating existing state?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Map#{key := Val} asserts that key exists, immediately raising a {badkey, key} error on typos instead of silently inserting a duplicate corrupt key",
+        "isCorrect": true,
+        "explanation": "Using := asserts prior existence and catches typos immediately at runtime, preventing silent schema corruption."
+      },
+      {
+        "id": "B",
+        "label": "Map#{key := Val} runs in O(1) time while => runs in O(N) time",
+        "isCorrect": false,
+        "explanation": "Both operators use the exact same underlying FlatMap or HAMT update mechanisms."
+      },
+      {
+        "id": "C",
+        "label": "Map#{key := Val} writes the key directly into ETS memory",
+        "isCorrect": false,
+        "explanation": "All map updates take place on the local process heap."
+      }
+    ]
+  }
+}

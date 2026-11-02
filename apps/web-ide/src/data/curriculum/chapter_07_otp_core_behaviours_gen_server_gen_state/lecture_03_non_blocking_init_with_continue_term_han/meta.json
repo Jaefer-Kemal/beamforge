@@ -1,0 +1,65 @@
+{
+  "id": "ch07-l03",
+  "chapterNumber": 7,
+  "lessonNumber": 3,
+  "lessonType": "concept_exercise",
+  "title": "Non-Blocking Init with {continue, Term}, handle_continue/2 & Periodic handle_info/2 Timers",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Uses {continue, hydrate_defaults} for instant start_link supervisor unblocking and erlang:send_after/3 timer ticks in handle_info to sweep expired sessions.",
+  "astRules": {
+    "requiredCalls": [
+      "erlang:send_after/3"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "send_after",
+      "module": "erlang",
+      "signature": "erlang:send_after(TimeMs, Dest, Msg) -> TimerRef",
+      "typesSpec": [
+        "TimeMs = non_neg_integer()",
+        "Dest = pid() | atom()",
+        "Msg = term()"
+      ],
+      "description": "Starts a timer which sends Msg to Dest after TimeMs milliseconds.",
+      "complexityNote": "O(log N) timer wheel insertion in ERTS runtime.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#send_after/3"
+    },
+    {
+      "functionName": "system_time",
+      "module": "erlang",
+      "signature": "erlang:system_time(Unit) -> integer()",
+      "typesSpec": [
+        "Unit = second | millisecond | microsecond | nanosecond"
+      ],
+      "description": "Returns the current OS system time in the requested time unit.",
+      "complexityNote": "O(1) hardware clock read.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#system_time/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does returning {ok, State, {continue, Term}} prevent supervisor boot timeouts?",
+    "codeSnippet": "init(Args) ->\n    {ok, #{items => #{}}, {continue, hydrate_data}}.",
+    "options": [
+      {
+        "id": "A",
+        "label": "start_link returns immediately to the supervisor, while handle_continue runs before any mailbox messages are processed.",
+        "isCorrect": true,
+        "explanation": "Correct! The supervisor unblocks in microseconds, while OTP guarantees that handle_continue/2 runs before any client calls or casts in the process mailbox."
+      },
+      {
+        "id": "B",
+        "label": "continue spawns a separate OS thread to execute the code.",
+        "isCorrect": false,
+        "explanation": "No OS threads are spawned; handle_continue runs in the same Erlang process."
+      },
+      {
+        "id": "C",
+        "label": "continue disables all timeouts permanently in the BEAM runtime.",
+        "isCorrect": false,
+        "explanation": "Timeouts remain fully active."
+      }
+    ]
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "id": "ch08-l06",
+  "chapterNumber": 8,
+  "lessonNumber": 6,
+  "lessonType": "incident_triage",
+  "title": "Incident #104: Misconfigured Supervision Strategy Leaving Stale Downstream Workers",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "Fixed Incident #104 by reconfiguring supervisor with strategy => rest_for_one, intensity => 5, period => 10, and setting all pipeline workers to permanent restart.",
+  "astRules": {
+    "requiredCalls": [
+      "supervisor:start_link/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "which_children",
+      "module": "supervisor",
+      "signature": "supervisor:which_children(SupRef) -> [{Id, Child, Type, Modules}]",
+      "typesSpec": [
+        "SupRef = pid() | atom()",
+        "Child = pid() | undefined | restarting"
+      ],
+      "description": "Returns a list of all current children managed by the supervisor, including their PIDs and statuses.",
+      "complexityNote": "Synchronous call to supervisor loop.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/supervisor.html#which_children/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why is rest_for_one mandatory for [db -> cache -> http] pipelines instead of one_for_one?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Because when an upstream worker (like cache) restarts, downstream workers (like http) must be restarted to invalidate stale handles and reconnect to the new PID.",
+        "isCorrect": true,
+        "explanation": "rest_for_one guarantees that any child dependent on an upstream worker is cleanly restarted in sequence."
+      },
+      {
+        "id": "B",
+        "label": "Because one_for_one only allows two children total.",
+        "isCorrect": false,
+        "explanation": "one_for_one allows any number of children, but restarts them in total isolation."
+      },
+      {
+        "id": "C",
+        "label": "Because rest_for_one executes 10x faster than one_for_one.",
+        "isCorrect": false,
+        "explanation": "Restart strategy choice is about architectural dependency correctness, not raw execution speed."
+      },
+      {
+        "id": "D",
+        "label": "Because the Erlang compiler rejects one_for_one on pipelines.",
+        "isCorrect": false,
+        "explanation": "The compiler cannot know your architectural dependencies; you must choose the correct strategy."
+      }
+    ]
+  },
+  "incidentAlert": {
+    "incidentId": "INC-104",
+    "severity": "HIGH",
+    "serviceName": "auth-pipeline-sup",
+    "symptom": "When auth_cache crashes under memory pressure, it never restarts (leaving the cache dead), and downstream api_router continues running with broken references!",
+    "rootCauseHint": "init/1 in incident_wrong_strategy.erl configured strategy => one_for_one instead of rest_for_one, set intensity => 0 (so the very first crash kills the supervisor!), and marked auth_cache as restart => temporary.",
+    "fixObjective": "Fix init([]) to return strategy => rest_for_one, intensity => 5, period => 10, and ensure all 3 pipeline children ([worker_db, worker_cache, worker_http]) have restart => permanent and type => worker.",
+    "impact": "Total failure of authentication routing when cache worker crashes."
+  },
+  "visualScene": "supervision_rest_for_one_ets_heir"
+}

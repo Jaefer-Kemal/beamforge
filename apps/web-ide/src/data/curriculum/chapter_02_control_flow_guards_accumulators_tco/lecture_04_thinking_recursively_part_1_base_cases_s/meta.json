@@ -1,0 +1,54 @@
+{
+  "id": "ch02-l04",
+  "chapterNumber": 2,
+  "lessonNumber": 4,
+  "lessonType": "concept_exercise",
+  "title": "Thinking Recursively (Part 1): Base Cases & Searching a List of Tuples",
+  "difficulty": "Beginner",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates base-case handling on [] and recursive head/tail pattern matching for tuple search and member verification.",
+  "astRules": {
+    "forbiddenCalls": [
+      "lists:keyfind",
+      "lists:member",
+      "lists:filter"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "recursive_decomposition",
+      "module": "erlang",
+      "signature": "Search([H | T], Target) -> Result.",
+      "typesSpec": [
+        "List = [term()]",
+        "Target = term()"
+      ],
+      "description": "Recursive head/tail list decomposition pattern.",
+      "complexityNote": "O(N) time complexity with O(1) stack space under tail-call optimization.",
+      "officialUrl": "https://www.erlang.org/doc/programming_examples/list_comprehensions.html"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does an Erlang recursive search function crash with {function_clause} if the base case find_product([], _) -> not_found is omitted?",
+    "options": [
+      {
+        "id": "A",
+        "label": "When the list is exhausted, Erlang attempts to match the empty list [] against [Head | Tail], which fails",
+        "isCorrect": true,
+        "explanation": "The cons pattern [Head | Tail] requires at least one element. An empty list cannot match it."
+      },
+      {
+        "id": "B",
+        "label": "The BEAM scheduler halts because empty lists cannot exist in memory",
+        "isCorrect": false,
+        "explanation": "Empty lists [] are the fundamental nil terminator in Erlang."
+      },
+      {
+        "id": "C",
+        "label": "The garbage collector deletes the TargetId variable when a list reaches zero length",
+        "isCorrect": false,
+        "explanation": "Variable bindings persist throughout the execution of the function clause."
+      }
+    ]
+  }
+}

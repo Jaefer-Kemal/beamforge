@@ -1,0 +1,69 @@
+{
+  "id": "ch07-l01",
+  "chapterNumber": 7,
+  "lessonNumber": 1,
+  "lessonType": "guided_demo",
+  "title": "From my_gen_server to OTP gen_server & Live sys:get_state/1 Introspection",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates OTP Inversion of Control with gen_server callbacks and live state inspection via sys:get_state/1 without taking down the process.",
+  "astRules": {
+    "requiredCalls": [
+      "gen_server:start_link/3",
+      "gen_server:call/2",
+      "gen_server:cast/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "start_link",
+      "module": "gen_server",
+      "signature": "gen_server:start_link(Mod, Args, Opts) -> {ok, Pid} | {error, Reason}",
+      "typesSpec": [
+        "Mod = module()",
+        "Args = term()",
+        "Opts = list()"
+      ],
+      "description": "Spawns a gen_server linked to the caller, synchronously invoking Mod:init(Args).",
+      "complexityNote": "O(1) process creation with atomic link.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/gen_server.html#start_link/3"
+    },
+    {
+      "functionName": "get_state",
+      "module": "sys",
+      "signature": "sys:get_state(Pid) -> State",
+      "typesSpec": [
+        "Pid = pid() | atom()",
+        "State = term()"
+      ],
+      "description": "Synchronously queries the internal state of a process implementing OTP system messages.",
+      "complexityNote": "O(1) system message round-trip.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/sys.html#get_state/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why is writing raw spawn and receive loops considered an anti-pattern in production Erlang systems?",
+    "codeSnippet": "%% Raw Process Loop:\nloop(State) ->\n    receive Msg -> loop(handle(Msg, State)) end.",
+    "options": [
+      {
+        "id": "A",
+        "label": "Raw loops fail to handle standard OTP system messages, breaking supervisor shutdowns, live sys:get_state/1 inspection, and hot code upgrades.",
+        "isCorrect": true,
+        "explanation": "Correct! An OTP gen_server handles supervisor signals, live tracing, sys introspection, and code_change/3 out of the box, whereas raw loops silently ignore or break on system protocol messages."
+      },
+      {
+        "id": "B",
+        "label": "Raw spawn loops consume 100x more RAM than gen_server processes.",
+        "isCorrect": false,
+        "explanation": "Both use standard BEAM processes with ~2.5 KB initial heap."
+      },
+      {
+        "id": "C",
+        "label": "Erlang prevents modules from compiling if they use spawn.",
+        "isCorrect": false,
+        "explanation": "spawn/1 and spawn/3 are standard built-in functions, but OTP provides higher-level abstractions."
+      }
+    ]
+  },
+  "visualScene": "supervision_rest_for_one_ets_heir"
+}

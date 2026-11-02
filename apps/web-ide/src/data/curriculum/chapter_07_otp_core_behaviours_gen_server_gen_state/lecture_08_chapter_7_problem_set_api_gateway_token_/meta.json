@@ -1,0 +1,55 @@
+{
+  "id": "ch07-l08",
+  "chapterNumber": 7,
+  "lessonNumber": 8,
+  "lessonType": "problem_set",
+  "title": "Chapter 7 Problem Set: API Gateway Token-Bucket Rate Limiter (rate_limiter_srv.erl)",
+  "difficulty": "Production",
+  "xpReward": 100,
+  "solutionExplanation": "Implements an API Gateway token-bucket rate limiter with per-client burst quotas, atomic bucket deduction, batch refilling, and live sys:get_state inspection.",
+  "astRules": {
+    "requiredCalls": [
+      "gen_server:start_link/3",
+      "gen_server:call/2",
+      "gen_server:cast/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "cast",
+      "module": "gen_server",
+      "signature": "gen_server:cast(ServerRef, Request) -> ok",
+      "typesSpec": [
+        "ServerRef = pid() | atom()",
+        "Request = term()"
+      ],
+      "description": "Sends an asynchronous request to the ServerRef and returns ok immediately.",
+      "complexityNote": "O(1) fire-and-forget message send.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/gen_server.html#cast/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "In a token-bucket rate limiter, why is refill_all capped at MaxTokens?",
+    "codeSnippet": "NewTokens = min(Current + Refill, MaxTokens)",
+    "options": [
+      {
+        "id": "A",
+        "label": "To prevent clients from accumulating infinite credits during idle periods and subsequently overwhelming the downstream service with an uncontrolled burst.",
+        "isCorrect": true,
+        "explanation": "Correct! Without capping at MaxTokens, a client idle for 24 hours would accumulate millions of tokens and bypass all throttling protections."
+      },
+      {
+        "id": "B",
+        "label": "Erlang maps can only hold numbers less than 100.",
+        "isCorrect": false,
+        "explanation": "Erlang integers have arbitrary precision."
+      },
+      {
+        "id": "C",
+        "label": "Tokens are physical hardware chips in the CPU.",
+        "isCorrect": false,
+        "explanation": "Tokens are pure logical units in software."
+      }
+    ]
+  }
+}

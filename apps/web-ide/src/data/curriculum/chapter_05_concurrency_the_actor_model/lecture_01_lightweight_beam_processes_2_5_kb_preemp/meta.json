@@ -1,0 +1,62 @@
+{
+  "id": "ch05-l01",
+  "chapterNumber": 5,
+  "lessonNumber": 1,
+  "lessonType": "guided_demo",
+  "title": "Lightweight BEAM Processes (~2.5 KB), Preemptive Reductions & Process Introspection BIFs",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates ultralightweight BEAM process creation (~2.5 KB initial heap), preemptive reductions, and introspection via erlang:process_info/2.",
+  "astRules": {},
+  "otpDocCards": [
+    {
+      "functionName": "process_info",
+      "module": "erlang",
+      "signature": "erlang:process_info(Pid, ItemList) -> InfoList | undefined",
+      "typesSpec": [
+        "Pid = pid()",
+        "ItemList = [atom()] | atom()",
+        "InfoList = [{atom(), term()}]"
+      ],
+      "description": "Returns real-time telemetry regarding process heap size, memory, mailbox length, reductions, and lifecycle status.",
+      "complexityNote": "O(1) direct memory lookup on the internal process control block.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#process_info/2"
+    },
+    {
+      "functionName": "system_info",
+      "module": "erlang",
+      "signature": "erlang:system_info(Item) -> term()",
+      "typesSpec": [
+        "Item = atom()"
+      ],
+      "description": "Returns runtime information about the BEAM emulator, including scheduler count, process count, and memory allocators.",
+      "complexityNote": "O(1) emulator runtime state read.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#system_info/1"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why can an accidental infinite loop like `loop() -> loop().` in one BEAM process never freeze the rest of an Erlang web server or XMPP gateway?",
+    "codeSnippet": "%% A rogue compute-heavy loop running on CPU Core 1:\ncpu_intensive_loop() ->\n    cpu_intensive_loop().",
+    "options": [
+      {
+        "id": "A",
+        "label": "The BEAM Scheduler preemptively halts the process after 4,000 reductions (~function calls), placing it at the end of the run queue to let other processes execute.",
+        "isCorrect": true,
+        "explanation": "Correct! The BEAM employs preemptive reduction scheduling (4,000 reductions per time slice). When the reduction counter reaches zero, the scheduler preempts the process and runs other processes, preventing compute starvation."
+      },
+      {
+        "id": "B",
+        "label": "Erlang's compiler detects infinite recursion at compile time and inserts OS sleep calls.",
+        "isCorrect": false,
+        "explanation": "The Erlang compiler does not prevent infinite loops; recursion is the primary mechanism for long-running actor loops."
+      },
+      {
+        "id": "C",
+        "label": "The host Linux kernel terminates any Erlang process running for longer than 10 milliseconds.",
+        "isCorrect": false,
+        "explanation": "BEAM processes are user-space micro-threads completely decoupled from OS kernel thread management."
+      }
+    ]
+  },
+  "visualScene": "mailbox_selective_receive"
+}

@@ -1,0 +1,53 @@
+{
+  "id": "ch07-l04",
+  "chapterNumber": 7,
+  "lessonNumber": 4,
+  "lessonType": "concept_exercise",
+  "title": "Async Worker Offloading with gen_server:reply/2 & Process Hibernation",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Eliminates Head-of-Line blocking by returning {noreply, State} immediately from handle_call while an offloaded worker evaluates the report and delivers the reply via gen_server:reply/2.",
+  "astRules": {
+    "requiredCalls": [
+      "gen_server:reply/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "reply",
+      "module": "gen_server",
+      "signature": "gen_server:reply(From, Reply) -> ok",
+      "typesSpec": [
+        "From = {pid(), Tag :: term()}",
+        "Reply = term()"
+      ],
+      "description": "Explicitly sends a reply to a client that invoked gen_server:call.",
+      "complexityNote": "O(1) direct message delivery to waiting client.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/gen_server.html#reply/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "How does returning {noreply, State} and using gen_server:reply/2 inside a spawned worker resolve Head-of-Line blocking?",
+    "codeSnippet": "handle_call({slow_task, Data}, From, State) ->\n    Self = self(),\n    spawn(fun() ->\n        Result = compute(Data),\n        gen_server:reply(From, Result),\n        Self ! task_done\n    end),\n    {noreply, State}.",
+    "options": [
+      {
+        "id": "A",
+        "label": "The server returns {noreply, State} in microseconds, freeing it to serve other clients immediately while the worker computes the slow result and unblocks the original caller.",
+        "isCorrect": true,
+        "explanation": "Correct! The server process is not blocked during computation. The From token carries the client PID and monitor tag, enabling the worker to reply directly to the client."
+      },
+      {
+        "id": "B",
+        "label": "The client is terminated immediately and replaced with a websocket.",
+        "isCorrect": false,
+        "explanation": "The client remains in a standard gen_server:call selective receive awaiting reply."
+      },
+      {
+        "id": "C",
+        "label": "gen_server:reply/2 bypasses the Erlang runtime and writes directly to socket buffers.",
+        "isCorrect": false,
+        "explanation": "gen_server:reply/2 simply sends the tagged {MRef, Reply} message to the client PID."
+      }
+    ]
+  }
+}

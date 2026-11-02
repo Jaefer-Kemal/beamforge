@@ -1,0 +1,57 @@
+{
+  "id": "ch04-l06",
+  "chapterNumber": 4,
+  "lessonNumber": 6,
+  "lessonType": "concept_exercise",
+  "title": "Binary Scanning (binary:split/2,3, binary:match/2) & Binary Comprehensions",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Demonstrates C-speed binary:split/2 header parsing, multi-line global CRLF splitting with trim_all, and binary comprehension XOR byte transformation.",
+  "astRules": {
+    "requiredCalls": [
+      "binary:split/2",
+      "binary:split/3"
+    ],
+    "requiredConstructs": [
+      "bit_syntax"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "binary:split/3",
+      "module": "binary",
+      "signature": "split(Subject, Pattern, Options) -> [binary()]",
+      "typesSpec": [
+        "Subject = binary()",
+        "Pattern = binary()",
+        "Options = [global | trim_all]"
+      ],
+      "description": "Splits Subject on Pattern using Boyer-Moore C algorithm.",
+      "complexityNote": "Sub-linear O(N / M) average search time in C.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#split/3"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "What is the role of <= in Erlang expressions like << <<B:8>> || <<B:8>> <= Bin >>?",
+    "options": [
+      {
+        "id": "A",
+        "label": "It is the binary generator operator in binary comprehensions, streaming bit patterns out of Bin",
+        "isCorrect": true,
+        "explanation": "<= extracts binary segments in comprehensions, whereas =< is the numeric less-than-or-equal comparison operator."
+      },
+      {
+        "id": "B",
+        "label": "It compares whether the left binary is less than or equal to the right binary",
+        "isCorrect": false,
+        "explanation": "Numeric less-than-or-equal is =< in Erlang."
+      },
+      {
+        "id": "C",
+        "label": "It copies the binary into off-heap memory",
+        "isCorrect": false,
+        "explanation": "It is a syntactic generator operator."
+      }
+    ]
+  }
+}

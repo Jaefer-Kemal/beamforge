@@ -1,0 +1,68 @@
+{
+  "id": "ch07-l02",
+  "chapterNumber": 7,
+  "lessonNumber": 2,
+  "lessonType": "concept_exercise",
+  "title": "gen_server Essentials: start_link, Synchronous call & Async cast",
+  "difficulty": "Intermediate",
+  "xpReward": 100,
+  "solutionExplanation": "Implements synchronous call for debit/get_balances with backpressure and asynchronous cast for credit, maintaining an atomic multi-currency ledger map.",
+  "astRules": {
+    "requiredCalls": [
+      "gen_server:start_link/3",
+      "gen_server:call/2",
+      "gen_server:cast/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "call",
+      "module": "gen_server",
+      "signature": "gen_server:call(ServerRef, Request) -> Reply",
+      "typesSpec": [
+        "ServerRef = pid() | atom()",
+        "Request = term()",
+        "Reply = term()"
+      ],
+      "description": "Performs a synchronous call to ServerRef, waiting for a reply with a default 5000ms timeout.",
+      "complexityNote": "Synchronous round-trip; provides natural flow-control backpressure.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/gen_server.html#call/2"
+    },
+    {
+      "functionName": "cast",
+      "module": "gen_server",
+      "signature": "gen_server:cast(ServerRef, Request) -> ok",
+      "typesSpec": [
+        "ServerRef = pid() | atom()",
+        "Request = term()"
+      ],
+      "description": "Sends an asynchronous message to ServerRef, returning ok immediately without waiting for a reply.",
+      "complexityNote": "O(1) non-blocking send; lacks natural backpressure.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/gen_server.html#cast/2"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Under high traffic bursts, why is gen_server:call safer than gen_server:cast for processing operations?",
+    "codeSnippet": "%% Cast: returns ok instantly, zero client wait\ngen_server:cast(Server, {process_transaction, Tx})\n\n%% Call: blocks caller until server replies\ngen_server:call(Server, {process_transaction, Tx})",
+    "options": [
+      {
+        "id": "A",
+        "label": "Call forces callers to wait for a reply, providing natural backpressure that prevents the server mailbox from overflowing into an Out-Of-Memory crash.",
+        "isCorrect": true,
+        "explanation": "Correct! Callers cannot produce faster than the server consumes because each caller process is paused waiting for handle_call/3 to return."
+      },
+      {
+        "id": "B",
+        "label": "Cast messages are encrypted, which consumes 10x more CPU cycles.",
+        "isCorrect": false,
+        "explanation": "Cast messages are not encrypted; they are raw Erlang terms."
+      },
+      {
+        "id": "C",
+        "label": "Call bypasses the server mailbox and writes directly to server memory.",
+        "isCorrect": false,
+        "explanation": "Processes have completely isolated heaps; call still sends a message through the mailbox."
+      }
+    ]
+  }
+}

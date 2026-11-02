@@ -1,0 +1,88 @@
+{
+  "id": "ch11-l06",
+  "chapterNumber": 11,
+  "lessonNumber": 6,
+  "lessonType": "concept_exercise",
+  "title": "The C2S Connection Handshake State Machine (RFC 6120)",
+  "difficulty": "Advanced",
+  "xpReward": 100,
+  "solutionExplanation": "The FSM implements the RFC 6120 handshake flow:\n1. wait_for_stream: Verifies domain matching in {stream_open, Domain} and advertises SASL PLAIN mechanism.\n2. wait_for_sasl: Rejects any stanzas (like chat messages or IQs) with {error, not_authorized, State}. On valid SASL PLAIN Base64 token, decodes the null-delimited credentials and advances to authenticated.\n3. authenticated: Receives bind_resource, constructs Full JID User@Domain/Resource, emits the IQ result, and transitions to session_established.\n4. session_established: Enables full stanza routing.",
+  "astRules": {
+    "requiredCalls": [
+      "inet:setopts/2",
+      "gen_tcp:send/2"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "decode",
+      "module": "base64",
+      "signature": "base64:decode(Base64) -> binary()",
+      "typesSpec": [
+        "Base64 = binary() | string()"
+      ],
+      "description": "Decodes Base64 encoded binary into raw credential bytes.",
+      "complexityNote": "Linear scan decoding 4 Base64 characters into 3 bytes.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/base64.html#decode/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/base64.erl"
+    },
+    {
+      "functionName": "split",
+      "module": "binary",
+      "signature": "binary:split(Binary, Pattern, Options) -> [binary()]",
+      "typesSpec": [
+        "Binary = binary()",
+        "Pattern = binary()",
+        "Options = [global]"
+      ],
+      "description": "Extracts null-delimited username and password from SASL payload.",
+      "complexityNote": "Extracts authentication tokens with bounded memory allocations.",
+      "officialUrl": "https://www.erlang.org/doc/apps/stdlib/binary.html#split/3",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does the C2S connection state machine set inet:setopts(Socket, [{active, once}]) after receiving each TCP packet instead of using {active, true}?",
+    "options": [
+      {
+        "id": "A",
+        "label": "To implement backpressure flow control at the OS kernel socket buffer level, preventing malicious clients from flooding the BEAM process mailbox.",
+        "isCorrect": true,
+        "explanation": "{active, once} stops the kernel from pushing packets to the process mailbox until the current packet has been fully handled."
+      },
+      {
+        "id": "B",
+        "label": "Because {active, true} is not supported on Windows.",
+        "isCorrect": false,
+        "explanation": "{active, true} works on all OS platforms, but lacks flow control."
+      },
+      {
+        "id": "C",
+        "label": "Because {active, once} runs twice as fast as passive recv.",
+        "isCorrect": false,
+        "explanation": "The primary benefit of {active, once} is mailbox protection and event-driven backpressure."
+      },
+      {
+        "id": "D",
+        "label": "Because raw TCP sockets can only receive one packet per lifetime.",
+        "isCorrect": false,
+        "explanation": "Sockets receive endless packets; {active, once} requests them one at a time."
+      }
+    ]
+  },
+  "visualScene": "tcp_xmpp_stream_framing",
+  "references": [
+    {
+      "title": "IETF RFC 6120: Section 6 SASL Negotiation & Resource Binding",
+      "url": "https://datatracker.ietf.org/doc/html/rfc6120",
+      "category": "book_rfc",
+      "description": "Standard authentication sequence and resource binding protocol definitions."
+    },
+    {
+      "title": "GitHub esl/MongooseIM: src/c2s/mongoose_c2s.erl",
+      "url": "https://github.com/esl/MongooseIM/blob/master/src/c2s/mongoose_c2s.erl",
+      "category": "github_ecosystem",
+      "description": "Production battle-tested Erlang gen_statem C2S connection handler."
+    }
+  ]
+}

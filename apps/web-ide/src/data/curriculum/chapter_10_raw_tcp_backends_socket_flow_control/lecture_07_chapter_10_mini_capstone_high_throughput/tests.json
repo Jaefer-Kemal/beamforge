@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch10-l07-1",
+      "title": "Parse PING and SET Commands",
+      "erlangCall": "begin {ok, P1} = tcp_kv_backend:parse_command(<<\"PING\">>), {ok, P2} = tcp_kv_backend:parse_command(<<\"SET session_token secret123\">>), {P1, P2} end",
+      "expectedOutput": "{ping,{set,<<\"session_token\">>,<<\"secret123\">>}}",
+      "explanation": "Parses valid PING and SET command strings into internal representation."
+    },
+    {
+      "id": "tc-ch10-l07-2",
+      "title": "Execute Wire Commands Against ETS Store",
+      "erlangCall": "begin Tab = ets:new(test_tab, [set, public]), R1 = tcp_kv_backend:execute_command({set, <<\"k1\">>, <<\"val1\">>}, Tab), R2 = tcp_kv_backend:execute_command({get, <<\"k1\">>}, Tab), R3 = tcp_kv_backend:execute_command({del, <<\"k1\">>}, Tab), R4 = tcp_kv_backend:execute_command({get, <<\"k1\">>}, Tab), ets:delete(Tab), {R1, R2, R3, R4} end",
+      "expectedOutput": "{<<\"+OK\\r\\n\">>,<<\"$val1\\r\\n\">>,<<\":1\\r\\n\">>,<<\"$-1\\r\\n\">>}",
+      "explanation": "Validates +OK, $Val, :1, and $-1 return values across SET, GET, and DEL lifecycle."
+    }
+  ]
+}

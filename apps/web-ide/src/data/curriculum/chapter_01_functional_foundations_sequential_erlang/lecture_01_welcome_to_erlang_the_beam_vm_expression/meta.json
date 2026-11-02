@@ -1,0 +1,53 @@
+{
+  "id": "ch01-l01",
+  "chapterNumber": 1,
+  "lessonNumber": 1,
+  "lessonType": "guided_demo",
+  "title": "Welcome to Erlang, The BEAM VM & Expression Syntax",
+  "difficulty": "Beginner",
+  "xpReward": 100,
+  "solutionExplanation": "The module queries the ERTS runtime using erlang:system_info/1 and formats metrics into an immutable 5-tuple.",
+  "astRules": {
+    "requiredCalls": [
+      "erlang:system_info/1"
+    ]
+  },
+  "otpDocCards": [
+    {
+      "functionName": "system_info",
+      "module": "erlang",
+      "signature": "erlang:system_info(Item) -> Info",
+      "typesSpec": [
+        "Item = schedulers_online | process_limit | atom_limit | otp_release",
+        "Info = term()"
+      ],
+      "description": "Returns information about the current BEAM emulator instance.",
+      "complexityNote": "O(1) C BIF lookup directly reading internal ERTS state tables.",
+      "officialUrl": "https://www.erlang.org/doc/apps/erts/erlang.html#system_info/1",
+      "githubSourceUrl": "https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c"
+    }
+  ],
+  "mentalModelCheck": {
+    "question": "Why does the BEAM virtual machine preempt processes after 4,000 reductions rather than relying on cooperative multitasking?",
+    "options": [
+      {
+        "id": "A",
+        "label": "To reduce the total RAM required by operating system thread stacks",
+        "isCorrect": false,
+        "explanation": "Stack size is determined by the BEAM process memory model (~309 words), not the reduction counter."
+      },
+      {
+        "id": "B",
+        "label": "To prevent compute-heavy tasks from starving network I/O and low-latency message passing",
+        "isCorrect": true,
+        "explanation": "Reduction counting guarantees soft real-time responsiveness. Even an infinite compute loop yields after 4,000 reductions."
+      },
+      {
+        "id": "C",
+        "label": "Because the operating system kernel forces Erlang to sleep every 4,000 machine instructions",
+        "isCorrect": false,
+        "explanation": "Reduction counting is handled entirely in user space by BEAM schedulers, not by OS interrupts."
+      }
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch06-02-1",
+      "title": "Safe Division Success and Zero Division",
+      "erlangCall": "{domain_validator:safe_divide(100, 4), domain_validator:safe_divide(100, 0)}",
+      "expectedOutput": "{{ok, 25.0}, {error, division_by_zero}}",
+      "explanation": "Confirms safe_divide returns float result on success and tagged error on zero division."
+    },
+    {
+      "id": "tc-ch06-02-2",
+      "title": "Email Validation Check",
+      "erlangCall": "{domain_validator:validate_email(<<\"alice@beamforge.io\">>), domain_validator:validate_email(<<\"invalid_email\">>)}",
+      "expectedOutput": "{{ok, <<\"alice@beamforge.io\">>}, {error, invalid_email}}",
+      "explanation": "Validates RFC-like email structure with @ and domain dot."
+    },
+    {
+      "id": "tc-ch06-02-3",
+      "title": "Composite Checkout Pipeline",
+      "erlangCall": "domain_validator:process_checkout_input(<<\"bob@beamforge.io\">>, 300, 3)",
+      "expectedOutput": "{ok, #{email => <<\"bob@beamforge.io\">>, per_person => 100.0}}",
+      "explanation": "Validates email, amount, and split count, returning calculated per-person share in map."
+    }
+  ]
+}

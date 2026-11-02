@@ -1,0 +1,11 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch05-01-1",
+      "title": "Benchmark 2,000 BEAM Processes",
+      "erlangCall": "begin #{spawned := S, avg_memory_bytes := M} = process_bench:run_bench(2000), {S, M < 4096} end",
+      "expectedOutput": "{2000, true}",
+      "explanation": "Verifies that 2,000 processes spawn in microseconds with an average memory footprint strictly under 4,096 bytes."
+    }
+  ]
+}

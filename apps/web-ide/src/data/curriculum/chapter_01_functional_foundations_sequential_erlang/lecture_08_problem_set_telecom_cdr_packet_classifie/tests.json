@@ -1,0 +1,32 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch01-08-a",
+      "title": "Classify Valid IPv4 Packet with Payload",
+      "erlangCall": "telecom_foundations:classify_packet({ipv4, \"10.0.0.1\", \"10.0.0.2\", [ping, 100]})",
+      "expectedOutput": "{ok, ipv4, \"10.0.0.1\", \"10.0.0.2\", ping}",
+      "explanation": "Extracts protocol tag, hosts, and head of payload list."
+    },
+    {
+      "id": "tc-ch01-08-b",
+      "title": "Classify Packet with Empty Payload",
+      "erlangCall": "telecom_foundations:classify_packet({ipv4, \"10.0.0.1\", \"10.0.0.2\", []})",
+      "expectedOutput": "{error, empty_payload}",
+      "explanation": "Matches empty list clause and returns {error, empty_payload}."
+    },
+    {
+      "id": "tc-ch01-08-c",
+      "title": "Bill Standard Call with Default Connection Fee",
+      "erlangCall": "telecom_foundations:bill_call(60, standard)",
+      "expectedOutput": "{ok, 310}",
+      "explanation": "Default fee 10 + (60 * 5) = 310 cents."
+    },
+    {
+      "id": "tc-ch01-08-d",
+      "title": "Bill Free Internal Call",
+      "erlangCall": "telecom_foundations:bill_call(3600, internal)",
+      "expectedOutput": "{ok, 0}",
+      "explanation": "Internal company calls are free {ok, 0}."
+    }
+  ]
+}

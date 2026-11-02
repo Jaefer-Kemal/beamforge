@@ -1,0 +1,18 @@
+{
+  "visibleTestCases": [
+    {
+      "id": "tc-ch01-03-a",
+      "title": "Sequential Variable Progression",
+      "erlangCall": "pattern_vars:rebind_update(10, 5)",
+      "expectedOutput": "30",
+      "explanation": "V1 = 10, V2 = 15, V3 = 15 * 2 = 30."
+    },
+    {
+      "id": "tc-ch01-03-b",
+      "title": "Extract Middle Tuple Element",
+      "erlangCall": "pattern_vars:extract_middle({alpha, beta, gamma})",
+      "expectedOutput": "beta",
+      "explanation": "Destructures {_, Middle, _} and extracts beta."
+    }
+  ]
+}
