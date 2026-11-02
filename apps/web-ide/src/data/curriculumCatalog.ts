@@ -1,4 +1,4 @@
-import { WorkspaceFile, BeamNode, BeamEdge, XmppC2SState, VisualSceneId, MentalModelCheckSpec } from '../types/workspace';
+import { WorkspaceFile, BeamNode, BeamEdge, XmppC2SState, VisualSceneId, MentalModelCheckSpec, IncidentAlert, LessonType } from '../types/workspace';
 
 export type CapabilityMode = 'code_only' | 'code_and_memory' | 'beam_graph' | 'xmpp_full';
 export type Difficulty = 'Beginner' | 'Intermediate' | 'Advanced' | 'Production';
@@ -38,6 +38,8 @@ export interface CurriculumLevel {
   initialXmppState?: XmppC2SState;
   visualScene?: VisualSceneId;
   mentalModelCheck?: MentalModelCheckSpec;
+  incidentAlert?: IncidentAlert;
+  lessonType?: LessonType;
 }
 
 export interface CurriculumWorld {
@@ -356,8 +358,8 @@ filter_active_sessions([_ | T], Acc) ->
 Erlang features unmatched support for unpacking binary wire protocols via bit-level pattern matching.
 
 > [!abstract] Under the Hood: ProcBin vs HeapBin & Refc Leaks
-> - Binaries $\\le 64$ bytes are **HeapBin** terms allocated directly on the process heap.
-> - Binaries $> 64$ bytes are **ProcBin** terms allocated in globally shared, reference-counted off-heap memory.
+> - Binaries =< 64 bytes are **HeapBin** terms allocated directly on the process heap.
+> - Binaries > 64 bytes are **ProcBin** terms allocated in globally shared, reference-counted off-heap memory.
 > 
 > When you slice a binary:
 > \`\`\`erlang

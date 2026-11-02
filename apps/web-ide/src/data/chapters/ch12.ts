@@ -64,6 +64,17 @@ export const CH12_CAPSTONE_MILESTONES: CapstoneMilestone[] = [
     verificationHint:
       'Route a message between two active C2S pids, then route to an unregistered user. Verify the offline message is queued and retrievable via pop_offline_messages/1.',
   },
+  {
+    id: 'm6-chaos',
+    number: 6,
+    title: 'Chaos Monkey Resilience & 5-Module Integration (xmpp_sup)',
+    targetFile: 'src/xmpp_sup.erl',
+    targetFunctions: ['start_link/0', 'stop/0', 'init/1'],
+    description:
+      'Subject the 5-module cluster to dynamic fault injection. Verify that killing xmpp_session_registry triggers rest_for_one supervisor cascades, safely terminating and restarting xmpp_router while preserving tree stability.',
+    verificationHint:
+      'Boot xmpp_sup, inject an abnormal exit into xmpp_session_registry, and verify the supervisor restarts both registry and router with fresh PIDs.',
+  },
 ];
 
 // ── Milestone Pedagogical Lessons (Rich Textbooks for Every Milestone) ──────
@@ -217,7 +228,62 @@ ets:insert(?TAB, {FullJid, BareJid, Resource, Priority, C2sPid, MRef})`,
         },
       ],
     },
-    conceptMarkdown: "## Milestone 4: Client-to-Server State Machine (`gen_statem`)\n\n### Why This Matters in Production\nNetwork protocol connections are fundamentally stateful. A client socket connected to port 5222 cannot simply begin sending chat stanzas immediately. The connection must strictly progress through authentication and resource binding gates:\n\n1. It must initiate an XML stream and negotiate encryption/features.\n2. It must authenticate identity via SASL PLAIN.\n3. It must bind an authorized resource identifier (e.g. `/mobile` or `/web`).\n4. Only upon entering the **established** state is it permitted to route stanzas and receive incoming messages.\n\nIn Erlang/OTP, the premier abstraction for modeling complex connection lifecycles is the `gen_statem` behaviour using **`callback_mode() -> state_functions`**.\n\n> **4-Phase Connection Lifecycle:** `wait_for_stream` (`<stream:stream>`) -> `wait_for_sasl` (`<auth mechanism='PLAIN'>`) -> `authenticated` (`<iq bind>`) -> `session_established` (real-time stanza routing).\n\n### Deep Concept Breakdown: `state_functions` vs `handle_event_function`\n`gen_statem` supports two callback modes:\n- **`handle_event_function`**: A single central callback `handle_event/4` with large nested `case StateName of ...` statements. This quickly becomes unwieldy in production.\n- **`state_functions` (RECOMMENDED)**: Each state in the state machine is represented by an individual Erlang function named after that state, with arity 3:\n  ```erlang\n  StateName(EventType, EventContent, Data) ->\n      {next_state, NextStateName, NewData, Actions}.\n  ```\n  This provides compile-time isolation between protocol phases: code handling SASL tokens cannot accidentally execute while in the established chat state!\n\n### Active-Once TCP Flow Control & Mailbox Protection\nHow does a production Erlang server prevent a rogue client from flooding the BEAM process with millions of TCP packets?\n- In Erlang socket programming, we set the socket to `{active, once}`.\n- The OS kernel delivers exactly one packet to the actor as an Erlang message `{tcp, Socket, Data}`, and then immediately switches the socket to passive mode!\n- The actor parses the chunk, processes the state transition, and only when it is ready calls `inet:setopts(Socket, [{active, once}])` to request the next packet. This provides built-in TCP backpressure!\n\n### Step-by-Step Assignment Task\n1. Open `src/xmpp_c2s_statem.erl`.\n2. Implement `wait_for_stream({call, From}, {feed_xml, XmlBin}, Data)`:\n   - Parse `XmlBin` with `xmpp_stream_parser:feed_chunk/2`.\n   - On `{stream_open, Domain}`: reply with stream features XML advertising SASL PLAIN, and transition to `wait_for_sasl`.\n3. Implement `wait_for_sasl({call, From}, {feed_xml, XmlBin}, Data)`:\n   - On `{sasl_auth, <<\"PLAIN\">>, Payload}`: extract the username, reply with `<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>`, store `user` in state data, and advance to `authenticated`.\n4. Implement `authenticated({call, From}, {feed_xml, XmlBin}, Data)`:\n   - On `{iq_bind, Id, Resource}`: construct full JID `user@domain/resource`, register the session in `xmpp_session_registry:register_session/3`, reply with result IQ containing the bound JID, and advance to `session_established`.\n5. Implement `session_established`:\n   - Handle incoming chat messages and dispatch them via `xmpp_router:route_stanza/3`.\n   - Handle `{info, {deliver_stanza, StanzaXml}}` and forward the stanza to the attached client socket.",
+    conceptMarkdown: `## Milestone 4: Client-to-Server State Machine (\`gen_statem\`)
+
+### Why This Matters in Production
+Network protocol connections are fundamentally stateful. A client socket connected to port 5222 cannot simply begin sending chat stanzas immediately. The connection must strictly progress through authentication and resource binding gates:
+
+1. It must initiate an XML stream and negotiate encryption/features.
+2. It must authenticate identity via SASL PLAIN.
+3. It must bind an authorized resource identifier (e.g. \`/obsidian\` or \`/desktop\`).
+4. Only upon entering the **session_established** state is it permitted to route stanzas and receive incoming messages.
+
+In Erlang/OTP, the premier abstraction for modeling complex connection lifecycles is the \`gen_statem\` behaviour using **\`callback_mode() -> state_functions\`**.
+
+> **4-Phase Connection Lifecycle:** \`wait_for_stream\` (\`<stream:stream>\`) -> \`wait_for_sasl\` (\`<auth mechanism='PLAIN'>\`) -> \`authenticated\` (\`<iq bind>\`) -> \`session_established\` (real-time stanza routing).
+
+### Deep Concept Breakdown: \`state_functions\` & \`process_events/4\`
+In our industrial architecture, incoming chunks from either unit-test calls (\`{xml_chunk, Chunk}\`) or live TCP sockets (\`{tcp, Socket, Chunk}\`) are fed into \`xmpp_stream_parser:feed_chunk/2\`. The resulting list of structured XML events is then processed sequentially by \`process_events(Events, CurrentState, Data, OutXmlAcc)\`:
+
+\`\`\`erlang
+process_events([], State, Data, OutAcc) ->
+    {State, Data, lists:reverse(OutAcc)};
+\`\`\`
+
+Each clause of \`process_events/4\` inspects the current protocol state:
+- **\`wait_for_stream\`**: When \`{stream_open, Domain}\` arrives, respond with the opening stream header advertising SASL PLAIN, and advance state to \`wait_for_sasl\`.
+- **\`wait_for_sasl\`**: When \`{sasl_auth, Mech, Payload}\` arrives, extract the username, reply with \`<success .../>\`, and advance state to \`authenticated\`.
+- **Pre-Auth Security Rejection**: In \`wait_for_sasl\`, any unauthenticated message stanza (\`_PreAuthStanza\`) received before SASL authentication is completed MUST be rejected with:
+  \`\`\`xml
+  <stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>
+  \`\`\`
+  The state machine remains in \`wait_for_sasl\`.
+- **\`authenticated\`**: When \`{iq_bind, Id, ResourceBin}\` arrives, default resource to \`<<"obsidian">\`, register in \`xmpp_session_registry\`, reply with the bound JID result IQ, and advance state to \`session_established\`.
+- **\`session_established\`**: Normal chat stanzas are passed to \`xmpp_router:route_stanza/3\`.
+
+### Active-Once TCP Flow Control & Mailbox Protection
+In Erlang socket programming, we set the socket to \`{active, once}\` during \`init/1\` and after every received packet. The OS kernel delivers exactly one packet to the actor as an Erlang message \`{tcp, Socket, Data}\`, switching the socket to passive mode until we process it and re-enable active-once. This provides built-in TCP backpressure!
+
+### Step-by-Step Assignment Task
+1. Open \`src/xmpp_c2s_statem.erl\`.
+2. In \`process_events([{stream_open, Domain} | Rest], wait_for_stream, Data, OutAcc)\`:
+   - Construct \`Reply = <<"<stream:stream from='", Domain/binary, "' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'><stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>">>\`.
+   - Recurse with \`wait_for_sasl\`, \`Data#{domain => Domain}\`, and \`[Reply | OutAcc]\`.
+3. In \`process_events([{sasl_auth, _Mech, Payload} | Rest], wait_for_sasl, Data, OutAcc)\`:
+   - Extract user: \`User = extract_user_from_sasl(Payload, maps:get(username, Data, <<"alice">>))\`.
+   - Construct \`Reply = <<"<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>">>\`.
+   - Recurse with \`authenticated\`, \`Data#{username => User}\`, and \`[Reply | OutAcc]\`.
+4. In \`process_events([_PreAuthStanza | Rest], wait_for_sasl, Data, OutAcc)\`:
+   - Construct \`Err = <<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>\`.
+   - Recurse with \`wait_for_sasl\`, \`Data\`, and \`[Err | OutAcc]\`.
+5. In \`process_events([{stream_open, Domain} | Rest], authenticated, Data, OutAcc)\`:
+   - Construct \`Reply = <<"<stream:stream from='", Domain/binary, "' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'><stream:features><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/></stream:features>">>\`.
+   - Recurse with \`authenticated\`, \`Data#{domain => Domain}\`, and \`[Reply | OutAcc]\`.
+6. In \`process_events([{iq_bind, Id, ResourceBin} | Rest], authenticated, Data, OutAcc)\`:
+   - Format resource and \`FullJid = <<User/binary, "@", Domain/binary, "/", Res/binary>>\`.
+   - Register: \`xmpp_session_registry:register_session(FullJid, maps:get(priority, Data, 10), self())\`.
+   - Construct \`Reply = <<"<iq type='result' id='", Id/binary, "'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>", FullJid/binary, "</jid></bind></iq>">>\`.
+   - Recurse with \`session_established\`, \`Data#{resource => Res, full_jid => FullJid}\`, and \`[Reply | OutAcc]\`.`,
   },
   {
     id: 'ch12-m5',
@@ -253,16 +319,56 @@ ets:insert(?TAB, {FullJid, BareJid, Resource, Priority, C2sPid, MRef})`,
     },
     conceptMarkdown: "## Milestone 5: Stanza Routing Engine & Offline Message Queue\n\n### Why This Matters in Production\nThe final piece of our production XMPP architecture is the **Stanza Router**. The router acts as the central messaging switchboard: it decouples client connection processes from each other. Individual C2S connection actors do not need to know where recipient sockets are hosted; they simply pass outgoing stanzas to `xmpp_router:route_stanza/3`.\n\nFurthermore, in mobile networks, users are frequently disconnected due to dead zones, subway tunnels, or app backgrounding. If a message arrives for an offline user, the router must safely spool the stanza in an offline message store so it can be delivered immediately upon the user's next login.\n\n> **Routing Dispatch Semantics:** Incoming stanzas query `xmpp_session_registry:lookup_by_jid/1`. If target PIDs are online, the stanza is dispatched directly (`Pid ! {deliver_stanza, Xml}`); if offline, it is spooled into the router's in-memory `offline_store` map.\n\n### Deep Concept Breakdown: Dispatch Semantics\nWhen `route_stanza(FromFullJid, ToJid, XmlBin)` is called:\n1. It queries `xmpp_session_registry:lookup_by_jid(ToJid)`.\n2. **If PIDs are found (User is Online)**:\n   It dispatches the raw XML directly to each target process's mailbox:\n   ```erlang\n   lists:foreach(fun(Pid) ->\n       Pid ! {deliver_stanza, binary:copy(XmlBin)}\n   end, TargetPids)\n   ```\n   And increments the internal `total_routed` telemetry counter.\n3. **If no PIDs are found (User is Offline)**:\n   It extracts the bare JID with `xmpp_session_registry:parse_jid(ToJid)`, retrieves the user's existing queue from the `offline_store` map (defaulting to `[]`), appends `binary:copy(XmlBin)`, and updates the map.\n\n### Offline Message Retrieval\nWhen a previously offline user finishes connecting and authenticating, their client requests unread messages:\n- `pop_offline_messages(TargetJid)`: Extracts all pending stanzas for that user's bare JID, deletes them from the `offline_store` map, and returns `{ok, StanzaList}`.\n- `get_offline_count(TargetJid)`: Returns an integer count of queued messages for monitoring.\n\n### Step-by-Step Assignment Task\n1. Open `src/xmpp_router.erl`.\n2. In `init/1`, initialize the state map with `offline_store => #{}` and `total_routed => 0`.\n3. In `handle_call({route_stanza, FromFullJid, ToJid, XmlBin}, ...)`:\n   - Query `xmpp_session_registry:lookup_by_jid(ToJid)`.\n   - If `TargetPids` is non-empty, deliver `{deliver_stanza, binary:copy(XmlBin)}` to each PID and return `{reply, {routed, length(TargetPids)}, NewState}`.\n   - If empty, append `binary:copy(XmlBin)` to `offline_store[BareJid]` and return `{reply, {queued_offline, BareJid}, NewState}`.\n4. In `handle_call({pop_offline, TargetJid}, ...)`:\n   - Extract messages for `BareJid`, remove key from `offline_store`, and return `{reply, {ok, Messages}, NewState}`.\n5. In `handle_call({get_offline_count, TargetJid}, ...)`:\n   - Return `{reply, length(Messages), State}`.",
   },
+  {
+    id: 'ch12-m6',
+    milestoneId: 'm6-chaos',
+    milestoneNumber: 6,
+    title: 'Milestone 6: Chaos Monkey Resilience & Fault-Injection (xmpp_sup)',
+    targetFile: 'src/xmpp_sup.erl',
+    targetFunctions: ['start_link/0', 'stop/0', 'init/1'],
+    verificationHint: 'Boot xmpp_sup, inject an abnormal exit into xmpp_session_registry, and verify the supervisor restarts both registry and router with fresh PIDs.',
+    mentalModelCheck: {
+      question: 'When xmpp_session_registry terminates abnormally under rest_for_one, why is xmpp_router terminated and restarted even if it experienced no internal errors?',
+      codeSnippet: `#{strategy => rest_for_one, intensity => 5, period => 10}\n[RegistryChildSpec, RouterChildSpec]`,
+      options: [
+        {
+          id: 'A',
+          label: 'The router depends on the registry\'s ETS table. Restarting the router ensures it reconnects to the newly created ETS table rather than crashing on stale references.',
+          isCorrect: true,
+          explanation: 'Correct! Under rest_for_one, child processes booted after the failed process are terminated and restarted in forward sequence, guaranteeing all downstream dependencies re-synchronize with the fresh upstream state.',
+        },
+        {
+          id: 'B',
+          label: 'In OTP, rest_for_one is an alias for one_for_all and terminates all processes unconditionally.',
+          isCorrect: false,
+          explanation: 'rest_for_one only terminates siblings started after the failed process; earlier siblings remain unaffected.',
+        },
+        {
+          id: 'C',
+          label: 'The BEAM runtime automatically kills all processes that share the same atom table.',
+          isCorrect: false,
+          explanation: 'Process isolation guarantees that one process crash does not kill others unless linked or managed by a supervisor.',
+        },
+      ],
+    },
+    conceptMarkdown: "## Milestone 6: Chaos Monkey Resilience & 5-Module Integration\\n\\n### Why This Matters in Production\\nIn distributed messaging backends, testing happy paths is never enough. Production systems inevitably encounter network partitions, unexpected packet bursts, OOM kills, and runtime crashes. Erlang's core design philosophy—**'Let It Crash'**—is only effective if your supervision hierarchy deterministically recovers from failures without human intervention.\\n\\nIn this final milestone, you subject your complete 5-module XMPP cluster to **Chaos Monkey Fault Injection**: deliberately killing key worker processes and verifying that the supervision hierarchy cleanly self-heals.\\n\\n> **Chaos Invariant:** When `xmpp_session_registry` is killed with `exit(RegPid, kill)`, `xmpp_sup` must immediately detect the termination, kill all downstream children (`xmpp_router`), restart the registry (creating a fresh ETS table), and restart the router.\\n\\n### Supervision Cascade Mechanics\\nBecause `xmpp_sup` uses the `rest_for_one` strategy with child order `[xmpp_session_registry, xmpp_router]`:\\n\\n1. **Registry Crash**: If `xmpp_session_registry` terminates:\\n   - `xmpp_router` is terminated by the supervisor (because it was started *after* the registry).\\n   - `xmpp_session_registry` is started anew (`init([])` creates a new public ETS table).\\n   - `xmpp_router` is restarted, binding to the fresh registry.\\n2. **Router Crash**: If `xmpp_router` terminates:\\n   - Only `xmpp_router` is restarted.\\n   - `xmpp_session_registry` and all active client sessions remain completely undisturbed!\\n\\n### Step-by-Step Assignment Task\\n1. Open `src/xmpp_sup.erl`.\\n2. Ensure `stop/0` is exported and properly implemented using modern OTP 29 `supervisor:stop(Pid)`:\\n   ```erlang\\n   stop() ->\\n       case whereis(?MODULE) of\\n           undefined -> ok;\\n           Pid -> supervisor:stop(Pid)\\n       end.\\n   ```\\n3. Verify that `start_link/0` registers `{local, ?MODULE}`.\\n4. Click **Submit** to run the complete 6-stage verification suite, including the live Chaos Monkey resilience test!",
+  },
 ];
 
 export const CH12_SOLUTION_FILES: Record<string, string> = {
   'src/xmpp_sup.erl': `-module(xmpp_sup).
 -behaviour(supervisor).
 
--export([start_link/0, init/1]).
+-export([start_link/0, stop/0, init/1]).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+stop() ->
+    case whereis(?MODULE) of
+        undefined -> ok;
+        Pid -> supervisor:stop(Pid)
+    end.
 
 init([]) ->
     SupFlags = #{
@@ -644,7 +750,7 @@ terminate(_Reason, _State, Data) ->
     case maps:get(full_jid, Data, <<>>) of
         <<>> -> ok;
         FullJid ->
-            catch xmpp_session_registry:unregister_session(FullJid),
+            try xmpp_session_registry:unregister_session(FullJid) catch _:_ -> ok end,
             ok
     end.
 
@@ -688,7 +794,7 @@ process_events([{iq_bind, Id, ResourceBin} | Rest], authenticated, Data, OutAcc)
     User = maps:get(username, Data, <<"alice">>),
     Domain = maps:get(domain, Data, <<"localhost">>),
     FullJid = <<User/binary, "@", Domain/binary, "/", Res/binary>>,
-    catch xmpp_session_registry:register_session(FullJid, maps:get(priority, Data, 10), self()),
+    try xmpp_session_registry:register_session(FullJid, maps:get(priority, Data, 10), self()) catch _:_ -> ok end,
     Reply = <<"<iq type='result' id='", Id/binary, "'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>", FullJid/binary, "</jid></bind></iq>">>,
     process_events(Rest, session_established, Data#{resource => Res, full_jid => FullJid}, [Reply | OutAcc]);
 
@@ -696,7 +802,7 @@ process_events([{chat_message, Id, ToJid, Body} | Rest], session_established, Da
     FromJid = maps:get(full_jid, Data, <<"alice@localhost/obsidian">>),
     TargetJid = case ToJid of <<>> -> FromJid; T -> T end,
     StanzaXml = <<"<message from='", FromJid/binary, "' to='", TargetJid/binary, "' id='", Id/binary, "' type='chat'><body>", Body/binary, "</body></message>">>,
-    _ = (catch xmpp_router:route_stanza(FromJid, TargetJid, StanzaXml)),
+    _ = (try xmpp_router:route_stanza(FromJid, TargetJid, StanzaXml) catch _:_ -> ok end),
     process_events(Rest, session_established, Data, OutAcc);
 
 process_events([{ping, Id} | Rest], State, Data, OutAcc) ->
@@ -720,7 +826,7 @@ extract_user_from_sasl(Payload, Default) ->
 
 send_to_socket(undefined, _Data) -> ok;
 send_to_socket(Socket, Data) ->
-    catch gen_tcp:send(Socket, Data),
+    try gen_tcp:send(Socket, Data) catch _:_ -> ok end,
     ok.
 `,
 
@@ -805,10 +911,208 @@ terminate(_Reason, _State) ->
 
 // ── Starter Code Files (SCAFFOLDED WITH % TODO CHALLENGES - NOT PRE-SOLVED!) ─
 export const CH12_STARTER_FILES: Record<string, string> = {
-  'src/xmpp_sup.erl': "-module(xmpp_sup).\n-behaviour(supervisor).\n\n-export([start_link/0, init/1]).\n\nstart_link() ->\n    supervisor:start_link({local, ?MODULE}, ?MODULE, []).\n\ninit([]) ->\n    %% % TODO [Milestone 1 - Step 1]: Configure the Root Supervisor Flags\n    %% Set:\n    %%   strategy  => rest_for_one  (router depends on registry, so if registry restarts, router must too)\n    %%   intensity => 5             (allow up to 5 restarts)\n    %%   period    => 10            (within a 10-second window)\n    SupFlags = #{\n        strategy => rest_for_one,\n        intensity => 5,\n        period => 10\n    },\n\n    %% % TODO [Milestone 1 - Step 2]: Declare the Ordered Child Specifications\n    %% Under rest_for_one, child startup order is critical!\n    %% Child 1 (xmpp_session_registry):\n    %%   - id: xmpp_session_registry\n    %%   - start: {xmpp_session_registry, start_link, []}\n    %%   - restart: permanent\n    %%   - shutdown: 2000\n    %%   - type: worker\n    %%   - modules: [xmpp_session_registry]\n    %%\n    %% Child 2 (xmpp_router):\n    %%   - id: xmpp_router\n    %%   - start: {xmpp_router, start_link, []}\n    %%   - restart: permanent\n    %%   - shutdown: 2000\n    %%   - type: worker\n    %%   - modules: [xmpp_router]\n    ChildSpecs = [\n        %% Add child specification map for xmpp_session_registry here:\n\n        %% Add child specification map for xmpp_router here:\n\n    ],\n    {ok, {SupFlags, ChildSpecs}}.\n",
+  'src/xmpp_sup.erl': "-module(xmpp_sup).\n-behaviour(supervisor).\n\n-export([start_link/0, stop/0, init/1]).\n\nstart_link() ->\n    supervisor:start_link({local, ?MODULE}, ?MODULE, []).\n\nstop() ->\n    case whereis(?MODULE) of\n        undefined -> ok;\n        Pid -> supervisor:stop(Pid)\n    end.\n\ninit([]) ->\n    %% % TODO [Milestone 1 - Step 1]: Configure the Root Supervisor Flags\n    %% Set:\n    %%   strategy  => rest_for_one  (router depends on registry, so if registry restarts, router must too)\n    %%   intensity => 5             (allow up to 5 restarts)\n    %%   period    => 10            (within a 10-second window)\n    SupFlags = #{\n        strategy => rest_for_one,\n        intensity => 5,\n        period => 10\n    },\n\n    %% % TODO [Milestone 1 - Step 2]: Declare the Ordered Child Specifications\n    %% Under rest_for_one, child startup order is critical!\n    %% Child 1 (xmpp_session_registry):\n    %%   - id: xmpp_session_registry\n    %%   - start: {xmpp_session_registry, start_link, []}\n    %%   - restart: permanent\n    %%   - shutdown: 2000\n    %%   - type: worker\n    %%   - modules: [xmpp_session_registry]\n    %%\n    %% Child 2 (xmpp_router):\n    %%   - id: xmpp_router\n    %%   - start: {xmpp_router, start_link, []}\n    %%   - restart: permanent\n    %%   - shutdown: 2000\n    %%   - type: worker\n    %%   - modules: [xmpp_router]\n    ChildSpecs = [\n        %% Add child specification map for xmpp_session_registry here:\n\n        %% Add child specification map for xmpp_router here:\n\n    ],\n    {ok, {SupFlags, ChildSpecs}}.\n",
   'src/xmpp_stream_parser.erl': "-module(xmpp_stream_parser).\n-export([new_buffer/0, feed_chunk/2, extract_attr/2, extract_tag_body/2]).\n\nnew_buffer() ->\n    <<>>.\n\nfeed_chunk(BufferBin, IncomingBin) when is_binary(BufferBin), is_binary(IncomingBin) ->\n    Combined = <<BufferBin/binary, IncomingBin/binary>>,\n    extract_events(Combined, []).\n\nextract_events(Bin, Acc) ->\n    CleanBin = trim_leading_ws(Bin),\n    case CleanBin of\n        <<>> ->\n            {lists:reverse(Acc), <<>>};\n\n        <<\"</stream:stream>\", Rest/binary>> ->\n            extract_events(Rest, [stream_close | Acc]);\n\n        <<\"<stream:stream\", _/binary>> ->\n            case binary:match(CleanBin, <<\">\">>) of\n                {Pos, 1} ->\n                    HeaderLen = Pos + 1,\n                    <<HeaderBin:HeaderLen/binary, Rest/binary>> = CleanBin,\n                    Domain = binary:copy(extract_attr(HeaderBin, <<\"to\">>, <<\"localhost\">>)),\n                    extract_events(Rest, [{stream_open, Domain} | Acc]);\n                nomatch ->\n                    {lists:reverse(Acc), binary:copy(CleanBin)}\n            end;\n\n        %% % TODO [Milestone 2 - Step 1]: Parse self-closing <ping id='...'/>\n        %% 1. Match prefix <<\"<ping\", _/binary>>.\n        %% 2. Check for closing <<\"/>\">>. If incomplete, return {lists:reverse(Acc), binary:copy(CleanBin)}.\n        %% 3. Extract the \"id\" attribute (default <<\"ping_1\">>).\n        %% 4. CRITICAL: Unpin with binary:copy/1!\n        %% 5. Recurse with [{ping, Id} | Acc].\n        <<\"<ping\", _/binary>> ->\n            %% Implement ping stanza extraction here:\n            {lists:reverse(Acc), binary:copy(CleanBin)};\n\n        %% % TODO [Milestone 2 - Step 2]: Parse <auth mechanism='...'>payload</auth>\n        %% 1. Use extract_closed_tag(CleanBin, <<\"</auth>\">>, Fun, Acc).\n        %% 2. In Fun, extract attribute \"mechanism\" (default <<\"PLAIN\">>).\n        %% 3. Extract tag body using extract_tag_body(FrameBin, <<\"auth\">>).\n        %% 4. CRITICAL: Unpin both strings with binary:copy/1!\n        %% 5. Return event: {sasl_auth, Mech, Payload}.\n        <<\"<auth\", _/binary>> ->\n            %% Implement sasl auth stanza extraction here:\n            {lists:reverse(Acc), binary:copy(CleanBin)};\n\n        %% % TODO [Milestone 2 - Step 3]: Parse <iq id='...'><resource>res</resource></iq>\n        %% 1. Use extract_closed_tag(CleanBin, <<\"</iq>\">>, Fun, Acc).\n        %% 2. In Fun, extract attribute \"id\" (default <<\"bind_1\">>).\n        %% 3. Extract resource body using extract_tag_body(FrameBin, <<\"resource\">>).\n        %% 4. Unpin with binary:copy/1, and return: {iq_bind, Id, Res}.\n        <<\"<iq\", _/binary>> ->\n            %% Implement iq bind stanza extraction here:\n            {lists:reverse(Acc), binary:copy(CleanBin)};\n\n        %% % TODO [Milestone 2 - Step 4]: Parse <message id='...' to='...'><body>body</body></message>\n        %% 1. Use extract_closed_tag(CleanBin, <<\"</message>\">>, Fun, Acc).\n        %% 2. In Fun, extract \"id\" (default <<\"msg_1\">>), \"to\" (default <<>>), and body with extract_tag_body/2.\n        %% 3. Unpin all three with binary:copy/1, and return: {chat_message, Id, To, Body}.\n        <<\"<message\", _/binary>> ->\n            %% Implement chat message stanza extraction here:\n            {lists:reverse(Acc), binary:copy(CleanBin)};\n\n        Other ->\n            {lists:reverse(Acc), binary:copy(Other)}\n    end.\n\n%% ── Helper Framing Utilities (Pre-built for you) ─────────────────────────────\nextract_closed_tag(Bin, CloseTag, Fun, Acc) ->\n    CloseTagLen = byte_size(CloseTag),\n    case binary:match(Bin, CloseTag) of\n        {Pos, CloseTagLen} ->\n            TotalLen = Pos + CloseTagLen,\n            <<FrameBin:TotalLen/binary, Rest/binary>> = Bin,\n            Event = Fun(FrameBin),\n            extract_events(Rest, [Event | Acc]);\n        nomatch ->\n            {lists:reverse(Acc), binary:copy(Bin)}\n    end.\n\nextract_attr(Bin, AttrName) ->\n    extract_attr(Bin, AttrName, <<>>).\n\nextract_attr(Bin, AttrName, Default) ->\n    Key1 = <<AttrName/binary, 61, 34>>,\n    Key2 = <<AttrName/binary, 61, 39>>,\n    case find_attr_val(Bin, Key1, <<34>>) of\n        {ok, Val} -> Val;\n        nomatch ->\n            case find_attr_val(Bin, Key2, <<39>>) of\n                {ok, Val} -> Val;\n                nomatch -> Default\n            end\n    end.\n\nfind_attr_val(Bin, Key, QuoteChar) ->\n    case binary:match(Bin, Key) of\n        {Pos, Len} ->\n            Start = Pos + Len,\n            <<_:Start/binary, Rem/binary>> = Bin,\n            case binary:match(Rem, QuoteChar) of\n                {ValLen, _} ->\n                    <<Val:ValLen/binary, _/binary>> = Rem,\n                    {ok, Val};\n                nomatch ->\n                    nomatch\n            end;\n        nomatch ->\n            nomatch\n    end.\n\nextract_tag_body(Bin, TagName) ->\n    OpenTag = <<\"<\", TagName/binary>>,\n    CloseTag = <<\"</\", TagName/binary, \">\">>,\n    case binary:match(Bin, OpenTag) of\n        {PosOpen, _} ->\n            <<_:PosOpen/binary, Rem1/binary>> = Bin,\n            case binary:match(Rem1, <<\">\">>) of\n                {PosCloseOpen, 1} ->\n                    ContentStart = PosCloseOpen + 1,\n                    <<_:ContentStart/binary, Rem2/binary>> = Rem1,\n                    case binary:match(Rem2, CloseTag) of\n                        {BodyLen, _} ->\n                            <<Body:BodyLen/binary, _/binary>> = Rem2,\n                            Body;\n                        nomatch ->\n                            <<>>\n                    end;\n                nomatch ->\n                    <<>>\n            end;\n        nomatch ->\n            <<>>\n    end.\n\ntrim_leading_ws(<<C, Rest/binary>>) when C =:= 32; C =:= 9; C =:= 10; C =:= 13 ->\n    trim_leading_ws(Rest);\ntrim_leading_ws(Bin) ->\n    Bin.\n",
   'src/xmpp_session_registry.erl': "-module(xmpp_session_registry).\n-behaviour(gen_server).\n\n-export([\n    start_link/0,\n    stop/0,\n    register_session/3,\n    unregister_session/1,\n    lookup_by_jid/1,\n    list_all_sessions/0,\n    parse_jid/1\n]).\n-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).\n\n-define(TAB, xmpp_sessions_tab).\n\nstart_link() ->\n    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).\n\nstop() ->\n    case whereis(?MODULE) of\n        undefined -> ok;\n        Pid -> gen_server:stop(Pid)\n    end.\n\nregister_session(FullJid, Priority, C2sPid)\n  when is_binary(FullJid), is_integer(Priority), is_pid(C2sPid) ->\n    gen_server:call(?MODULE, {register_session, FullJid, Priority, C2sPid}).\n\nunregister_session(FullJid) when is_binary(FullJid) ->\n    gen_server:call(?MODULE, {unregister_session, FullJid}).\n\n%% % TODO [Milestone 3 - Step 1]: Direct Concurrent ETS Lookup\n%% 1. Ensure table exists with ensure_table().\n%% 2. Check if TargetJid contains <<\"/\">>:\n%%    - If YES (Full JID): Use ets:lookup(?TAB, TargetJid).\n%%      If found, return [Pid]. If not found, return [].\n%%    - If NO (Bare JID): Find all sessions in ?TAB matching BareJid.\n%%      Sort matching sessions by Priority descending.\n%%      Return the list containing the single highest-priority PID: [TopPid], or [] if none.\nlookup_by_jid(TargetJid) when is_binary(TargetJid) ->\n    ensure_table(),\n    %% Implement lookup logic here:\n    [].\n\nlist_all_sessions() ->\n    ensure_table(),\n    ets:tab2list(?TAB).\n\nparse_jid(JidBin) when is_binary(JidBin) ->\n    case binary:split(JidBin, <<\"/\">>) of\n        [Bare, Res] -> {Bare, Res};\n        [Bare] -> {Bare, <<>>}\n    end.\n\nensure_table() ->\n    case ets:info(?TAB) of\n        undefined ->\n            ets:new(?TAB, [named_table, public, set, {read_concurrency, true}]);\n        _ ->\n            ?TAB\n    end.\n\ninit([]) ->\n    ensure_table(),\n    {ok, #{monitors => #{}}}.\n\n%% % TODO [Milestone 3 - Step 2]: Implement Session Registration & Monitoring\n%% 1. Call parse_jid(FullJidBin) to get {BareJid, Resource}.\n%% 2. Call MRef = erlang:monitor(process, C2sPid).\n%% 3. Insert record into ?TAB: {FullJidBin, BareJid, Resource, Priority, C2sPid, MRef}.\n%% 4. Save MRef => FullJidBin in State.monitors map.\n%% 5. Return {reply, ok, NewState}.\nhandle_call({register_session, FullJidBin, Priority, C2sPid}, _From, State) ->\n    ensure_table(),\n    %% Implement registration here:\n    {reply, ok, State};\n\n%% % TODO [Milestone 3 - Step 3]: Implement Session Unregistration\n%% 1. Look up FullJidBin in ?TAB to find MRef.\n%% 2. Demonitor with erlang:demonitor(MRef, [flush]).\n%% 3. Delete from ?TAB with ets:delete(?TAB, FullJidBin).\n%% 4. Return {reply, ok, State}.\nhandle_call({unregister_session, FullJidBin}, _From, State) ->\n    ensure_table(),\n    %% Implement unregistration here:\n    {reply, ok, State};\n\nhandle_call(_Req, _From, State) ->\n    {reply, {error, unknown_request}, State}.\n\nhandle_cast(_Msg, State) ->\n    {noreply, State}.\n\n%% % TODO [Milestone 3 - Step 4]: Process Monitor Termination Handler\n%% When a monitored C2S process terminates, the BEAM delivers:\n%% {'DOWN', MRef, process, DeadPid, Reason}\n%% 1. Find FullJid mapped to MRef in State.monitors.\n%% 2. Delete entry from ?TAB with ets:delete(?TAB, FullJid).\n%% 3. Remove MRef from the monitors map.\n%% 4. Return {noreply, NewState}.\nhandle_info({'DOWN', MRef, process, _DeadPid, _Reason}, State) ->\n    ensure_table(),\n    %% Implement monitor cleanup here:\n    {noreply, State};\n\nhandle_info(_Info, State) ->\n    {noreply, State}.\n\nterminate(_Reason, _State) ->\n    ok.\n",
-  'src/xmpp_c2s_statem.erl': "-module(xmpp_c2s_statem).\n-behaviour(gen_statem).\n\n-export([start_link/1, stop/1, feed_xml/2, get_session_info/1]).\n-export([init/1, callback_mode/0, terminate/3]).\n\n%% State functions (gen_statem)\n-export([wait_for_stream/3, wait_for_sasl/3, authenticated/3, session_established/3]).\n\nstart_link(Opts) ->\n    gen_statem:start_link(?MODULE, Opts, []).\n\nstop(Pid) ->\n    gen_statem:stop(Pid).\n\nfeed_xml(Pid, XmlBin) when is_binary(XmlBin) ->\n    gen_statem:call(Pid, {feed_xml, XmlBin}).\n\nget_session_info(Pid) ->\n    gen_statem:call(Pid, get_session_info).\n\ncallback_mode() ->\n    state_functions.\n\ninit(Opts) ->\n    Domain = maps:get(domain, Opts, <<\"localhost\">>),\n    Socket = maps:get(socket, Opts, undefined),\n    Data = #{\n        domain => Domain,\n        socket => Socket,\n        parser_buf => xmpp_stream_parser:new_buffer(),\n        user => undefined,\n        resource => undefined,\n        full_jid => undefined,\n        priority => 0\n    },\n    {ok, wait_for_stream, Data}.\n\n%% % TODO [Milestone 4 - Step 1]: wait_for_stream State Function\n%% 1. Parse XmlBin using xmpp_stream_parser:feed_chunk/2.\n%% 2. If events contain {stream_open, RequestedDomain}:\n%%    - Construct StreamFeaturesXml = <<\"<stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>\">>\n%%    - Transition to wait_for_sasl:\n%%      {next_state, wait_for_sasl, NewData, [{reply, From, {ok, wait_for_sasl, [StreamFeaturesXml]}}]}\n%% 3. Otherwise keep state with {keep_state, NewData, [{reply, From, {ok, wait_for_stream, []}}]}.\nwait_for_stream({call, From}, {feed_xml, XmlBin}, Data) ->\n    Buf = maps:get(parser_buf, Data, <<>>),\n    {Events, NewBuf} = xmpp_stream_parser:feed_chunk(Buf, XmlBin),\n    NewData = Data#{parser_buf => NewBuf},\n    %% Implement state transition logic here:\n    {keep_state, NewData, [{reply, From, {ok, wait_for_stream, []}}]};\n\nwait_for_stream({call, From}, get_session_info, Data) ->\n    {keep_state, Data, [{reply, From, {ok, wait_for_stream, Data}}]};\nwait_for_stream(_EventType, _EventContent, Data) ->\n    {keep_state, Data}.\n\n%% % TODO [Milestone 4 - Step 2]: wait_for_sasl State Function\n%% 1. Parse XmlBin with xmpp_stream_parser:feed_chunk/2.\n%% 2. If events contain {sasl_auth, <<\"PLAIN\">>, Payload}:\n%%    - Extract username with extract_user_from_sasl(Payload, <<\"anonymous\">>).\n%%    - SuccessXml = <<\"<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>\">>.\n%%    - Transition to authenticated state:\n%%      {next_state, authenticated, NewData#{user => User}, [{reply, From, {ok, authenticated, [SuccessXml]}}]}\nwait_for_sasl({call, From}, {feed_xml, XmlBin}, Data) ->\n    Buf = maps:get(parser_buf, Data, <<>>),\n    {Events, NewBuf} = xmpp_stream_parser:feed_chunk(Buf, XmlBin),\n    NewData = Data#{parser_buf => NewBuf},\n    %% Implement state transition logic here:\n    {keep_state, NewData, [{reply, From, {ok, wait_for_sasl, []}}]};\n\nwait_for_sasl({call, From}, get_session_info, Data) ->\n    {keep_state, Data, [{reply, From, {ok, wait_for_sasl, Data}}]};\nwait_for_sasl(_EventType, _EventContent, Data) ->\n    {keep_state, Data}.\n\n%% % TODO [Milestone 4 - Step 3]: authenticated State Function\n%% 1. Parse XmlBin with xmpp_stream_parser:feed_chunk/2.\n%% 2. If events contain {iq_bind, Id, Resource}:\n%%    - SafeResource = if Resource =:= <<>> -> <<\"default\">>; true -> Resource end.\n%%    - FullJid = <<User/binary, \"@\", Domain/binary, \"/\", SafeResource/binary>>.\n%%    - Register session: xmpp_session_registry:register_session(FullJid, 10, self()).\n%%    - ReplyXml = <<\"<iq type='result' id='\", Id/binary, \"'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>\", FullJid/binary, \"</jid></bind></iq>\">>.\n%%    - Transition to session_established:\n%%      {next_state, session_established, NewData#{resource => SafeResource, full_jid => FullJid, priority => 10},\n%%       [{reply, From, {ok, session_established, [ReplyXml]}}]}\nauthenticated({call, From}, {feed_xml, XmlBin}, Data) ->\n    Buf = maps:get(parser_buf, Data, <<>>),\n    {Events, NewBuf} = xmpp_stream_parser:feed_chunk(Buf, XmlBin),\n    NewData = Data#{parser_buf => NewBuf},\n    %% Implement state transition logic here:\n    {keep_state, NewData, [{reply, From, {ok, authenticated, []}}]};\n\nauthenticated({call, From}, get_session_info, Data) ->\n    {keep_state, Data, [{reply, From, {ok, authenticated, Data}}]};\nauthenticated(_EventType, _EventContent, Data) ->\n    {keep_state, Data}.\n\n%% % TODO [Milestone 4 - Step 4]: session_established State Function\n%% In established session:\n%% 1. On {feed_xml, XmlBin}: parse events and forward chat messages to xmpp_router:route_stanza/3.\n%% 2. On {info, {deliver_stanza, StanzaXml}}: push to client socket if attached.\nsession_established({call, From}, {feed_xml, XmlBin}, Data) ->\n    Buf = maps:get(parser_buf, Data, <<>>),\n    {Events, NewBuf} = xmpp_stream_parser:feed_chunk(Buf, XmlBin),\n    NewData = Data#{parser_buf => NewBuf},\n    {NextState, FinalData, OutXmls} = process_events(Events, session_established, NewData, []),\n    {next_state, NextState, FinalData, [{reply, From, {ok, NextState, lists:reverse(OutXmls)}}]};\n\nsession_established({call, From}, get_session_info, Data) ->\n    {keep_state, Data, [{reply, From, {ok, session_established, Data}}]};\n\nsession_established(info, {deliver_stanza, StanzaXml}, Data) ->\n    send_to_socket(maps:get(socket, Data, undefined), StanzaXml),\n    {keep_state, Data};\n\nsession_established(_EventType, _EventContent, Data) ->\n    {keep_state, Data}.\n\nterminate(_Reason, _State, _Data) ->\n    ok.\n\n%% ── Helpers ──────────────────────────────────────────────────────────────────\nprocess_events([], State, Data, OutAcc) ->\n    {State, Data, OutAcc};\nprocess_events([{chat_message, Id, TargetJid, Body} | Rest], session_established, Data, OutAcc) ->\n    FromJid = maps:get(full_jid, Data, <<\"unknown@localhost/anon\">>),\n    StanzaXml = <<\"<message from='\", FromJid/binary, \"' to='\", TargetJid/binary, \"' id='\", Id/binary, \"' type='chat'><body>\", Body/binary, \"</body></message>\">>,\n    _ = (catch xmpp_router:route_stanza(FromJid, TargetJid, StanzaXml)),\n    process_events(Rest, session_established, Data, OutAcc);\nprocess_events([{ping, Id} | Rest], State, Data, OutAcc) ->\n    Reply = <<\"<iq type='result' id='\", Id/binary, \"'/>\">>,\n    process_events(Rest, State, Data, [Reply | OutAcc]);\nprocess_events([stream_close | Rest], _State, Data, OutAcc) ->\n    Reply = <<\"</stream:stream>\">>,\n    process_events(Rest, wait_for_stream, Data, [Reply | OutAcc]);\nprocess_events([_Other | Rest], State, Data, OutAcc) ->\n    process_events(Rest, State, Data, OutAcc).\n\nextract_user_from_sasl(<<>>, Default) -> Default;\nextract_user_from_sasl(Payload, Default) ->\n    case binary:split(Payload, <<0>>, [global]) of\n        [_Authzid, Authcid, _Pass | _] when Authcid =/= <<>> -> Authcid;\n        [Single | _] when Single =/= <<>> -> Single;\n        _ -> Default\n    end.\n\nsend_to_socket(undefined, _Data) -> ok;\nsend_to_socket(Socket, Data) ->\n    catch gen_tcp:send(Socket, Data),\n    ok.\n",
+  'src/xmpp_c2s_statem.erl': `-module(xmpp_c2s_statem).
+-behaviour(gen_statem).
+
+-export([
+    start_link/1,
+    feed_xml/2,
+    get_session_info/1,
+    stop/1
+]).
+-export([
+    callback_mode/0,
+    init/1,
+    wait_for_stream/3,
+    wait_for_sasl/3,
+    authenticated/3,
+    session_established/3,
+    terminate/3
+]).
+
+start_link(Opts) when is_map(Opts) ->
+    gen_statem:start_link(?MODULE, Opts, []).
+
+feed_xml(Pid, XmlChunkBin) when is_pid(Pid), is_binary(XmlChunkBin) ->
+    gen_statem:call(Pid, {xml_chunk, XmlChunkBin}).
+
+get_session_info(Pid) when is_pid(Pid) ->
+    gen_statem:call(Pid, get_session_info).
+
+stop(Pid) when is_pid(Pid) ->
+    gen_statem:stop(Pid).
+
+callback_mode() ->
+    state_functions.
+
+init(Opts) ->
+    Socket = maps:get(socket, Opts, undefined),
+    if Socket =/= undefined ->
+        _ = inet:setopts(Socket, [{active, once}]);
+       true ->
+        ok
+    end,
+    Data = #{
+        socket => Socket,
+        buffer => xmpp_stream_parser:new_buffer(),
+        domain => maps:get(domain, Opts, <<"localhost">>),
+        username => maps:get(username, Opts, <<"alice">>),
+        resource => <<>>,
+        full_jid => <<>>,
+        priority => 10,
+        delivered_inbox => []
+    },
+    {ok, wait_for_stream, Data}.
+
+wait_for_stream({call, From}, {xml_chunk, Chunk}, Data) ->
+    handle_incoming_chunk(Chunk, wait_for_stream, Data, From);
+wait_for_stream(info, {tcp, Socket, Chunk}, Data) ->
+    _ = inet:setopts(Socket, [{active, once}]),
+    handle_incoming_chunk(Chunk, wait_for_stream, Data, undefined);
+wait_for_stream({call, From}, get_session_info, Data) ->
+    {keep_state_and_data, [{reply, From, {ok, wait_for_stream, Data}}]};
+wait_for_stream(_EventType, _Event, _Data) ->
+    keep_state_and_data.
+
+wait_for_sasl({call, From}, {xml_chunk, Chunk}, Data) ->
+    handle_incoming_chunk(Chunk, wait_for_sasl, Data, From);
+wait_for_sasl(info, {tcp, Socket, Chunk}, Data) ->
+    _ = inet:setopts(Socket, [{active, once}]),
+    handle_incoming_chunk(Chunk, wait_for_sasl, Data, undefined);
+wait_for_sasl({call, From}, get_session_info, Data) ->
+    {keep_state_and_data, [{reply, From, {ok, wait_for_sasl, Data}}]};
+wait_for_sasl(_EventType, _Event, _Data) ->
+    keep_state_and_data.
+
+authenticated({call, From}, {xml_chunk, Chunk}, Data) ->
+    handle_incoming_chunk(Chunk, authenticated, Data, From);
+authenticated(info, {tcp, Socket, Chunk}, Data) ->
+    _ = inet:setopts(Socket, [{active, once}]),
+    handle_incoming_chunk(Chunk, authenticated, Data, undefined);
+authenticated({call, From}, get_session_info, Data) ->
+    {keep_state_and_data, [{reply, From, {ok, authenticated, Data}}]};
+authenticated(_EventType, _Event, _Data) ->
+    keep_state_and_data.
+
+session_established({call, From}, {xml_chunk, Chunk}, Data) ->
+    handle_incoming_chunk(Chunk, session_established, Data, From);
+session_established(info, {tcp, Socket, Chunk}, Data) ->
+    _ = inet:setopts(Socket, [{active, once}]),
+    handle_incoming_chunk(Chunk, session_established, Data, undefined);
+session_established(info, {deliver_stanza, XmlBin}, Data) ->
+    send_to_socket(maps:get(socket, Data, undefined), XmlBin),
+    Inbox = maps:get(delivered_inbox, Data, []),
+    {keep_state, Data#{delivered_inbox => Inbox ++ [XmlBin]}};
+session_established({call, From}, get_session_info, Data) ->
+    {keep_state_and_data, [{reply, From, {ok, session_established, Data}}]};
+session_established(_EventType, _Event, _Data) ->
+    keep_state_and_data.
+
+terminate(_Reason, _State, Data) ->
+    case maps:get(full_jid, Data, <<>>) of
+        <<>> -> ok;
+        FullJid ->
+            try xmpp_session_registry:unregister_session(FullJid) catch _:_ -> ok end,
+            ok
+    end.
+
+handle_incoming_chunk(Chunk, CurrentState, Data, ReplyFrom) ->
+    OldBuf = maps:get(buffer, Data, <<>>),
+    {Events, NewBuf} = xmpp_stream_parser:feed_chunk(OldBuf, Chunk),
+    {NextState, UpdatedData, OutXmlList} =
+        process_events(Events, CurrentState, Data#{buffer => NewBuf}, []),
+    lists:foreach(fun(Xml) ->
+        send_to_socket(maps:get(socket, UpdatedData, undefined), Xml)
+    end, OutXmlList),
+    case ReplyFrom of
+        undefined ->
+            {next_state, NextState, UpdatedData};
+        From ->
+            {next_state, NextState, UpdatedData, [{reply, From, {ok, NextState, OutXmlList}}]}
+    end.
+
+%% % TODO [Milestone 4 - Event Processing Engine]:
+%% process_events(Events, CurrentState, Data, OutXmlAcc) -> {NextState, UpdatedData, OutXmlList}
+
+process_events([], State, Data, OutAcc) ->
+    {State, Data, lists:reverse(OutAcc)};
+
+%% % TODO [Milestone 4 - Step 1]: Handle {stream_open, Domain} in wait_for_stream
+%% Reply with stream header advertising SASL PLAIN mechanism:
+%%   Reply = <<"<stream:stream from='", Domain/binary, "' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'><stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>">>
+%% Advance state to 'wait_for_sasl', store domain in Data, append Reply to OutAcc.
+process_events([{stream_open, Domain} | Rest], wait_for_stream, Data, OutAcc) ->
+    %% Implement stream_open transition here:
+    process_events(Rest, wait_for_stream, Data, OutAcc);
+
+%% % TODO [Milestone 4 - Step 2]: Handle {sasl_auth, Mech, Payload} in wait_for_sasl
+%% Extract username with extract_user_from_sasl(Payload, maps:get(username, Data, <<"alice">>))
+%% Reply with success stanza: <<"<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>">>
+%% Advance state to 'authenticated', store username in Data, append Reply to OutAcc.
+process_events([{sasl_auth, _Mech, Payload} | Rest], wait_for_sasl, Data, OutAcc) ->
+    %% Implement sasl_auth transition here:
+    process_events(Rest, wait_for_sasl, Data, OutAcc);
+
+%% % TODO [Milestone 4 - Step 3]: Pre-Auth Security Rejection in wait_for_sasl
+%% Any unauthenticated stanza received before SASL authentication completes MUST be rejected!
+%% Reply with: <<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>
+%% Remain in wait_for_sasl state.
+process_events([_PreAuthStanza | Rest], wait_for_sasl, Data, OutAcc) ->
+    %% Implement pre-auth stanza rejection here:
+    process_events(Rest, wait_for_sasl, Data, OutAcc);
+
+%% % TODO [Milestone 4 - Step 4]: Handle {stream_open, Domain} in authenticated
+%% After SASL success, client re-opens stream. Reply advertising bind feature:
+%%   Reply = <<"<stream:stream from='", Domain/binary, "' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'><stream:features><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/></stream:features>">>
+%% Remain in 'authenticated' state.
+process_events([{stream_open, Domain} | Rest], authenticated, Data, OutAcc) ->
+    %% Implement second stream_open response here:
+    process_events(Rest, authenticated, Data, OutAcc);
+
+%% % TODO [Milestone 4 - Step 5]: Handle {iq_bind, Id, ResourceBin} in authenticated
+%% 1. Res = if ResourceBin == <<>> -> <<"obsidian">>; true -> ResourceBin end.
+%% 2. FullJid = <<User/binary, "@", Domain/binary, "/", Res/binary>>.
+%% 3. Register session: try xmpp_session_registry:register_session(FullJid, maps:get(priority, Data, 10), self()) catch _:_ -> ok end.
+%% 4. Reply = <<"<iq type='result' id='", Id/binary, "'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>", FullJid/binary, "</jid></bind></iq>">>.
+%% 5. Advance state to 'session_established', update Data with resource and full_jid.
+process_events([{iq_bind, Id, ResourceBin} | Rest], authenticated, Data, OutAcc) ->
+    %% Implement resource binding and session registration here:
+    process_events(Rest, authenticated, Data, OutAcc);
+
+process_events([{chat_message, Id, ToJid, Body} | Rest], session_established, Data, OutAcc) ->
+    FromJid = maps:get(full_jid, Data, <<"alice@localhost/obsidian">>),
+    TargetJid = case ToJid of <<>> -> FromJid; T -> T end,
+    StanzaXml = <<"<message from='", FromJid/binary, "' to='", TargetJid/binary, "' id='", Id/binary, "' type='chat'><body>", Body/binary, "</body></message>">>,
+    _ = try xmpp_router:route_stanza(FromJid, TargetJid, StanzaXml) catch _:_ -> ok end,
+    process_events(Rest, session_established, Data, OutAcc);
+
+process_events([{ping, Id} | Rest], State, Data, OutAcc) ->
+    Reply = <<"<iq type='result' id='", Id/binary, "'/>">>,
+    process_events(Rest, State, Data, [Reply | OutAcc]);
+
+process_events([stream_close | Rest], _State, Data, OutAcc) ->
+    Reply = <<"</stream:stream>">>,
+    process_events(Rest, wait_for_stream, Data, [Reply | OutAcc]);
+
+process_events([_Other | Rest], State, Data, OutAcc) ->
+    process_events(Rest, State, Data, OutAcc).
+
+extract_user_from_sasl(<<>>, Default) -> Default;
+extract_user_from_sasl(Payload, Default) ->
+    case binary:split(Payload, <<0>>, [global]) of
+        [_Authzid, Authcid, _Pass | _] when Authcid =/= <<>> -> Authcid;
+        [Single | _] when Single =/= <<>> -> Single;
+        _ -> Default
+    end.
+
+send_to_socket(undefined, _Data) -> ok;
+send_to_socket(Socket, Data) ->
+    try gen_tcp:send(Socket, Data) catch _:_ -> ok end,
+    ok.
+`,
   'src/xmpp_router.erl': "-module(xmpp_router).\n-behaviour(gen_server).\n\n-export([\n    start_link/0,\n    stop/0,\n    route_stanza/3,\n    pop_offline_messages/1,\n    get_offline_count/1\n]).\n-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).\n\nstart_link() ->\n    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).\n\nstop() ->\n    case whereis(?MODULE) of\n        undefined -> ok;\n        Pid -> gen_server:stop(Pid)\n    end.\n\nroute_stanza(FromFullJid, ToJid, XmlBin)\n  when is_binary(FromFullJid), is_binary(ToJid), is_binary(XmlBin) ->\n    gen_server:call(?MODULE, {route_stanza, FromFullJid, ToJid, XmlBin}).\n\npop_offline_messages(TargetJid) when is_binary(TargetJid) ->\n    gen_server:call(?MODULE, {pop_offline, TargetJid}).\n\nget_offline_count(TargetJid) when is_binary(TargetJid) ->\n    gen_server:call(?MODULE, {get_offline_count, TargetJid}).\n\ninit([]) ->\n    {ok, #{offline_store => #{}, total_routed => 0}}.\n\n%% % TODO [Milestone 5 - Step 1]: Online Routing vs Offline Fallback Spooling\n%% 1. Query target recipients with xmpp_session_registry:lookup_by_jid(ToJid).\n%% 2. If target PIDs exist ([_ | _]):\n%%    - For each Pid, send: Pid ! {deliver_stanza, binary:copy(XmlBin)}\n%%    - Increment total_routed counter\n%%    - Return {reply, {routed, length(TargetPids)}, UpdatedState}\n%% 3. If no target PIDs exist (recipient is offline: []):\n%%    - Parse BareJid with xmpp_session_registry:parse_jid(ToJid)\n%%    - Append binary:copy(XmlBin) to list for BareJid in State.offline_store\n%%    - Return {reply, {queued_offline, BareJid}, UpdatedState}\nhandle_call({route_stanza, _FromFullJid, ToJid, XmlBin}, _From, State) ->\n    %% Implement online delivery vs offline queueing here:\n    {reply, {queued_offline, ToJid}, State};\n\n%% % TODO [Milestone 5 - Step 2]: Pop Offline Messages for Target JID\n%% 1. Parse BareJid with xmpp_session_registry:parse_jid(TargetJid).\n%% 2. Get list of queued messages from State.offline_store (default []).\n%% 3. Remove BareJid from State.offline_store map.\n%% 4. Return {reply, {ok, Messages}, UpdatedState}.\nhandle_call({pop_offline, TargetJid}, _From, State) ->\n    %% Implement offline message retrieval here:\n    {reply, {ok, []}, State};\n\n%% % TODO [Milestone 5 - Step 3]: Get Count of Offline Messages\n%% 1. Parse BareJid with xmpp_session_registry:parse_jid(TargetJid).\n%% 2. Return {reply, length(Messages), State}.\nhandle_call({get_offline_count, TargetJid}, _From, State) ->\n    %% Implement offline count query here:\n    {reply, 0, State};\n\nhandle_call(_Req, _From, State) ->\n    {reply, {error, unknown_request}, State}.\n\nhandle_cast(_Msg, State) ->\n    {noreply, State}.\n\nhandle_info(_Info, State) ->\n    {noreply, State}.\n\nterminate(_Reason, _State) ->\n    ok.\n",
 };
 
@@ -945,8 +1249,8 @@ Welcome to the **BeamForge Final Capstone**. In this capstone project, you unify
       {
         id: 'tc-cap-1',
         title: 'Milestone 1: Supervision Tree Boot',
-        erlangCall: 'xmpp_sup:start_link()',
-        expectedOutput: '{ok, Pid}',
+        erlangCall: 'begin catch xmpp_sup:stop(), {ok, SupPid} = xmpp_sup:start_link(), Res = is_pid(SupPid) andalso is_process_alive(SupPid), xmpp_sup:stop(), Res end',
+        expectedOutput: 'true',
         explanation: 'Verifies the root supervisor boots with rest_for_one strategy and launches both workers.',
       },
       {
@@ -959,23 +1263,30 @@ Welcome to the **BeamForge Final Capstone**. In this capstone project, you unify
       {
         id: 'tc-cap-3',
         title: 'Milestone 3: ETS Session Registry & Highest Priority Lookup',
-        erlangCall: 'xmpp_session_registry:register_session(<<"alice@localhost/obsidian">>, 10, self()), xmpp_session_registry:lookup_by_jid(<<"alice@localhost">>)',
-        expectedOutput: '[<self>]',
+        erlangCall: 'begin catch xmpp_session_registry:stop(), {ok, _} = xmpp_session_registry:start_link(), ok = xmpp_session_registry:register_session(<<"alice@localhost/mobile">>, 5, self()), ok = xmpp_session_registry:register_session(<<"alice@localhost/desktop">>, 10, self()), Res = xmpp_session_registry:lookup_by_jid(<<"alice@localhost">>), xmpp_session_registry:stop(), Res =:= [self()] end',
+        expectedOutput: 'true',
         explanation: 'Verifies session registration and bare JID priority dispatch.',
       },
       {
         id: 'tc-cap-4',
         title: 'Milestone 4: C2S Handshake State Transitions',
-        erlangCall: 'xmpp_c2s_statem:feed_xml(Pid, <<"<auth mechanism=\'PLAIN\'>alice</auth>">>)',
-        expectedOutput: '{ok, authenticated, [<<"<success.../>">>]}',
+        erlangCall: 'begin {ok, C2SPid} = xmpp_c2s_statem:start_link(#{}), {ok, wait_for_sasl, _} = xmpp_c2s_statem:feed_xml(C2SPid, <<"<stream:stream to=\'localhost\'>">>), {ok, AuthState, _} = xmpp_c2s_statem:feed_xml(C2SPid, <<"<auth mechanism=\'PLAIN\'>alice</auth>">>), xmpp_c2s_statem:stop(C2SPid), AuthState end',
+        expectedOutput: 'authenticated',
         explanation: 'Verifies SASL authentication advances state machine from wait_for_sasl to authenticated.',
       },
       {
         id: 'tc-cap-5',
         title: 'Milestone 5: Routing & Offline Fallback Queue',
-        erlangCall: 'xmpp_router:route_stanza(<<"alice@localhost">>, <<"charlie@localhost">>, <<"<message>Hi</message>">>)',
-        expectedOutput: '{queued_offline, <<"charlie@localhost">>}',
+        erlangCall: 'begin catch xmpp_router:stop(), {ok, _} = xmpp_router:start_link(), {queued_offline, Bare} = xmpp_router:route_stanza(<<"alice@localhost">>, <<"bob@localhost">>, <<"<message>Hi</message>">>), Count = xmpp_router:get_offline_count(<<"bob@localhost">>), xmpp_router:stop(), {Bare, Count} end',
+        expectedOutput: '{<<"bob@localhost">>, 1}',
         explanation: 'Verifies message routing falls back to the in-memory offline message store when recipient is offline.',
+      },
+      {
+        id: 'tc-cap-6',
+        title: 'Milestone 6: Chaos Monkey Supervision Resilience',
+        erlangCall: 'begin catch xmpp_sup:stop(), {ok, _} = xmpp_sup:start_link(), Reg1 = whereis(xmpp_session_registry), exit(Reg1, kill), timer:sleep(60), Reg2 = whereis(xmpp_session_registry), xmpp_sup:stop(), Reg2 =/= undefined andalso Reg2 =/= Reg1 end',
+        expectedOutput: 'true',
+        explanation: 'Verifies that killing the session registry triggers rest_for_one supervisor restart of both registry and router without bringing down the root tree.',
       },
     ],
 

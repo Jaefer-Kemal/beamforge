@@ -1,7 +1,6 @@
 import { LessonContent } from '../../types/workspace';
 
 export const CHAPTER_11_LESSONS: LessonContent[] = [
-  // ── Lesson 11.1: Guided Demo ───────────────────────────────────────────────
   {
     id: 'ch11-l01',
     chapterNumber: 11,
@@ -9,6 +8,36 @@ export const CHAPTER_11_LESSONS: LessonContent[] = [
     lessonType: 'guided_demo',
     title: 'Guided Demo: Observing a Live XMPP Wire Protocol Session Transcript',
     difficulty: 'Intermediate',
+        visualScene: 'tcp_xmpp_stream_framing',
+    mentalModelCheck: {
+      question: 'Why does the XMPP C2S protocol keep a single TCP connection open persistently rather than using short-lived HTTP requests for each chat message?',
+      options: [
+        {
+          id: 'A',
+          label: 'To allow the server to push incoming stanzas to the client in real time with sub-millisecond latency without polling overhead.',
+          isCorrect: true,
+          explanation: 'XMPP maintains a long-lived bidirectional XML stream over a single TCP socket so either peer can push stanzas instantaneously.'
+        },
+        {
+          id: 'B',
+          label: 'Because XML documents can only be transmitted over raw TCP sockets.',
+          isCorrect: false,
+          explanation: 'XML can be sent over any transport, but persistent streaming avoids connection renegotiation latency.'
+        },
+        {
+          id: 'C',
+          label: 'Because Erlang processes cannot handle HTTP requests.',
+          isCorrect: false,
+          explanation: 'Erlang handles HTTP effortlessly (e.g. Cowboy), but real-time messaging requires low-latency bidirectional push streams.'
+        },
+        {
+          id: 'D',
+          label: 'Because SASL PLAIN authentication only works on raw sockets.',
+          isCorrect: false,
+          explanation: 'SASL PLAIN is transport-independent; persistent connections are chosen for real-time delivery.'
+        }
+      ]
+    },
     conceptMarkdown: `## Why This Matters in Production
 
 The **Extensible Messaging and Presence Protocol (XMPP — RFC 6120 & RFC 6121)** powers the communication backends of global real-time platforms: from **WhatsApp's core messaging engine** (which originated as an optimized Erlang XMPP fork) to massive telecom carriers and gaming backends running **ejabberd** and **MongooseIM**.
@@ -96,6 +125,95 @@ This is a **guided terminal demo**—no code changes are required!
         githubSourceUrl: 'https://github.com/processone/ejabberd',
       },
     ],
+        files: [
+      {
+        path: 'src/xmpp_wire_demo.erl',
+        name: 'xmpp_wire_demo.erl',
+        content: `-module(xmpp_wire_demo).
+-export([run_demo/0, print_transcript/2]).
+
+%% @doc Boots an ephemeral mock XMPP C2S server, runs the live protocol harness,
+%% formats each transcript step with latencies, and returns {ok, EntryCount}.
+-spec run_demo() -> {ok, pos_integer()}.
+run_demo() ->
+    RegName = list_to_atom("sample_xmpp_c2s_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    {ok, ServerPid} = sample_xmpp_c2s:start_link(#{reg_name => RegName, active_mode => once}),
+    Port = sample_xmpp_c2s:get_port(ServerPid),
+    io:format("~n================================================================~n"),
+    io:format(">>> BEAMFORGE XMPP WIRE PROTOCOL DEMO (PORT: ~p) <<<~n", [Port]),
+    io:format("================================================================~n~n"),
+    
+    ClientJid = <<"alice@localhost">>,
+    AuthToken = <<"password">>,
+    case bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing(Port, ClientJid, AuthToken) of
+        {ok, Transcript} ->
+            print_transcript(Transcript, 1),
+            sample_xmpp_c2s:stop(ServerPid),
+            io:format("~n================================================================~n"),
+            io:format(">>> ALL 5 XMPP PHASES COMPLETED WITH ZERO WIRE VIOLATIONS <<<~n"),
+            io:format("================================================================~n"),
+            {ok, length(Transcript)};
+        {error, Stage, Reason, PartialTranscript} ->
+            io:format("[ERROR] Failed at stage: ~p (~p)~n", [Stage, Reason]),
+            print_transcript(PartialTranscript, 1),
+            sample_xmpp_c2s:stop(ServerPid),
+            {error, Stage}
+    end.
+
+%% @private Pretty-print transcript entries with direction indicators
+print_transcript([], _Idx) -> ok;
+print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := Lat} | Rest], Idx) ->
+    Arrow = case Dir of
+        <<"c2s">> -> "C ===> S (Client to Server)";
+        <<"s2c">> -> "S ===> C (Server to Client)"
+    end,
+    io:format("[Step ~p | ~s | Latency: ~p µs]~n  Stage: ~s~n  XML:   ~s~n~n",
+              [Idx, Arrow, Lat, Stage, Xml]),
+    print_transcript(Rest, Idx + 1).
+`,
+      },
+    ],
+    solutionFiles: {
+      'src/xmpp_wire_demo.erl': `-module(xmpp_wire_demo).
+-export([run_demo/0, print_transcript/2]).
+
+-spec run_demo() -> {ok, pos_integer()}.
+run_demo() ->
+    RegName = list_to_atom("sample_xmpp_c2s_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    {ok, ServerPid} = sample_xmpp_c2s:start_link(#{reg_name => RegName, active_mode => once}),
+    Port = sample_xmpp_c2s:get_port(ServerPid),
+    io:format("~n================================================================~n"),
+    io:format(">>> BEAMFORGE XMPP WIRE PROTOCOL DEMO (PORT: ~p) <<<~n", [Port]),
+    io:format("================================================================~n~n"),
+    
+    ClientJid = <<"alice@localhost">>,
+    AuthToken = <<"password">>,
+    case bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing(Port, ClientJid, AuthToken) of
+        {ok, Transcript} ->
+            print_transcript(Transcript, 1),
+            sample_xmpp_c2s:stop(ServerPid),
+            io:format("~n================================================================~n"),
+            io:format(">>> ALL 5 XMPP PHASES COMPLETED WITH ZERO WIRE VIOLATIONS <<<~n"),
+            io:format("================================================================~n"),
+            {ok, length(Transcript)};
+        {error, Stage, Reason, PartialTranscript} ->
+            io:format("[ERROR] Failed at stage: ~p (~p)~n", [Stage, Reason]),
+            print_transcript(PartialTranscript, 1),
+            sample_xmpp_c2s:stop(ServerPid),
+            {error, Stage}
+    end.
+
+print_transcript([], _Idx) -> ok;
+print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := Lat} | Rest], Idx) ->
+    Arrow = case Dir of
+        <<"c2s">> -> "C ===> S (Client to Server)";
+        <<"s2c">> -> "S ===> C (Server to Client)"
+    end,
+    io:format("[Step ~p | ~s | Latency: ~p µs]~n  Stage: ~s~n  XML:   ~s~n~n",
+              [Idx, Arrow, Lat, Stage, Xml]),
+    print_transcript(Rest, Idx + 1).
+`,
+    },
     starterCode: `-module(xmpp_wire_demo).
 -export([run_demo/0, print_transcript/2]).
 
@@ -214,7 +332,6 @@ print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := 
     ],
   },
 
-  // ── Lesson 11.2: Concept Exercise ──────────────────────────────────────────
   {
     id: 'ch11-l02',
     chapterNumber: 11,
@@ -222,6 +339,36 @@ print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := 
     lessonType: 'concept_exercise',
     title: 'XMPP Addressing (RFC 7622): Parsing, Validating & Normalizing JIDs',
     difficulty: 'Intermediate',
+        visualScene: 'tcp_xmpp_stream_framing',
+    mentalModelCheck: {
+      question: 'Under RFC 7622, what is the architectural difference between a Bare JID (user@domain) and a Full JID (user@domain/resource)?',
+      options: [
+        {
+          id: 'A',
+          label: 'A Bare JID identifies the user account (for presence subscriptions and roster management), while a Full JID routes to a specific connected client socket session.',
+          isCorrect: true,
+          explanation: 'Full JIDs include the bound resource identifier and correspond directly to a unique online socket session.'
+        },
+        {
+          id: 'B',
+          label: 'Bare JIDs are only used on localhost, while Full JIDs are used on the internet.',
+          isCorrect: false,
+          explanation: 'Bare and Full JIDs are used everywhere across local and federated XMPP architectures.'
+        },
+        {
+          id: 'C',
+          label: 'Bare JIDs cannot receive chat messages.',
+          isCorrect: false,
+          explanation: 'Bare JIDs can receive messages; the server routes them to the highest priority connected resource or stores them offline.'
+        },
+        {
+          id: 'D',
+          label: 'Full JIDs require RSA signatures.',
+          isCorrect: false,
+          explanation: 'JIDs are simply structured protocol addresses, not cryptographic signatures.'
+        }
+      ]
+    },
     conceptMarkdown: `## Why This Matters in Production
 
 In the XMPP architecture, the fundamental unit of addressing is the **Jabber Identifier (JID — RFC 7622)**. 
@@ -335,6 +482,132 @@ Implement the module \`xmpp_jid\` in \`src/xmpp_jid.erl\` with the following exp
         githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl',
       },
     ],
+        files: [
+      {
+        path: 'src/xmpp_jid.erl',
+        name: 'xmpp_jid.erl',
+        content: `-module(xmpp_jid).
+-export([
+    parse/1,
+    to_bare/1,
+    format_jid/1,
+    is_same_bare_jid/2
+]).
+
+-type jid_map() :: #{
+    user => binary(),
+    domain => binary(),
+    resource => binary(),
+    bare => binary()
+}.
+
+%% @doc Parses a raw binary JID into validated components.
+%% Ensures sub-binaries are unpinned using binary:copy/1.
+-spec parse(binary()) -> {ok, jid_map()} | {error, invalid_jid}.
+parse(JidBin) when is_binary(JidBin) ->
+    %% % TODO: Implement RFC 7622 JID parser
+    %% 1. Split on "/" to separate Resource (if present)
+    %% 2. Split Bare part on "@" to extract User and Domain
+    %% 3. Validate neither User nor Domain is empty
+    %% 4. Use binary:copy/1 on all slices
+    {error, not_implemented}.
+
+%% @doc Extracts the Bare JID binary from either a map or binary JID.
+-spec to_bare(jid_map() | binary()) -> binary() | {error, invalid_jid}.
+to_bare(#{bare := Bare}) -> Bare;
+to_bare(JidBin) when is_binary(JidBin) ->
+    case parse(JidBin) of
+        {ok, #{bare := Bare}} -> Bare;
+        Error -> Error
+    end.
+
+%% @doc Formats a JID map back into standard wire format.
+-spec format_jid(jid_map()) -> binary().
+format_jid(#{user := User, domain := Domain, resource := Resource}) ->
+    %% % TODO: Return User@Domain if Resource is <<>>, else User@Domain/Resource
+    <<>>.
+
+%% @doc Returns true if two JIDs represent the same user account.
+-spec is_same_bare_jid(jid_map() | binary(), jid_map() | binary()) -> boolean().
+is_same_bare_jid(Jid1, Jid2) ->
+    %% % TODO: Compare bare JID representations
+    false.
+`,
+      },
+    ],
+    solutionFiles: {
+      'src/xmpp_jid.erl': `-module(xmpp_jid).
+-export([
+    parse/1,
+    to_bare/1,
+    format_jid/1,
+    is_same_bare_jid/2
+]).
+
+-type jid_map() :: #{
+    user => binary(),
+    domain => binary(),
+    resource => binary(),
+    bare => binary()
+}.
+
+-spec parse(binary()) -> {ok, jid_map()} | {error, invalid_jid}.
+parse(JidBin) when is_binary(JidBin) ->
+    case binary:split(JidBin, <<"/">>) of
+        [BarePart, ResourcePart] ->
+            if
+                byte_size(ResourcePart) =:= 0 -> {error, invalid_jid};
+                true -> parse_bare(BarePart, ResourcePart)
+            end;
+        [BarePart] ->
+            parse_bare(BarePart, <<>>)
+    end;
+parse(_) ->
+    {error, invalid_jid}.
+
+parse_bare(BareBin, ResourceBin) ->
+    case binary:split(BareBin, <<"@">>) of
+        [UserPart, DomainPart] when byte_size(UserPart) > 0 andalso byte_size(DomainPart) > 0 ->
+            CleanUser = binary:copy(UserPart),
+            CleanDomain = binary:copy(DomainPart),
+            CleanResource = binary:copy(ResourceBin),
+            CleanBare = binary:copy(<<CleanUser/binary, "@", CleanDomain/binary>>),
+            {ok, #{
+                user => CleanUser,
+                domain => CleanDomain,
+                resource => CleanResource,
+                bare => CleanBare
+            }};
+        _ ->
+            {error, invalid_jid}
+    end.
+
+-spec to_bare(jid_map() | binary()) -> binary() | {error, invalid_jid}.
+to_bare(#{bare := Bare}) -> Bare;
+to_bare(JidBin) when is_binary(JidBin) ->
+    case parse(JidBin) of
+        {ok, #{bare := Bare}} -> Bare;
+        Error -> Error
+    end;
+to_bare(_) ->
+    {error, invalid_jid}.
+
+-spec format_jid(jid_map()) -> binary().
+format_jid(#{user := User, domain := Domain, resource := Resource}) ->
+    case Resource of
+        <<>> -> <<User/binary, "@", Domain/binary>>;
+        _    -> <<User/binary, "@", Domain/binary, "/", Resource/binary>>
+    end.
+
+-spec is_same_bare_jid(jid_map() | binary(), jid_map() | binary()) -> boolean().
+is_same_bare_jid(Jid1, Jid2) ->
+    case {to_bare(Jid1), to_bare(Jid2)} of
+        {{error, _}, _} -> false;
+        {_, {error, _}} -> false;
+        {Bare1, Bare2}  -> Bare1 =:= Bare2
+    end.
+`,
+    },
     starterCode: `-module(xmpp_jid).
 -export([
     parse/1,
@@ -406,10 +679,7 @@ is_same_bare_jid(Jid1, Jid2) ->
       },
     ],
     astRules: {
-      requireTailRecursion: [],
-      forbiddenCalls: [],
-      requiredCalls: ['binary:copy'],
-      requiredConstructs: ['case'],
+      requiredCalls: ['binary:split/2', 'binary:copy/1'],
     },
     solutionCode: `-module(xmpp_jid).
 -export([
@@ -503,7 +773,6 @@ is_same_bare_jid(Jid1, Jid2) ->
     ],
   },
 
-  // ── Lesson 11.3: Concept Exercise ──────────────────────────────────────────
   {
     id: 'ch11-l03',
     chapterNumber: 11,
@@ -511,6 +780,36 @@ is_same_bare_jid(Jid1, Jid2) ->
     lessonType: 'concept_exercise',
     title: 'XMPP Stanza Anatomy (RFC 6120): Parsing & Constructing Stanzas',
     difficulty: 'Intermediate',
+        visualScene: 'tcp_xmpp_stream_framing',
+    mentalModelCheck: {
+      question: 'Why does an XMPP <iq type="get"> stanza strictly require the recipient to return an <iq type="result"> or <iq type="error"> with the exact same id attribute?',
+      options: [
+        {
+          id: 'A',
+          label: 'To enable asynchronous request-response RPC matching over the persistent stream without head-of-line blocking.',
+          isCorrect: true,
+          explanation: 'Because stanzas are multiplexed asynchronously over a single TCP stream, the client uses the unique id attribute to match responses to requests.'
+        },
+        {
+          id: 'B',
+          label: 'Because Erlang processes will crash if the id is missing.',
+          isCorrect: false,
+          explanation: 'It is an RFC 6120 protocol specification requirement for multiplexed RPC correlation.'
+        },
+        {
+          id: 'C',
+          label: 'To encrypt the payload for privacy.',
+          isCorrect: false,
+          explanation: 'The id attribute provides correlation, not encryption.'
+        },
+        {
+          id: 'D',
+          label: 'Because the XML parser cannot parse closing tags without an id.',
+          isCorrect: false,
+          explanation: 'XML parsers do not require id attributes to parse closing tags.'
+        }
+      ]
+    },
     conceptMarkdown: `## Why This Matters in Production
 
 In XMPP, after the stream header has been negotiated, all communication consists of discrete XML packets called **Stanzas**. 
@@ -610,6 +909,179 @@ Implement the module \`xmpp_stanza\` in \`src/xmpp_stanza.erl\` with the followi
         githubSourceUrl: 'https://github.com/erlang/otp/blob/master/erts/preloaded/src/erlang.erl',
       },
     ],
+        files: [
+      {
+        path: 'src/xmpp_stanza.erl',
+        name: 'xmpp_stanza.erl',
+        content: `-module(xmpp_stanza).
+-export([
+    classify_xml_packet/1,
+    build_stream_features/1,
+    build_bind_result/2,
+    build_chat_message/4
+]).
+
+%% @doc Classifies incoming raw XML packets into structured tuples.
+-spec classify_xml_packet(binary()) ->
+    {stream_open, binary()} |
+    {auth_plain, binary()} |
+    {iq, binary(), binary()} |
+    {presence, binary()} |
+    {message, binary(), binary(), binary()} |
+    unknown.
+classify_xml_packet(XmlBin) when is_binary(XmlBin) ->
+    %% % TODO: Classify XmlBin using binary pattern matching or inspection
+    unknown.
+
+%% @doc Constructs a <stream:features> XML payload advertising SASL mechanisms.
+-spec build_stream_features([binary()]) -> binary().
+build_stream_features(Mechanisms) ->
+    %% % TODO: Construct <stream:features><mechanisms ...> XML
+    <<>>.
+
+%% @doc Constructs an IQ result responding to resource binding.
+-spec build_bind_result(binary(), binary()) -> binary().
+build_bind_result(Id, FullJid) ->
+    %% % TODO: Construct <iq type='result' id='...'><bind ...><jid>...</jid></bind></iq>
+    <<>>.
+
+%% @doc Constructs a chat <message> stanza.
+-spec build_chat_message(binary(), binary(), binary(), binary()) -> binary().
+build_chat_message(FromJid, ToJid, Id, BodyText) ->
+    %% % TODO: Construct <message from='...' to='...' id='...' type='chat'><body>...</body></message>
+    <<>>.
+`,
+      },
+    ],
+    solutionFiles: {
+      'src/xmpp_stanza.erl': `-module(xmpp_stanza).
+-export([
+    classify_xml_packet/1,
+    build_stream_features/1,
+    build_bind_result/2,
+    build_chat_message/4
+]).
+
+-spec classify_xml_packet(binary()) ->
+    {stream_open, binary()} |
+    {auth_plain, binary()} |
+    {iq, binary(), binary()} |
+    {presence, binary()} |
+    {message, binary(), binary(), binary()} |
+    unknown.
+classify_xml_packet(XmlBin) when is_binary(XmlBin) ->
+    Trimmed = string:trim(XmlBin),
+    case binary:match(Trimmed, <<"stream:stream">>) of
+        {_, _} ->
+            ToDomain = extract_attr(Trimmed, <<"to=">>),
+            {stream_open, ToDomain};
+        nomatch ->
+            case binary:match(Trimmed, <<"auth">>) of
+                {_, _} ->
+                    AuthData = extract_tag_body(Trimmed, <<"auth">>),
+                    {auth_plain, AuthData};
+                nomatch ->
+                    case binary:match(Trimmed, <<"<iq">>) of
+                        {_, _} ->
+                            Id = extract_attr(Trimmed, <<"id=">>),
+                            Type = extract_attr(Trimmed, <<"type=">>),
+                            {iq, Id, Type};
+                        nomatch ->
+                            case binary:match(Trimmed, <<"<presence">>) of
+                                {_, _} ->
+                                    Type = case extract_attr(Trimmed, <<"type=">>) of
+                                        <<>> -> <<"available">>;
+                                        Val -> Val
+                                    end,
+                                    {presence, Type};
+                                nomatch ->
+                                    case binary:match(Trimmed, <<"<message">>) of
+                                        {_, _} ->
+                                            Id = extract_attr(Trimmed, <<"id=">>),
+                                            Type = extract_attr(Trimmed, <<"type=">>),
+                                            To = extract_attr(Trimmed, <<"to=">>),
+                                            {message, Id, Type, To};
+                                        nomatch ->
+                                            unknown
+                                    end
+                            end
+                    end
+            end
+    end.
+
+extract_attr(Xml, AttrPrefix) ->
+    case binary:match(Xml, AttrPrefix) of
+        {Pos, Len} ->
+            StartPos = Pos + Len,
+            <<_:StartPos/binary, Rest/binary>> = Xml,
+            case Rest of
+                <<39, ValueRest/binary>> ->
+                    case binary:match(ValueRest, <<39>>) of
+                        {ValLen, _} -> binary:copy(binary:part(ValueRest, 0, ValLen));
+                        nomatch -> <<>>
+                    end;
+                <<34, ValueRest/binary>> ->
+                    case binary:match(ValueRest, <<34>>) of
+                        {ValLen, _} -> binary:copy(binary:part(ValueRest, 0, ValLen));
+                        nomatch -> <<>>
+                    end;
+                _ -> <<>>
+            end;
+        nomatch ->
+            <<>>
+    end.
+
+extract_tag_body(Xml, TagName) ->
+    OpenTag = <<"<", TagName/binary>>,
+    CloseTag = <<"</", TagName/binary, ">">>,
+    case binary:match(Xml, OpenTag) of
+        {OpenPos, _} ->
+            <<_:OpenPos/binary, Rest/binary>> = Xml,
+            case binary:match(Rest, <<">">>) of
+                {GtPos, _} ->
+                    BodyStart = GtPos + 1,
+                    <<_:BodyStart/binary, BodyAndClose/binary>> = Rest,
+                    case binary:match(BodyAndClose, CloseTag) of
+                        {ClosePos, _} ->
+                            binary:copy(binary:part(BodyAndClose, 0, ClosePos));
+                        nomatch -> <<>>
+                    end;
+                nomatch -> <<>>
+            end;
+        nomatch -> <<>>
+    end.
+
+-spec build_stream_features([binary()]) -> binary().
+build_stream_features(Mechanisms) ->
+    Inner = [[<<"<mechanism>">>, M, <<"</mechanism>">>] || M <- Mechanisms],
+    MechanismsXml = iolist_to_binary(Inner),
+    iolist_to_binary([
+        <<"<stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'>">>,
+        MechanismsXml,
+        <<"</mechanisms></stream:features>">>
+    ]).
+
+-spec build_bind_result(binary(), binary()) -> binary().
+build_bind_result(Id, FullJid) ->
+    iolist_to_binary([
+        <<"<iq type='result' id='">>, Id,
+        <<"'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>">>,
+        FullJid,
+        <<"</jid></bind></iq>">>
+    ]).
+
+-spec build_chat_message(binary(), binary(), binary(), binary()) -> binary().
+build_chat_message(FromJid, ToJid, Id, BodyText) ->
+    iolist_to_binary([
+        <<"<message from='">>, FromJid,
+        <<"' to='">>, ToJid,
+        <<"' id='">>, Id,
+        <<"' type='chat'><body>">>,
+        BodyText,
+        <<"</body></message>">>
+    ]).
+`,
+    },
     starterCode: `-module(xmpp_stanza).
 -export([
     classify_xml_packet/1,
@@ -672,10 +1144,7 @@ build_chat_message(FromJid, ToJid, Id, BodyText) ->
       },
     ],
     astRules: {
-      requireTailRecursion: [],
-      forbiddenCalls: [],
-      requiredCalls: [],
-      requiredConstructs: ['case'],
+      requiredCalls: ['binary:copy/1'],
     },
     solutionCode: `-module(xmpp_stanza).
 -export([
@@ -818,15 +1287,336 @@ build_chat_message(FromJid, ToJid, Id, BodyText) ->
     ],
   },
 
-  // ── Lesson 11.4: Concept Exercise ──────────────────────────────────────────
   {
     id: 'ch11-l04',
     chapterNumber: 11,
     lessonNumber: 4,
     lessonType: 'concept_exercise',
-    title: 'Incremental XML Stream Framing Over Fragmented TCP Sockets',
+    title: 'RFC 6120 Stanza & Stream Errors and RFC 6121 Roster Subscriptions',
+    difficulty: 'Intermediate',
+    xpReward: 100,
     visualScene: 'tcp_xmpp_stream_framing',
+    mentalModelCheck: {
+      question: 'According to RFC 6120 Section 8, which error type must accompany the <not-authorized/> condition when a client attempts a command without logging in?',
+      options: [
+        {
+          id: 'A',
+          label: 'auth (prerequisite authentication or authorization failed)',
+          isCorrect: true,
+          explanation: 'RFC 6120 Section 8.3 defines auth as the formal error type for not-authorized and forbidden conditions.'
+        },
+        {
+          id: 'B',
+          label: 'cancel (the request cannot be retried under any circumstances)',
+          isCorrect: false,
+          explanation: 'cancel is reserved for fatal errors like item-not-found or service-unavailable.'
+        },
+        {
+          id: 'C',
+          label: 'modify (the request syntax is invalid)',
+          isCorrect: false,
+          explanation: 'modify is used for bad-request or invalid XML parameters.'
+        },
+        {
+          id: 'D',
+          label: 'wait (the server is temporarily overloaded)',
+          isCorrect: false,
+          explanation: 'wait is used for rate limits and resource-constraint.'
+        }
+      ]
+    },
+    conceptMarkdown: `## Why This Matters in Production
+
+In production messaging backends, errors cannot be communicated via generic HTTP status codes. **RFC 6120 Section 8** defines a formal, structured error hierarchy containing specific error types and standardized XML condition elements.
+
+When a client transmits a stanza to a non-existent JID, attempts an unauthenticated request, or exceeds server rate limits, the server must formulate a standardized stanza-level or stream-level error response:
+1. **Error Types (RFC 6120 Section 8.3)**:
+   - \`auth\`: Authentication or authorization prerequisite failed.
+   - \`cancel\`: Irrecoverable error; client must not retry without altering the request.
+   - \`modify\`: Request was malformed; retry after updating payload parameters.
+   - \`wait\`: Transient load or lock condition; retry after a backoff interval.
+
+2. **Standardized Condition Elements**:
+   - \`not-authorized\` (\`auth\`)
+   - \`forbidden\` (\`auth\`)
+   - \`item-not-found\` (\`cancel\`)
+   - \`bad-request\` (\`modify\`)
+   - \`resource-constraint\` (\`wait\`)
+
+In addition, **RFC 6121 Section 3** defines the mutual presence subscription state machine:
+- \`none\`: Neither party sees presence.
+- \`to\`: User sees contact's presence.
+- \`from\`: Contact sees user's presence.
+- \`both\`: Mutual presence subscription.
+
+## Assignment Specification
+
+Implement module \`xmpp_error_and_roster.erl\`:
+1. \`classify_error_condition(ConditionAtom)\`: Returns \`{TypeBin, ConditionBin}\`.
+2. \`build_stanza_error(StanzaTagBin, IdBin, ToJidBin, ConditionAtom)\`: Synthesizes structured XML error stanza.
+3. \`build_stream_not_authorized()\`: Returns \`<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>\`.
+4. \`transition_subscription(Current, InboundAction)\`: Computes new subscription state (\`none\`, \`to\`, \`from\`, \`both\`).
+`,
+    files: [
+      {
+        path: 'src/xmpp_error_and_roster.erl',
+        name: 'xmpp_error_and_roster.erl',
+        content: `-module(xmpp_error_and_roster).
+-export([classify_error_condition/1, build_stanza_error/4, build_stream_not_authorized/0, transition_subscription/2]).
+
+%% % TODO: Classify RFC 6120 Stanza Error Condition
+%% Map condition atom to {TypeBin, ConditionBin}:
+%%   not_authorized      -> {<<"auth">>, <<"not-authorized">>}
+%%   forbidden           -> {<<"auth">>, <<"forbidden">>}
+%%   item_not_found      -> {<<"cancel">>, <<"item-not-found">>}
+%%   service_unavailable -> {<<"cancel">>, <<"service-unavailable">>}
+%%   bad_request         -> {<<"modify">>, <<"bad-request">>}
+%%   resource_constraint -> {<<"wait">>, <<"resource-constraint">>}
+%%   _                   -> {<<"cancel">>, <<"undefined-condition">>}
+-spec classify_error_condition(atom()) -> {binary(), binary()}.
+classify_error_condition(_ConditionAtom) ->
+    {<<"cancel">>, <<"undefined-condition">>}.
+
+%% % TODO: Synthesize RFC 6120 Structured Stanza Error XML
+%% Return binary formatted as:
+%%   <StanzaTag type='error' id='Id' to='ToJid'><error type='Type'><Condition xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></StanzaTag>
+-spec build_stanza_error(binary(), binary(), binary(), atom()) -> binary().
+build_stanza_error(_StanzaTagBin, _IdBin, _ToJidBin, _ConditionAtom) ->
+    <<>>.
+
+%% % TODO: Synthesize RFC 6120 Stream Error <not-authorized/>
+%% Return <<" <stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>
+-spec build_stream_not_authorized() -> binary().
+build_stream_not_authorized() ->
+    <<>>.
+
+%% % TODO: RFC 6121 Roster Subscription State Machine
+%% Handle outbound and inbound events:
+%%   none + outbound_subscribed   -> to
+%%   none + inbound_subscribed    -> from
+%%   to   + inbound_subscribed    -> both
+%%   to   + outbound_unsubscribed -> none
+%%   from + outbound_subscribed   -> both
+%%   from + inbound_unsubscribed  -> none
+%%   both + outbound_unsubscribed -> from
+%%   both + inbound_unsubscribed  -> to
+%%   Any other combination       -> Current
+-spec transition_subscription(atom(), atom()) -> atom().
+transition_subscription(Current, _Event) ->
+    Current.
+`,
+      },
+    ],
+    solutionFiles: {
+      'src/xmpp_error_and_roster.erl': `-module(xmpp_error_and_roster).
+-export([classify_error_condition/1, build_stanza_error/4, build_stream_not_authorized/0, transition_subscription/2]).
+
+-spec classify_error_condition(atom()) -> {binary(), binary()}.
+classify_error_condition(not_authorized)      -> {<<"auth">>, <<"not-authorized">>};
+classify_error_condition(forbidden)           -> {<<"auth">>, <<"forbidden">>};
+classify_error_condition(item_not_found)       -> {<<"cancel">>, <<"item-not-found">>};
+classify_error_condition(service_unavailable)  -> {<<"cancel">>, <<"service-unavailable">>};
+classify_error_condition(bad_request)         -> {<<"modify">>, <<"bad-request">>};
+classify_error_condition(resource_constraint) -> {<<"wait">>, <<"resource-constraint">>};
+classify_error_condition(_)                   -> {<<"cancel">>, <<"undefined-condition">>}.
+
+-spec build_stanza_error(binary(), binary(), binary(), atom()) -> binary().
+build_stanza_error(StanzaTagBin, IdBin, ToJidBin, ConditionAtom) ->
+    {TypeBin, ElementBin} = classify_error_condition(ConditionAtom),
+    <<"<", StanzaTagBin/binary, " type='error' id='", IdBin/binary, "' to='", ToJidBin/binary, "'><error type='", TypeBin/binary, "'><", ElementBin/binary, " xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></", StanzaTagBin/binary, ">">>.
+
+-spec build_stream_not_authorized() -> binary().
+build_stream_not_authorized() ->
+    <<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>.
+
+-spec transition_subscription(atom(), atom()) -> atom().
+transition_subscription(none, outbound_subscribed)   -> to;
+transition_subscription(none, inbound_subscribed)    -> from;
+transition_subscription(none, _)                     -> none;
+transition_subscription(to, inbound_subscribed)      -> both;
+transition_subscription(to, outbound_unsubscribed)   -> none;
+transition_subscription(to, _)                       -> to;
+transition_subscription(from, outbound_subscribed)   -> both;
+transition_subscription(from, inbound_unsubscribed)  -> none;
+transition_subscription(from, _)                     -> from;
+transition_subscription(both, outbound_unsubscribed) -> from;
+transition_subscription(both, inbound_unsubscribed)  -> to;
+transition_subscription(both, _)                     -> both;
+transition_subscription(Current, _)                  -> Current.
+`,
+    },
+    starterCode: `-module(xmpp_error_and_roster).
+-export([classify_error_condition/1, build_stanza_error/4, build_stream_not_authorized/0, transition_subscription/2]).
+
+%% % TODO: Classify RFC 6120 Stanza Error Condition
+%% Map condition atom to {TypeBin, ConditionBin}:
+%%   not_authorized      -> {<<"auth">>, <<"not-authorized">>}
+%%   forbidden           -> {<<"auth">>, <<"forbidden">>}
+%%   item_not_found      -> {<<"cancel">>, <<"item-not-found">>}
+%%   service_unavailable -> {<<"cancel">>, <<"service-unavailable">>}
+%%   bad_request         -> {<<"modify">>, <<"bad-request">>}
+%%   resource_constraint -> {<<"wait">>, <<"resource-constraint">>}
+%%   _                   -> {<<"cancel">>, <<"undefined-condition">>}
+-spec classify_error_condition(atom()) -> {binary(), binary()}.
+classify_error_condition(_ConditionAtom) ->
+    {<<"cancel">>, <<"undefined-condition">>}.
+
+%% % TODO: Synthesize RFC 6120 Structured Stanza Error XML
+%% Return binary formatted as:
+%%   <StanzaTag type='error' id='Id' to='ToJid'><error type='Type'><Condition xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></StanzaTag>
+-spec build_stanza_error(binary(), binary(), binary(), atom()) -> binary().
+build_stanza_error(_StanzaTagBin, _IdBin, _ToJidBin, _ConditionAtom) ->
+    <<>>.
+
+%% % TODO: Synthesize RFC 6120 Stream Error <not-authorized/>
+%% Return <<" <stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>
+-spec build_stream_not_authorized() -> binary().
+build_stream_not_authorized() ->
+    <<>>.
+
+%% % TODO: RFC 6121 Roster Subscription State Machine
+%% Handle outbound and inbound events:
+%%   none + outbound_subscribed   -> to
+%%   none + inbound_subscribed    -> from
+%%   to   + inbound_subscribed    -> both
+%%   to   + outbound_unsubscribed -> none
+%%   from + outbound_subscribed   -> both
+%%   from + inbound_unsubscribed  -> none
+%%   both + outbound_unsubscribed -> from
+%%   both + inbound_unsubscribed  -> to
+%%   Any other combination       -> Current
+-spec transition_subscription(atom(), atom()) -> atom().
+transition_subscription(Current, _Event) ->
+    Current.
+`,
+    solutionCode: `-module(xmpp_error_and_roster).
+-export([classify_error_condition/1, build_stanza_error/4, build_stream_not_authorized/0, transition_subscription/2]).
+
+-spec classify_error_condition(atom()) -> {binary(), binary()}.
+classify_error_condition(not_authorized)      -> {<<"auth">>, <<"not-authorized">>};
+classify_error_condition(forbidden)           -> {<<"auth">>, <<"forbidden">>};
+classify_error_condition(item_not_found)       -> {<<"cancel">>, <<"item-not-found">>};
+classify_error_condition(service_unavailable)  -> {<<"cancel">>, <<"service-unavailable">>};
+classify_error_condition(bad_request)         -> {<<"modify">>, <<"bad-request">>};
+classify_error_condition(resource_constraint) -> {<<"wait">>, <<"resource-constraint">>};
+classify_error_condition(_)                   -> {<<"cancel">>, <<"undefined-condition">>}.
+
+-spec build_stanza_error(binary(), binary(), binary(), atom()) -> binary().
+build_stanza_error(StanzaTagBin, IdBin, ToJidBin, ConditionAtom) ->
+    {TypeBin, ElementBin} = classify_error_condition(ConditionAtom),
+    <<"<", StanzaTagBin/binary, " type='error' id='", IdBin/binary, "' to='", ToJidBin/binary, "'><error type='", TypeBin/binary, "'><", ElementBin/binary, " xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></", StanzaTagBin/binary, ">">>.
+
+-spec build_stream_not_authorized() -> binary().
+build_stream_not_authorized() ->
+    <<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>.
+
+-spec transition_subscription(atom(), atom()) -> atom().
+transition_subscription(none, outbound_subscribed)   -> to;
+transition_subscription(none, inbound_subscribed)    -> from;
+transition_subscription(none, _)                     -> none;
+transition_subscription(to, inbound_subscribed)      -> both;
+transition_subscription(to, outbound_unsubscribed)   -> none;
+transition_subscription(to, _)                       -> to;
+transition_subscription(from, outbound_subscribed)   -> both;
+transition_subscription(from, inbound_unsubscribed)  -> none;
+transition_subscription(from, _)                     -> from;
+transition_subscription(both, outbound_unsubscribed) -> from;
+transition_subscription(both, inbound_unsubscribed)  -> to;
+transition_subscription(both, _)                     -> both;
+transition_subscription(Current, _)                  -> Current.
+`,
+    otpDocCards: [
+      {
+        functionName: 'classify_error_condition',
+        module: 'xmpp_error_and_roster',
+        signature: 'classify_error_condition(ConditionAtom) -> {TypeBin, ElementBin}',
+        typesSpec: ['ConditionAtom = atom()', 'TypeBin = binary()', 'ElementBin = binary()'],
+        description: 'Maps RFC 6120 error condition atoms to type and element name binaries.',
+        complexityNote: 'O(1) pattern matching jump table.',
+        officialUrl: 'https://datatracker.ietf.org/doc/html/rfc6120#section-8',
+        githubSourceUrl: 'https://github.com/erlang/otp',
+      },
+    ],
+    astRules: {
+      requiredCalls: ['classify_error_condition/1'],
+    },
+    visibleTestCases: [
+      {
+        id: 'tc-ch11-l04-1',
+        title: 'Error Condition Classification',
+        erlangCall: '{xmpp_error_and_roster:classify_error_condition(not_authorized), xmpp_error_and_roster:classify_error_condition(item_not_found)}',
+        expectedOutput: '{{<<"auth">>, <<"not-authorized">>}, {<<"cancel">>, <<"item-not-found">>}}',
+        explanation: 'Verifies mapping of RFC 6120 error condition atoms to type and element binaries.',
+      },
+      {
+        id: 'tc-ch11-l04-2',
+        title: 'Structured Stanza Error Synthesis',
+        erlangCall: 'xmpp_error_and_roster:build_stanza_error(<<"message">>, <<"msg_1">>, <<"bob@localhost">>, item_not_found)',
+        expectedOutput: '<message type=\'error\' id=\'msg_1\' to=\'bob@localhost\'><error type=\'cancel\'><item-not-found xmlns=\'urn:ietf:params:xml:ns:xmpp-stanzas\'/></error></message>',
+        explanation: 'Verifies structured XML stanza error formatting.',
+      },
+      {
+        id: 'tc-ch11-l04-3',
+        title: 'Roster Subscription State Transitions',
+        erlangCall: 'begin S1 = xmpp_error_and_roster:transition_subscription(none, outbound_subscribed), S2 = xmpp_error_and_roster:transition_subscription(S1, inbound_subscribed), {S1, S2} end',
+        expectedOutput: '{to, both}',
+        explanation: 'Verifies mutual subscription transition logic from none to to to both.',
+      },
+    ],
+    solutionExplanation: 'Implements RFC 6120 structured error classification and RFC 6121 presence subscription state machines.',
+    references: [
+      {
+        title: 'RFC 6120: Section 8 (Extended Stanza and Stream Errors)',
+        url: 'https://datatracker.ietf.org/doc/html/rfc6120#section-8',
+        category: 'book_rfc',
+        description: 'Official IETF specification for XMPP stanza and stream error types and conditions.',
+      },
+      {
+        title: 'RFC 6121: Section 3 (Managing Roster Subscriptions)',
+        url: 'https://datatracker.ietf.org/doc/html/rfc6121#section-3',
+        category: 'book_rfc',
+        description: 'Official IETF specification for mutual presence subscription state machines.',
+      },
+    ],
+  },
+
+  {
+    id: 'ch11-l05',
+    chapterNumber: 11,
+    lessonNumber: 5,
+    lessonType: 'concept_exercise',
+    title: 'Incremental XML Stream Framing Over Fragmented TCP Sockets',
     difficulty: 'Advanced',
+        visualScene: 'tcp_xmpp_stream_framing',
+    mentalModelCheck: {
+      question: 'Why MUST an incremental XML stream framer call binary:copy/1 when extracting attribute values or stanza bodies from a TCP buffer?',
+      options: [
+        {
+          id: 'A',
+          label: 'To prevent sub-binary retention leaks where a tiny extracted slice pins a large 64 KB refc binary in process heap memory.',
+          isCorrect: true,
+          explanation: 'Sub-binaries retain reference counters to their parent binary. binary:copy/1 copies the small slice and releases the refc binary.'
+        },
+        {
+          id: 'B',
+          label: 'Because Erlang binaries are immutable and cannot be read without copying.',
+          isCorrect: false,
+          explanation: 'Binaries are read directly via pattern matching; binary:copy/1 is used specifically for memory unpinning.'
+        },
+        {
+          id: 'C',
+          label: 'Because gen_statem will reject uncopied binaries with a badmatch error.',
+          isCorrect: false,
+          explanation: 'gen_statem accepts any term; memory management is an engineering optimization.'
+        },
+        {
+          id: 'D',
+          label: 'To convert the binary to a null-terminated C string.',
+          isCorrect: false,
+          explanation: 'Erlang binaries are length-prefixed, not null-terminated.'
+        }
+      ]
+    },
     conceptMarkdown: `## Why This Matters in Production
 
 The single biggest pitfall for engineers building XMPP servers is attempting to use standard XML parsers (like DOM or SAX parsers) directly on the incoming TCP socket stream.
@@ -925,6 +1715,115 @@ extract_frames(BufferBin, NewChunkBin) -> {FramesList, RemainingBufferBin}
         githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl',
       },
     ],
+        files: [
+      {
+        path: 'src/xmpp_xml_framer.erl',
+        name: 'xmpp_xml_framer.erl',
+        content: `-module(xmpp_xml_framer).
+-export([extract_frames/2]).
+
+%% @doc Extracts complete XML stanzas from a continuous TCP byte buffer.
+%% Returns {ExtractedFramesList, RemainingBufferBin}.
+-spec extract_frames(binary(), binary()) -> {[binary()], binary()}.
+extract_frames(BufferBin, NewChunkBin) ->
+    %% % TODO: Implement incremental XML stream framer
+    %% 1. Combined = <<BufferBin/binary, NewChunkBin/binary>>
+    %% 2. Check for <stream:stream ...>
+    %% 3. Check for complete child stanzas (<iq>...</iq>, <presence/>, etc.)
+    %% 4. Use binary:copy/1 on remaining unparsed buffer
+    {[], <<>>}.
+`,
+      },
+    ],
+    solutionFiles: {
+      'src/xmpp_xml_framer.erl': `-module(xmpp_xml_framer).
+-export([extract_frames/2]).
+
+-spec extract_frames(binary(), binary()) -> {[binary()], binary()}.
+extract_frames(BufferBin, NewChunkBin) ->
+    Combined = <<BufferBin/binary, NewChunkBin/binary>>,
+    extract_loop(Combined, []).
+
+extract_loop(Bin, Acc) ->
+    Trimmed = trim_leading(Bin),
+    case byte_size(Trimmed) of
+        0 ->
+            {lists:reverse(Acc), <<>>};
+        _ ->
+            case try_extract_frame(Trimmed) of
+                {ok, Frame, Rest} ->
+                    extract_loop(Rest, [Frame | Acc]);
+                need_more ->
+                    {lists:reverse(Acc), binary:copy(Trimmed)}
+            end
+    end.
+
+trim_leading(<<32, Rest/binary>>) -> trim_leading(Rest);
+trim_leading(<<13, Rest/binary>>) -> trim_leading(Rest);
+trim_leading(<<10, Rest/binary>>) -> trim_leading(Rest);
+trim_leading(<<9, Rest/binary>>)  -> trim_leading(Rest);
+trim_leading(Bin) -> Bin.
+
+try_extract_frame(Bin) ->
+    case Bin of
+        <<"<stream:stream", _/binary>> ->
+            case binary:match(Bin, <<">">>) of
+                {GtPos, _} ->
+                    HeaderLen = GtPos + 1,
+                    Frame = binary:copy(binary:part(Bin, 0, HeaderLen)),
+                    Rest = binary:part(Bin, HeaderLen, byte_size(Bin) - HeaderLen),
+                    {ok, Frame, Rest};
+                nomatch ->
+                    need_more
+            end;
+        <<"<", Rest/binary>> ->
+            case parse_tag_name(Rest, <<>>) of
+                {ok, TagName, _} ->
+                    try_extract_element(Bin, TagName);
+                need_more ->
+                    need_more
+            end;
+        _ ->
+            need_more
+    end.
+
+parse_tag_name(<<>>, _Acc) -> need_more;
+parse_tag_name(<<C, _/binary>>, Acc) when C =:= 32; C =:= $>; C =:= $/ ->
+    if
+        byte_size(Acc) > 0 -> {ok, Acc, C};
+        true -> need_more
+    end;
+parse_tag_name(<<C, Rest/binary>>, Acc) ->
+    parse_tag_name(Rest, <<Acc/binary, C>>).
+
+try_extract_element(Bin, TagName) ->
+    case binary:match(Bin, <<">">>) of
+        nomatch ->
+            need_more;
+        {FirstGt, _} ->
+            FirstTag = binary:part(Bin, 0, FirstGt + 1),
+            case binary:match(FirstTag, <<"/>">>) of
+                {_, _} ->
+                    %% Self-closing tag
+                    Frame = binary:copy(FirstTag),
+                    Rest = binary:part(Bin, FirstGt + 1, byte_size(Bin) - (FirstGt + 1)),
+                    {ok, Frame, Rest};
+                nomatch ->
+                    %% Paired tag: search for </TagName>
+                    CloseTag = <<"</", TagName/binary, ">">>,
+                    case binary:match(Bin, CloseTag) of
+                        {ClosePos, CloseLen} ->
+                            TotalLen = ClosePos + CloseLen,
+                            Frame = binary:copy(binary:part(Bin, 0, TotalLen)),
+                            Rest = binary:part(Bin, TotalLen, byte_size(Bin) - TotalLen),
+                            {ok, Frame, Rest};
+                        nomatch ->
+                            need_more
+                    end
+            end
+    end.
+`,
+    },
     starterCode: `-module(xmpp_xml_framer).
 -export([extract_frames/2]).
 
@@ -941,14 +1840,14 @@ extract_frames(BufferBin, NewChunkBin) ->
 `,
     visibleTestCases: [
       {
-        id: 'tc-ch11-l04-1',
+        id: 'tc-ch11-l05-1',
         title: 'Extract Stream Header and Partial IQ',
         erlangCall: 'xmpp_xml_framer:extract_frames(<<>>, <<"<stream:stream to=\'localhost\'> <iq type=\'get\'">>)',
         expectedOutput: '{[<<"<stream:stream to=\'localhost\'>">>],<<"<iq type=\'get\'">>}',
         explanation: 'Extracts stream opening tag and leaves unclosed <iq in remainder buffer.',
       },
       {
-        id: 'tc-ch11-l04-2',
+        id: 'tc-ch11-l05-2',
         title: 'Complete Fragmented IQ and Coalesced Presence',
         erlangCall: 'xmpp_xml_framer:extract_frames(<<"<iq type=\'get\'">>, <<" id=\'1\'><ping/></iq><presence/>">>)',
         expectedOutput: '{[<<"<iq type=\'get\' id=\'1\'><ping/></iq>">>,<<"<presence/>">>],<<>>}',
@@ -956,10 +1855,7 @@ extract_frames(BufferBin, NewChunkBin) ->
       },
     ],
     astRules: {
-      requireTailRecursion: [],
-      forbiddenCalls: [],
-      requiredCalls: ['binary:copy'],
-      requiredConstructs: ['case'],
+      requiredCalls: ['binary:copy/1', 'binary:match/2'],
     },
     solutionCode: `-module(xmpp_xml_framer).
 -export([extract_frames/2]).
@@ -1063,14 +1959,43 @@ try_extract_element(Bin, TagName) ->
     ],
   },
 
-  // ── Lesson 11.5: Concept Exercise ──────────────────────────────────────────
   {
-    id: 'ch11-l05',
+    id: 'ch11-l06',
     chapterNumber: 11,
-    lessonNumber: 5,
+    lessonNumber: 6,
     lessonType: 'concept_exercise',
     title: 'The C2S Connection Handshake State Machine (RFC 6120)',
     difficulty: 'Advanced',
+        visualScene: 'tcp_xmpp_stream_framing',
+    mentalModelCheck: {
+      question: 'Why does the C2S connection state machine set inet:setopts(Socket, [{active, once}]) after receiving each TCP packet instead of using {active, true}?',
+      options: [
+        {
+          id: 'A',
+          label: 'To implement backpressure flow control at the OS kernel socket buffer level, preventing malicious clients from flooding the BEAM process mailbox.',
+          isCorrect: true,
+          explanation: '{active, once} stops the kernel from pushing packets to the process mailbox until the current packet has been fully handled.'
+        },
+        {
+          id: 'B',
+          label: 'Because {active, true} is not supported on Windows.',
+          isCorrect: false,
+          explanation: '{active, true} works on all OS platforms, but lacks flow control.'
+        },
+        {
+          id: 'C',
+          label: 'Because {active, once} runs twice as fast as passive recv.',
+          isCorrect: false,
+          explanation: 'The primary benefit of {active, once} is mailbox protection and event-driven backpressure.'
+        },
+        {
+          id: 'D',
+          label: 'Because raw TCP sockets can only receive one packet per lifetime.',
+          isCorrect: false,
+          explanation: 'Sockets receive endless packets; {active, once} requests them one at a time.'
+        }
+      ]
+    },
     conceptMarkdown: `## Why This Matters in Production
 
 In production servers like **MongooseIM** (\`mongoose_c2s.erl\`) and **ejabberd**, each connected TCP client runs an OTP **\`gen_statem\`** process. 
@@ -1182,6 +2107,136 @@ Implement the module \`xmpp_c2s_fsm\` in \`src/xmpp_c2s_fsm.erl\` with the follo
         githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl',
       },
     ],
+        files: [
+      {
+        path: 'src/xmpp_c2s_fsm.erl',
+        name: 'xmpp_c2s_fsm.erl',
+        content: `-module(xmpp_c2s_fsm).
+-export([
+    init/1,
+    handle_event/2,
+    get_state/1
+]).
+
+-type fsm_state() :: #{
+    state := atom(),
+    domain := binary(),
+    user := binary(),
+    full_jid := binary()
+}.
+
+%% @doc Initializes the connection FSM in wait_for_stream state.
+-spec init(binary()) -> fsm_state().
+init(Domain) ->
+    #{state => wait_for_stream, domain => Domain, user => <<>>, full_jid => <<>>}.
+
+%% @doc Handles protocol events and enforces strict authentication transitions.
+-spec handle_event(term(), fsm_state()) ->
+    {reply, binary() | [binary()], fsm_state()} |
+    {ok, term(), fsm_state()} |
+    {error, atom(), fsm_state()}.
+handle_event(Event, State) ->
+    %% % TODO: Implement state transitions:
+    %% 1. wait_for_stream -> wait_for_sasl
+    %% 2. wait_for_sasl -> authenticated
+    %% 3. authenticated -> session_established
+    {error, not_implemented, State}.
+
+%% @doc Returns the current state name atom.
+-spec get_state(fsm_state()) -> atom().
+get_state(#{state := StateName}) -> StateName.
+`,
+      },
+    ],
+    solutionFiles: {
+      'src/xmpp_c2s_fsm.erl': `-module(xmpp_c2s_fsm).
+-export([
+    init/1,
+    handle_event/2,
+    get_state/1
+]).
+
+-type fsm_state() :: #{
+    state := atom(),
+    domain := binary(),
+    user := binary(),
+    full_jid := binary()
+}.
+
+-spec init(binary()) -> fsm_state().
+init(Domain) ->
+    #{state => wait_for_stream, domain => Domain, user => <<>>, full_jid => <<>>}.
+
+-spec handle_event(term(), fsm_state()) ->
+    {reply, binary() | [binary()], fsm_state()} |
+    {ok, term(), fsm_state()} |
+    {error, atom(), fsm_state()}.
+handle_event(Event, #{state := wait_for_stream, domain := Domain} = State) ->
+    case Event of
+        {stream_open, Domain} ->
+            Reply = <<"<stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>">>,
+            {reply, Reply, State#{state => wait_for_sasl}};
+        _ ->
+            {error, unexpected_stanza_before_stream, State}
+    end;
+
+handle_event(Event, #{state := wait_for_sasl} = State) ->
+    case Event of
+        {auth_plain, Base64Token} ->
+            case decode_sasl_plain(Base64Token) of
+                {ok, User, _Pass} ->
+                    Success = <<"<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>">>,
+                    {reply, Success, State#{state => authenticated, user => User}};
+                error ->
+                    {error, invalid_credentials, State}
+            end;
+        _ ->
+            {error, not_authorized, State}
+    end;
+
+handle_event(Event, #{state := authenticated, domain := Domain, user := User} = State) ->
+    case Event of
+        {bind_resource, Id, Resource} ->
+            FullJid = <<User/binary, "@", Domain/binary, "/", Resource/binary>>,
+            Result = <<"<iq type='result' id='", Id/binary, "'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>", FullJid/binary, "</jid></bind></iq>">>,
+            {reply, Result, State#{state => session_established, full_jid => FullJid}};
+        _ ->
+            {error, expected_bind, State}
+    end;
+
+handle_event(Event, #{state := session_established} = State) ->
+    case Event of
+        {chat_message, To, _Id, _Body} ->
+            {ok, {routed, To}, State};
+        {presence, Type} ->
+            {ok, {presence_updated, Type}, State};
+        _ ->
+            {error, unknown_event, State}
+    end.
+
+-spec get_state(fsm_state()) -> atom().
+get_state(#{state := StateName}) -> StateName.
+
+decode_sasl_plain(Base64Token) ->
+    try
+        Decoded = base64:decode(Base64Token),
+        case Decoded of
+            <<0, Rest/binary>> ->
+                case binary:split(Rest, <<0>>) of
+                    [User, Pass] -> {ok, binary:copy(User), binary:copy(Pass)};
+                    _ -> error
+                end;
+            _ ->
+                case binary:split(Decoded, <<0>>, [global]) of
+                    [User, Pass] -> {ok, binary:copy(User), binary:copy(Pass)};
+                    _ -> error
+                end
+        end
+    catch
+        _:_ -> error
+    end.
+`,
+    },
     starterCode: `-module(xmpp_c2s_fsm).
 -export([
     init/1,
@@ -1219,21 +2274,21 @@ get_state(#{state := StateName}) -> StateName.
 `,
     visibleTestCases: [
       {
-        id: 'tc-ch11-l05-1',
+        id: 'tc-ch11-l06-1',
         title: 'Initial Stream Open and Transition to wait_for_sasl',
         erlangCall: 'begin S0 = xmpp_c2s_fsm:init(<<"localhost">>), {reply, _, S1} = xmpp_c2s_fsm:handle_event({stream_open, <<"localhost">>}, S0), xmpp_c2s_fsm:get_state(S1) end',
         expectedOutput: 'wait_for_sasl',
         explanation: 'Transitions from wait_for_stream to wait_for_sasl upon receiving stream_open.',
       },
       {
-        id: 'tc-ch11-l05-2',
+        id: 'tc-ch11-l06-2',
         title: 'Reject Chat Message Before Authentication',
         erlangCall: 'begin S0 = xmpp_c2s_fsm:init(<<"localhost">>), {reply, _, S1} = xmpp_c2s_fsm:handle_event({stream_open, <<"localhost">>}, S0), {error, Reason, _} = xmpp_c2s_fsm:handle_event({chat_message, <<"bob">>, <<"1">>, <<"hi">>}, S1), Reason end',
         expectedOutput: 'not_authorized',
         explanation: 'Rejects chat messages in wait_for_sasl state with not_authorized.',
       },
       {
-        id: 'tc-ch11-l05-3',
+        id: 'tc-ch11-l06-3',
         title: 'Complete SASL Auth and Resource Binding',
         erlangCall: 'begin S0 = xmpp_c2s_fsm:init(<<"localhost">>), {reply, _, S1} = xmpp_c2s_fsm:handle_event({stream_open, <<"localhost">>}, S0), Token = base64:encode(<<0, "alice", 0, "secret">>), {reply, _, S2} = xmpp_c2s_fsm:handle_event({auth_plain, Token}, S1), {reply, _, S3} = xmpp_c2s_fsm:handle_event({bind_resource, <<"b1">>, <<"mobile">>}, S2), {xmpp_c2s_fsm:get_state(S3), maps:get(full_jid, S3)} end',
         expectedOutput: '{session_established,<<"alice@localhost/mobile">>}',
@@ -1241,10 +2296,7 @@ get_state(#{state := StateName}) -> StateName.
       },
     ],
     astRules: {
-      requireTailRecursion: [],
-      forbiddenCalls: [],
-      requiredCalls: ['base64:decode'],
-      requiredConstructs: ['case'],
+      requiredCalls: ['inet:setopts/2', 'gen_tcp:send/2'],
     },
     solutionCode: `-module(xmpp_c2s_fsm).
 -export([
@@ -1354,14 +2406,324 @@ decode_sasl_plain(Base64Token) ->
     ],
   },
 
-  // ── Lesson 11.6: Problem Set ───────────────────────────────────────────────
   {
-    id: 'ch11-l06',
+    id: 'ch11-l07',
     chapterNumber: 11,
-    lessonNumber: 6,
+    lessonNumber: 7,
+    lessonType: 'incident_triage',
+    title: 'Incident #107: Pre-Auth Stanza Injection & XML Entity Attacks',
+    difficulty: 'Advanced',
+    xpReward: 125,
+    visualScene: 'tcp_xmpp_stream_framing',
+    mentalModelCheck: {
+      question: 'In Incident #107, what allowed unauthenticated attackers to inject fake admin commands into the session?',
+      options: [
+        {
+          id: 'A',
+          label: 'The connection state machine processed incoming <message> stanzas before the client finished SASL PLAIN authentication, and lacked an XML character escape loop.',
+          isCorrect: true,
+          explanation: 'Failing to reject pre-auth stanzas and neglecting to escape &, <, > characters allows authentication bypass and XML injection.'
+        },
+        {
+          id: 'B',
+          label: 'The server used MD5 password hashing instead of SHA-256.',
+          isCorrect: false,
+          explanation: 'The bug was architectural: pre-auth stanza dispatch and unescaped entity strings.'
+        },
+        {
+          id: 'C',
+          label: 'The Erlang runtime crashed on large payloads.',
+          isCorrect: false,
+          explanation: 'The BEAM handles large payloads effortlessly; this was an application security failure.'
+        },
+        {
+          id: 'D',
+          label: 'The client used an expired TLS certificate.',
+          isCorrect: false,
+          explanation: 'The incident occurred over plain C2S TCP streams without pre-auth state validation.'
+        }
+      ]
+    },
+    incidentAlert: {
+      incidentId: 'INC-107',
+      severity: 'CRITICAL',
+      serviceName: 'xmpp-c2s-gateway',
+      symptom: 'Unauthenticated sockets can inject arbitrary stanzas and corrupt client XML streams with unescaped characters.',
+      impact: 'Privilege escalation and client disconnection cascades across the cluster.',
+      diagnosticClue: 'Connection state machine processed stanzas before SASL auth, and lacked XML entity escaping.',
+    },
+    conceptMarkdown: `## Incident Briefing: INC-107 Pre-Auth Stanza Injection & XML Entity Attacks
+
+### Production Outage Summary
+At 03:14 UTC, security telemetry detected unauthorized messages injected into VIP chat streams without credentials. Attackers exploited an edge case in the C2S connection handling where client sockets in \`wait_for_stream\` and \`wait_for_sasl\` were permitted to dispatch stanzas before authentication succeeded.
+
+Furthermore, attackers injected unescaped XML markup (e.g. \`<b>Tom & Jerry > 1</b>\`), corrupting downstream client XML parsers and causing cascade disconnections.
+
+### Root Cause Analysis
+1. **Missing Pre-Auth Guard**: Stanza dispatch did not check connection state, allowing unauthenticated sockets to send chat stanzas.
+2. **Missing XML Character Escaping**: User messages containing \`&\`, \`<\`, or \`>\` were concatenated directly into XML binaries without escaping.
+
+### Required Architecture Fix
+1. Reject any stanzas received during \`wait_for_stream\` and \`wait_for_sasl\` by returning:
+   \`{reject, <<"<stream:error><not-authorized/></stream:error>">>, State}\`
+2. Implement recursive binary character escaping for chat bodies:
+   - \`&\` -> \`&amp;\`
+   - \`<\` -> \`&lt;\`
+   - \`>\` -> \`&gt;\`
+`,
+    files: [
+      {
+        path: 'src/incident_xmpp_auth_bypass.erl',
+        name: 'incident_xmpp_auth_bypass.erl',
+        content: `-module(incident_xmpp_auth_bypass).
+-export([process_c2s_stanza/3, escape_xml_text/1, test_pre_auth_rejection/0, test_xml_escaping/0]).
+
+%% % TODO: Reject unauthenticated stanzas during pre-auth states (wait_for_stream, wait_for_sasl)
+%% When in wait_for_stream or wait_for_sasl:
+%%   return {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}
+%% When in session_established and receiving {chat_message, To, Body}:
+%%   escape Body with escape_xml_text/1, construct <message>, return {route, To, Xml, State}
+%% Any other state/stanza:
+%%   return {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}
+process_c2s_stanza(wait_for_stream, _Stanza, State) ->
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
+process_c2s_stanza(wait_for_sasl, _Stanza, State) ->
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
+process_c2s_stanza(session_established, {chat_message, _To, _Body}, State) ->
+    %% % TODO: Escape Body and format <message from='...' to='...' type='chat'><body>...</body></message>
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
+process_c2s_stanza(_OtherState, _Stanza, State) ->
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}.
+
+%% % TODO: Recursive binary loop escaping &, <, > to &amp;, &lt;, &gt;
+escape_xml_text(Bin) when is_binary(Bin) ->
+    Bin.
+
+test_pre_auth_rejection() ->
+    State = #{jid => undefined},
+    Msg = {chat_message, <<"victim@localhost">>, <<"Spoofed">>},
+    Rej1 = process_c2s_stanza(wait_for_stream, Msg, State),
+    Rej2 = process_c2s_stanza(wait_for_sasl, Msg, State),
+    Expected = {reject, <<"<stream:error><not-authorized/></stream:error>">>, State},
+    case Rej1 =:= Expected andalso Rej2 =:= Expected of
+        true -> {ok, pre_auth_rejected};
+        false -> {error, failed_rejection}
+    end.
+
+test_xml_escaping() ->
+    Input = <<"<b>Tom & Jerry > 1</b>">>,
+    Escaped = escape_xml_text(Input),
+    {ok, Escaped}.
+`,
+      },
+    ],
+    solutionFiles: {
+      'src/incident_xmpp_auth_bypass.erl': `-module(incident_xmpp_auth_bypass).
+-export([process_c2s_stanza/3, escape_xml_text/1, test_pre_auth_rejection/0, test_xml_escaping/0]).
+
+process_c2s_stanza(wait_for_stream, {chat_message, _To, _Body}, State) ->
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
+process_c2s_stanza(wait_for_sasl, {chat_message, _To, _Body}, State) ->
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
+process_c2s_stanza(session_established, {chat_message, To, Body}, State) ->
+    EscapedBody = escape_xml_text(Body),
+    From = maps:get(jid, State, <<"system@localhost">>),
+    Xml = <<"<message from='", From/binary, "' to='", To/binary, "' type='chat'><body>", EscapedBody/binary, "</body></message>">>,
+    {route, To, Xml, State};
+process_c2s_stanza(_OtherState, _Stanza, State) ->
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}.
+
+escape_xml_text(Bin) when is_binary(Bin) ->
+    escape_loop(Bin, <<>>).
+
+escape_loop(<<>>, Acc) -> Acc;
+escape_loop(<<"&", Rest/binary>>, Acc) -> escape_loop(Rest, <<Acc/binary, "&amp;">>);
+escape_loop(<<"<", Rest/binary>>, Acc) -> escape_loop(Rest, <<Acc/binary, "&lt;">>);
+escape_loop(<<">", Rest/binary>>, Acc) -> escape_loop(Rest, <<Acc/binary, "&gt;">>);
+escape_loop(<<C, Rest/binary>>, Acc)   -> escape_loop(Rest, <<Acc/binary, C>>).
+
+test_pre_auth_rejection() ->
+    State = #{jid => undefined},
+    Msg = {chat_message, <<"victim@localhost">>, <<"Spoofed">>},
+    Rej1 = process_c2s_stanza(wait_for_stream, Msg, State),
+    Rej2 = process_c2s_stanza(wait_for_sasl, Msg, State),
+    Expected = {reject, <<"<stream:error><not-authorized/></stream:error>">>, State},
+    case Rej1 =:= Expected andalso Rej2 =:= Expected of
+        true -> {ok, pre_auth_rejected};
+        false -> {error, failed_rejection}
+    end.
+
+test_xml_escaping() ->
+    Input = <<"<b>Tom & Jerry > 1</b>">>,
+    Escaped = escape_xml_text(Input),
+    {ok, Escaped}.
+`,
+    },
+    starterCode: `-module(incident_xmpp_auth_bypass).
+-export([process_c2s_stanza/3, escape_xml_text/1, test_pre_auth_rejection/0, test_xml_escaping/0]).
+
+%% % TODO: Reject unauthenticated stanzas during pre-auth states (wait_for_stream, wait_for_sasl)
+%% When in wait_for_stream or wait_for_sasl:
+%%   return {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}
+%% When in session_established and receiving {chat_message, To, Body}:
+%%   escape Body with escape_xml_text/1, construct <message>, return {route, To, Xml, State}
+%% Any other state/stanza:
+%%   return {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}
+process_c2s_stanza(wait_for_stream, _Stanza, State) ->
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
+process_c2s_stanza(wait_for_sasl, _Stanza, State) ->
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
+process_c2s_stanza(session_established, {chat_message, _To, _Body}, State) ->
+    %% % TODO: Escape Body and format <message from='...' to='...' type='chat'><body>...</body></message>
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
+process_c2s_stanza(_OtherState, _Stanza, State) ->
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}.
+
+%% % TODO: Recursive binary loop escaping &, <, > to &amp;, &lt;, &gt;
+escape_xml_text(Bin) when is_binary(Bin) ->
+    Bin.
+
+test_pre_auth_rejection() ->
+    State = #{jid => undefined},
+    Msg = {chat_message, <<"victim@localhost">>, <<"Spoofed">>},
+    Rej1 = process_c2s_stanza(wait_for_stream, Msg, State),
+    Rej2 = process_c2s_stanza(wait_for_sasl, Msg, State),
+    Expected = {reject, <<"<stream:error><not-authorized/></stream:error>">>, State},
+    case Rej1 =:= Expected andalso Rej2 =:= Expected of
+        true -> {ok, pre_auth_rejected};
+        false -> {error, failed_rejection}
+    end.
+
+test_xml_escaping() ->
+    Input = <<"<b>Tom & Jerry > 1</b>">>,
+    Escaped = escape_xml_text(Input),
+    {ok, Escaped}.
+`,
+    solutionCode: `-module(incident_xmpp_auth_bypass).
+-export([process_c2s_stanza/3, escape_xml_text/1, test_pre_auth_rejection/0, test_xml_escaping/0]).
+
+process_c2s_stanza(wait_for_stream, {chat_message, _To, _Body}, State) ->
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
+process_c2s_stanza(wait_for_sasl, {chat_message, _To, _Body}, State) ->
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
+process_c2s_stanza(session_established, {chat_message, To, Body}, State) ->
+    EscapedBody = escape_xml_text(Body),
+    From = maps:get(jid, State, <<"system@localhost">>),
+    Xml = <<"<message from='", From/binary, "' to='", To/binary, "' type='chat'><body>", EscapedBody/binary, "</body></message>">>,
+    {route, To, Xml, State};
+process_c2s_stanza(_OtherState, _Stanza, State) ->
+    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}.
+
+escape_xml_text(Bin) when is_binary(Bin) ->
+    escape_loop(Bin, <<>>).
+
+escape_loop(<<>>, Acc) -> Acc;
+escape_loop(<<"&", Rest/binary>>, Acc) -> escape_loop(Rest, <<Acc/binary, "&amp;">>);
+escape_loop(<<"<", Rest/binary>>, Acc) -> escape_loop(Rest, <<Acc/binary, "&lt;">>);
+escape_loop(<<">", Rest/binary>>, Acc) -> escape_loop(Rest, <<Acc/binary, "&gt;">>);
+escape_loop(<<C, Rest/binary>>, Acc)   -> escape_loop(Rest, <<Acc/binary, C>>).
+
+test_pre_auth_rejection() ->
+    State = #{jid => undefined},
+    Msg = {chat_message, <<"victim@localhost">>, <<"Spoofed">>},
+    Rej1 = process_c2s_stanza(wait_for_stream, Msg, State),
+    Rej2 = process_c2s_stanza(wait_for_sasl, Msg, State),
+    Expected = {reject, <<"<stream:error><not-authorized/></stream:error>">>, State},
+    case Rej1 =:= Expected andalso Rej2 =:= Expected of
+        true -> {ok, pre_auth_rejected};
+        false -> {error, failed_rejection}
+    end.
+
+test_xml_escaping() ->
+    Input = <<"<b>Tom & Jerry > 1</b>">>,
+    Escaped = escape_xml_text(Input),
+    {ok, Escaped}.
+`,
+    otpDocCards: [
+      {
+        functionName: 'escape_xml_text',
+        module: 'incident_xmpp_auth_bypass',
+        signature: 'escape_xml_text(Bin) -> EscapedBin',
+        typesSpec: ['Bin = binary()', 'EscapedBin = binary()'],
+        description: 'Recursively escapes &, <, and > characters into XML entities.',
+        complexityNote: 'Tail-recursive binary fold in O(N) time.',
+        officialUrl: 'https://datatracker.ietf.org/doc/html/rfc6120',
+        githubSourceUrl: 'https://github.com/erlang/otp',
+      },
+    ],
+    astRules: {
+      requiredCalls: ['escape_xml_text/1'],
+    },
+    visibleTestCases: [
+      {
+        id: 'tc-ch11-l07-1',
+        title: 'Pre-Auth Stanza Rejection',
+        erlangCall: 'incident_xmpp_auth_bypass:test_pre_auth_rejection()',
+        expectedOutput: '{ok, pre_auth_rejected}',
+        explanation: 'Verifies chat stanzas are rejected with not-authorized stream error in pre-auth states.',
+      },
+      {
+        id: 'tc-ch11-l07-2',
+        title: 'XML Entity Escaping',
+        erlangCall: 'incident_xmpp_auth_bypass:test_xml_escaping()',
+        expectedOutput: '{ok, <<"&lt;b&gt;Tom &amp; Jerry &gt; 1&lt;/b&gt;">>}',
+        explanation: 'Verifies recursive loop properly escapes &, <, and > into XML entities.',
+      },
+    ],
+    solutionExplanation: 'Enforces pre-auth security gates and recursive XML entity escaping to neutralize injection attacks.',
+    references: [
+      {
+        title: 'OWASP XML External Entity (XXE) Prevention Cheat Sheet',
+        url: 'https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html',
+        category: 'github_ecosystem',
+        description: 'Industry best practices for parsing XML safely and neutralizing malicious payload injections.',
+      },
+      {
+        title: 'RFC 6120: Section 4.9.3.10 (Stream Error: not-authorized)',
+        url: 'https://datatracker.ietf.org/doc/html/rfc6120#section-4.9.3.10',
+        category: 'book_rfc',
+        description: 'Specification for stream-level not-authorized termination conditions.',
+      },
+    ],
+  },
+
+  {
+    id: 'ch11-l08',
+    chapterNumber: 11,
+    lessonNumber: 8,
     lessonType: 'problem_set',
     title: 'Chapter 11 Mini-Capstone: Multi-Device Presence Priority & Routing Engine',
     difficulty: 'Advanced',
+        visualScene: 'tcp_xmpp_stream_framing',
+    mentalModelCheck: {
+      question: 'When routing a message to a Bare JID (user@domain), how does RFC 6121 select the destination among multiple online client sessions?',
+      options: [
+        {
+          id: 'A',
+          label: 'It selects the session(s) with the highest non-negative priority (>= 0), or queues offline if all priorities are negative or no sessions exist.',
+          isCorrect: true,
+          explanation: 'RFC 6121 Section 8.5.2 specifies priority-based dispatch; negative priorities do not receive bare JID messages.'
+        },
+        {
+          id: 'B',
+          label: 'It broadcasts the message to every online session regardless of priority.',
+          isCorrect: false,
+          explanation: 'Messages are delivered to the highest priority session; ties result in multi-delivery.'
+        },
+        {
+          id: 'C',
+          label: 'It always stores the message offline first, then notifies clients via push.',
+          isCorrect: false,
+          explanation: 'Online sessions receive instantaneous BEAM message delivery.'
+        },
+        {
+          id: 'D',
+          label: 'It randomly picks an active socket PID.',
+          isCorrect: false,
+          explanation: 'Routing is deterministic based on integer priority rankings.'
+        }
+      ]
+    },
     conceptMarkdown: `## Why This Matters in Production
 
 In real-world chat networks, every active user is logged into multiple devices simultaneously: phone, smartwatch, desktop app, and web browser. 
@@ -1472,6 +2834,142 @@ Implement \`src/xmpp_presence_router.erl\` with the following exports:
         githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/lists.erl',
       },
     ],
+        files: [
+      {
+        path: 'src/xmpp_presence_router.erl',
+        name: 'xmpp_presence_router.erl',
+        content: `-module(xmpp_presence_router).
+-export([
+    upsert_session/5,
+    remove_session_by_pid/2,
+    resolve_message_targets/2,
+    broadcast_presence/4
+]).
+
+-type session() :: {session, FullJid :: binary(), BareJid :: binary(), Resource :: binary(), Priority :: integer(), Pid :: pid()}.
+-type roster_map() :: #{binary() => [binary()]}.
+
+%% @doc Adds or updates a connected user session.
+-spec upsert_session([session()], binary(), integer(), pid(), roster_map()) -> [session()].
+upsert_session(Sessions, FullJid, Priority, Pid, _RosterMap) ->
+    %% % TODO: Extract BareJid and Resource, replace matching FullJid or insert
+    [].
+
+%% @doc Removes all sessions owned by DeadPid using tail recursion.
+-spec remove_session_by_pid([session()], pid()) -> [session()].
+remove_session_by_pid(Sessions, DeadPid) ->
+    %% % TODO: Tail-recursive session pruning
+    [].
+
+%% @doc Resolves message targets according to RFC 6121 priority rules.
+-spec resolve_message_targets([session()], binary()) ->
+    {route_online, [pid()]} | {store_offline, binary()}.
+resolve_message_targets(Sessions, TargetJid) ->
+    %% % TODO: Check Full JID match; fallback to highest non-negative priority
+    {store_offline, TargetJid}.
+
+%% @doc Broadcasts presence updates to roster subscribers and own other resources.
+-spec broadcast_presence([session()], roster_map(), binary(), binary()) -> non_neg_integer().
+broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
+    %% % TODO: Fan out {xmpp_presence, SenderFullJid, PresenceStanza} to contacts
+    0.
+`,
+      },
+    ],
+    solutionFiles: {
+      'src/xmpp_presence_router.erl': `-module(xmpp_presence_router).
+-export([
+    upsert_session/5,
+    remove_session_by_pid/2,
+    resolve_message_targets/2,
+    broadcast_presence/4
+]).
+
+-type session() :: {session, FullJid :: binary(), BareJid :: binary(), Resource :: binary(), Priority :: integer(), Pid :: pid()}.
+-type roster_map() :: #{binary() => [binary()]}.
+
+-spec upsert_session([session()], binary(), integer(), pid(), roster_map()) -> [session()].
+upsert_session(Sessions, FullJid, Priority, Pid, _RosterMap) ->
+    {BareJid, Resource} = split_jid(FullJid),
+    ClampedPriority = clamp_priority(Priority),
+    NewSession = {session, FullJid, BareJid, Resource, ClampedPriority, Pid},
+    Filtered = [S || S = {session, F, _, _, _, _} <- Sessions, F =/= FullJid],
+    [NewSession | Filtered].
+
+-spec remove_session_by_pid([session()], pid()) -> [session()].
+remove_session_by_pid(Sessions, DeadPid) ->
+    remove_pid_loop(Sessions, DeadPid, []).
+
+remove_pid_loop([], _DeadPid, Acc) ->
+    lists:reverse(Acc);
+remove_pid_loop([{session, _, _, _, _, Pid} | Rest], DeadPid, Acc) when Pid =:= DeadPid ->
+    remove_pid_loop(Rest, DeadPid, Acc);
+remove_pid_loop([Session | Rest], DeadPid, Acc) ->
+    remove_pid_loop(Rest, DeadPid, [Session | Acc]).
+
+-spec resolve_message_targets([session()], binary()) ->
+    {route_online, [pid()]} | {store_offline, binary()}.
+resolve_message_targets(Sessions, TargetJid) ->
+    case binary:match(TargetJid, <<"/">>) of
+        {_, _} ->
+            %% Target is Full JID: check exact resource first
+            case [Pid || {session, F, _, _, _, Pid} <- Sessions, F =:= TargetJid] of
+                [ExactPid | _] ->
+                    {route_online, [ExactPid]};
+                [] ->
+                    %% Specific resource is offline; fall back to Bare JID routing rules
+                    {Bare, _} = split_jid(TargetJid),
+                    route_bare(Sessions, Bare)
+            end;
+        nomatch ->
+            route_bare(Sessions, TargetJid)
+    end.
+
+route_bare(Sessions, BareJid) ->
+    Matching = [{P, Pid} || {session, _, B, _, P, Pid} <- Sessions, B =:= BareJid, P >= 0],
+    case Matching of
+        [] ->
+            {store_offline, BareJid};
+        _ ->
+            MaxPriority = lists:max([P || {P, _} <- Matching]),
+            BestPids = [Pid || {P, Pid} <- Matching, P =:= MaxPriority],
+            {route_online, BestPids}
+    end.
+
+-spec broadcast_presence([session()], roster_map(), binary(), binary()) -> non_neg_integer().
+broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
+    {SenderBare, _} = split_jid(SenderFullJid),
+    Subscribers = maps:get(SenderBare, RosterMap, []),
+    TargetBares = [SenderBare | Subscribers],
+    
+    TargetSessions = [
+        Pid || {session, Full, Bare, _, _, Pid} <- Sessions,
+        Full =/= SenderFullJid,
+        lists:member(Bare, TargetBares)
+    ],
+    
+    UniquePids = lists:usort(TargetSessions),
+    lists:foreach(fun(Pid) ->
+        Pid ! {xmpp_presence, SenderFullJid, PresenceStanza}
+    end, UniquePids),
+    length(UniquePids).
+
+split_jid(FullJid) ->
+    case binary:split(FullJid, <<"/">>) of
+        [Bare, Res] -> {binary:copy(Bare), binary:copy(Res)};
+        [Bare]      -> {binary:copy(Bare), <<>>}
+    end.
+
+clamp_priority(P) when is_integer(P) ->
+    if
+        P < -128 -> -128;
+        P > 127  -> 127;
+        true     -> P
+    end;
+clamp_priority(_) ->
+    0.
+`,
+    },
     starterCode: `-module(xmpp_presence_router).
 -export([
     upsert_session/5,
@@ -1510,21 +3008,21 @@ broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
 `,
     visibleTestCases: [
       {
-        id: 'tc-ch11-l06-1',
+        id: 'tc-ch11-l08-1',
         title: 'Priority-Based Message Routing (Desktop vs Phone vs Watch)',
         erlangCall: 'begin P1 = spawn(fun() -> ok end), P2 = spawn(fun() -> ok end), P3 = spawn(fun() -> ok end), S0 = [], S1 = xmpp_presence_router:upsert_session(S0, <<"alice@host/watch">>, -5, P1, #{}), S2 = xmpp_presence_router:upsert_session(S1, <<"alice@host/phone">>, 5, P2, #{}), S3 = xmpp_presence_router:upsert_session(S2, <<"alice@host/desktop">>, 10, P3, #{}), {xmpp_presence_router:resolve_message_targets(S3, <<"alice@host">>), xmpp_presence_router:resolve_message_targets(S3, <<"alice@host/phone">>)} end',
         expectedOutput: '{{route_online,[P3]},{route_online,[P2]}}',
         explanation: 'Bare JID routes to highest priority (P3 with priority 10); Full JID routes directly to specific resource (P2).',
       },
       {
-        id: 'tc-ch11-l06-2',
+        id: 'tc-ch11-l08-2',
         title: 'Pruning Dead Sessions on Process Down',
         erlangCall: 'begin P1 = spawn(fun() -> ok end), P2 = spawn(fun() -> ok end), S0 = xmpp_presence_router:upsert_session([], <<"bob@host/web">>, 1, P1, #{}), S1 = xmpp_presence_router:upsert_session(S0, <<"bob@host/cli">>, 2, P2, #{}), S2 = xmpp_presence_router:remove_session_by_pid(S1, P1), xmpp_presence_router:resolve_message_targets(S2, <<"bob@host/web">>) end',
         expectedOutput: '{route_online,[P2]}',
         explanation: 'After removing P1, routing to offline web resource falls back to online cli resource.',
       },
       {
-        id: 'tc-ch11-l06-3',
+        id: 'tc-ch11-l08-3',
         title: 'Broadcast Presence to Subscribed Contacts',
         erlangCall: 'begin PAlice = self(), PBob = spawn(fun() -> receive _ -> ok end end), Roster = #{<<"alice@host">> => [<<"bob@host">>]}, S0 = xmpp_presence_router:upsert_session([], <<"alice@host/phone">>, 5, PAlice, Roster), S1 = xmpp_presence_router:upsert_session(S0, <<"bob@host/laptop">>, 5, PBob, Roster), xmpp_presence_router:broadcast_presence(S1, Roster, <<"alice@host/phone">>, <<"<presence/>">>) end',
         expectedOutput: '1',
@@ -1532,10 +3030,7 @@ broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
       },
     ],
     astRules: {
-      requireTailRecursion: ['remove_session_by_pid/2'],
-      forbiddenCalls: [],
-      requiredCalls: [],
-      requiredConstructs: ['case'],
+      requiredCalls: ['binary:split/2', 'binary:copy/1', 'lists:usort/1'],
     },
     solutionCode: `-module(xmpp_presence_router).
 -export([
@@ -1648,5 +3143,5 @@ clamp_priority(_) ->
         description: 'Core stanza routing pipeline handling local, remote, and offline messages.',
       },
     ],
-  },
+  }
 ];
