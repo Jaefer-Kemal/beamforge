@@ -1,5 +1,8 @@
 # Specification 03: The 12-Chapter Master Curriculum Blueprint
 
+> [!IMPORTANT]
+> For the comprehensive **88-Module Pedagogical Overhaul Roadmap**, surgical root-cause analysis of the 6 hidden flaws, recursion stepping stones, and the 5-batch execution plan, refer directly to [`docs/CURRICULUM_AUDIT_AND_EXPANSION_PLAN.md`](file:///d:/Projects/EAII/BeamForge/docs/CURRICULUM_AUDIT_AND_EXPANSION_PLAN.md).
+
 Every chapter progresses incrementally: **Concept Micro-Lessons** -> **Guided Runnable Demo** -> **Real-World Problem Sets** -> **Chapter Mini-Capstone**.
 
 ## Chapter 1: Getting Started & Functional Foundations
@@ -85,13 +88,15 @@ Every chapter progresses incrementally: **Concept Micro-Lessons** -> **Guided Ru
 - `ch10-l04`: **Building a Ranch-Style Concurrent TCP Acceptor Pool & Connection Supervisor**
 - `ch10-l05`: **Chapter Mini-Capstone: High-Throughput TCP Key-Value Backend Server (`tcp_kv_server.erl`)** (Parses framed commands `SET key val\r\n`, `GET key\r\n` over real TCP sockets using `{active, once}` and an ETS backend, verified by `bf_backpressure_tester`)
 
-## Chapter 11: XMPP Protocol Architecture (Guided & Step-by-Step)
-- `ch11-l01`: **Guided Runnable Demo: Observing a Live XMPP Client-to-Server XML Stream** (No code edits required—run the pre-built demo to watch `<stream:stream>`, `<stream:features>`, SASL auth, resource binding, and `<message>` stanzas in the terminal)
-- `ch11-l02`: **XMPP Addressing (RFC 7622): Parsing & Normalizing Full and Bare JIDs (`user@domain/resource`)** (`xmpp_jid.erl`)
-- `ch11-l03`: **XMPP Stanza Anatomy (RFC 6120): Constructing & Matching `<iq>`, `<presence>`, and `<message>` Records** (`xmpp_stanza.erl`)
-- `ch11-l04`: **Incremental XML Stream Framing: Extracting Complete Stanzas from Fragmented TCP Chunks** (`xmpp_xml_framer.erl`)
-- `ch11-l05`: **C2S Handshake State Machine: Stream Open -> SASL PLAIN Auth -> Resource Bind** (`xmpp_c2s_fsm.erl`)
-- `ch11-l06`: **Presence Subscriptions, Priority Rules & Roster Broadcast Fan-Out** (`xmpp_presence_router.erl`)
+## Chapter 11: XMPP Protocol Architecture (Guided & Step-by-Step, 8 Lessons)
+- `ch11-l01`: **Guided Demo: Observing a Complete Live XMPP Wire Protocol Session Transcript** (`xmpp_wire_demo.erl`) (No code edits required—run the pre-built demo to watch `<stream:stream>`, `<stream:features>`, SASL auth, resource binding, and `<message>` stanzas in the terminal)
+- `ch11-l02`: **XMPP Addressing: Building an RFC 7622 JID Parser & Validator** (`xmpp_jid.erl`)
+- `ch11-l03`: **XMPP Stanza Codec: Parsing, Classifying, and Serializing RFC 6120 XML Elements** (`xmpp_stanza.erl`)
+- `ch11-l04`: **RFC 6120 Stanza & Stream Errors and RFC 6121 Roster Subscription FSM** (`xmpp_error_and_roster.erl`)
+- `ch11-l05`: **Incremental XML Stream Framing & Attribute Extraction over Raw TCP** (`xmpp_xml_framer.erl`)
+- `ch11-l06`: **Implementing the RFC 6120 C2S Handshake State Machine** (`xmpp_c2s_fsm.erl`)
+- `ch11-l07`: **Incident #107: The Pre-Auth XML Injection & Stanza Spoofing Vulnerability** (`incident_xmpp_auth_bypass.erl`)
+- `ch11-l08`: **Capstone Foundation: In-Memory Presence Registry, Priority Routing & Fanout** (`xmpp_presence_router.erl`)
 
 ## Chapter 12: Final Capstone Studio — Build a Production XMPP Server
 - `ch12-capstone`: **Dedicated Multi-File Capstone Studio: The Complete OTP XMPP Server**
