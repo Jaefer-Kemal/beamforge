@@ -13,7 +13,7 @@
 start_system(MaxRestarts) when is_integer(MaxRestarts), MaxRestarts >= 0 ->
     InitRef = make_ref(),
     Parent = self(),
-    WatcherPid = spawn(fun() ->
+    _WatcherPid = spawn(fun() ->
         {WorkerPid, MRef} = spawn_monitor(fun() -> worker_loop() end),
         State = #{
             worker_pid => WorkerPid,

@@ -16,7 +16,7 @@ choose_primitive(independent_watcher)      -> use_monitor.
 start(CallbackMod, InitArg) ->
     InitRef = make_ref(),
     Parent = self(),
-    Pid = spawn(fun() ->
+    _Pid = spawn(fun() ->
         case CallbackMod:init(InitArg) of
             {ok, InitialState} ->
                 Parent ! {InitRef, ok, self()},

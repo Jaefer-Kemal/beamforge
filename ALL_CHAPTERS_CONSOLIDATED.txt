@@ -1,5 +1,5 @@
 # BEAMFORGE COMPLETE 12-CHAPTER CURRICULUM DUMP
-Generated At: 2026-11-02T13:09:24.426Z
+Generated At: 2026-11-02T13:46:55.784Z
 Platform: BeamForge (Erlang/OTP, Concurrency, Distributed TCP & XMPP)
 Total Chapters: 12
 
@@ -14439,7 +14439,7 @@ choose_primitive(independent_watcher)      -> use_monitor.
 start(CallbackMod, InitArg) ->
     InitRef = make_ref(),
     Parent = self(),
-    Pid = spawn(fun() ->
+    _Pid = spawn(fun() ->
         case CallbackMod:init(InitArg) of
             {ok, InitialState} ->
                 Parent ! {InitRef, ok, self()},
@@ -14576,7 +14576,7 @@ choose_primitive(independent_watcher)      -> use_monitor.
 start(CallbackMod, InitArg) ->
     InitRef = make_ref(),
     Parent = self(),
-    Pid = spawn(fun() ->
+    _Pid = spawn(fun() ->
         case CallbackMod:init(InitArg) of
             {ok, InitialState} ->
                 Parent ! {InitRef, ok, self()},
@@ -15177,7 +15177,7 @@ worker_loop() ->
 start_system(MaxRestarts) when is_integer(MaxRestarts), MaxRestarts >= 0 ->
     InitRef = make_ref(),
     Parent = self(),
-    WatcherPid = spawn(fun() ->
+    _WatcherPid = spawn(fun() ->
         {WorkerPid, MRef} = spawn_monitor(fun() -> worker_loop() end),
         State = #{
             worker_pid => WorkerPid,
@@ -15475,7 +15475,7 @@ worker_loop() ->
 start_system(MaxRestarts) when is_integer(MaxRestarts), MaxRestarts >= 0 ->
     InitRef = make_ref(),
     Parent = self(),
-    WatcherPid = spawn(fun() ->
+    _WatcherPid = spawn(fun() ->
         {WorkerPid, MRef} = spawn_monitor(fun() -> worker_loop() end),
         State = #{
             worker_pid => WorkerPid,
