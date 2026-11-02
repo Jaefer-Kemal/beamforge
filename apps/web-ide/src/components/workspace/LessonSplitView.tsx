@@ -1254,7 +1254,25 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
               <button
                 key={key}
                 id={`output-tab-${key}`}
-                onClick={(e) => { e.stopPropagation(); setLessonOutputTab(key); setLessonOutputOpen(true); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (key === 'solution') {
+                    const isUnlocked = (unlockedSolutionLessonIds || []).includes(lesson.id);
+                    if (isUnlocked) {
+                      if (isLessonOutputOpen && lessonOutputTab === 'solution') {
+                        setLessonOutputOpen(false);
+                      } else {
+                        setLessonOutputTab('solution');
+                        setLessonOutputOpen(true);
+                      }
+                    } else {
+                      setIsUnlockModalOpen(true);
+                    }
+                  } else {
+                    setLessonOutputTab(key);
+                    setLessonOutputOpen(true);
+                  }
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg mr-1 transition-all duration-150"
                 style={{
                   background: lessonOutputTab === key && isLessonOutputOpen
@@ -1659,7 +1677,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
         </div>
 
         {/* Mobile Results Scrollable Body */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className={`flex-1 min-h-0 space-y-3 ${lessonOutputTab === 'solution' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto p-4'}`}>
           {lessonOutputTab === 'test_results' && (
             <>
               {runResult && !runResult.compileOk && (
@@ -1798,20 +1816,22 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           )}
 
           {lessonOutputTab === 'solution' && (
-            <SolutionViewerTab
-              fileName={activeFile?.name || 'solution.erl'}
-              solutionCode={
-                (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles[activeFile.path]) ||
-                (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles[activeFile.path.replace(/^src\//, '')]) ||
-                (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles['src/' + activeFile.path]) ||
-                lesson.solutionCode ||
-                ''
-              }
-              solutionExplanation={lesson.solutionExplanation}
-              isDark={isDark}
-              isExpanded={isDrawerExpanded}
-              onToggleExpand={() => setIsDrawerExpanded((prev) => !prev)}
-            />
+            <div className="flex-1 min-h-0" style={{ height: 'calc(100dvh - 14rem)' }}>
+              <SolutionViewerTab
+                fileName={activeFile?.name || 'solution.erl'}
+                solutionCode={
+                  (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles[activeFile.path]) ||
+                  (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles[activeFile.path.replace(/^src\//, '')]) ||
+                  (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles['src/' + activeFile.path]) ||
+                  lesson.solutionCode ||
+                  ''
+                }
+                solutionExplanation={lesson.solutionExplanation}
+                isDark={isDark}
+                isExpanded={isDrawerExpanded}
+                onToggleExpand={() => setIsDrawerExpanded((prev) => !prev)}
+              />
+            </div>
           )}
         </div>
 

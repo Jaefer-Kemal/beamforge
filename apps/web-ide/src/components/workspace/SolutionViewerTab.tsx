@@ -34,10 +34,10 @@ export const SolutionViewerTab: React.FC<SolutionViewerTabProps> = ({
   const lines = solutionCode ? solutionCode.split('\n') : [];
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto p-3 space-y-3">
+    <div className="flex flex-col h-full">
       {/* Header Bar */}
       <div
-        className="flex items-center justify-between gap-2 pb-2.5 border-b flex-shrink-0 flex-wrap sm:flex-nowrap"
+        className="flex items-center justify-between gap-2 p-3 pb-2.5 border-b flex-shrink-0 flex-wrap sm:flex-nowrap"
         style={{ borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)' }}
       >
         <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -159,8 +159,9 @@ export const SolutionViewerTab: React.FC<SolutionViewerTabProps> = ({
       </div>
 
       {/* Code Container with Interactive Click-to-Unblur */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-3 pt-2">
       <div
-        className="relative rounded-xl overflow-hidden border min-h-[140px]"
+        className="relative rounded-xl overflow-hidden border"
         style={{
           borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)',
           background: isDark ? '#090D16' : '#F8FAFC',
@@ -173,7 +174,6 @@ export const SolutionViewerTab: React.FC<SolutionViewerTabProps> = ({
               ? 'select-none pointer-events-none filter blur-[6px] opacity-30'
               : ''
           }`}
-          style={{ maxHeight: '380px' }}
         >
           {lines.map((line, idx) => (
             <div key={idx} className="flex leading-relaxed hover:bg-white/5 px-1 rounded">
@@ -219,11 +219,12 @@ export const SolutionViewerTab: React.FC<SolutionViewerTabProps> = ({
           </div>
         )}
       </div>
+      </div>
 
       {/* Pedagogical Explanation Card */}
       {solutionExplanation && (
         <div
-          className="rounded-xl p-3.5 border space-y-1.5 flex-shrink-0"
+          className="rounded-xl p-3.5 mx-3 mb-3 border space-y-1.5 flex-shrink-0"
           style={{
             background: isDark ? 'rgba(30, 41, 59, 0.40)' : 'rgba(241, 245, 249, 0.60)',
             borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',

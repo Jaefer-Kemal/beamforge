@@ -1014,10 +1014,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
   - `apps/web-ide`: `npm run build` passed with 0 errors (5/5 static pages).
 
-
-
-
-
-
-
-
+## Phase 47: Lesson View Solution Drawer Unlock Gating & Unbounded Solution Code Scroll
+- [x] **47.1: LessonSplitView Bottom Drawer Solution Tab Unlock Gating (`LessonSplitView.tsx`)**:
+  - Gated the bottom drawer "Solution (File)" tab button (`output-tab-solution`) behind the Option B XP forfeit unlock check (`unlockedSolutionLessonIds.includes(lesson.id)`).
+  - Clicking the tab when locked now summons `SolutionUnlockModal` rather than immediately exposing the verified solution code.
+  - Clicking when already unlocked toggles drawer visibility cleanly.
+- [x] **47.2: Unbounded Solution Code Scrolling & Layout Restructuring (`SolutionViewerTab.tsx`)**:
+  - Eliminated the restrictive `maxHeight: '380px'` constraint that truncated long solutions and prevented complete downward scrolling.
+  - Converted the root layout to a strict `flex flex-col h-full` container with header and pedagogical notes marked as `flex-shrink-0`.
+  - Nested the code container inside `flex-1 min-h-0 overflow-y-auto` with ample bottom padding so learners can comfortably scroll to the final line of code even on dense or maximized views.
+- [x] **47.3: Mobile Solution Container Responsiveness (`LessonSplitView.tsx`)**:
+  - Updated mobile results scrollable body to adopt `flex flex-col overflow-hidden` when the solution tab is selected.
+  - Wrapped mobile `SolutionViewerTab` in a height-bounded `calc(100dvh - 14rem)` container with `flex-1 min-h-0` ensuring smooth touch scrolling without viewport clipping.
+- [x] **47.4: Verification Loop**:
+  - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
+  - `apps/web-ide`: `npm run build` passed with 0 errors (5/5 static pages generated).
