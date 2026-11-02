@@ -1029,3 +1029,16 @@ We execute the platform overhaul incrementally so every single piece is built to
 - [x] **47.4: Verification Loop**:
   - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
   - `apps/web-ide`: `npm run build` passed with 0 errors (5/5 static pages generated).
+
+## Phase 48: Visualizer Accessibility, Typography Scaling & Daylight Contrast Overhaul
+- [x] **48.1: Unified Typography Scale Upgrade (`BeamConceptVisualizer.tsx`)**:
+  - Eliminated all micro font sizes (`text-[8px]`, `text-[8.5px]`, `text-[9px]`, `text-[9.5px]`, and `text-[10px]`) across all 7 interactive scenes.
+  - Standardized on a high-legibility typographic hierarchy: minimum `text-[11px]` for secondary technical descriptors, `text-xs` (12px) for node titles/PIDs, and `text-sm` (14px) for prominent supervisor headers and card titles.
+  - Enlarged stepper control buttons to `w-7 h-7` with accessible focus/active states and increased icon sizes from `w-3` to `w-3.5`/`w-4`.
+- [x] **48.2: Light Mode (Daylight Glass) Contrast Certified Palettes**:
+  - Replaced low-contrast `text-slate-400` on white frosted surfaces with WCAG AA compliant Slate 700 (`#334155`) and Slate 900 (`#0F172A`).
+  - Replaced pale lavender (`text-purple-400`), pale cyan (`text-cyan-300`), and pale amber tones in light mode with deep, rich pigment tokens (`text-purple-700`, `text-cyan-700`, `text-amber-700`, `text-emerald-700`).
+  - Added subtle shadows (`shadow-xs` / `shadow-sm`) and explicit borders to nodes and flow arrows so process boundaries remain crisp against bright daylight backgrounds.
+- [x] **48.3: Verification Loop**:
+  - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
+  - `apps/web-ide`: `npm run build` passed with 0 errors (5/5 static pages generated).
