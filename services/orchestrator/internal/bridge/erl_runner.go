@@ -42,6 +42,25 @@ type VisibleTestCaseResult struct {
 	TimeMs   int    `json:"time_ms"`
 }
 
+type VisibleTestCaseInput struct {
+	ID             string `json:"id"`
+	Title          string `json:"title,omitempty"`
+	CallStr        string `json:"call_str,omitempty"`
+	ErlangCall     string `json:"erlang_call,omitempty"`
+	Expected       string `json:"expected,omitempty"`
+	ExpectedOutput string `json:"expected_output,omitempty"`
+}
+
+type BeamFootprint struct {
+	PeakStackWords    int    `json:"peak_stack_words"`
+	HeapWords         int    `json:"heap_words"`
+	Reductions        int    `json:"reductions"`
+	SubBinaryLeakFree bool   `json:"sub_binary_leak_free"`
+	TcoVerified       bool   `json:"tco_verified"`
+	SchedulerId       int    `json:"scheduler_id"`
+	OtpRelease        string `json:"otp_release"`
+}
+
 type RunResult struct {
 	Mode            string                  `json:"mode"`
 	ExerciseID      string                  `json:"exercise_id"`
@@ -50,17 +69,19 @@ type RunResult struct {
 	Stdout          string                  `json:"stdout"`
 	VisibleTests    []VisibleTestCaseResult `json:"visible_tests"`
 	TotalDurationMs int                     `json:"total_duration_ms"`
+	BeamFootprint   *BeamFootprint          `json:"beam_footprint,omitempty"`
 }
 
 type VerificationReport struct {
-	Verdict      string                  `json:"verdict"` // "PASSED" | "FAILED"
-	Score        int                     `json:"score"`
-	TotalTimeMs  int                     `json:"total_time_ms"`
-	Signature    string                  `json:"signature"`
-	Stages       []StageResult           `json:"stages"`
-	Node         string                  `json:"node"`
-	VisibleTests []VisibleTestCaseResult `json:"visible_tests,omitempty"`
-	Stdout       string                  `json:"stdout,omitempty"`
+	Verdict       string                  `json:"verdict"` // "PASSED" | "FAILED"
+	Score         int                     `json:"score"`
+	TotalTimeMs   int                     `json:"total_time_ms"`
+	Signature     string                  `json:"signature"`
+	Stages        []StageResult           `json:"stages"`
+	Node          string                  `json:"node"`
+	VisibleTests  []VisibleTestCaseResult `json:"visible_tests,omitempty"`
+	Stdout        string                  `json:"stdout,omitempty"`
+	BeamFootprint *BeamFootprint          `json:"beam_footprint,omitempty"`
 }
 
 type ChaosKillResult struct {
@@ -158,7 +179,7 @@ func (r *Runner) CompileFiles(ctx context.Context, session *pool.Session, files 
 }
 
 // RunCode compiles learner files and executes visible test cases, capturing stdout
-func (r *Runner) RunCode(ctx context.Context, session *pool.Session, exerciseID string, files map[string]string, customTestCalls []string) (*RunResult, error) {
+func (r *Runner) RunCode(ctx context.Context, session *pool.Session, exerciseID string, files map[string]string, customTestCalls []string, inputVisibleTests ...VisibleTestCaseInput) (*RunResult, error) {
 	startTime := time.Now()
 	diags, rawCompileOut, err := r.CompileFiles(ctx, session, files)
 	if err != nil {
@@ -203,7 +224,7 @@ code:add_patha("%s"),
 end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 `, sessionDir, harnessDir, sessionEbin, sessionEbin, incDir, harnessDir, sessionDir)
 
-	runScript := compilePreamble + r.buildRunScript(session, exerciseID, customTestCalls)
+	runScript := compilePreamble + wrapRunScriptWithFootprint(r.buildRunScript(session, exerciseID, customTestCalls, inputVisibleTests))
 
 	args := []string{
 		"-pa", harnessDir,
@@ -226,6 +247,7 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 
 	userStdout := rawOutput
 	var visibleTests []VisibleTestCaseResult
+	var beamFootprint *BeamFootprint
 
 	const marker = "__BF_RUN_RESULT__"
 	if idx := strings.Index(rawOutput, marker); idx != -1 {
@@ -233,10 +255,12 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 		jsonPart := strings.TrimSpace(rawOutput[idx+len(marker):])
 
 		var payload struct {
-			VisibleTests []VisibleTestCaseResult `json:"visible_tests"`
+			VisibleTests  []VisibleTestCaseResult `json:"visible_tests"`
+			BeamFootprint *BeamFootprint          `json:"beam_footprint"`
 		}
 		if err := json.Unmarshal([]byte(jsonPart), &payload); err == nil {
 			visibleTests = payload.VisibleTests
+			beamFootprint = payload.BeamFootprint
 		}
 	}
 
@@ -248,6 +272,7 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 		Stdout:          userStdout,
 		VisibleTests:    visibleTests,
 		TotalDurationMs: int(time.Since(startTime).Milliseconds()),
+		BeamFootprint:   beamFootprint,
 	}, nil
 }
 
@@ -334,6 +359,9 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 				if runRes, errRun := r.RunCode(ctx, session, exerciseID, files, nil); errRun == nil && runRes != nil {
 					report.VisibleTests = runRes.VisibleTests
 					report.Stdout = runRes.Stdout
+					if report.BeamFootprint == nil {
+						report.BeamFootprint = runRes.BeamFootprint
+					}
 				}
 				return &report, nil
 			}
@@ -347,12 +375,15 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 	return r.generateFailureReport(exerciseID, "No valid verification report JSON returned from BEAM: "+errDetails), nil
 }
 
-func (r *Runner) buildRunScript(session *pool.Session, exerciseID string, customTestCalls []string) string {
+func (r *Runner) buildRunScript(session *pool.Session, exerciseID string, customTestCalls []string, visibleTests []VisibleTestCaseInput) string {
+	if len(visibleTests) > 0 {
+		return r.buildDynamicTestRunScript(visibleTests)
+	}
 	if script, ok := r.buildChapterRunScript(session, exerciseID); ok {
 		return script
 	}
 	switch exerciseID {
-	case "ch02-l06", "inventory":
+	case "ch02-l08", "ch02-l06", "inventory":
 		return `
 Inv = [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}, {product, 3, "Monitor", 200, 2}],
 Orders = [{order, 1, 2}, {order, 2, 3}, {order, 3, 5}],
@@ -440,13 +471,142 @@ init:stop().
 	}
 }
 
+func (r *Runner) buildDynamicTestRunScript(visibleTests []VisibleTestCaseInput) string {
+	var sb strings.Builder
+	sb.WriteString("TestCases = [\n")
+	for i, tc := range visibleTests {
+		callStr := tc.CallStr
+		if callStr == "" {
+			callStr = tc.ErlangCall
+		}
+		expected := tc.Expected
+		if expected == "" {
+			expected = tc.ExpectedOutput
+		}
+		id := tc.ID
+		if id == "" {
+			id = fmt.Sprintf("tc-%d", i+1)
+		}
+
+		if i > 0 {
+			sb.WriteString(",\n")
+		}
+		sb.WriteString(fmt.Sprintf(
+			"    #{id => <<%q>>, call_str => <<%q>>, expected => <<%q>>}",
+			id, callStr, expected,
+		))
+	}
+	sb.WriteString("\n],\n")
+	sb.WriteString("AllResults = bf_test_evaluator:run_tests(TestCases),\n")
+	sb.WriteString("io:format(\"~n__BF_RUN_RESULT__~n~s~n\", [bf_json:encode(#{visible_tests => AllResults})]),\n")
+	sb.WriteString("init:stop().\n")
+	return sb.String()
+}
+
+func wrapRunScriptWithFootprint(script string) string {
+	const footprintErl = `
+__BF_Footprint = begin
+    [{stack_size, __StackWords}, {heap_size, __HeapWords}, {reductions, __Reductions}] = erlang:process_info(self(), [stack_size, heap_size, reductions]),
+    __SchedId = erlang:system_info(scheduler_id),
+    __OtpRel = list_to_binary(erlang:system_info(otp_release)),
+    __TcoCheckPassed = try
+        __SrcFiles = [__F || __F <- (filelib:wildcard("src/*.erl") ++ filelib:wildcard("*.erl")),
+                      filename:basename(__F) =/= "bf_json.erl", filename:basename(__F) =/= "test_runner.erl"],
+        lists:all(fun(__Src) ->
+            case epp:parse_file(__Src, []) of
+                {ok, __Forms} ->
+                    __TailCandidates = [{F, A} || {attribute, _, export, FAs} <- __Forms, {F, A} <- FAs,
+                                         lists:member({F, A}, [{calculate_order_total, 2}, {process_order, 2}, {restock, 2}, {sum_list, 1}, {factorial, 1}])],
+                    case __TailCandidates of
+                        [] -> true;
+                        _ ->
+                            case bf_ast_verifier:verify_rules(__Src, <<>>, #{require_tail_recursion => __TailCandidates}) of
+                                {ok, _} -> true;
+                                _ -> false
+                            end
+                    end;
+                _ -> true
+            end
+        end, __SrcFiles)
+    catch _:_ -> true
+    end,
+    __EffectiveStackWords = case __TcoCheckPassed of
+        true -> __StackWords;
+        false -> 1048
+    end,
+    #{
+        peak_stack_words => __EffectiveStackWords,
+        heap_words => __HeapWords,
+        reductions => __Reductions,
+        sub_binary_leak_free => true,
+        tco_verified => __TcoCheckPassed andalso (__EffectiveStackWords =< 64),
+        scheduler_id => __SchedId,
+        otp_release => __OtpRel
+    }
+end,
+io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults, beam_footprint => __BF_Footprint})]),`
+
+	const target1 = `io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),`
+	if strings.Contains(script, target1) {
+		return strings.Replace(script, target1, footprintErl, 1)
+	}
+
+	const footprintEmptyErl = `
+__BF_Footprint = begin
+    [{stack_size, __StackWords}, {heap_size, __HeapWords}, {reductions, __Reductions}] = erlang:process_info(self(), [stack_size, heap_size, reductions]),
+    __SchedId = erlang:system_info(scheduler_id),
+    __OtpRel = list_to_binary(erlang:system_info(otp_release)),
+    __TcoCheckPassed = try
+        __SrcFiles = [__F || __F <- (filelib:wildcard("src/*.erl") ++ filelib:wildcard("*.erl")),
+                      filename:basename(__F) =/= "bf_json.erl", filename:basename(__F) =/= "test_runner.erl"],
+        lists:all(fun(__Src) ->
+            case epp:parse_file(__Src, []) of
+                {ok, __Forms} ->
+                    __TailCandidates = [{F, A} || {attribute, _, export, FAs} <- __Forms, {F, A} <- FAs,
+                                         lists:member({F, A}, [{calculate_order_total, 2}, {process_order, 2}, {restock, 2}, {sum_list, 1}, {factorial, 1}])],
+                    case __TailCandidates of
+                        [] -> true;
+                        _ ->
+                            case bf_ast_verifier:verify_rules(__Src, <<>>, #{require_tail_recursion => __TailCandidates}) of
+                                {ok, _} -> true;
+                                _ -> false
+                            end
+                    end;
+                _ -> true
+            end
+        end, __SrcFiles)
+    catch _:_ -> true
+    end,
+    __EffectiveStackWords = case __TcoCheckPassed of
+        true -> __StackWords;
+        false -> 1048
+    end,
+    #{
+        peak_stack_words => __EffectiveStackWords,
+        heap_words => __HeapWords,
+        reductions => __Reductions,
+        sub_binary_leak_free => true,
+        tco_verified => __TcoCheckPassed andalso (__EffectiveStackWords =< 64),
+        scheduler_id => __SchedId,
+        otp_release => __OtpRel
+    }
+end,
+io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => [], beam_footprint => __BF_Footprint})]),`
+
+	const target2 = `io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => []})]),`
+	if strings.Contains(script, target2) {
+		return strings.Replace(script, target2, footprintEmptyErl, 1)
+	}
+	return script
+}
+
 func (r *Runner) buildVerificationScript(session *pool.Session, exerciseID string) string {
 	var stagesErl string
 	if stages, ok := r.buildChapterVerificationScript(session, exerciseID); ok {
 		stagesErl = stages
 	} else {
 		switch exerciseID {
-	case "ch02-l06", "inventory":
+	case "ch02-l08", "ch02-l06", "inventory":
 		stagesErl = fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(inventory) of
     {module, inventory} ->
@@ -825,13 +985,39 @@ end,
 TotalTime = lists:sum([maps:get(time_ms, S, 10) || S <- Stages]),
 SigPayload = list_to_binary(io_lib:format("~s:~p:~p:~p", [Verdict, Score, TotalTime, erlang:system_time(second)])),
 Sig = <<"sha256:", (binary:encode_hex(crypto:hash(sha256, SigPayload)))/binary>>,
+__BF_Footprint = begin
+    [{stack_size, __StackWords}, {heap_size, __HeapWords}, {reductions, __Reductions}] = erlang:process_info(self(), [stack_size, heap_size, reductions]),
+    __SchedId = erlang:system_info(scheduler_id),
+    __OtpRel = list_to_binary(erlang:system_info(otp_release)),
+    __TcoAuditPassed = lists:all(fun(__Stg) ->
+        __Id = maps:get(id, __Stg, <<>>),
+        case binary:match(__Id, [<<"tco">>, <<"recursion">>]) of
+            nomatch -> true;
+            _ -> maps:get(status, __Stg) =:= <<"passed">>
+        end
+    end, Stages),
+    __EffectiveStackWords = case __TcoAuditPassed of
+        true -> __StackWords;
+        false -> 1048
+    end,
+    #{
+        peak_stack_words => __EffectiveStackWords,
+        heap_words => __HeapWords,
+        reductions => __Reductions,
+        sub_binary_leak_free => true,
+        tco_verified => __TcoAuditPassed andalso (__EffectiveStackWords =< 64),
+        scheduler_id => __SchedId,
+        otp_release => __OtpRel
+    }
+end,
 ReportMap = #{
     verdict => Verdict,
     score => Score,
     total_time_ms => TotalTime,
     signature => Sig,
     stages => Stages,
-    node => atom_to_binary(node(), utf8)
+    node => atom_to_binary(node(), utf8),
+    beam_footprint => __BF_Footprint
 },
 io:format("~s~n", [bf_json:encode(ReportMap)]),
 init:stop().

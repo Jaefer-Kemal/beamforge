@@ -21,7 +21,13 @@ dist/
 
 # Erlang Crash Dumps & Logs
 erl_crash.dump
+**/erl_crash.dump
+*.dump
 *.log
+
+# Python Cache
+__pycache__/
+**/__pycache__/
 
 # Compiled BEAM files, except precompiled runtime harness modules
 *.beam

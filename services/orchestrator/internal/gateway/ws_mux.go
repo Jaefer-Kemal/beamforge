@@ -195,9 +195,10 @@ func (h *Handler) handleJSONChannel(
 	case 5: // 0x05 Grader
 		if frame.Type == "run_code" {
 			var req struct {
-				ExerciseID      string            `json:"exercise_id"`
-				Files           map[string]string `json:"files"`
-				CustomTestCalls []string          `json:"custom_test_calls"`
+				ExerciseID      string                        `json:"exercise_id"`
+				Files           map[string]string             `json:"files"`
+				CustomTestCalls []string                      `json:"custom_test_calls"`
+				VisibleTests    []bridge.VisibleTestCaseInput `json:"visible_tests"`
 			}
 			_ = json.Unmarshal(frame.Payload, &req)
 
@@ -208,7 +209,7 @@ func (h *Handler) handleJSONChannel(
 				Payload: map[string]interface{}{"status": "running"},
 			})
 
-			res, err := h.runner.RunCode(ctx, session, req.ExerciseID, req.Files, req.CustomTestCalls)
+			res, err := h.runner.RunCode(ctx, session, req.ExerciseID, req.Files, req.CustomTestCalls, req.VisibleTests...)
 			send(ResponseFrame{
 				Channel: 5,
 				Type:    "run_result",

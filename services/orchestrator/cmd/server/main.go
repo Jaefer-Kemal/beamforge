@@ -110,10 +110,11 @@ func main() {
 		}
 
 		var req struct {
-			ExerciseID      string            `json:"exercise_id"`
-			SessionID       string            `json:"session_id"`
-			Files           map[string]string `json:"files"`
-			CustomTestCalls []string          `json:"custom_test_calls"`
+			ExerciseID      string                        `json:"exercise_id"`
+			SessionID       string                        `json:"session_id"`
+			Files           map[string]string             `json:"files"`
+			CustomTestCalls []string                      `json:"custom_test_calls"`
+			VisibleTests    []bridge.VisibleTestCaseInput `json:"visible_tests"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
@@ -134,7 +135,7 @@ func main() {
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
 
-		result, err := runner.RunCode(ctx, session, req.ExerciseID, req.Files, req.CustomTestCalls)
+		result, err := runner.RunCode(ctx, session, req.ExerciseID, req.Files, req.CustomTestCalls, req.VisibleTests...)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
