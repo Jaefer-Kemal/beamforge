@@ -35,7 +35,10 @@ __pycache__/
 
 # Environment variables
 .env
+.env.*
 .env*.local
+*.env
+
 
 # Editor & OS files
 .vscode/
@@ -48,3 +51,5 @@ Thumbs.db
 # Scratch and Temporary Development Scripts
 scratch/
 **/scratch/
+*playwright*.mjs
+apps/web-ide/*playwright*.mjs
