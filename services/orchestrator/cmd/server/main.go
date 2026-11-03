@@ -22,12 +22,15 @@ func main() {
 	}
 
 	// Resolve monorepo root directory
-	exePath, _ := os.Executable()
-	projectRoot := filepath.Clean(filepath.Join(filepath.Dir(exePath), "..", "..", ".."))
-	if _, err := os.Stat(filepath.Join(projectRoot, "runtimes")); err != nil {
-		// Fallback to working directory parent
-		cwd, _ := os.Getwd()
-		projectRoot = filepath.Clean(filepath.Join(cwd, "..", ".."))
+	projectRoot := os.Getenv("PROJECT_ROOT")
+	if projectRoot == "" {
+		exePath, _ := os.Executable()
+		projectRoot = filepath.Clean(filepath.Join(filepath.Dir(exePath), "..", "..", ".."))
+		if _, err := os.Stat(filepath.Join(projectRoot, "runtimes")); err != nil {
+			// Fallback to working directory parent
+			cwd, _ := os.Getwd()
+			projectRoot = filepath.Clean(filepath.Join(cwd, "..", ".."))
+		}
 	}
 
 	log.Printf("[BeamForge] Monorepo root detected: %s", projectRoot)

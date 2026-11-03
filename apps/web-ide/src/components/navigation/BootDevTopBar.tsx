@@ -15,10 +15,12 @@ import {
   Moon,
   CheckCircle2,
   Code2,
+  User,
 } from 'lucide-react';
 import { BeamForgeLogo } from './BeamForgeLogo';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import { ALL_CURRICULUM_CHAPTERS } from '../../data/curriculumCatalog';
+import { DEFAULT_USERS, UserProfile } from '../../types/user';
 
 // ── Chapter metadata for the 12-chapter curriculum ──────────────────────────
 export const CHAPTERS = [
@@ -168,14 +170,18 @@ export function BootDevTopBar() {
     goToPrevLesson, goToNextLesson,
     totalXp,
     wsStatus,
+    currentUser,
+    switchUser,
   } = useWorkspaceStore();
 
   const [mounted, setMounted] = useState(false);
   const [chapterOpen, setChapterOpen] = useState(false);
   const [lessonOpen, setLessonOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const chapterRef = useRef<HTMLDivElement>(null);
   const lessonRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -186,6 +192,7 @@ export function BootDevTopBar() {
     const handler = (e: MouseEvent) => {
       if (chapterRef.current && !chapterRef.current.contains(e.target as Node)) setChapterOpen(false);
       if (lessonRef.current && !lessonRef.current.contains(e.target as Node)) setLessonOpen(false);
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -607,6 +614,94 @@ export function BootDevTopBar() {
           </button>
         </div>
 
+        {/* 3-User Switcher Dropdown */}
+        <div ref={userMenuRef} className="relative">
+          <button
+            id="user-switcher-btn"
+            onClick={() => { setUserMenuOpen((o) => !o); setChapterOpen(false); setLessonOpen(false); }}
+            title={`Active Profile: ${currentUser?.name || 'Alpha Tester'}`}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200"
+            style={{
+              background: isDark ? 'rgba(30,41,59,0.70)' : 'rgba(255,255,255,0.75)',
+              border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(255,255,255,0.85)',
+              color: isDark ? '#CBD5E1' : '#334155',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+            }}
+          >
+            <div
+              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+              style={{ background: currentUser?.avatarColor || '#3B82F6' }}
+            />
+            <span className="hidden xl:inline max-w-28 truncate font-medium">
+              {currentUser?.name || 'Alpha Tester'}
+            </span>
+            <ChevronDown className={`w-3 h-3 opacity-60 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {userMenuOpen && (
+            <div
+              id="user-switcher-menu"
+              className="absolute right-0 top-full mt-2 w-72 rounded-2xl overflow-hidden animate-slide-down z-50"
+              style={{
+                background: isDark ? 'rgba(11,15,23,0.95)' : 'rgba(255,255,255,0.95)',
+                border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(203,213,225,0.80)',
+                boxShadow: isDark ? '0 24px 60px rgba(0,0,0,0.60)' : '0 20px 50px rgba(15,23,42,0.12)',
+                backdropFilter: 'blur(40px)',
+              }}
+            >
+              <div
+                className="px-4 py-2.5 border-b text-xs font-bold uppercase tracking-widest flex items-center justify-between"
+                style={{ color: isDark ? '#64748B' : '#94A3B8', borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)' }}
+              >
+                <span>Test Profiles</span>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500">
+                  Neon / Local
+                </span>
+              </div>
+              <div className="py-1">
+                {Object.values(DEFAULT_USERS).map((u) => {
+                  const isSelected = (currentUser?.id || 'user_alpha') === u.id;
+                  return (
+                    <button
+                      key={u.id}
+                      onClick={() => {
+                        switchUser(u.id);
+                        setUserMenuOpen(false);
+                      }}
+                      className="w-full flex items-start gap-3 px-4 py-2.5 text-left transition-colors duration-150"
+                      style={{
+                        background: isSelected ? (isDark ? 'rgba(59,130,246,0.15)' : 'rgba(59,130,246,0.08)') : 'transparent',
+                      }}
+                      onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.03)'; }}
+                      onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                    >
+                      <div
+                        className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-white text-xs flex-shrink-0 mt-0.5 shadow-xs"
+                        style={{ background: u.avatarColor }}
+                      >
+                        {u.name[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold truncate" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
+                            {u.name}
+                          </span>
+                          <span className="text-[11px] font-mono text-amber-500 font-bold">
+                            {u.id === currentUser?.id ? `${totalXp} XP` : `${u.totalXp} XP`}
+                          </span>
+                        </div>
+                        <div className="text-[11px] truncate opacity-70" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                          {u.role}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Light/Dark Theme Toggle */}
         <button
           id="theme-toggle-btn"
@@ -788,6 +883,47 @@ export function BootDevTopBar() {
             <Compass className="w-4 h-4" />
             <span>Course Syllabus</span>
           </button>
+        </div>
+
+        {/* Mobile Profile Switcher */}
+        <div className="p-3 border-b" style={{ borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)' }}>
+          <div className="text-[11px] font-bold uppercase tracking-wider mb-2 flex items-center justify-between" style={{ color: isDark ? '#64748B' : '#94A3B8' }}>
+            <span>Active Test Profile</span>
+            <span className="text-[10px] font-mono text-blue-500 font-normal">Neon / Local</span>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {Object.values(DEFAULT_USERS).map((u) => {
+              const isSelected = (currentUser?.id || 'user_alpha') === u.id;
+              return (
+                <button
+                  key={u.id}
+                  onClick={() => switchUser(u.id)}
+                  className="p-2 rounded-xl text-left transition-all border flex flex-col items-center text-center gap-1"
+                  style={{
+                    background: isSelected
+                      ? (isDark ? 'rgba(59,130,246,0.20)' : 'rgba(59,130,246,0.12)')
+                      : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)'),
+                    borderColor: isSelected
+                      ? 'rgba(59,130,246,0.40)'
+                      : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)'),
+                  }}
+                >
+                  <div
+                    className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-white text-[10px]"
+                    style={{ background: u.avatarColor }}
+                  >
+                    {u.name[0]}
+                  </div>
+                  <span className="text-[11px] font-bold truncate max-w-full" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
+                    {u.name.split(' ')[0]}
+                  </span>
+                  <span className="text-[10px] font-mono text-amber-500 font-bold">
+                    {u.id === currentUser?.id ? `${totalXp} XP` : `${u.totalXp} XP`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Chapter Selector Ribbon */}

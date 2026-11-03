@@ -1073,3 +1073,30 @@ We execute the platform overhaul incrementally so every single piece is built to
 - [x] **50.5: Verification Loop**:
   - `services/orchestrator`: `go build ./...` passed with 0 errors.
   - `services/orchestrator`: `go test -v -count=1 -run "^TestChapter12Verification$" ./internal/bridge` passed 100% across all 6 milestones in 31.88s with 2 concurrent workers and single-scheduler BEAM flags.
+
+
+## Phase 51: Monorepo Deployment Configs (Docker/Render/Vercel) & Glassmorphic 3-User Profile Switcher (Neon/Local)
+- [x] **51.1: Monorepo Dockerfile & Render Blueprint (`Dockerfile` & `render.yaml`)**:
+  - Authored multi-stage `Dockerfile` (Go 1.22 builder + Alpine 3.19 runtime with native `erlang erlang-dev erlang-tools`).
+  - Added build step to pre-compile test and grader harness modules into `ebin`.
+  - Configured memory safety environment variables: `PORT=8080`, `PROJECT_ROOT=/app`, `MAX_CONCURRENT_WORKERS=2`, `ERL_FLAGS="+S 1:1 +B -noinput"`.
+  - Authored root `render.yaml` declaring the web service targeting `./Dockerfile` with `/health` healthchecks.
+- [x] **51.2: Dynamic Cloud Backend URL Resolution (`apps/web-ide/src/lib/orchestratorConfig.ts`)**:
+  - Created centralized orchestrator resolver supporting `NEXT_PUBLIC_ORCHESTRATOR_URL` and `NEXT_PUBLIC_ORCHESTRATOR_WS_URL`.
+  - Purged hardcoded `http://localhost:8080` strings across `useWorkspaceStore.ts`, `LessonSplitView.tsx`, `CapstoneStudioView.tsx`, and `ws-multiplexer.ts`, enabling seamless zero-code deployment across Vercel and Render.
+- [x] **51.3: 3-User Test Profiles & Neon Serverless Postgres Integration (`user.ts`, `db.ts`, `route.ts`, `neon_schema.sql`)**:
+  - Created `apps/web-ide/src/types/user.ts` defining 3 progression presets:
+    - `user_alpha`: "Alpha Tester", Junior BEAM Explorer (150 XP, Chapter 1).
+    - `user_beta`: "Beta Learner", Actor Architect (1,450 XP, Chapter 6).
+    - `user_master`: "BEAM Master", Telecom Principal (4,200 XP, Chapter 12 Capstone).
+  - Integrated `@neondatabase/serverless` in `apps/web-ide/src/lib/db.ts` with graceful offline fallback when `DATABASE_URL` is omitted.
+  - Built Next.js Route Handler `apps/web-ide/src/app/api/user-progress/route.ts` (GET & POST) with automatic DDL table creation (`beamforge_users`).
+  - Created SQL migration script `scripts/neon_schema.sql` for 1-click execution in Neon Console.
+- [x] **51.4: Glassmorphic 3-User Switcher UI (`BootDevTopBar.tsx`)**:
+  - Added desktop top bar dropdown (`[ 👤 Alpha Tester ▾ ]`) with role subtitles, colored status avatars, and live XP tallies.
+  - Added mobile navigation drawer profile switcher grid allowing testing across all 3 profiles on touch devices.
+  - Wired profile switching to `useWorkspaceStore.ts`: automatically swaps XP, completed level badges, unlocked solutions, and restores the user's last active lesson.
+- [x] **51.5: Verification Loop**:
+  - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
+  - `apps/web-ide`: `npm run build` passed with 0 errors (6/6 static and dynamic routes).
+  - `services/orchestrator`: `go build ./...` passed with 0 errors.

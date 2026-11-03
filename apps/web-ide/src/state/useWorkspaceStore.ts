@@ -24,6 +24,8 @@ import {
   ALL_CURRICULUM_CHAPTERS,
 } from '../data/curriculumCatalog';
 import { wsMux, WSConnectionStatus, WSResponseFrame } from '../lib/ws-multiplexer';
+import { ORCHESTRATOR_HTTP_URL } from '../lib/orchestratorConfig';
+import { UserProfile, DEFAULT_USERS } from '../types/user';
 
 export const ALL_EXERCISES: Record<string, ExerciseManifest> = { ...EXERCISES };
 for (const world of CURRICULUM_WORLDS) {
@@ -101,6 +103,8 @@ interface WorkspaceState {
   // ─────────────────────────────────────────────────────────────────────────
 
   // Mastery & Progression State
+  currentUser: UserProfile;
+  switchUser: (userId: string) => Promise<void>;
   completedLevelIds: string[];
   totalXp: number;
   unlockedWorldIds: string[];
@@ -246,42 +250,64 @@ const INITIAL_XMPP_STANZAS: XmppStanza[] = [
   },
 ];
 
-const loadInitialProgress = () => {
+const syncUserToStorageAndDb = (user: UserProfile) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('bf_current_user_id', user.id);
+    localStorage.setItem(`beamforge_user_${user.id}`, JSON.stringify(user));
+    localStorage.setItem(
+      'beamforge_progress',
+      JSON.stringify({
+        completedLevelIds: user.completedLevelIds,
+        totalXp: user.totalXp,
+        unlockedWorldIds: ['world-1-foundations'],
+        devModeUnlockedAll: false,
+        unlockedSolutionLessonIds: user.unlockedSolutionLessonIds,
+      })
+    );
+    localStorage.setItem('bf_last_active_exercise', user.lastActiveExercise);
+
+    fetch('/api/user-progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user }),
+    }).catch(() => {});
+  } catch (err) {
+    console.warn('[Sync] Progress save warning:', err);
+  }
+};
+
+const loadInitialUser = (): UserProfile => {
   if (typeof window === 'undefined') {
-    return {
-      completedLevelIds: [] as string[],
-      totalXp: 0,
-      unlockedWorldIds: ['world-1-foundations'],
-      devModeUnlockedAll: false,
-      unlockedSolutionLessonIds: [] as string[],
-    };
+    return DEFAULT_USERS['user_alpha'];
   }
   try {
-    const raw = localStorage.getItem('beamforge_progress');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return {
-        completedLevelIds: (parsed.completedLevelIds || []) as string[],
-        totalXp: (parsed.totalXp || 0) as number,
-        unlockedWorldIds: (parsed.unlockedWorldIds || ['world-1-foundations']) as string[],
-        devModeUnlockedAll: Boolean(parsed.devModeUnlockedAll),
-        unlockedSolutionLessonIds: (parsed.unlockedSolutionLessonIds || []) as string[],
-      };
+    const currentUserId = localStorage.getItem('bf_current_user_id') || 'user_alpha';
+    const cached = localStorage.getItem(`beamforge_user_${currentUserId}`);
+    if (cached) {
+      return JSON.parse(cached);
     }
-  } catch (e) {
-    console.error('Failed to parse beamforge_progress from localStorage', e);
+    // Backward compatibility with legacy beamforge_progress
+    const legacyRaw = localStorage.getItem('beamforge_progress');
+    if (legacyRaw && currentUserId === 'user_alpha') {
+      const parsed = JSON.parse(legacyRaw);
+      const user: UserProfile = {
+        ...DEFAULT_USERS['user_alpha'],
+        completedLevelIds: parsed.completedLevelIds || DEFAULT_USERS['user_alpha'].completedLevelIds,
+        totalXp: parsed.totalXp ?? DEFAULT_USERS['user_alpha'].totalXp,
+        unlockedSolutionLessonIds: parsed.unlockedSolutionLessonIds || [],
+      };
+      return user;
+    }
+    return DEFAULT_USERS[currentUserId] || DEFAULT_USERS['user_alpha'];
+  } catch {
+    return DEFAULT_USERS['user_alpha'];
   }
-  return {
-    completedLevelIds: [] as string[],
-    totalXp: 0,
-    unlockedWorldIds: ['world-1-foundations'],
-    devModeUnlockedAll: false,
-    unlockedSolutionLessonIds: [] as string[],
-  };
 };
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
-  const lastActiveId = (typeof window !== 'undefined' ? localStorage.getItem('bf_last_active_exercise') : null) || 'ch01-l01';
+  const initialUser = loadInitialUser();
+  const lastActiveId = (typeof window !== 'undefined' ? localStorage.getItem('bf_last_active_exercise') : null) || initialUser.lastActiveExercise || 'ch01-l01';
   const defaultLesson = getLessonById(lastActiveId) || getLessonById('ch01-l01');
   const defaultEx = ALL_EXERCISES['erl-101-pattern-matching'] || ALL_EXERCISES['otp-04-ets-heir-resilience'];
   const initialFiles: WorkspaceFile[] = (defaultLesson && defaultLesson.files) ? defaultLesson.files : (defaultEx?.files || []);
@@ -293,7 +319,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       if (typeof get === 'function' && get()?.addTerminalEntry) {
         get().addTerminalEntry({
           type: 'output',
-          text: '[Gateway] Connected to live Go Orchestrator (ws://localhost:8080/ws) • Native Erlang/OTP 29',
+          text: `[Gateway] Connected to live Go Orchestrator (${ORCHESTRATOR_HTTP_URL}) • Native Erlang/OTP 29`,
         });
       }
     } else {
@@ -399,8 +425,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }
   });
 
-  const initialProgress = loadInitialProgress();
-
   return {
     // Navigation & View Mode
     activeView: 'workspace',
@@ -500,7 +524,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       }));
 
       try {
-        const res = await fetch('http://localhost:8080/api/v1/run', {
+        const res = await fetch(`${ORCHESTRATOR_HTTP_URL}/api/v1/run`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -564,7 +588,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           });
           get().addTerminalEntry({ type: 'error', text: `[Run] Failed: HTTP ${res.status}` });
         }
-      } catch (err) {
+      } catch {
         // Backend is offline — DO NOT fake-pass!
         set({
           isBackendOnline: false,
@@ -572,7 +596,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             mode: 'run',
             exerciseId: get().activeExerciseId,
             compileOk: false,
-            stdout: '[BeamForge Offline Error]\n\nGo Orchestrator backend (http://localhost:8080) is OFFLINE.\n\nCode execution was NOT performed because the BEAM/OTP runtime is not reachable.\nTo run and compile Erlang code, start the Go Orchestrator:\n  1. Open a terminal in services/orchestrator\n  2. Run: .\\orchestrator.exe (or go run ./cmd/server)',
+            stdout: `[BeamForge Offline Error]\n\nGo Orchestrator backend (${ORCHESTRATOR_HTTP_URL}) is OFFLINE.\n\nCode execution was NOT performed because the BEAM/OTP runtime is not reachable.\nTo run and compile Erlang code, start the Go Orchestrator:\n  1. Open a terminal in services/orchestrator\n  2. Run: .\\orchestrator.exe (or go run ./cmd/server)`,
             visibleTests: [],
             totalDurationMs: 0,
             diagnostics: [
@@ -581,7 +605,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
                 line: 1,
                 col: 1,
                 severity: 'error',
-                message: 'Backend Offline: Cannot reach http://localhost:8080',
+                message: `Backend Offline: Cannot reach ${ORCHESTRATOR_HTTP_URL}`,
               },
             ],
           },
@@ -591,7 +615,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         if (!keepTab) set({ lessonOutputTab: 'test_results' });
         get().addTerminalEntry({
           type: 'error',
-          text: '[BeamForge] Error: Go Orchestrator is OFFLINE (http://localhost:8080). Start the backend to execute code.',
+          text: `[BeamForge] Error: Go Orchestrator is OFFLINE (${ORCHESTRATOR_HTTP_URL}). Start the backend to execute code.`,
         });
       } finally {
         set({ isRunning: false });
@@ -600,31 +624,66 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     // ─────────────────────────────────────────────────────────────────────
 
     // Mastery & Progression State
-    completedLevelIds: initialProgress.completedLevelIds,
-    totalXp: initialProgress.totalXp,
-    unlockedWorldIds: initialProgress.unlockedWorldIds,
-    devModeUnlockedAll: initialProgress.devModeUnlockedAll,
-    unlockedSolutionLessonIds: initialProgress.unlockedSolutionLessonIds || [],
+    currentUser: initialUser,
+    switchUser: async (userId: string) => {
+      let targetUser = DEFAULT_USERS[userId] || DEFAULT_USERS['user_alpha'];
+      if (typeof window !== 'undefined') {
+        const cached = localStorage.getItem(`beamforge_user_${userId}`);
+        if (cached) {
+          try {
+            targetUser = JSON.parse(cached);
+          } catch {}
+        }
+      }
+
+      try {
+        const res = await fetch(`/api/user-progress?userId=${userId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            targetUser = data.user;
+          }
+        }
+      } catch {}
+
+      syncUserToStorageAndDb(targetUser);
+
+      set({
+        currentUser: targetUser,
+        completedLevelIds: targetUser.completedLevelIds,
+        totalXp: targetUser.totalXp,
+        unlockedSolutionLessonIds: targetUser.unlockedSolutionLessonIds,
+      });
+
+      if (targetUser.lastActiveExercise) {
+        get().switchExercise(targetUser.lastActiveExercise);
+      }
+
+      get().addTerminalEntry({
+        type: 'output',
+        text: `[User Switched] Active profile: ${targetUser.name} (${targetUser.role}) • ${targetUser.totalXp} XP`,
+      });
+    },
+
+    completedLevelIds: initialUser.completedLevelIds,
+    totalXp: initialUser.totalXp,
+    unlockedWorldIds: ['world-1-foundations'],
+    devModeUnlockedAll: false,
+    unlockedSolutionLessonIds: initialUser.unlockedSolutionLessonIds || [],
 
     unlockSolutionForLesson: (lessonId: string) => {
       set((state) => {
         if (state.unlockedSolutionLessonIds.includes(lessonId)) return state;
         const next = [...state.unlockedSolutionLessonIds, lessonId];
-        if (typeof window !== 'undefined') {
-          try {
-            localStorage.setItem(
-              'beamforge_progress',
-              JSON.stringify({
-                completedLevelIds: state.completedLevelIds,
-                totalXp: state.totalXp,
-                unlockedWorldIds: state.unlockedWorldIds,
-                devModeUnlockedAll: state.devModeUnlockedAll,
-                unlockedSolutionLessonIds: next,
-              })
-            );
-          } catch {}
-        }
-        return { unlockedSolutionLessonIds: next };
+        const updatedUser: UserProfile = {
+          ...state.currentUser,
+          unlockedSolutionLessonIds: next,
+        };
+        syncUserToStorageAndDb(updatedUser);
+        return {
+          unlockedSolutionLessonIds: next,
+          currentUser: updatedUser,
+        };
       });
     },
 
@@ -778,23 +837,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         }
       }
 
+      const updatedUser: UserProfile = {
+        ...get().currentUser,
+        completedLevelIds: newCompleted,
+        totalXp: newXp,
+        level: Math.max(1, Math.floor(newXp / 300) + 1),
+        lastActiveExercise: levelId,
+      };
+      syncUserToStorageAndDb(updatedUser);
+
       set({
         completedLevelIds: newCompleted,
         totalXp: newXp,
         unlockedWorldIds: newUnlockedWorlds,
+        currentUser: updatedUser,
       });
-
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('beamforge_progress', JSON.stringify({
-            completedLevelIds: newCompleted,
-            totalXp: newXp,
-            unlockedWorldIds: newUnlockedWorlds,
-            devModeUnlockedAll,
-            unlockedSolutionLessonIds,
-          }));
-        } catch {}
-      }
 
       get().addTerminalEntry({
         type: 'output',
@@ -812,7 +869,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 1200);
-        const res = await fetch('http://localhost:8080/health', { signal: controller.signal });
+        const res = await fetch(`${ORCHESTRATOR_HTTP_URL}/health`, { signal: controller.signal });
         clearTimeout(timer);
         const online = res.ok;
         if (get().isBackendOnline !== online) {
@@ -867,6 +924,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             localStorage.setItem('bf_last_active_exercise', id);
           } catch (_) {}
         }
+        if (get().currentUser) {
+          const updatedUser: UserProfile = {
+            ...get().currentUser,
+            lastActiveExercise: id,
+          };
+          syncUserToStorageAndDb(updatedUser);
+          set({ currentUser: updatedUser });
+        }
         get().addTerminalEntry({
           type: 'output',
           text: `==> Switched workspace to Lesson [${lesson.id}] Ch ${lesson.chapterNumber}.${lesson.lessonNumber}: ${lesson.title}`,
@@ -900,6 +965,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           try {
             localStorage.setItem('bf_last_active_exercise', id);
           } catch (_) {}
+        }
+        if (get().currentUser) {
+          const updatedUser: UserProfile = {
+            ...get().currentUser,
+            lastActiveExercise: id,
+          };
+          syncUserToStorageAndDb(updatedUser);
+          set({ currentUser: updatedUser });
         }
         get().addTerminalEntry({
           type: 'output',
@@ -1087,7 +1160,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         get().files.forEach((f) => {
           fileMap[f.path] = f.content;
         });
-        const res = await fetch('http://localhost:8080/api/v1/verify', {
+        const res = await fetch(`${ORCHESTRATOR_HTTP_URL}/api/v1/verify`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1157,7 +1230,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               title: '1. Backend Runtime Connection',
               status: 'failed',
               timeMs: 0,
-              assertionDetails: 'Cannot connect to Go Orchestrator at http://localhost:8080. The BEAM/OTP 29 runtime is offline.',
+              assertionDetails: `Cannot connect to Go Orchestrator at ${ORCHESTRATOR_HTTP_URL}. The BEAM/OTP 29 runtime is offline.`,
               hintOnFail: 'Start the Go Orchestrator with .\\orchestrator.exe or go run ./cmd/server in services/orchestrator to verify and grade code.',
             },
           ],
@@ -1165,7 +1238,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         });
         get().addTerminalEntry({
           type: 'error',
-          text: '==> [bf_grader] VERIFICATION ABORTED: Go Orchestrator is OFFLINE (http://localhost:8080). Start backend service to verify code.',
+          text: `==> [bf_grader] VERIFICATION ABORTED: Go Orchestrator is OFFLINE (${ORCHESTRATOR_HTTP_URL}). Start backend service to verify code.`,
         });
         return;
       }

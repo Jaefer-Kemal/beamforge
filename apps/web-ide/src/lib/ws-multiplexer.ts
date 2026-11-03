@@ -1,5 +1,7 @@
 'use client';
 
+import { getOrchestratorWsUrl } from './orchestratorConfig';
+
 export type WSConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'fallback_sim';
 
 export interface WSResponseFrame {
@@ -15,7 +17,7 @@ class WSMultiplexer {
   private statusListeners: Array<(status: WSConnectionStatus) => void> = [];
   private messageListeners: Array<(frame: WSResponseFrame) => void> = [];
   private reconnectTimer: NodeJS.Timeout | null = null;
-  private url: string = 'ws://localhost:8080/ws';
+  private url: string = getOrchestratorWsUrl();
 
   constructor() {
     if (typeof window !== 'undefined') {

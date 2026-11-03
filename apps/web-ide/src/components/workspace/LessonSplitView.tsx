@@ -33,6 +33,7 @@ import type {
   VisualSceneId,
 } from '../../types/workspace';
 import { configureMonacoErlang, ErlangCodeBlock } from '../../lib/monacoErlang';
+import { ORCHESTRATOR_HTTP_URL } from '../../lib/orchestratorConfig';
 import { BeamConceptVisualizer } from '../pedagogy/BeamConceptVisualizer';
 import { MentalModelCheckCard } from '../pedagogy/MentalModelCheckCard';
 import { ErlangTermDiffCard } from '../pedagogy/ErlangTermDiffCard';
@@ -618,7 +619,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
       if (!model) return;
 
       try {
-        const res = await fetch('http://localhost:8080/api/v1/lint', {
+        const res = await fetch(`${ORCHESTRATOR_HTTP_URL}/api/v1/lint`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

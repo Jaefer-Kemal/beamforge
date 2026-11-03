@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: beamforge-orchestrator
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: MAX_CONCURRENT_WORKERS
+        value: 2
+      - key: PROJECT_ROOT
+        value: /app
+
