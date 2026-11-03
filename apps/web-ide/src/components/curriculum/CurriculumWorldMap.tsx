@@ -20,6 +20,7 @@ import {
   BookOpen,
   Zap,
   AlertTriangle,
+  Lock,
 } from 'lucide-react';
 import { COURSE_WORLDS } from '../../data/courseWorlds';
 import { ALL_CURRICULUM_CHAPTERS } from '../../data/chapters';
@@ -250,6 +251,7 @@ export function CurriculumWorldMap() {
     switchExercise,
     setBootDevView,
     totalXp,
+    devModeUnlockedAll,
   } = useWorkspaceStore();
 
   const isDark = theme === 'dark';
@@ -641,9 +643,10 @@ export function CurriculumWorldMap() {
 
                             {/* Lesson Cards Grid */}
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                              {lessons.map((lesson: any) => {
+                              {lessons.map((lesson: any, lessonIdx: number) => {
                                 const isCompleted = completedLevelIds.includes(lesson.id);
                                 const isCurrent = activeChapter === chNum && activeLesson === lesson.lessonNumber;
+                                const isAccessible = devModeUnlockedAll || isCompleted || isCurrent || lessonIdx === 0 || completedLevelIds.includes(lessons[lessonIdx - 1]?.id);
 
                                 return (
                                   <div
@@ -660,17 +663,22 @@ export function CurriculumWorldMap() {
                                         ? (isDark ? 'rgba(0,122,255,0.12)' : 'rgba(0,122,255,0.06)')
                                         : isCompleted
                                         ? (isDark ? 'rgba(16,185,129,0.06)' : 'rgba(16,185,129,0.04)')
+                                        : !isAccessible
+                                        ? (isDark ? 'rgba(15,23,42,0.40)' : 'rgba(241,245,249,0.60)')
                                         : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.68)'),
                                       borderColor: isCurrent
                                         ? 'rgba(0,122,255,0.40)'
                                         : isCompleted
                                         ? (isDark ? 'rgba(16,185,129,0.22)' : 'rgba(16,185,129,0.18)')
+                                        : !isAccessible
+                                        ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.06)')
                                         : (isDark ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.90)'),
                                       boxShadow: isCurrent
                                         ? undefined /* handled by lesson-card-active class */
                                         : isDark
                                         ? 'inset 0 1px 0 rgba(255,255,255,0.12), 0 2px 8px rgba(0,0,0,0.30)'
                                         : 'inset 0 1px 0 rgba(255,255,255,1), 0 2px 8px rgba(15,23,42,0.04)',
+                                      opacity: !isAccessible && !isCurrent ? 0.78 : 1,
                                     }}
                                   >
                                     <div>
@@ -701,6 +709,19 @@ export function CurriculumWorldMap() {
                                             <span className="flex items-center gap-1 text-[10px] font-bold text-blue-500 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
                                               <PlayCircle className="w-3 h-3" />
                                               <span>Active</span>
+                                            </span>
+                                          ) : !isAccessible ? (
+                                            <span
+                                              title="Recommended: Complete earlier lessons first. Click to jump in anyway."
+                                              className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border opacity-75"
+                                              style={{
+                                                background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)',
+                                                borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.10)',
+                                                color: isDark ? '#94A3B8' : '#64748B',
+                                              }}
+                                            >
+                                              <Lock className="w-2.5 h-2.5 opacity-70" />
+                                              <span>Locked</span>
                                             </span>
                                           ) : (
                                             <span

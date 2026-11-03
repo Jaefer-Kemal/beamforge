@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   Code2,
   User,
+  Flame,
 } from 'lucide-react';
 import { BeamForgeLogo } from './BeamForgeLogo';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
@@ -256,6 +257,22 @@ export function BootDevTopBar() {
         >
           <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500 flex-shrink-0" />
           <span suppressHydrationWarning>{mounted ? totalXp.toLocaleString() : '0'} XP</span>
+        </div>
+
+        {/* Streak Badge */}
+        <div
+          id="streak-badge"
+          suppressHydrationWarning
+          title={`${currentUser?.streakDays || 1} day active streak! Complete a lesson daily to keep your flame lit.`}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-all"
+          style={{
+            background: 'linear-gradient(135deg, rgba(239,68,68,0.18) 0%, rgba(249,115,22,0.12) 100%)',
+            border: '1px solid rgba(239,68,68,0.35)',
+            color: '#F97316',
+          }}
+        >
+          <Flame className="w-3.5 h-3.5 text-orange-500 fill-orange-500 flex-shrink-0" />
+          <span suppressHydrationWarning>{mounted ? (currentUser?.streakDays || 1) : 1}d</span>
         </div>
 
         {/* Role Badge */}
@@ -834,6 +851,17 @@ export function BootDevTopBar() {
               }}
             >
               Lv{mounted ? level : 1} · {mounted ? role : 'Apprentice'}
+            </div>
+            <div
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold"
+              style={{
+                background: 'linear-gradient(135deg, rgba(239,68,68,0.18) 0%, rgba(249,115,22,0.12) 100%)',
+                border: '1px solid rgba(239,68,68,0.35)',
+                color: '#F97316',
+              }}
+            >
+              <Flame className="w-3.5 h-3.5 fill-orange-500" />
+              <span>{currentUser?.streakDays || 1}d</span>
             </div>
           </div>
 

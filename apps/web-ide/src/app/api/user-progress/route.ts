@@ -14,9 +14,15 @@ async function ensureTable(sql: any) {
         completed_level_ids JSONB DEFAULT '[]'::jsonb,
         unlocked_solution_lesson_ids JSONB DEFAULT '[]'::jsonb,
         last_active_exercise VARCHAR(128) DEFAULT 'ch01-l01',
+        streak_days INT DEFAULT 1,
+        last_activity_date VARCHAR(32),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `;
+    try {
+      await sql`ALTER TABLE beamforge_users ADD COLUMN IF NOT EXISTS streak_days INT DEFAULT 1;`;
+      await sql`ALTER TABLE beamforge_users ADD COLUMN IF NOT EXISTS last_activity_date VARCHAR(32);`;
+    } catch {}
   } catch (err) {
     console.warn('[Neon DB] Table check/creation warning:', err);
   }
@@ -39,7 +45,7 @@ export async function GET(req: NextRequest) {
   try {
     await ensureTable(sql);
     const rows = await sql`
-      SELECT id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise
+      SELECT id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, last_activity_date
       FROM beamforge_users
       WHERE id = ${userId}
       LIMIT 1
@@ -58,6 +64,8 @@ export async function GET(req: NextRequest) {
         completedLevelIds: Array.isArray(r.completed_level_ids) ? r.completed_level_ids : [],
         unlockedSolutionLessonIds: Array.isArray(r.unlocked_solution_lesson_ids) ? r.unlocked_solution_lesson_ids : [],
         lastActiveExercise: r.last_active_exercise || preset.lastActiveExercise,
+        streakDays: Number(r.streak_days || preset.streakDays || 1),
+        lastActivityDate: r.last_activity_date || preset.lastActivityDate,
       };
       return NextResponse.json({ source: 'neon', user, dbConnected: true });
     }
@@ -65,7 +73,7 @@ export async function GET(req: NextRequest) {
     // Seed preset user if not in database yet
     await sql`
       INSERT INTO beamforge_users (
-        id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise
+        id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, last_activity_date
       ) VALUES (
         ${preset.id},
         ${preset.name},
@@ -74,7 +82,9 @@ export async function GET(req: NextRequest) {
         ${preset.totalXp},
         ${JSON.stringify(preset.completedLevelIds)},
         ${JSON.stringify(preset.unlockedSolutionLessonIds)},
-        ${preset.lastActiveExercise}
+        ${preset.lastActiveExercise},
+        ${preset.streakDays || 1},
+        ${preset.lastActivityDate || null}
       )
       ON CONFLICT (id) DO NOTHING
     `;
@@ -107,7 +117,7 @@ export async function POST(req: NextRequest) {
     await ensureTable(sql);
     await sql`
       INSERT INTO beamforge_users (
-        id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, updated_at
+        id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, last_activity_date, updated_at
       ) VALUES (
         ${user.id},
         ${user.name},
@@ -117,6 +127,8 @@ export async function POST(req: NextRequest) {
         ${JSON.stringify(user.completedLevelIds)},
         ${JSON.stringify(user.unlockedSolutionLessonIds)},
         ${user.lastActiveExercise},
+        ${user.streakDays || 1},
+        ${user.lastActivityDate || null},
         NOW()
       )
       ON CONFLICT (id) DO UPDATE SET
@@ -125,6 +137,8 @@ export async function POST(req: NextRequest) {
         completed_level_ids = EXCLUDED.completed_level_ids,
         unlocked_solution_lesson_ids = EXCLUDED.unlocked_solution_lesson_ids,
         last_active_exercise = EXCLUDED.last_active_exercise,
+        streak_days = EXCLUDED.streak_days,
+        last_activity_date = EXCLUDED.last_activity_date,
         updated_at = NOW()
     `;
 

@@ -26,6 +26,7 @@ import {
 import { wsMux, WSConnectionStatus, WSResponseFrame } from '../lib/ws-multiplexer';
 import { ORCHESTRATOR_HTTP_URL } from '../lib/orchestratorConfig';
 import { UserProfile, DEFAULT_USERS } from '../types/user';
+import { triggerCelebrationConfetti } from '../lib/confetti';
 
 export const ALL_EXERCISES: Record<string, ExerciseManifest> = { ...EXERCISES };
 for (const world of CURRICULUM_WORLDS) {
@@ -420,6 +421,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         set({ beamFootprint: report.beam_footprint || report.beamFootprint });
       }
       if (report.score === 100 || report.verdict === 'PASSED') {
+        triggerCelebrationConfetti();
         get().onLevelCompleted(get().activeExerciseId);
       }
     }
@@ -812,15 +814,55 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       const isAlreadyCompleted = completedLevelIds.includes(levelId);
       const isSolutionUnlocked = (unlockedSolutionLessonIds || []).includes(levelId) || (unlockedSolutionLessonIds || []).includes(activeExerciseId);
       const xpReward = isSolutionUnlocked ? 0 : (level?.xpReward || 100);
-      const newCompleted = isAlreadyCompleted ? completedLevelIds : [...completedLevelIds, levelId];
+      let finalCompleted = isAlreadyCompleted ? [...completedLevelIds] : [...completedLevelIds, levelId];
       const newXp = isAlreadyCompleted ? totalXp : totalXp + xpReward;
+
+      // Fast-Track Assessment: If completing the final lesson of a chapter, auto-complete all earlier chapter lessons
+      const lessonObj = getLessonById(levelId);
+      if (lessonObj && lessonObj.chapterNumber) {
+        const chLessons = ALL_CURRICULUM_CHAPTERS[lessonObj.chapterNumber] || [];
+        const isChapterFinal = chLessons.length > 0 && lessonObj.lessonNumber === chLessons.length;
+        if (isChapterFinal) {
+          const priorMissing: string[] = [];
+          for (const l of chLessons) {
+            if (!finalCompleted.includes(l.id)) {
+              finalCompleted.push(l.id);
+              priorMissing.push(l.id);
+            }
+          }
+          if (priorMissing.length > 0) {
+            get().addTerminalEntry({
+              type: 'output',
+              text: `[Fast-Track] Chapter ${lessonObj.chapterNumber} Problem Set mastered! ${priorMissing.length} earlier lessons auto-completed.`,
+            });
+          }
+        }
+      }
+
+      // Daily Streak Calculation
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const yesterdayStr = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const prevActivity = get().currentUser?.lastActivityDate;
+      let newStreak = get().currentUser?.streakDays || 1;
+
+      if (prevActivity === todayStr) {
+        // Already active today, maintain streak
+      } else if (prevActivity === yesterdayStr) {
+        newStreak += 1;
+        get().addTerminalEntry({
+          type: 'output',
+          text: `[Streak Active] Daily streak extended to ${newStreak} days!`,
+        });
+      } else if (prevActivity) {
+        newStreak = 1;
+      }
 
       let newUnlockedWorlds = [...unlockedWorldIds];
       if (level) {
         const currentWorld = CURRICULUM_WORLDS.find((w) => w.id === level.worldId);
         if (currentWorld) {
           const worldLevelIds = currentWorld.levels.map((l) => l.id);
-          const allWorldLevelsDone = worldLevelIds.every((lid) => newCompleted.includes(lid));
+          const allWorldLevelsDone = worldLevelIds.every((lid) => finalCompleted.includes(lid));
           if (allWorldLevelsDone) {
             const nextWorldIndex = CURRICULUM_WORLDS.findIndex((w) => w.id === level.worldId) + 1;
             if (nextWorldIndex < CURRICULUM_WORLDS.length) {
@@ -839,15 +881,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
       const updatedUser: UserProfile = {
         ...get().currentUser,
-        completedLevelIds: newCompleted,
+        completedLevelIds: finalCompleted,
         totalXp: newXp,
         level: Math.max(1, Math.floor(newXp / 300) + 1),
         lastActiveExercise: levelId,
+        streakDays: newStreak,
+        lastActivityDate: todayStr,
       };
       syncUserToStorageAndDb(updatedUser);
 
       set({
-        completedLevelIds: newCompleted,
+        completedLevelIds: finalCompleted,
         totalXp: newXp,
         unlockedWorldIds: newUnlockedWorlds,
         currentUser: updatedUser,
@@ -1204,6 +1248,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             });
           }
           if (report.score === 100 || report.verdict === 'PASSED') {
+            triggerCelebrationConfetti();
             get().onLevelCompleted(get().activeExerciseId);
             get().addTerminalEntry({
               type: 'output',

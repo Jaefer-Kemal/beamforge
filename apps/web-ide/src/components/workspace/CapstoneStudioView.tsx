@@ -1637,6 +1637,9 @@ export function CapstoneStudioView() {
         isDark={isDark}
         onClose={() => setIsUnlockModalOpen(false)}
         onConfirm={handleConfirmUnlockSolution}
+        hint1={activeMilestone.verificationHint || activeMilestoneLesson.verificationHint}
+        hint2={activeMilestone.targetFunctions && activeMilestone.targetFunctions.length > 0 ? `%% Target Exported Functions for ${activeMilestone.targetFile}:\n` + activeMilestone.targetFunctions.map(f => `-export([${f}]).`).join('\n') : undefined}
+        solutionExplanation={capstoneMasterLesson?.solutionExplanation || activeMilestone.verificationHint}
       />
 
       <ResetConfirmModal

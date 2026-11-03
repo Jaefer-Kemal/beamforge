@@ -9,6 +9,8 @@ export interface UserProfile {
   totalXp: number;
   unlockedSolutionLessonIds: string[];
   lastActiveExercise: string;
+  streakDays: number;
+  lastActivityDate?: string;
 }
 
 export const DEFAULT_USERS: Record<string, UserProfile> = {
@@ -23,6 +25,7 @@ export const DEFAULT_USERS: Record<string, UserProfile> = {
     totalXp: 150,
     unlockedSolutionLessonIds: [],
     lastActiveExercise: 'ch01-l03',
+    streakDays: 1,
   },
   user_beta: {
     id: 'user_beta',
@@ -41,6 +44,7 @@ export const DEFAULT_USERS: Record<string, UserProfile> = {
     totalXp: 1450,
     unlockedSolutionLessonIds: ['ch02-l08'],
     lastActiveExercise: 'ch06-l01',
+    streakDays: 4,
   },
   user_master: {
     id: 'user_master',
@@ -67,6 +71,7 @@ export const DEFAULT_USERS: Record<string, UserProfile> = {
     totalXp: 4200,
     unlockedSolutionLessonIds: ['ch06-l10', 'ch09-l08'],
     lastActiveExercise: 'ch12-l04',
+    streakDays: 14,
   },
 };
 

@@ -1100,3 +1100,28 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
   - `apps/web-ide`: `npm run build` passed with 0 errors (6/6 static and dynamic routes).
   - `services/orchestrator`: `go build ./...` passed with 0 errors.
+
+
+## Phase 52: Ergonomics, Gamification & Assessment Acceleration (Streak Tracking, Fast-Track Assessment, Soft-Gated Syllabus, Confetti Celebrations, and 2-Tier Progressive Hints)
+- [x] **52.1: Fast-Track Chapter Assessment (`useWorkspaceStore.ts`)**:
+  - Implemented automatic completion backfilling: passing the final lesson or capstone milestone of any chapter (e.g., `ch01-l08`, `ch02-l08`, `ch12-capstone`) immediately marks all missing preceding lessons in that chapter as completed in `completedLevelIds`.
+  - Enables testers and advanced learners to jump directly to chapter capstones without repetitive prerequisite clicking.
+- [x] **52.2: Soft-Gated Syllabus Progression (`CurriculumWorldMap.tsx`)**:
+  - Added subtle `Locked` badge indicators on future chapter lessons when preceding lessons remain uncompleted.
+  - Preserved clickability and tester overrides via `devModeUnlockedAll`, ensuring reviewers can freely inspect any lesson without being blocked.
+- [x] **52.3: Daily Streak Counter (`user.ts`, `useWorkspaceStore.ts`, `BootDevTopBar.tsx`, `route.ts`, `neon_schema.sql`)**:
+  - Added `streakDays` and `lastActivityDate` to `UserProfile`, Neon DDL schema, and `/api/user-progress` Route Handler.
+  - Automated consecutive daily calculation: increments streak if active on previous day, preserves streak if already active today, resets to 1 day after gaps.
+  - Displayed amber frosted glass flame indicator (`<streak>d`) in both desktop top bar (beside XP tally) and mobile navigation drawer.
+- [x] **52.4: Zero-Dependency Confetti Celebrations (`confetti.ts`, `useWorkspaceStore.ts`)**:
+  - Created pure HTML5 canvas particle emitter (`apps/web-ide/src/lib/confetti.ts`) generating 70 physics-simulated glassmorphic particles with gravity, wind drag, rotation, and opacity decay, auto-removing after 2.5 seconds.
+  - Wired into both WebSocket streaming and REST verification completion handlers when all test cases achieve 100% pass.
+- [x] **52.5: 2-Tier Progressive Hints Accordion (`SolutionUnlockModal.tsx`, `LessonSplitView.tsx`, `CapstoneStudioView.tsx`)**:
+  - Replaced immediate destructive forfeit dialog with an expandable `Need a progressive hint first? (Keep 100% XP)` accordion.
+  - Tier 1: Mental model & diagnostic clue (derived from `lesson.incidentAlert.diagnosticClue` or `solutionExplanation`).
+  - Tier 2: Syntax & structural skeleton (derived from OTP behaviour signatures or target function exports).
+  - Explicit reminder that hints do not forfeit XP reward, encouraging deliberate practice before unlocking verified code.
+- [x] **52.6: Verification Loop**:
+  - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
+  - `apps/web-ide`: `npm run build` passed with 0 errors (6/6 routes).
+  - `services/orchestrator`: `go build ./...` passed with 0 errors.

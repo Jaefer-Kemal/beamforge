@@ -1907,6 +1907,9 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             setMobileTab('results');
           }
         }}
+        hint1={lesson.incidentAlert?.diagnosticClue || lesson.solutionExplanation}
+        hint2={lesson.incidentAlert?.rootCauseHint || (lesson.otpDocCards && lesson.otpDocCards.length > 0 ? `${lesson.otpDocCards[0].signature}\n%% ${lesson.otpDocCards[0].description}` : undefined)}
+        solutionExplanation={lesson.solutionExplanation}
       />
 
       <ResetConfirmModal
