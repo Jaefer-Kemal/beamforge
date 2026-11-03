@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,17 +18,22 @@ type Session struct {
 	WorkspaceDir string
 	CreatedAt    time.Time
 	Active       bool
+	mu           sync.Mutex
 }
 
+func (s *Session) Lock()   { s.mu.Lock() }
+func (s *Session) Unlock() { s.mu.Unlock() }
+
 type Manager struct {
-	mu           sync.RWMutex
-	sessions     map[string]*Session
-	warmPool     []*Session
-	erlPath      string
-	erlcPath     string
-	otpRelease   string
-	harnessDir   string
-	maxPoolSize  int
+	mu          sync.RWMutex
+	sessions    map[string]*Session
+	warmPool    []*Session
+	erlPath     string
+	erlcPath    string
+	otpRelease  string
+	harnessDir  string
+	maxPoolSize int
+	workerSem   chan struct{}
 }
 
 func NewManager(projectRoot string) (*Manager, error) {
@@ -39,6 +45,13 @@ func NewManager(projectRoot string) (*Manager, error) {
 	otpRelease := detectOTPRelease(erlPath)
 	harnessEbin := filepath.Join(projectRoot, "runtimes", "erl-harness", "ebin")
 
+	maxWorkers := 2
+	if envMax := os.Getenv("MAX_CONCURRENT_WORKERS"); envMax != "" {
+		if val, err := strconv.Atoi(envMax); err == nil && val > 0 {
+			maxWorkers = val
+		}
+	}
+
 	m := &Manager{
 		sessions:    make(map[string]*Session),
 		warmPool:    make([]*Session, 0),
@@ -47,6 +60,7 @@ func NewManager(projectRoot string) (*Manager, error) {
 		otpRelease:  otpRelease,
 		harnessDir:  harnessEbin,
 		maxPoolSize: 4,
+		workerSem:   make(chan struct{}, maxWorkers),
 	}
 
 	// Pre-warm initial sandbox sessions
@@ -57,15 +71,38 @@ func NewManager(projectRoot string) (*Manager, error) {
 		}
 	}
 
-	log.Printf("[PoolManager] Initialized with OTP %s (erl: %s)", otpRelease, erlPath)
+	log.Printf("[PoolManager] Initialized with OTP %s (erl: %s), maxWorkers: %d", otpRelease, erlPath, maxWorkers)
 	return m, nil
 }
 
-func (m *Manager) ErlPath() string    { return m.erlPath }
-func (m *Manager) ErlcPath() string   { return m.erlcPath }
-func (m *Manager) OTPRelease() string { return m.otpRelease }
-func (m *Manager) HarnessDir() string { return m.harnessDir }
-func (m *Manager) WarmCount() int     { m.mu.RLock(); defer m.mu.RUnlock(); return len(m.warmPool) }
+func (m *Manager) ErlPath() string       { return m.erlPath }
+func (m *Manager) ErlcPath() string      { return m.erlcPath }
+func (m *Manager) OTPRelease() string    { return m.otpRelease }
+func (m *Manager) HarnessDir() string    { return m.harnessDir }
+func (m *Manager) WarmCount() int        { m.mu.RLock(); defer m.mu.RUnlock(); return len(m.warmPool) }
+func (m *Manager) MaxWorkers() int       { return cap(m.workerSem) }
+func (m *Manager) ActiveWorkers() int    { return len(m.workerSem) }
+
+// AcquireWorker reserves a compilation/execution slot from the worker pool.
+// If the pool is saturated, it queues the caller up to timeout duration.
+func (m *Manager) AcquireWorker(ctx context.Context, timeout time.Duration) (func(), error) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case m.workerSem <- struct{}{}:
+		var once sync.Once
+		return func() {
+			once.Do(func() {
+				<-m.workerSem
+			})
+		}, nil
+	case <-timer.C:
+		return nil, fmt.Errorf("grader is currently busy with concurrent requests; queue timed out after %v, please retry in a moment", timeout)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 func (m *Manager) ClaimSession(sessionID string) (*Session, error) {
 	m.mu.Lock()

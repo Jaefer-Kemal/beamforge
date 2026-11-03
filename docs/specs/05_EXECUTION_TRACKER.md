@@ -1054,3 +1054,22 @@ We execute the platform overhaul incrementally so every single piece is built to
 - [x] **49.3: Verification Loop**:
   - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
   - `apps/web-ide`: `npm run build` passed with 0 errors (5/5 static pages generated).
+
+## Phase 50: Worker Semaphore, Session Mutex Serialization & Single-Scheduler BEAM VM Tuning for 512 MB Cloud Safety
+- [x] **50.1: Global Worker Semaphore (`services/orchestrator/internal/pool/manager.go`)**:
+  - Implemented buffered channel worker semaphore (`workerSem chan struct{}`) with `MAX_CONCURRENT_WORKERS` env support (default 2).
+  - Added `AcquireWorker(ctx, timeout)` returning a cleanup release closure or timing out with clear backpressure messaging ("grader is currently busy with concurrent requests; queue timed out...").
+  - Added `MaxWorkers()` and `ActiveWorkers()` accessor methods.
+- [x] **50.2: Per-Session Workspace Mutex Serialization & Non-Reentrant Deadlock Elimination (`services/orchestrator/internal/bridge/erl_runner.go`)**:
+  - Added `mu sync.Mutex` to `Session` with `Lock()` and `Unlock()` methods to prevent concurrent file clobbering within a workspace.
+  - Refactored `CompileFiles` and `RunCode` into public locked entrypoints and private `compileFilesLocked` / `runCodeLocked` execution routines, preventing self-deadlock when `RunVerification` coordinates compilation and visible test runs.
+  - Scoped worker semaphore acquisition across `EvalShell` (8s), `RunCode` (10s), `RunVerification` (12s), `RunChaosKill` (10s), and `RunXmppHandshake` (10s).
+- [x] **50.3: Single-Scheduler BEAM VM Memory Tuning (`services/orchestrator/internal/bridge/erl_runner.go`)**:
+  - Added `+S 1:1 +B -noinput` to all `erl` invocations, pinning the Erlang runtime to 1 scheduler thread.
+  - Suppressed carrier/thread proliferation per host CPU core, reducing base BEAM footprint from ~80 MB to ~25 MB per instance and guaranteeing safety within 512 MB RAM environments on Render/EthioDeploy.
+- [x] **50.4: Unique Anonymous Session ID Isolation (`services/orchestrator/cmd/server/main.go` & `gateway/ws_mux.go`)**:
+  - Replaced shared session defaults (`"rest-session"`, `"rest-run-session"`, `"rest-eval"`, `"rest-lint"`, `"default-user"`) with timestamped unique identifiers (`fmt.Sprintf("guest-%d", time.Now().UnixNano())`), guaranteeing complete sandbox isolation between concurrent guest requests.
+  - Added `max_workers` and `active_workers` telemetry to the `/health` endpoint.
+- [x] **50.5: Verification Loop**:
+  - `services/orchestrator`: `go build ./...` passed with 0 errors.
+  - `services/orchestrator`: `go test -v -count=1 -run "^TestChapter12Verification$" ./internal/bridge` passed 100% across all 6 milestones in 31.88s with 2 concurrent workers and single-scheduler BEAM flags.

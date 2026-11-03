@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -55,7 +56,7 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 	sessionID := r.URL.Query().Get("session_id")
 	if sessionID == "" {
-		sessionID = "default-user"
+		sessionID = fmt.Sprintf("guest-%d", time.Now().UnixNano())
 	}
 
 	session, err := h.poolMgr.ClaimSession(sessionID)

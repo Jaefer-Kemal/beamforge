@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -46,12 +47,14 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		resp := map[string]interface{}{
-			"status":      "ok",
-			"otp_release": poolMgr.OTPRelease(),
-			"mode":        "native_beam_bridge",
-			"pool_warm":   poolMgr.WarmCount(),
-			"erl_path":    poolMgr.ErlPath(),
-			"timestamp":   time.Now().UTC().Format(time.RFC3339),
+			"status":         "ok",
+			"otp_release":    poolMgr.OTPRelease(),
+			"mode":           "native_beam_bridge",
+			"pool_warm":      poolMgr.WarmCount(),
+			"max_workers":    poolMgr.MaxWorkers(),
+			"active_workers": poolMgr.ActiveWorkers(),
+			"erl_path":       poolMgr.ErlPath(),
+			"timestamp":      time.Now().UTC().Format(time.RFC3339),
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	})
@@ -77,7 +80,7 @@ func main() {
 		}
 
 		if req.SessionID == "" {
-			req.SessionID = "rest-session"
+			req.SessionID = fmt.Sprintf("guest-%d", time.Now().UnixNano())
 		}
 
 		session, err := poolMgr.ClaimSession(req.SessionID)
@@ -122,7 +125,7 @@ func main() {
 		}
 
 		if req.SessionID == "" {
-			req.SessionID = "rest-run-session"
+			req.SessionID = fmt.Sprintf("guest-%d", time.Now().UnixNano())
 		}
 
 		session, err := poolMgr.ClaimSession(req.SessionID)
@@ -164,7 +167,7 @@ func main() {
 		}
 
 		if req.SessionID == "" {
-			req.SessionID = "rest-eval"
+			req.SessionID = fmt.Sprintf("guest-%d", time.Now().UnixNano())
 		}
 		session, err := poolMgr.ClaimSession(req.SessionID)
 		if err != nil {
@@ -205,7 +208,7 @@ func main() {
 			req.Filename = "src/buffer.erl"
 		}
 		if req.SessionID == "" {
-			req.SessionID = "rest-lint"
+			req.SessionID = fmt.Sprintf("guest-%d", time.Now().UnixNano())
 		}
 
 		session, err := poolMgr.ClaimSession(req.SessionID)

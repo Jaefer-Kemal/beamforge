@@ -118,9 +118,21 @@ func (r *Runner) EvalShell(ctx context.Context, session *pool.Session, expr stri
 		trimmed += "."
 	}
 
+	session.Lock()
+	defer session.Unlock()
+
+	releaseWorker, err := r.poolMgr.AcquireWorker(ctx, 8*time.Second)
+	if err != nil {
+		return "", err
+	}
+	defer releaseWorker()
+
 	evalCmd := fmt.Sprintf("try Res = (%s), io:format('~p~n', [Res]) catch C:R:St -> io:format('** exception ~p:~p~n~p~n', [C, R, St]) end, init:stop().", strings.TrimSuffix(trimmed, "."))
 
 	args := []string{
+		"+S", "1:1",
+		"+B",
+		"-noinput",
 		"-pa", r.poolMgr.HarnessDir(),
 		"-pa", filepath.Join(session.WorkspaceDir, "ebin"),
 		"-noshell",
@@ -132,7 +144,7 @@ func (r *Runner) EvalShell(ctx context.Context, session *pool.Session, expr stri
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	output := stdout.String()
 	if output == "" && stderr.Len() > 0 {
 		output = stderr.String()
@@ -140,8 +152,21 @@ func (r *Runner) EvalShell(ctx context.Context, session *pool.Session, expr stri
 	return strings.TrimSpace(output), err
 }
 
-// CompileFiles writes files to workspace and compiles them with erlc
+// CompileFiles writes files to workspace and compiles them with erlc (locks session and acquires worker)
 func (r *Runner) CompileFiles(ctx context.Context, session *pool.Session, files map[string]string) ([]Diagnostic, string, error) {
+	session.Lock()
+	defer session.Unlock()
+
+	releaseWorker, err := r.poolMgr.AcquireWorker(ctx, 5*time.Second)
+	if err != nil {
+		return nil, "", err
+	}
+	defer releaseWorker()
+
+	return r.compileFilesLocked(ctx, session, files)
+}
+
+func (r *Runner) compileFilesLocked(ctx context.Context, session *pool.Session, files map[string]string) ([]Diagnostic, string, error) {
 	srcDir := filepath.Join(session.WorkspaceDir, "src")
 	incDir := filepath.Join(session.WorkspaceDir, "include")
 	ebinDir := filepath.Join(session.WorkspaceDir, "ebin")
@@ -180,8 +205,21 @@ func (r *Runner) CompileFiles(ctx context.Context, session *pool.Session, files 
 
 // RunCode compiles learner files and executes visible test cases, capturing stdout
 func (r *Runner) RunCode(ctx context.Context, session *pool.Session, exerciseID string, files map[string]string, customTestCalls []string, inputVisibleTests ...VisibleTestCaseInput) (*RunResult, error) {
+	session.Lock()
+	defer session.Unlock()
+
+	releaseWorker, err := r.poolMgr.AcquireWorker(ctx, 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWorker()
+
+	return r.runCodeLocked(ctx, session, exerciseID, files, customTestCalls, inputVisibleTests...)
+}
+
+func (r *Runner) runCodeLocked(ctx context.Context, session *pool.Session, exerciseID string, files map[string]string, customTestCalls []string, inputVisibleTests ...VisibleTestCaseInput) (*RunResult, error) {
 	startTime := time.Now()
-	diags, rawCompileOut, err := r.CompileFiles(ctx, session, files)
+	diags, rawCompileOut, err := r.compileFilesLocked(ctx, session, files)
 	if err != nil {
 		return nil, err
 	}
@@ -227,6 +265,9 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 	runScript := compilePreamble + wrapRunScriptWithFootprint(r.buildRunScript(session, exerciseID, customTestCalls, inputVisibleTests))
 
 	args := []string{
+		"+S", "1:1",
+		"+B",
+		"-noinput",
 		"-pa", harnessDir,
 		"-pa", sessionEbin,
 		"-noshell",
@@ -278,8 +319,17 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 
 // RunVerification executes the verification pipeline corresponding to exerciseID
 func (r *Runner) RunVerification(ctx context.Context, session *pool.Session, exerciseID string, files map[string]string) (*VerificationReport, error) {
+	session.Lock()
+	defer session.Unlock()
+
+	releaseWorker, err := r.poolMgr.AcquireWorker(ctx, 12*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWorker()
+
 	// First compile user files into ebin
-	diags, rawCompileOut, _ := r.CompileFiles(ctx, session, files)
+	diags, rawCompileOut, _ := r.compileFilesLocked(ctx, session, files)
 	hasErrors := false
 	for _, d := range diags {
 		if d.Severity == "error" {
@@ -325,6 +375,9 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 	evalCmd := compilePreamble + r.buildVerificationScript(session, exerciseID)
 
 	args := []string{
+		"+S", "1:1",
+		"+B",
+		"-noinput",
 		"-pa", harnessDir,
 		"-pa", sessionEbin,
 		"-noshell",
@@ -336,7 +389,7 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	out := stdout.Bytes()
 	if err != nil {
 		errDetails := strings.TrimSpace(stderr.String())
@@ -356,7 +409,7 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
 			if err := json.Unmarshal([]byte(line), &report); err == nil {
-				if runRes, errRun := r.RunCode(ctx, session, exerciseID, files, nil); errRun == nil && runRes != nil {
+				if runRes, errRun := r.runCodeLocked(ctx, session, exerciseID, files, nil); errRun == nil && runRes != nil {
 					report.VisibleTests = runRes.VisibleTests
 					report.Stdout = runRes.Stdout
 					if report.BeamFootprint == nil {
@@ -1044,6 +1097,15 @@ func (r *Runner) generateFailureReport(exerciseID string, errMsg string) *Verifi
 
 // RunChaosKill simulates an exit(Pid, kill) on session_cache and verifies ETS heir transfer
 func (r *Runner) RunChaosKill(ctx context.Context, session *pool.Session, targetPID string) (*ChaosKillResult, error) {
+	session.Lock()
+	defer session.Unlock()
+
+	releaseWorker, err := r.poolMgr.AcquireWorker(ctx, 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWorker()
+
 	evalCmd := `
 catch ets:delete(sample_session_tab),
 catch exit(whereis(sample_session_sup), kill),
@@ -1058,6 +1120,9 @@ io:format("~s~n", [Json]),
 init:stop().
 `
 	args := []string{
+		"+S", "1:1",
+		"+B",
+		"-noinput",
 		"-pa", r.poolMgr.HarnessDir(),
 		"-pa", filepath.Join(session.WorkspaceDir, "ebin"),
 		"-noshell",
@@ -1107,6 +1172,15 @@ init:stop().
 
 // RunXmppHandshake runs real bf_xmpp_c2s_harness verification against sample_xmpp_c2s
 func (r *Runner) RunXmppHandshake(ctx context.Context, session *pool.Session) ([]XmppTranscriptEntry, error) {
+	session.Lock()
+	defer session.Unlock()
+
+	releaseWorker, err := r.poolMgr.AcquireWorker(ctx, 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWorker()
+
 	evalCmd := `
 {ok, ServerPid} = sample_xmpp_c2s:start_link(#{active_mode => once, reg_name => live_c2s}),
 Port = sample_xmpp_c2s:get_port(ServerPid),
@@ -1117,6 +1191,9 @@ io:format("~s~n", [Json]),
 init:stop().
 `
 	args := []string{
+		"+S", "1:1",
+		"+B",
+		"-noinput",
 		"-pa", r.poolMgr.HarnessDir(),
 		"-pa", filepath.Join(session.WorkspaceDir, "ebin"),
 		"-noshell",
