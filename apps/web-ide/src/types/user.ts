@@ -21,10 +21,10 @@ export const DEFAULT_USERS: Record<string, UserProfile> = {
     level: 1,
     avatarColor: '#3B82F6', // Blue
     bio: 'Fresh recruit tackling Erlang functional syntax and immutable pattern matching.',
-    completedLevelIds: ['ch01-l01', 'ch01-l02'],
-    totalXp: 150,
+    completedLevelIds: [],
+    totalXp: 0,
     unlockedSolutionLessonIds: [],
-    lastActiveExercise: 'ch01-l03',
+    lastActiveExercise: 'ch01-l01',
     streakDays: 1,
   },
   user_beta: {

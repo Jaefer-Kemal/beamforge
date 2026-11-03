@@ -607,6 +607,14 @@ export function CurriculumWorldMap() {
                         const lessons = allLessonsByChapter[chNum] || [];
                         const isCurrentChapter = activeChapter === chNum;
 
+                        const isChapterUnlocked = (() => {
+                          if (devModeUnlockedAll || chNum === 1) return true;
+                          const prevChapterLessons = (ALL_CURRICULUM_CHAPTERS as any)[chNum - 1] || [];
+                          if (prevChapterLessons.length === 0) return true;
+                          const prevFinalLesson = prevChapterLessons[prevChapterLessons.length - 1];
+                          return completedLevelIds.includes(prevFinalLesson.id);
+                        })();
+
                         return (
                           <div key={chNum} className="space-y-3.5">
                             {/* Chapter Header Line */}
@@ -627,6 +635,18 @@ export function CurriculumWorldMap() {
                                 >
                                   {chapterInfo?.title || `Chapter ${chNum}`}
                                 </h3>
+                                {!isChapterUnlocked && !devModeUnlockedAll && (
+                                  <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border opacity-70"
+                                    style={{
+                                      background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)',
+                                      borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.10)',
+                                      color: isDark ? '#94A3B8' : '#64748B',
+                                    }}
+                                  >
+                                    <Lock className="w-2.5 h-2.5" />
+                                    <span>Prerequisite: CH{chNum - 1}</span>
+                                  </span>
+                                )}
                                 {isCurrentChapter && (
                                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20">
                                     Current Chapter
@@ -646,7 +666,11 @@ export function CurriculumWorldMap() {
                               {lessons.map((lesson: any, lessonIdx: number) => {
                                 const isCompleted = completedLevelIds.includes(lesson.id);
                                 const isCurrent = activeChapter === chNum && activeLesson === lesson.lessonNumber;
-                                const isAccessible = devModeUnlockedAll || isCompleted || isCurrent || lessonIdx === 0 || completedLevelIds.includes(lessons[lessonIdx - 1]?.id);
+                                const isAccessible =
+                                  devModeUnlockedAll ||
+                                  isCompleted ||
+                                  isCurrent ||
+                                  (isChapterUnlocked && (lessonIdx === 0 || completedLevelIds.includes(lessons[lessonIdx - 1]?.id)));
 
                                 return (
                                   <div

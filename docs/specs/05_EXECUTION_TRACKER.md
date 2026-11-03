@@ -1125,3 +1125,25 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
   - `apps/web-ide`: `npm run build` passed with 0 errors (6/6 routes).
   - `services/orchestrator`: `go build ./...` passed with 0 errors.
+
+
+## Phase 53: Production Database Seeding (Neon Lakebase Postgres), Inter-Chapter Gating & Fresh Scratch State
+- [x] **53.1: Live Neon Lakebase Postgres Database Provisioning & Seeding (`scripts/neon_schema.sql`, `scripts/seed_neon.mjs`)**:
+  - Provisioned dedicated `beamforge` database inside Neon project `calm-field-36262565`.
+  - Configured pooled serverless connection string in gitignored `apps/web-ide/.env.local`.
+  - Created table `beamforge_users` and seeded initial profiles with upsert (`ON CONFLICT (id) DO UPDATE SET`):
+    - `user_alpha`: Initial fresh learner at pure scratch (0 XP, 0 completed levels, streak 1, `ch01-l01`).
+    - `user_beta`: Intermediate actor architect preset (1,450 XP, Chapter 6).
+    - `user_master`: Capstone principal preset (4,200 XP, Chapter 12).
+- [x] **53.2: Inter-Chapter Gating (`CurriculumWorldMap.tsx`)**:
+  - Replaced indiscriminate `lessonIdx === 0` open access with sequential chapter gating: Chapter `N` is locked until Chapter `N - 1`'s final problem set is completed or `devModeUnlockedAll` is active.
+  - Added subtle "Prerequisite: CH{N-1}" badge indicator with lock icon on chapter headers and future lessons.
+  - Maintained non-blocking soft-lock clickability and tester overrides.
+- [x] **53.3: Client Reset to Scratch & Cache Wipe (`useWorkspaceStore.ts`, `BootDevTopBar.tsx`)**:
+  - Implemented `resetUserProgress` action in store: wipes local storage user caches, sets 0 XP, clears completed levels, and syncs clean state to Neon database.
+  - Added "Reset to Scratch (0 XP)" button in both desktop TopBar dropdown and mobile navigation drawer.
+- [x] **53.4: Verification Loop**:
+  - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
+  - `apps/web-ide`: `npm run build` compiled 6/6 routes with code 0.
+  - `services/orchestrator`: `go build ./...` passed with 0 errors.
+  - Playwright end-to-end test against live Next.js server connected to Neon: confirmed `dbConnected: true`, `source: neon`, `user.totalXp: 0`, and "Prerequisite: CH1" locking badge visible.

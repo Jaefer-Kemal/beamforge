@@ -17,6 +17,7 @@ import {
   Code2,
   User,
   Flame,
+  RotateCcw,
 } from 'lucide-react';
 import { BeamForgeLogo } from './BeamForgeLogo';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
@@ -173,6 +174,7 @@ export function BootDevTopBar() {
     wsStatus,
     currentUser,
     switchUser,
+    resetUserProgress,
   } = useWorkspaceStore();
 
   const [mounted, setMounted] = useState(false);
@@ -715,6 +717,26 @@ export function BootDevTopBar() {
                   );
                 })}
               </div>
+
+              {/* Reset to Scratch */}
+              <div
+                className="pt-1 border-t"
+                style={{ borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)' }}
+              >
+                <button
+                  onClick={() => {
+                    resetUserProgress();
+                    setUserMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-left text-xs transition-colors rounded-b-xl"
+                  style={{ color: '#F43F5E' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = isDark ? 'rgba(244,63,94,0.12)' : 'rgba(244,63,94,0.06)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                >
+                  <RotateCcw className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="font-semibold">Reset to Scratch (0 XP)</span>
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -952,6 +974,16 @@ export function BootDevTopBar() {
               );
             })}
           </div>
+          <button
+            onClick={() => {
+              resetUserProgress();
+              setMobileMenuOpen(false);
+            }}
+            className="w-full mt-2 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-semibold text-rose-500 bg-rose-500/10 border border-rose-500/20"
+          >
+            <RotateCcw className="w-3 h-3" />
+            <span>Reset Progress to Scratch (0 XP)</span>
+          </button>
         </div>
 
         {/* Chapter Selector Ribbon */}

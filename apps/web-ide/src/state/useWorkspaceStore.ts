@@ -106,6 +106,7 @@ interface WorkspaceState {
   // Mastery & Progression State
   currentUser: UserProfile;
   switchUser: (userId: string) => Promise<void>;
+  resetUserProgress: () => Promise<void>;
   completedLevelIds: string[];
   totalXp: number;
   unlockedWorldIds: string[];
@@ -664,6 +665,35 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       get().addTerminalEntry({
         type: 'output',
         text: `[User Switched] Active profile: ${targetUser.name} (${targetUser.role}) • ${targetUser.totalXp} XP`,
+      });
+    },
+
+    resetUserProgress: async () => {
+      const freshAlpha: UserProfile = {
+        ...DEFAULT_USERS['user_alpha'],
+        totalXp: 0,
+        completedLevelIds: [],
+        unlockedSolutionLessonIds: [],
+        streakDays: 1,
+        lastActiveExercise: 'ch01-l01',
+      };
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('beamforge_user_profile_v2');
+        localStorage.removeItem('beamforge_user_user_alpha');
+        localStorage.removeItem('beamforge_user_user_beta');
+        localStorage.removeItem('beamforge_user_user_master');
+      }
+      syncUserToStorageAndDb(freshAlpha);
+      set({
+        currentUser: freshAlpha,
+        completedLevelIds: [],
+        totalXp: 0,
+        unlockedSolutionLessonIds: [],
+      });
+      get().switchExercise('ch01-l01');
+      get().addTerminalEntry({
+        type: 'output',
+        text: '[Reset] User progress wiped clean. Starting fresh from scratch (0 XP, Chapter 1 L01).',
       });
     },
 

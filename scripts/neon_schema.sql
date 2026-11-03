@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS beamforge_users (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Seed initial test users
+-- Seed initial test users: user_alpha starts at pure scratch (0 XP, 0 completed levels)
 INSERT INTO beamforge_users (
   id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days
 ) VALUES
@@ -25,10 +25,10 @@ INSERT INTO beamforge_users (
     'Alpha Tester',
     'BEAM Explorer (Junior)',
     1,
-    150,
-    '["ch01-l01", "ch01-l02"]'::jsonb,
+    0,
     '[]'::jsonb,
-    'ch01-l03',
+    '[]'::jsonb,
+    'ch01-l01',
     1
   ),
   (
@@ -53,5 +53,13 @@ INSERT INTO beamforge_users (
     'ch12-l04',
     14
   )
-ON CONFLICT (id) DO NOTHING;
-
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  role = EXCLUDED.role,
+  level = EXCLUDED.level,
+  total_xp = EXCLUDED.total_xp,
+  completed_level_ids = EXCLUDED.completed_level_ids,
+  unlocked_solution_lesson_ids = EXCLUDED.unlocked_solution_lesson_ids,
+  last_active_exercise = EXCLUDED.last_active_exercise,
+  streak_days = EXCLUDED.streak_days,
+  updated_at = NOW();
