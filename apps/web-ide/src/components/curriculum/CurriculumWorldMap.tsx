@@ -26,6 +26,7 @@ import { COURSE_WORLDS } from '../../data/courseWorlds';
 import { ALL_CURRICULUM_CHAPTERS } from '../../data/chapters';
 import { CHAPTERS } from '../navigation/BootDevTopBar';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
+import { PrerequisiteModal } from '../workspace/PrerequisiteModal';
 
 // Icon map for the 5 Thematic Worlds
 const WORLD_ICON_MAP: Record<string, React.ElementType> = {
@@ -297,8 +298,36 @@ export function CurriculumWorldMap() {
   else if (completedCount >= 10) currentRank = 'Concurrent BEAM Practitioner';
   else if (completedCount >= 3) currentRank = 'Functional Craftsman';
 
+  const [prereqModalData, setPrereqModalData] = useState<{
+    targetChapterNum: number;
+    targetChapterTitle: string;
+    prerequisiteChapterNum: number;
+    prerequisiteLessonId: string;
+    targetLessonNum: number;
+    targetLessonId: string;
+  } | null>(null);
+  const [isPrereqModalOpen, setIsPrereqModalOpen] = useState(false);
+
   // Navigate directly to selected lesson
-  const handleSelectLesson = (chNum: number, lessonNum: number, lessonId: string) => {
+  const handleSelectLesson = (chNum: number, lessonNum: number, lessonId: string, isAccessible = true) => {
+    if (!isAccessible) {
+      const prevChNum = chNum - 1;
+      const prevLessons = (ALL_CURRICULUM_CHAPTERS as any)[prevChNum] || [];
+      const prevFinalLessonId = prevLessons.length > 0 ? prevLessons[prevLessons.length - 1].id : `ch0${prevChNum}-l08`;
+      const chMeta = CHAPTERS.find((c) => c.num === chNum);
+
+      setPrereqModalData({
+        targetChapterNum: chNum,
+        targetChapterTitle: chMeta?.title || `Chapter ${chNum}`,
+        prerequisiteChapterNum: prevChNum,
+        prerequisiteLessonId: prevFinalLessonId,
+        targetLessonNum: lessonNum,
+        targetLessonId: lessonId,
+      });
+      setIsPrereqModalOpen(true);
+      return;
+    }
+
     setActiveChapter(chNum);
     setActiveLesson(lessonNum);
     switchExercise(lessonId);
@@ -677,7 +706,7 @@ export function CurriculumWorldMap() {
                                     key={lesson.id}
                                     id={`syllabus-lesson-${lesson.id}`}
                                     data-world={String(world.worldNumber)}
-                                    onClick={() => handleSelectLesson(chNum, lesson.lessonNumber, lesson.id)}
+                                    onClick={() => handleSelectLesson(chNum, lesson.lessonNumber, lesson.id, isAccessible)}
                                     className={`lesson-card flex flex-col justify-between border ${
                                       isCurrent ? 'lesson-card-active' : ''
                                     }`}
@@ -804,6 +833,32 @@ export function CurriculumWorldMap() {
           })}
         </div>
       </div>
+
+      {prereqModalData && (
+        <PrerequisiteModal
+          isOpen={isPrereqModalOpen}
+          targetChapterNum={prereqModalData.targetChapterNum}
+          targetChapterTitle={prereqModalData.targetChapterTitle}
+          prerequisiteChapterNum={prereqModalData.prerequisiteChapterNum}
+          prerequisiteLessonId={prereqModalData.prerequisiteLessonId}
+          isDark={isDark}
+          onClose={() => setIsPrereqModalOpen(false)}
+          onGoToPrerequisite={(lessonId) => {
+            const prevChNum = prereqModalData.prerequisiteChapterNum;
+            const prevLessons = (ALL_CURRICULUM_CHAPTERS as any)[prevChNum] || [];
+            setActiveChapter(prevChNum);
+            setActiveLesson(prevLessons.length || 8);
+            switchExercise(lessonId);
+            setBootDevView('lesson');
+          }}
+          onJumpInAnyway={() => {
+            setActiveChapter(prereqModalData.targetChapterNum);
+            setActiveLesson(prereqModalData.targetLessonNum);
+            switchExercise(prereqModalData.targetLessonId);
+            setBootDevView('lesson');
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -2739,7 +2739,7 @@ code_change(_OldVsn, State, _Extra) ->
       rootCauseHint: 'incident_blocking_init:init/1 performs synchronous rule compilation and normalization directly inside init/1 before returning {ok, State}, blocking gen_server:start_link/3.',
       fixObjective: 'Refactor init/1 to return {ok, #{status => booting, raw => SeedRules, rules => #{}}, {continue, {hydrate, SeedRules}}} immediately, and move rule compilation into handle_continue({hydrate, SeedRules}, State) setting status => ready.',
     },
-    conceptMarkdown: `## 🚨 Incident Triage: Root Supervisor Boot Timeout (INC-103)
+    conceptMarkdown: `## Incident Triage: Root Supervisor Boot Timeout (INC-103)
 
 ### Incident Context & Telemetry
 At 03:14 UTC, during a routine zero-downtime rolling update of the security gateway cluster, Kubernetes pods running the \`firewall-rule-hydrator\` service failed their liveness probes.

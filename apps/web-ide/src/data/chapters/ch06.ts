@@ -2875,7 +2875,7 @@ loop(CallbackMod, State) ->
     chapterNumber: 6,
     lessonNumber: 9,
     lessonType: 'incident_triage',
-    title: '🚨 Production Incident #102: Hanging Client Calls When Worker Crashes Mid-Request',
+    title: 'Production Incident #102: Hanging Client Calls When Worker Crashes Mid-Request',
     difficulty: 'Production',
     visualScene: 'links_monitors_signals',
     incidentAlert: {

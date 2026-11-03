@@ -30,10 +30,64 @@ async function ensureTable(sql: any) {
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
+  const mode = searchParams.get('mode');
   const userId = searchParams.get('userId') || 'user_alpha';
   const preset = DEFAULT_USERS[userId] || DEFAULT_USERS['user_alpha'];
 
   const sql = getNeonDb();
+
+  // Leaderboard Query Mode
+  if (mode === 'leaderboard') {
+    if (!sql) {
+      const fallbackList = Object.values(DEFAULT_USERS)
+        .map((u) => ({
+          id: u.id,
+          name: u.name,
+          role: u.role,
+          level: u.level,
+          totalXp: u.totalXp,
+          streakDays: u.streakDays || 1,
+          completedCount: u.completedLevelIds.length,
+        }))
+        .sort((a, b) => b.totalXp - a.totalXp);
+      return NextResponse.json({
+        source: 'local_preset',
+        leaderboard: fallbackList,
+        dbConnected: false,
+      });
+    }
+
+    try {
+      await ensureTable(sql);
+      const rows = await sql`
+        SELECT id, name, role, level, total_xp, streak_days, jsonb_array_length(completed_level_ids) as completed_count
+        FROM beamforge_users
+        ORDER BY total_xp DESC, streak_days DESC
+        LIMIT 20
+      `;
+      return NextResponse.json({
+        source: 'neon_leaderboard',
+        leaderboard: rows.map((r: any) => ({
+          id: r.id,
+          name: r.name,
+          role: r.role,
+          level: Number(r.level || 1),
+          totalXp: Number(r.total_xp || 0),
+          streakDays: Number(r.streak_days || 1),
+          completedCount: Number(r.completed_count || 0),
+        })),
+        dbConnected: true,
+      });
+    } catch (err: any) {
+      console.error('[Neon DB] Leaderboard query error:', err);
+      return NextResponse.json({
+        source: 'error_fallback',
+        leaderboard: [],
+        dbConnected: false,
+      });
+    }
+  }
+
   if (!sql) {
     return NextResponse.json({
       source: 'local_preset',

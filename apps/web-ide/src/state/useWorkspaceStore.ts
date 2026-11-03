@@ -700,7 +700,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     completedLevelIds: initialUser.completedLevelIds,
     totalXp: initialUser.totalXp,
     unlockedWorldIds: ['world-1-foundations'],
-    devModeUnlockedAll: false,
+    devModeUnlockedAll: typeof window !== 'undefined' ? localStorage.getItem('beamforge_dev_tester') === 'true' : false,
     unlockedSolutionLessonIds: initialUser.unlockedSolutionLessonIds || [],
 
     unlockSolutionForLesson: (lessonId: string) => {
@@ -726,6 +726,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       set({ devModeUnlockedAll: next, unlockedWorldIds: newUnlocked });
       if (typeof window !== 'undefined') {
         try {
+          localStorage.setItem('beamforge_dev_tester', String(next));
           localStorage.setItem('beamforge_progress', JSON.stringify({
             completedLevelIds: get().completedLevelIds,
             totalXp: get().totalXp,
@@ -738,8 +739,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       get().addTerminalEntry({
         type: 'output',
         text: next 
-          ? '[DEV MODE] Unlocked all 5 Worlds & 10 Levels for unrestricted testing!'
-          : '[DEV MODE] Normal progressive curriculum restored.',
+          ? '[Tester Mode] Unlocked all Chapters & Lessons for unrestricted testing. Note: XP is frozen (0 XP) while Tester Mode is active.'
+          : '[Tester Mode] Standard progressive curriculum and normal XP earning restored.',
       });
     },
 
@@ -843,9 +844,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       const level = getLevelById(levelId);
       const isAlreadyCompleted = completedLevelIds.includes(levelId);
       const isSolutionUnlocked = (unlockedSolutionLessonIds || []).includes(levelId) || (unlockedSolutionLessonIds || []).includes(activeExerciseId);
-      const xpReward = isSolutionUnlocked ? 0 : (level?.xpReward || 100);
+      const isTesterMode = devModeUnlockedAll;
+      const effectiveXpReward = isTesterMode ? 0 : (isSolutionUnlocked ? 0 : (level?.xpReward || 100));
       let finalCompleted = isAlreadyCompleted ? [...completedLevelIds] : [...completedLevelIds, levelId];
-      const newXp = isAlreadyCompleted ? totalXp : totalXp + xpReward;
+      const newXp = isAlreadyCompleted ? totalXp : totalXp + effectiveXpReward;
+
+      if (isTesterMode && !isAlreadyCompleted) {
+        get().addTerminalEntry({
+          type: 'output',
+          text: '[Tester Mode] Level verified. XP reward frozen (0 XP added while Tester Mode is active).',
+        });
+      }
 
       // Fast-Track Assessment: If completing the final lesson of a chapter, auto-complete all earlier chapter lessons
       const lessonObj = getLessonById(levelId);
@@ -929,9 +938,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
       get().addTerminalEntry({
         type: 'output',
-        text: isSolutionUnlocked
+        text: isTesterMode
+          ? `[Tester Mode] Level ${level?.levelNumber || levelId} verified! (+0 XP - Tester mode active). Total XP: ${newXp}`
+          : isSolutionUnlocked
           ? `[Mastery] Level ${level?.levelNumber || levelId} passed! (+0 XP - Solution was viewed). Total XP: ${newXp}`
-          : `[Mastery] Level ${level?.levelNumber || levelId} passed! (+${xpReward} XP). Total XP: ${newXp}`,
+          : `[Mastery] Level ${level?.levelNumber || levelId} passed! (+${effectiveXpReward} XP). Total XP: ${newXp}`,
       });
     },
 

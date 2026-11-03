@@ -2328,7 +2328,7 @@ unlocked(SecretCode) ->
     chapterNumber: 5,
     lessonNumber: 7,
     lessonType: 'incident_triage',
-    title: '🚨 Production Incident #101: Unbounded Mailbox Memory Leak in Telemetry Actor',
+    title: 'Production Incident #101: Unbounded Mailbox Memory Leak in Telemetry Actor',
     difficulty: 'Production',
     visualScene: 'mailbox_selective_receive',
     incidentAlert: {

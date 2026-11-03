@@ -84,7 +84,7 @@ check_limit(ClientIpBin, MaxAllowed) ->
     end.
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official ETS Calls (stdlib / ets)
@@ -436,7 +436,7 @@ purge_completed(CutoffTime) ->
     ets:select_delete(jobs_tab, MatchSpec).
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official ETS Match Calls (stdlib / ets)
@@ -751,7 +751,7 @@ handover_vault(TableName, NewWorkerPid, Tag) ->
     ets:give_away(TableName, NewWorkerPid, Tag).
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official ETS Heir Calls (stdlib / ets)
@@ -1125,7 +1125,7 @@ broadcast_heartbeat(Topic, Payload) ->
     {sent, length(Members)}.
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official Distributed Calls (kernel / rpc & pg)
@@ -1550,7 +1550,7 @@ reserve_item(Sku, Qty) ->
     end.
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official Mnesia Calls (mnesia)
@@ -1926,7 +1926,7 @@ pricing_test_() ->
     ].
 \`\`\`
 
-## 📖 Official Erlang Docs & Function Reference
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official EUnit Macros (eunit/include/eunit.hrl)

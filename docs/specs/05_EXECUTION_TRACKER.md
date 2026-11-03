@@ -1147,3 +1147,38 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `apps/web-ide`: `npm run build` compiled 6/6 routes with code 0.
   - `services/orchestrator`: `go build ./...` passed with 0 errors.
   - Playwright end-to-end test against live Next.js server connected to Neon: confirmed `dbConnected: true`, `source: neon`, `user.totalXp: 0`, and "Prerequisite: CH1" locking badge visible.
+
+## Phase 54: TopBar De-cluttering, Settings Popover, Safety Reset Modal, Tester Mode XP-Freeze, Leaderboard Drawer & Prerequisite Gating
+- [x] **54.1: TopBar De-Cluttering & 8 Connected Progress Dots (`BootDevTopBar.tsx`)**:
+  - Relocated standalone Theme Switcher, Go Orchestrator status, Tester Mode switch, and Reset button into a unified Settings popover (`Settings` icon).
+  - Reduced dot connector widths and adjusted horizontal padding, expanding center zone so that all 8 progress dots in Chapter 1 render visibly without clipping across all viewport widths.
+  - Verified all 8 dots visible via Playwright.
+- [x] **54.2: Settings Popover (`BootDevTopBar.tsx`)**:
+  - Added Settings popover containing:
+    - Appearance Theme Switcher (Daylight Glass & Midnight Glass buttons).
+    - Go Orchestrator live status (OTP 29 Live / Offline indicator).
+    - Tester Mode switch with warning explaining that all 12 chapters are unlocked while XP is frozen to 0 XP.
+    - Danger Zone: "Reset Account & Progress" button opening the red confirmation modal.
+- [x] **54.3: Destructive Safety Reset Modal (`ResetAccountModal.tsx`)**:
+  - Created red glassmorphic modal with `AlertTriangle` warning icon and profile name.
+  - Requires learner to type `"RESET PROGRESS"` before the "Permanently Reset (0 XP)" button is enabled.
+  - Emits zero emojis (pure Lucide icons only).
+- [x] **54.4: Tester Mode XP-Freeze & Gating (`useWorkspaceStore.ts`)**:
+  - Gated tester mode via `localStorage.getItem('beamforge_dev_tester') === 'true'`.
+  - In `onLevelCompleted`, if `isTesterMode` is active, `effectiveXpReward = 0` (XP is frozen, 0 XP awarded), ensuring tester testing does not pollute the live Neon leaderboard.
+  - Added visible indicator pill in TopBar when Tester Mode is active.
+- [x] **54.5: Prerequisite Modal for Locked Chapters (`PrerequisiteModal.tsx`, `BootDevTopBar.tsx`, `CurriculumWorldMap.tsx`)**:
+  - When clicking a locked chapter or lesson (in TopBar dropdown, progress dots, or syllabus), displays an informative modal:
+    - "Fast-Track to CH{N-1} Problem Set" (jumping to the prior chapter's problem set, which auto-completes on pass).
+    - "Jump In Anyway (Preview / Tester Mode)" (enables Tester Mode with XP frozen and opens the chapter).
+- [x] **54.6: Global Leaderboard Slide-Out Drawer (`LeaderboardDrawer.tsx`, `route.ts`, `BootDevTopBar.tsx`)**:
+  - Added `mode=leaderboard` GET endpoint in `/api/user-progress` querying the live Neon database (`beamforge_users ORDER BY total_xp DESC`).
+  - Added `Trophy` button beside XP badge in TopBar opening the drawer.
+  - Drawer displays podium (1st, 2nd, 3rd) and list of users with ranks, roles, streaks, and XP tallies, highlighting the current user.
+  - Zero emojis (Lucide icons only).
+- [x] **54.7: Verification Loop**:
+  - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
+  - `apps/web-ide`: `npm run build` passed with 0 errors (6/6 static/dynamic routes).
+  - `services/orchestrator`: `go build ./...` passed with 0 errors.
+  - Zero emojis anywhere in `apps/web-ide/src`.
+  - Playwright end-to-end test suite (`scripts/test_phase54_features.mjs`) verified all 8 dots visible, Settings popover functional, Reset modal requiring typing, Leaderboard drawer opening, and Prerequisite modal functioning with Tester Mode XP freeze.
