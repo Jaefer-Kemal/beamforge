@@ -875,6 +875,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               text: `[Fast-Track] Chapter ${lessonObj.chapterNumber} Problem Set mastered! ${priorMissing.length} earlier lessons auto-completed.`,
             });
           }
+          get().addTerminalEntry({
+            type: 'output',
+            text: `[Achievement] Chapter ${lessonObj.chapterNumber} Mastered! New Badge Unlocked in Trophy Shelf.`,
+          });
         }
       }
 

@@ -1182,3 +1182,26 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `services/orchestrator`: `go build ./...` passed with 0 errors.
   - Zero emojis anywhere in `apps/web-ide/src`.
   - Playwright end-to-end test suite (`scripts/test_phase54_features.mjs`) verified all 8 dots visible, Settings popover functional, Reset modal requiring typing, Leaderboard drawer opening, and Prerequisite modal functioning with Tester Mode XP freeze.
+
+## Phase 55: Badges & Trophies Showcase, Dual-Tab Drawer & LeetCode-Style Shareable Cards
+- [x] **55.1: Master Badges Catalog & Rarity Tokens (`types/badges.ts`)**:
+  - Defined 14 iconic Erlang/OTP badges across 7 tiers (Bronze, Silver, Gold, Platinum, Diamond, Mythic, Special).
+  - Implemented `isBadgeUnlocked` and `getUserBadgesSummary` calculating dynamic mastery progress and completion percentages.
+- [x] **55.2: Dual-Tab Slide-Out Drawer (`LeaderboardDrawer.tsx`)**:
+  - Upgraded slide-out drawer with two tabs: `[ Rankings | Badges & Trophies ]`.
+  - Badges tab displays learner progress card, completion progress bar, filter pills (`all`, `unlocked`, `locked`), and glass badge cards with checkmarks/lock indicators.
+- [x] **55.3: LeetCode-Style Shareable Badge Modal (`BadgeCelebrationModal.tsx`)**:
+  - Floating Apple-glass celebratory modal with dynamic icon, glowing ambient backdrop, rarity tag pill, flavor description, and learner credentials.
+  - "Share Badge" action copies a formatted Markdown achievement card to clipboard with immediate visual confirmation ("Copied Card!").
+- [x] **55.4: Clickable Role Badge & Mobile Trophy Access (`BootDevTopBar.tsx`)**:
+  - Made `#role-badge` (`[ Lv{level} • {role} ]`) in TopBar directly clickable to open the Badges shelf.
+  - Enabled mobile drawer role pill to open the Badges shelf.
+  - Handled `initialTab` state seamlessly between rankings and badges.
+- [x] **55.5: Permanent XP Retention Rules (`useWorkspaceStore.ts`)**:
+  - Formalized "once gained, always gained" lifetime XP principle: test retries, resets, and solution viewing never deduct XP; only deliberate `"RESET PROGRESS"` safety wipe clears it.
+- [x] **55.6: Verification Loop**:
+  - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
+  - `apps/web-ide`: `npm run build` compiled 6/6 routes with code 0.
+  - `services/orchestrator`: `go build ./...` passed with 0 errors.
+  - Zero emojis anywhere in `apps/web-ide/src`.
+  - Playwright test suite (`scripts/test_phase55_badges.mjs`) verified Badges shelf opening via Role badge, filter pills, unlocked/locked modals, share card copying, and tab switching.

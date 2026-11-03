@@ -11,6 +11,7 @@ export interface UserProfile {
   lastActiveExercise: string;
   streakDays: number;
   lastActivityDate?: string;
+  badges?: string[];
 }
 
 export const DEFAULT_USERS: Record<string, UserProfile> = {

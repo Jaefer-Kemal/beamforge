@@ -133,3 +133,4 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
     </div>
   );
 };
+

@@ -107,6 +107,18 @@ export async function GET(req: NextRequest) {
 
     if (rows && rows.length > 0) {
       const r = rows[0];
+      let completedLevelIds = r.completed_level_ids;
+      if (typeof completedLevelIds === 'string') {
+        try { completedLevelIds = JSON.parse(completedLevelIds); } catch { completedLevelIds = []; }
+      }
+      if (!Array.isArray(completedLevelIds)) completedLevelIds = [];
+
+      let unlockedSolutionLessonIds = r.unlocked_solution_lesson_ids;
+      if (typeof unlockedSolutionLessonIds === 'string') {
+        try { unlockedSolutionLessonIds = JSON.parse(unlockedSolutionLessonIds); } catch { unlockedSolutionLessonIds = []; }
+      }
+      if (!Array.isArray(unlockedSolutionLessonIds)) unlockedSolutionLessonIds = [];
+
       const user: UserProfile = {
         id: r.id,
         name: r.name,
@@ -115,8 +127,8 @@ export async function GET(req: NextRequest) {
         avatarColor: preset.avatarColor,
         bio: preset.bio,
         totalXp: Number(r.total_xp || 0),
-        completedLevelIds: Array.isArray(r.completed_level_ids) ? r.completed_level_ids : [],
-        unlockedSolutionLessonIds: Array.isArray(r.unlocked_solution_lesson_ids) ? r.unlocked_solution_lesson_ids : [],
+        completedLevelIds,
+        unlockedSolutionLessonIds,
         lastActiveExercise: r.last_active_exercise || preset.lastActiveExercise,
         streakDays: Number(r.streak_days || preset.streakDays || 1),
         lastActivityDate: r.last_activity_date || preset.lastActivityDate,

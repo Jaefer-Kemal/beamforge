@@ -207,6 +207,7 @@ export function BootDevTopBar() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<'rankings' | 'badges'>('rankings');
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
 
   const [prereqModalData, setPrereqModalData] = useState<{
@@ -369,7 +370,10 @@ export function BootDevTopBar() {
           {/* Leaderboard Trophy Button */}
           <button
             id="leaderboard-btn"
-            onClick={() => setIsLeaderboardOpen(true)}
+            onClick={() => {
+              setDrawerTab('rankings');
+              setIsLeaderboardOpen(true);
+            }}
             title="Global Leaderboard (Neon Cloud)"
             className="flex items-center justify-center w-7 h-7 rounded-full transition-all cursor-pointer hover:scale-105"
             style={{
@@ -397,11 +401,16 @@ export function BootDevTopBar() {
             <span suppressHydrationWarning>{mounted ? (currentUser?.streakDays || 1) : 1}d</span>
           </div>
 
-          {/* Role Badge (Large screens only) */}
-          <div
+          {/* Role Badge (Large screens only — Clickable Trophy Shelf) */}
+          <button
             id="role-badge"
             suppressHydrationWarning
-            className="hidden 2xl:flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium"
+            onClick={() => {
+              setDrawerTab('badges');
+              setIsLeaderboardOpen(true);
+            }}
+            title="View My Badges & Achievements Shelf"
+            className="hidden xl:flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-all hover:scale-105 hover:border-purple-400"
             style={{
               background: isDark ? 'rgba(139,92,246,0.18)' : 'rgba(139,92,246,0.10)',
               border: '1px solid rgba(139,92,246,0.30)',
@@ -411,7 +420,7 @@ export function BootDevTopBar() {
             <span suppressHydrationWarning>Lv{mounted ? level : 1}</span>
             <span className="opacity-60">•</span>
             <span suppressHydrationWarning>{mounted ? role : 'BEAM Newcomer'}</span>
-          </div>
+          </button>
 
           {/* Tester Mode Active Indicator (Pill) */}
           {devModeUnlockedAll && (
@@ -1019,7 +1028,10 @@ export function BootDevTopBar() {
         <div className="flex md:hidden items-center gap-1.5 flex-shrink-0">
           <button
             id="mobile-leaderboard-btn"
-            onClick={() => setIsLeaderboardOpen(true)}
+            onClick={() => {
+              setDrawerTab('rankings');
+              setIsLeaderboardOpen(true);
+            }}
             title="Global Leaderboard"
             className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer"
             style={{
@@ -1112,8 +1124,13 @@ export function BootDevTopBar() {
                 <Zap className="w-3.5 h-3.5 fill-amber-500" />
                 <span>{mounted ? totalXp.toLocaleString() : '0'} XP</span>
               </div>
-              <div
-                className="px-2.5 py-1 rounded-full text-xs font-semibold"
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setDrawerTab('badges');
+                  setIsLeaderboardOpen(true);
+                }}
+                className="px-2.5 py-1 rounded-full text-xs font-semibold cursor-pointer transition-all"
                 style={{
                   background: isDark ? 'rgba(139,92,246,0.18)' : 'rgba(139,92,246,0.10)',
                   border: '1px solid rgba(139,92,246,0.30)',
@@ -1121,7 +1138,7 @@ export function BootDevTopBar() {
                 }}
               >
                 Lv{mounted ? level : 1} · {mounted ? role : 'Apprentice'}
-              </div>
+              </button>
               <div
                 className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold"
                 style={{
@@ -1374,6 +1391,7 @@ export function BootDevTopBar() {
         isOpen={isLeaderboardOpen}
         currentUserId={currentUser?.id || 'user_alpha'}
         isDark={isDark}
+        initialTab={drawerTab}
         onClose={() => setIsLeaderboardOpen(false)}
       />
 
