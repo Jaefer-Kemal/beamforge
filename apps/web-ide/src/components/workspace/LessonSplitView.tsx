@@ -547,6 +547,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
     isLessonOutputOpen, setLessonOutputOpen,
     isSolutionVisible, setSolutionVisible,
     loadSolutionForActiveExercise,
+    completedLevelIds,
     unlockedSolutionLessonIds,
     unlockSolutionForLesson,
   } = useWorkspaceStore();
@@ -560,6 +561,10 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
   // Confirmation Modals
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
+
+  // Solution access: Free and immediate if already solved, otherwise gated via Option B modal
+  const isSolved = (completedLevelIds || []).includes(lesson.id);
+  const isUnlocked = isSolved || (unlockedSolutionLessonIds || []).includes(lesson.id);
 
   const insertTokenAtCursor = (token: string) => {
     if (monacoRef.current?.editor) {
@@ -1092,7 +1097,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             }}
             disabled={isRunning || isVerifying || !isBackendOnline}
             title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to run code.' : 'Run visible test cases'}
-            className="btn-run flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className={`btn-run flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${isRunning || isVerifying || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
             {isRunning ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
@@ -1115,7 +1120,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             }}
             disabled={isVerifying || isRunning || !isBackendOnline}
             title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to submit.' : 'Submit code for full verification suite'}
-            className="btn-submit flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-bold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className={`btn-submit flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-bold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${isVerifying || isRunning || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
             {isVerifying ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
@@ -1131,7 +1136,6 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           <button
             id="solution-btn"
             onClick={() => {
-              const isUnlocked = (unlockedSolutionLessonIds || []).includes(lesson.id);
               if (isUnlocked) {
                 if (isLessonOutputOpen && lessonOutputTab === 'solution') {
                   setLessonOutputOpen(false);
@@ -1246,7 +1250,9 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                 key: 'solution' as const,
                 label: `Solution (${activeFile?.name || 'File'})`,
                 icon: Eye,
-                badge: (unlockedSolutionLessonIds || []).includes(lesson.id)
+                badge: isSolved
+                  ? { text: 'Solved', color: '#10B981', bg: 'rgba(16,185,129,0.20)' }
+                  : (unlockedSolutionLessonIds || []).includes(lesson.id)
                   ? { text: 'Unlocked', color: '#F59E0B', bg: 'rgba(245,158,11,0.20)' }
                   : undefined,
               },
@@ -1257,7 +1263,6 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (key === 'solution') {
-                    const isUnlocked = (unlockedSolutionLessonIds || []).includes(lesson.id);
                     if (isUnlocked) {
                       if (isLessonOutputOpen && lessonOutputTab === 'solution') {
                         setLessonOutputOpen(false);
@@ -1645,7 +1650,6 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             <button
               id="mobile-results-tab-solution"
               onClick={() => {
-                const isUnlocked = (unlockedSolutionLessonIds || []).includes(lesson.id);
                 if (isUnlocked) {
                   setLessonOutputTab('solution');
                 } else {
@@ -1859,19 +1863,31 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           <button
             onClick={() => runCode()}
             disabled={isRunning || isVerifying || !isBackendOnline}
-            className="btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40"
+            className={`btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${isRunning || isVerifying || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            <span>{isRunning ? 'Running...' : 'Run Again'}</span>
+            {isRunning ? (
+              <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+            ) : !isBackendOnline ? (
+              <WifiOff className="w-3.5 h-3.5 text-red-300" />
+            ) : (
+              <Play className="w-3.5 h-3.5 fill-current" />
+            )}
+            <span>{isRunning ? 'Running...' : !isBackendOnline ? 'Run (Offline)' : 'Run Again'}</span>
           </button>
 
           <button
             onClick={() => runVerificationSuite()}
             disabled={isVerifying || isRunning || !isBackendOnline}
-            className="btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40"
+            className={`btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${isVerifying || isRunning || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>{isVerifying ? 'Verifying...' : 'Submit'}</span>
+            {isVerifying ? (
+              <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+            ) : !isBackendOnline ? (
+              <WifiOff className="w-3.5 h-3.5 text-red-400" />
+            ) : (
+              <ShieldCheck className="w-3.5 h-3.5" />
+            )}
+            <span>{isVerifying ? 'Verifying...' : !isBackendOnline ? 'Submit (Offline)' : 'Submit'}</span>
           </button>
         </div>
       </div>

@@ -1042,3 +1042,15 @@ We execute the platform overhaul incrementally so every single piece is built to
 - [x] **48.3: Verification Loop**:
   - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
   - `apps/web-ide`: `npm run build` passed with 0 errors (5/5 static pages generated).
+
+## Phase 49: Immediate Solved Solution Access & Double-Submit Protection
+- [x] **49.1: Solved-Lesson Immediate Solution Access (`LessonSplitView.tsx` & `CapstoneStudioView.tsx`)**:
+  - Replaced strict `unlockedSolutionLessonIds` check with hybrid `isSolved || unlockedSolutionLessonIds`.
+  - When a lesson or capstone milestone is already completed (`completedLevelIds.includes(lesson.id)`), clicking "Solution" grants instant, free access to inspect the reference solution without triggering the Option B forfeit modal.
+  - Added dedicated emerald "Solved" badge on the solution drawer tab when completed.
+- [x] **49.2: Double-Submit Prevention & Pointer Event Locking**:
+  - Added `pointer-events-none` and `disabled:cursor-not-allowed` to `Run` and `Submit` buttons across desktop and mobile views while `isRunning` or `isVerifying` is active.
+  - Added visual spinner indicators (`stage-spinner`) to mobile action buttons during compilation and verification.
+- [x] **49.3: Verification Loop**:
+  - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
+  - `apps/web-ide`: `npm run build` passed with 0 errors (5/5 static pages generated).

@@ -203,6 +203,7 @@ export function CapstoneStudioView() {
     isBackendOnline,
     checkBackendHealth,
     switchExercise,
+    completedLevelIds,
     unlockedSolutionLessonIds,
     unlockSolutionForLesson,
   } = useWorkspaceStore();
@@ -313,7 +314,9 @@ export function CapstoneStudioView() {
   const activeFile = files.find((f) => f.path === activeFilePath) || files[0];
   const currentFilePath = activeFile?.path || activeMilestone.targetFile;
   const requiredUnlockKey = FILE_TO_MILESTONE_KEY[currentFilePath] || `ch12-m${activeMilestoneIndex + 1}`;
-  const isCurrentFileUnlocked = (unlockedSolutionLessonIds || []).includes(requiredUnlockKey);
+  // Free immediate access if already solved, otherwise gated by Option B modal
+  const isCurrentFileSolved = (completedLevelIds || []).includes(requiredUnlockKey) || (completedLevelIds || []).includes('ch12-m6');
+  const isCurrentFileUnlocked = isCurrentFileSolved || (unlockedSolutionLessonIds || []).includes(requiredUnlockKey);
 
   // Handle milestone stepper pill click -> switches editor to target file and left pane to that milestone
   const handleMilestoneClick = (index: number) => {
@@ -910,7 +913,7 @@ export function CapstoneStudioView() {
             onClick={handleSubmit}
             disabled={isVerifying || isRunning || !isBackendOnline}
             title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to submit.' : 'Submit capstone milestones'}
-            className="btn-submit flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className={`btn-submit flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${isVerifying || isRunning || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
             {isVerifying ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-slate-900 border-t-transparent" />
@@ -928,7 +931,7 @@ export function CapstoneStudioView() {
             onClick={handleRun}
             disabled={isRunning || isVerifying || !isBackendOnline}
             title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to run simulation.' : 'Run capstone simulation'}
-            className="btn-run flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className={`btn-run flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${isRunning || isVerifying || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
             {isRunning ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
@@ -1079,7 +1082,7 @@ export function CapstoneStudioView() {
                 </button>
                 <button
                   onClick={() => setDrawerTab('solution')}
-                  className="px-2.5 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer"
                   style={{
                     background: drawerTab === 'solution'
                       ? (isDark ? 'rgba(255, 255, 255, 0.10)' : '#FFFFFF')
@@ -1092,7 +1095,22 @@ export function CapstoneStudioView() {
                       : '1px solid transparent',
                   }}
                 >
-                  Solution ({activeFile?.name || 'File'})
+                  <span>Solution ({activeFile?.name || 'File'})</span>
+                  {isCurrentFileSolved ? (
+                    <span
+                      className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold"
+                      style={{ background: 'rgba(16,185,129,0.20)', color: '#10B981' }}
+                    >
+                      Solved
+                    </span>
+                  ) : isCurrentFileUnlocked ? (
+                    <span
+                      className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold"
+                      style={{ background: 'rgba(245,158,11,0.20)', color: '#F59E0B' }}
+                    >
+                      Unlocked
+                    </span>
+                  ) : null}
                 </button>
               </div>
 
@@ -1582,19 +1600,31 @@ export function CapstoneStudioView() {
           <button
             onClick={handleRun}
             disabled={isRunning || isVerifying || !isBackendOnline}
-            className="btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40"
+            className={`btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${isRunning || isVerifying || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            <span>{isRunning ? 'Running...' : 'Run Simulation'}</span>
+            {isRunning ? (
+              <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+            ) : !isBackendOnline ? (
+              <WifiOff className="w-3.5 h-3.5 text-red-300" />
+            ) : (
+              <Play className="w-3.5 h-3.5 fill-current" />
+            )}
+            <span>{isRunning ? 'Running...' : !isBackendOnline ? 'Run (Offline)' : 'Run Simulation'}</span>
           </button>
 
           <button
             onClick={handleSubmit}
             disabled={isVerifying || isRunning || !isBackendOnline}
-            className="btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40"
+            className={`btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${isVerifying || isRunning || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>{isVerifying ? 'Verifying...' : 'Submit'}</span>
+            {isVerifying ? (
+              <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+            ) : !isBackendOnline ? (
+              <WifiOff className="w-3.5 h-3.5 text-red-400" />
+            ) : (
+              <ShieldCheck className="w-3.5 h-3.5" />
+            )}
+            <span>{isVerifying ? 'Verifying...' : !isBackendOnline ? 'Submit (Offline)' : 'Submit'}</span>
           </button>
         </div>
       </div>
