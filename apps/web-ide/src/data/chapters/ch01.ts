@@ -120,8 +120,8 @@ This is a **Guided Runnable Demo**. The code in the editor is pre-written and fu
         id: 'tc-ch01-01',
         title: 'Query Live BEAM Engine Telemetry',
         erlangCall: 'beam_intro:inspect_vm()',
-        expectedOutput: '{vm_info, "29", Schedulers, 1048576, 1048576}',
-        explanation: 'Calls erlang:system_info/1 on OTP 29 and formats emulator properties into a diagnostic 5-tuple.',
+        expectedOutput: '{vm_info,...}',
+        explanation: 'Calls erlang:system_info/1 on the live OTP runtime and formats emulator properties into a diagnostic 5-tuple: {vm_info, OtpRelease, Schedulers, ProcessLimit, AtomLimit}.',
       },
     ],
     astRules: {
