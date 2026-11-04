@@ -1254,4 +1254,30 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Restored 170px of horizontal real estate to the top bar, allowing the center connected lesson progress dots to render without clipping across screen widths.
   - Updated Playwright regression suites (`test_phase56_xp_and_celebration.mjs`, `test_auto_celebration.mjs`, and `test_phase55_badges.mjs`) to verify Settings role display and shelf navigation with 100% pass.
 
+## Phase 57: Chapter 12 Capstone Live In-Browser XMPP Chat Widget & Stanza Wire Terminal
+- [x] **57.1: Architectural Design & RFC 6120 / RFC 6121 Compliance (`LiveXmppChatSimulator.tsx`)**:
+  - Implemented dual-client interactive chat simulator: Alice (`alice@beamforge.local/web`, priority 10) <-> Bob (`bob@beamforge.local/mobile`, priority 5).
+  - RFC 6120 XML streaming transcript with raw wire stanzas (`<stream:stream>`, `<stream:features>`, SASL `<auth>`, `<bind>`, `<presence>`, `<message>`).
+  - RFC 6121 presence toggling with offline spooling: Bob presence toggle (`Online` <-> `Offline`). When Bob is offline, messages display `Spooled Offline in ETS` indicator and buffer in the ETS offline queue. When Bob reconnects, all queued messages automatically flush.
+- [x] **57.2: Milestone Architecture Context & Chaos Monkey Simulation**:
+  - Embedded live architectural status panel displaying Capstone modules M1 (`xmpp_sup`), M2 (`xmpp_stream_parser`), M3 (`xmpp_session_registry`), and M5 (`xmpp_router`) with live delivery and spool counters.
+  - Quick action simulators: Pre-auth XML injection sanitization test (`M2`), router crash recovery under `rest_for_one` supervision (`M1`), and OTP reduction explanation.
+  - Monospace XML Wire Inspector modal showing full indented RFC 6120 XML payloads with one-click copy.
+- [x] **57.3: Deep Integration into Chapter 12 Capstone Studio (`CapstoneStudioView.tsx`)**:
+  - Added `#xmpp-chat-btn` in the Boot.dev Action Bar (`Live Chat` pill with `MessageSquare` icon).
+  - Added drawer tab headers (`#tab-btn-chat` and `#expanded-tab-btn-chat`) in both collapsed and expanded drawer headers.
+  - Mounted `<LiveXmppChatSimulator isDark={isDark} />` in the bottom evaluation drawer with responsive scrolling.
+- [x] **57.4: Zero Emojis & Glassmorphic Apple Pedagogy Design**:
+  - Strictly zero emojis across all code, JSX, labels, and state messages (Lucide SVG icons only: `MessageSquare`, `Terminal`, `Send`, `UserCheck`, `UserX`, `Radio`, `RotateCcw`, `ShieldCheck`, `ShieldAlert`, `Layers`, `Sparkles`).
+  - Dual daylight and midnight frosted glass themes matching Boot.dev design tokens.
+- [x] **57.5: Comprehensive Compiler & E2E Playwright Verification**:
+  - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
+  - `apps/web-ide`: `npm run build` compiled 6/6 static and dynamic routes with 0 errors.
+  - Zero emojis anywhere in `apps/web-ide/src` (strictly Lucide SVG icons).
+  - Authored and verified E2E Playwright test suite (`scripts/test_xmpp_chat_simulator.mjs`): automated user switching to Grandmaster, navigated to Chapter 12 Capstone, opened the live chat drawer, sent real-time stanzas between Alice and Bob, toggled Bob offline to verify ETS spooling, reconnected Bob to verify queue flush, inspected the raw TCP Stanza Wire Terminal, and simulated Chaos Monkey crash recovery. Passed 100% with zero errors.
+  - Captured verification screenshot artifacts:
+    - `playwright_xmpp_chat_active.png`
+    - `playwright_xmpp_wire_terminal.png`
+
+
 
