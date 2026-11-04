@@ -28,6 +28,35 @@ import { ORCHESTRATOR_HTTP_URL } from '../lib/orchestratorConfig';
 import { UserProfile, DEFAULT_USERS, xpToRole } from '../types/user';
 import { triggerCelebrationConfetti } from '../lib/confetti';
 import { Badge, BADGE_CATALOG, isBadgeUnlocked } from '../types/badges';
+import type { UserSubmissionRecord } from '../types/submissions';
+
+export const getUserDraftKey = (userId: string, exerciseId: string) => `beamforge_draft_${userId}_${exerciseId}`;
+
+export const loadUserDraft = (userId: string, exerciseId: string): WorkspaceFile[] | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(getUserDraftKey(userId, exerciseId));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return null;
+};
+
+export const saveUserDraft = (userId: string, exerciseId: string, files: WorkspaceFile[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(getUserDraftKey(userId, exerciseId), JSON.stringify(files));
+  } catch {}
+};
+
+export const clearUserDraft = (userId: string, exerciseId: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(getUserDraftKey(userId, exerciseId));
+  } catch {}
+};
 
 export const ALL_EXERCISES: Record<string, ExerciseManifest> = { ...EXERCISES };
 for (const world of CURRICULUM_WORLDS) {
@@ -178,6 +207,16 @@ interface WorkspaceState {
   killProcess: (pid: string) => void;
   sendTestMessage: (targetPid: string, payload: string) => void;
   injectMailboxFlood: (targetPid: string) => void;
+
+  // Submissions & User-Scoped History
+  submissions: UserSubmissionRecord[];
+  isLoadingSubmissions: boolean;
+  activeSubmissionDetail: UserSubmissionRecord | null;
+  setActiveSubmissionDetail: (sub: UserSubmissionRecord | null) => void;
+  fetchSubmissions: (exerciseId?: string) => Promise<void>;
+  recordSubmission: (sub: Omit<UserSubmissionRecord, 'id' | 'createdAt'>) => Promise<void>;
+  restoreSubmissionToEditor: (sub: UserSubmissionRecord) => void;
+  resetCurrentExerciseToStarter: () => void;
 }
 
 const INITIAL_STAGES: VerificationStage[] = [
@@ -430,6 +469,27 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       if (report.score === 100 || report.verdict === 'PASSED') {
         get().onLevelCompleted(get().activeExerciseId);
       }
+
+      // Record submission from WebSocket verification frame
+      const isPassed = report.score === 100 || report.verdict === 'PASSED';
+      const fileMap: Record<string, string> = {};
+      get().files.forEach((f) => { fileMap[f.path] = f.content; });
+
+      get().recordSubmission({
+        userId: get().currentUser?.id || 'user_alpha',
+        exerciseId: get().activeExerciseId,
+        status: isPassed ? 'passed' : report.diagnostics?.length ? 'compile_error' : 'failed',
+        score: Number(report.score ?? (isPassed ? 100 : 0)),
+        files: fileMap,
+        stagesSummary: report.stages?.map((st: any) => ({
+          id: st.id,
+          title: st.title,
+          status: st.status === 'passed' ? 'passed' : 'failed',
+          timeMs: st.time_ms,
+          details: st.details,
+        })),
+        durationMs: Number(report.total_time_ms || 0),
+      });
     }
   });
 
@@ -634,6 +694,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     // Mastery & Progression State
     currentUser: initialUser,
     switchUser: async (userId: string) => {
+      const currentU = get().currentUser;
+      const activeExId = get().activeExerciseId;
+      // 1. Save current user's draft before switching
+      if (currentU && activeExId && get().files.length > 0) {
+        saveUserDraft(currentU.id, activeExId, get().files);
+      }
+
       let targetUser = DEFAULT_USERS[userId] || DEFAULT_USERS['user_alpha'];
       if (typeof window !== 'undefined') {
         const cached = localStorage.getItem(`beamforge_user_${userId}`);
@@ -664,11 +731,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         celebrationBadge: null,
         isBadgeCelebrationOpen: false,
         unlockedSolutionLessonIds: targetUser.unlockedSolutionLessonIds,
+        activeSubmissionDetail: null,
       });
 
-      if (targetUser.lastActiveExercise) {
-        get().switchExercise(targetUser.lastActiveExercise);
-      }
+      const exToLoad = targetUser.lastActiveExercise || activeExId || 'ch01-l01';
+      get().switchExercise(exToLoad);
+      get().fetchSubmissions(exToLoad);
 
       get().addTerminalEntry({
         type: 'output',
@@ -693,7 +761,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         localStorage.removeItem('beamforge_user_profile_v2');
         localStorage.removeItem(`beamforge_user_${activeUser.id}`);
         localStorage.removeItem('beamforge_progress');
+        // Clear all drafts and submissions cache for this user
+        Object.keys(localStorage).forEach((k) => {
+          if (
+            k.startsWith(`beamforge_draft_${activeUser.id}`) ||
+            k.startsWith(`beamforge_submissions_${activeUser.id}`) ||
+            k.startsWith(`beamforge_accepted_${activeUser.id}`)
+          ) {
+            localStorage.removeItem(k);
+          }
+        });
       }
+      try {
+        fetch('/api/user-progress', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'reset_submissions', userId: activeUser.id }),
+        }).catch(() => {});
+      } catch {}
       syncUserToStorageAndDb(freshUser);
       set({
         currentUser: freshUser,
@@ -703,6 +788,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         celebrationBadge: null,
         isBadgeCelebrationOpen: false,
         unlockedSolutionLessonIds: [],
+        submissions: [],
+        activeSubmissionDetail: null,
       });
       get().switchExercise('ch01-l01');
       get().addTerminalEntry({
@@ -1078,19 +1165,43 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             },
           ];
         }
+
+        const user = get().currentUser;
+        let filesToMount = lessonFiles;
+        if (user) {
+          const userDraft = loadUserDraft(user.id, id);
+          if (userDraft) {
+            filesToMount = userDraft;
+          } else if (typeof window !== 'undefined') {
+            try {
+              const acceptedRaw = localStorage.getItem(`beamforge_accepted_${user.id}_${id}`);
+              if (acceptedRaw) {
+                const acceptedMap = JSON.parse(acceptedRaw);
+                filesToMount = lessonFiles.map((f) => ({
+                  ...f,
+                  content: acceptedMap[f.path] || f.content,
+                }));
+              }
+            } catch {}
+          }
+        }
+
         set({
           activeExerciseId: id,
           activeChapter: lesson.chapterNumber,
           activeLesson: lesson.lessonNumber,
-          files: lessonFiles,
-          activeFilePath: lessonFiles[0]?.path || '',
-          openTabPaths: lessonFiles.map((f) => f.path),
+          files: filesToMount,
+          activeFilePath: filesToMount[0]?.path || '',
+          openTabPaths: filesToMount.map((f) => f.path),
           isSolutionVisible: false,
           runResult: null,
           verificationStages: [],
           lessonOutputTab: 'test_results',
           isLessonOutputOpen: false,
+          activeSubmissionDetail: null,
         });
+
+        get().fetchSubmissions(id);
         if (typeof window !== 'undefined') {
           try {
             localStorage.setItem('bf_last_active_exercise', id);
@@ -1200,14 +1311,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     },
 
     updateFileContent: (path: string, content: string) => {
-      set((state) => ({
-        files: state.files.map((f) => (f.path === path ? { ...f, content, isModified: true } : f)),
-      }));
+      const nextFiles = get().files.map((f) => (f.path === path ? { ...f, content, isModified: true } : f));
+      set({ files: nextFiles });
+
+      const user = get().currentUser;
+      const exId = get().activeExerciseId;
+      if (user && exId) {
+        saveUserDraft(user.id, exId, nextFiles);
+      }
+
       // Sync file change to Go orchestrator if connected
       if (wsMux.isConnected()) {
         const fileMap: Record<string, string> = {};
-        get().files.forEach((f) => {
-          fileMap[f.path] = f.path === path ? content : f.content;
+        nextFiles.forEach((f) => {
+          fileMap[f.path] = f.content;
         });
         wsMux.syncFiles(fileMap);
       }
@@ -1216,6 +1333,148 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     resetWorkspace: () => {
       const { activeExerciseId } = get();
       get().switchExercise(activeExerciseId);
+    },
+
+    // Submissions & User-Scoped History Implementation
+    submissions: [],
+    isLoadingSubmissions: false,
+    activeSubmissionDetail: null,
+    setActiveSubmissionDetail: (sub: UserSubmissionRecord | null) => set({ activeSubmissionDetail: sub }),
+
+    fetchSubmissions: async (targetExerciseId?: string) => {
+      const exerciseId = targetExerciseId || get().activeExerciseId;
+      const user = get().currentUser;
+      if (!user || !exerciseId) return;
+
+      // Check local cache first for instant UI response
+      if (typeof window !== 'undefined') {
+        try {
+          const cached = localStorage.getItem(`beamforge_submissions_${user.id}_${exerciseId}`);
+          if (cached) {
+            set({ submissions: JSON.parse(cached) });
+          }
+        } catch {}
+      }
+
+      set({ isLoadingSubmissions: true });
+      try {
+        const res = await fetch(`/api/user-progress?mode=submissions&userId=${user.id}&exerciseId=${exerciseId}`);
+        if (res.ok) {
+          const data = await res.json();
+          const subs: UserSubmissionRecord[] = data.submissions || [];
+          set({ submissions: subs, isLoadingSubmissions: false });
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem(`beamforge_submissions_${user.id}_${exerciseId}`, JSON.stringify(subs));
+            } catch {}
+          }
+        } else {
+          set({ isLoadingSubmissions: false });
+        }
+      } catch {
+        set({ isLoadingSubmissions: false });
+      }
+    },
+
+    recordSubmission: async (payload: Omit<UserSubmissionRecord, 'id' | 'createdAt'>) => {
+      const subId = `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const createdAt = new Date().toISOString();
+      const newRecord: UserSubmissionRecord = {
+        ...payload,
+        id: subId,
+        createdAt,
+      };
+
+      // Prepend to current submissions list
+      set((state) => {
+        const next = [newRecord, ...state.submissions.filter((s) => s.id !== subId)];
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem(
+              `beamforge_submissions_${payload.userId}_${payload.exerciseId}`,
+              JSON.stringify(next)
+            );
+          } catch {}
+        }
+        return { submissions: next };
+      });
+
+      // If passed, save as latest accepted solution snapshot
+      if (payload.status === 'passed' && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(
+            `beamforge_accepted_${payload.userId}_${payload.exerciseId}`,
+            JSON.stringify(payload.files)
+          );
+        } catch {}
+      }
+
+      // Persist to Neon DB
+      try {
+        await fetch('/api/user-progress', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'record_submission',
+            submission: newRecord,
+          }),
+        });
+      } catch (err) {
+        console.warn('[Submissions] Neon DB sync notice:', err);
+      }
+    },
+
+    restoreSubmissionToEditor: (sub: UserSubmissionRecord) => {
+      const user = get().currentUser;
+      const exId = get().activeExerciseId;
+      const currentFiles = get().files;
+      const fileMap = sub.files || {};
+      const fileMapKeys = Object.keys(fileMap);
+
+      const restoredFiles: WorkspaceFile[] = currentFiles.map((f) => {
+        // 1. Direct path match
+        if (fileMap[f.path]) {
+          return { ...f, content: fileMap[f.path], isModified: true };
+        }
+        // 2. Basename match
+        const matchingKey = fileMapKeys.find((k) => k.endsWith(f.name));
+        if (matchingKey) {
+          return { ...f, content: fileMap[matchingKey], isModified: true };
+        }
+        // 3. Single-file fallback
+        if (currentFiles.length === 1 && fileMapKeys.length === 1) {
+          return { ...f, content: fileMap[fileMapKeys[0]], isModified: true };
+        }
+        return f;
+      });
+
+      set({ files: restoredFiles });
+      if (user && exId) {
+        saveUserDraft(user.id, exId, restoredFiles);
+      }
+
+      get().addTerminalEntry({
+        type: 'output',
+        text: `[Submission Restored] Editor updated with snapshot from ${new Date(sub.createdAt).toLocaleTimeString()} (${sub.status.toUpperCase()}, Score: ${sub.score}).`,
+      });
+    },
+
+    resetCurrentExerciseToStarter: () => {
+      const user = get().currentUser;
+      const exId = get().activeExerciseId;
+      if (user && exId) {
+        clearUserDraft(user.id, exId);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem(`beamforge_accepted_${user.id}_${exId}`);
+          } catch {}
+        }
+      }
+      get().resetWorkspace();
+      get().addTerminalEntry({
+        type: 'output',
+        text: `[Template Reset] Workspace reset to starter code for ${exId}.`,
+      });
     },
 
     // UI Layout

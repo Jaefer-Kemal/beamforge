@@ -23,6 +23,23 @@ async function ensureTable(sql: any) {
       await sql`ALTER TABLE beamforge_users ADD COLUMN IF NOT EXISTS streak_days INT DEFAULT 1;`;
       await sql`ALTER TABLE beamforge_users ADD COLUMN IF NOT EXISTS last_activity_date VARCHAR(32);`;
     } catch {}
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS beamforge_submissions (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        exercise_id VARCHAR(128) NOT NULL,
+        status VARCHAR(32) NOT NULL,
+        score INT DEFAULT 0,
+        files JSONB NOT NULL,
+        stages_summary JSONB DEFAULT '[]'::jsonb,
+        duration_ms INT DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `;
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_submissions_user_exercise ON beamforge_submissions(user_id, exercise_id, created_at DESC);`;
+    } catch {}
   } catch (err) {
     console.warn('[Neon DB] Table check/creation warning:', err);
   }
@@ -35,6 +52,48 @@ export async function GET(req: NextRequest) {
   const preset = DEFAULT_USERS[userId] || DEFAULT_USERS['user_alpha'];
 
   const sql = getNeonDb();
+
+  // Submissions Query Mode
+  if (mode === 'submissions') {
+    const exerciseId = searchParams.get('exerciseId');
+    if (!sql) {
+      return NextResponse.json({ source: 'offline', submissions: [], dbConnected: false });
+    }
+    try {
+      await ensureTable(sql);
+      let rows: any[] = [];
+      if (exerciseId) {
+        rows = await sql`
+          SELECT id, user_id as "userId", exercise_id as "exerciseId", status, score, files, stages_summary as "stagesSummary", duration_ms as "durationMs", created_at as "createdAt"
+          FROM beamforge_submissions
+          WHERE user_id = ${userId} AND exercise_id = ${exerciseId}
+          ORDER BY created_at DESC
+          LIMIT 50
+        `;
+      } else {
+        rows = await sql`
+          SELECT id, user_id as "userId", exercise_id as "exerciseId", status, score, files, stages_summary as "stagesSummary", duration_ms as "durationMs", created_at as "createdAt"
+          FROM beamforge_submissions
+          WHERE user_id = ${userId}
+          ORDER BY created_at DESC
+          LIMIT 100
+        `;
+      }
+      return NextResponse.json({
+        source: 'neon_submissions',
+        submissions: rows || [],
+        dbConnected: true,
+      });
+    } catch (err: any) {
+      console.error('[Neon DB] Submissions query error:', err);
+      return NextResponse.json({
+        source: 'error_fallback',
+        submissions: [],
+        dbConnected: false,
+        error: err.message,
+      });
+    }
+  }
 
   // Leaderboard Query Mode
   if (mode === 'leaderboard') {
@@ -176,12 +235,55 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const sql = getNeonDb();
+
+    // Action: Record Submission
+    if (body.action === 'record_submission') {
+      const sub = body.submission;
+      if (!sub || !sub.userId || !sub.exerciseId) {
+        return NextResponse.json({ error: 'Missing submission payload' }, { status: 400 });
+      }
+      if (!sql) {
+        return NextResponse.json({ status: 'ok', source: 'offline', dbConnected: false });
+      }
+      await ensureTable(sql);
+      const subId = sub.id || `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      await sql`
+        INSERT INTO beamforge_submissions (
+          id, user_id, exercise_id, status, score, files, stages_summary, duration_ms, created_at
+        ) VALUES (
+          ${subId},
+          ${sub.userId},
+          ${sub.exerciseId},
+          ${sub.status || 'failed'},
+          ${sub.score || 0},
+          ${JSON.stringify(sub.files || {})},
+          ${JSON.stringify(sub.stagesSummary || [])},
+          ${sub.durationMs || 0},
+          NOW()
+        )
+      `;
+      return NextResponse.json({ status: 'ok', submissionId: subId, dbConnected: true });
+    }
+
+    // Action: Reset Submissions
+    if (body.action === 'reset_submissions') {
+      const resetUserId = body.userId;
+      if (!sql) {
+        return NextResponse.json({ status: 'ok', source: 'offline', dbConnected: false });
+      }
+      await ensureTable(sql);
+      if (resetUserId) {
+        await sql`DELETE FROM beamforge_submissions WHERE user_id = ${resetUserId}`;
+      }
+      return NextResponse.json({ status: 'ok', dbConnected: true });
+    }
+
+    // Default Action: Sync User Profile
     const user: UserProfile = body.user;
     if (!user || !user.id) {
       return NextResponse.json({ error: 'Missing user payload' }, { status: 400 });
     }
-
-    const sql = getNeonDb();
     if (!sql) {
       return NextResponse.json({ status: 'ok', source: 'offline', dbConnected: false });
     }

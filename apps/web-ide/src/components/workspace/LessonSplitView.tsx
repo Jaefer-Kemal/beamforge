@@ -23,6 +23,7 @@ import {
   Target,
   ArrowRight,
   WifiOff,
+  History,
 } from 'lucide-react';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import type {
@@ -43,6 +44,8 @@ import { BeamMarkdownRenderer, renderInlineContent } from '../pedagogy/BeamMarkd
 import { SolutionUnlockModal } from './SolutionUnlockModal';
 import { ResetConfirmModal } from './ResetConfirmModal';
 import { SolutionViewerTab } from './SolutionViewerTab';
+import { LessonSubmissionsList } from './LessonSubmissionsList';
+import { LessonSubmissionDetail } from './LessonSubmissionDetail';
 
 export type { LessonContent };
 
@@ -551,6 +554,12 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
     completedLevelIds,
     unlockedSolutionLessonIds,
     unlockSolutionForLesson,
+    submissions,
+    isLoadingSubmissions,
+    activeSubmissionDetail,
+    setActiveSubmissionDetail,
+    restoreSubmissionToEditor,
+    resetCurrentExerciseToStarter,
   } = useWorkspaceStore();
 
   const isDark = theme === 'dark';
@@ -558,6 +567,12 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
   const [editorMounted, setEditorMounted] = useState(false);
   const monacoRef = useRef<any>(null);
   const [mobileTab, setMobileTab] = useState<'guide' | 'code' | 'results'>('guide');
+  const [leftTab, setLeftTab] = useState<'guide' | 'submissions'>('guide');
+
+  // Reset active submission inspection when switching lessons
+  useEffect(() => {
+    setActiveSubmissionDetail(null);
+  }, [lesson.id, setActiveSubmissionDetail]);
 
   // Confirmation Modals
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
@@ -863,69 +878,143 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             )}
             <span className="truncate">{lesson.title}</span>
           </h1>
+
+          {/* Left Segmented Switcher: [ Guide ] vs [ Submissions (N) ] */}
+          <div
+            className="flex items-center p-0.5 rounded-lg border flex-shrink-0"
+            style={{
+              background: isDark ? 'rgba(15, 23, 42, 0.60)' : 'rgba(241, 245, 249, 0.90)',
+              borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
+            }}
+          >
+            <button
+              id="left-tab-guide"
+              onClick={() => setLeftTab('guide')}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold transition-all cursor-pointer"
+              style={{
+                background: leftTab === 'guide'
+                  ? (isDark ? 'rgba(255, 255, 255, 0.12)' : '#FFFFFF')
+                  : 'transparent',
+                color: leftTab === 'guide'
+                  ? (isDark ? '#F8FAFC' : '#0F172A')
+                  : (isDark ? '#94A3B8' : '#64748B'),
+                boxShadow: leftTab === 'guide' && !isDark ? '0 1px 3px rgba(15,23,42,0.08)' : 'none',
+              }}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Guide</span>
+            </button>
+
+            <button
+              id="left-tab-submissions"
+              onClick={() => setLeftTab('submissions')}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold transition-all cursor-pointer"
+              style={{
+                background: leftTab === 'submissions'
+                  ? (isDark ? 'rgba(255, 255, 255, 0.12)' : '#FFFFFF')
+                  : 'transparent',
+                color: leftTab === 'submissions'
+                  ? (isDark ? '#F8FAFC' : '#0F172A')
+                  : (isDark ? '#94A3B8' : '#64748B'),
+                boxShadow: leftTab === 'submissions' && !isDark ? '0 1px 3px rgba(15,23,42,0.08)' : 'none',
+              }}
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>Submissions</span>
+              {submissions.length > 0 && (
+                <span
+                  className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold"
+                  style={{
+                    background: isDark ? 'rgba(245, 158, 11, 0.25)' : 'rgba(245, 158, 11, 0.20)',
+                    color: '#F59E0B',
+                  }}
+                >
+                  {submissions.length}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Left Scrollable Content */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          {/* Slot 1: Incident Alert Banner (only on incident_triage or when incidentAlert is defined) */}
-          {lesson.incidentAlert && (
-            <IncidentAlertBanner alert={lesson.incidentAlert} isDark={isDark} />
-          )}
+        {leftTab === 'guide' ? (
+          <div className="flex-1 overflow-y-auto px-5 py-4">
+            {/* Slot 1: Incident Alert Banner (only on incident_triage or when incidentAlert is defined) */}
+            {lesson.incidentAlert && (
+              <IncidentAlertBanner alert={lesson.incidentAlert} isDark={isDark} />
+            )}
 
-          {/* Slot 2: Concept Markdown */}
-          <MarkdownRenderer md={lesson.conceptMarkdown} isDark={isDark} />
+            {/* Slot 2: Concept Markdown */}
+            <MarkdownRenderer md={lesson.conceptMarkdown} isDark={isDark} />
 
-          {/* Slot 3: Interactive Step-Diagram (Collapsible) */}
-          {resolveVisualScene(lesson) && (
-            <div className="mt-4">
-              <BeamConceptVisualizer scene={resolveVisualScene(lesson)!} />
-            </div>
-          )}
-
-          {/* Slot 4: OTP Doc Cards */}
-          {lesson.otpDocCards.length > 0 && (
-            <div className="mt-4">
-              <div className="text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-1.5"
-                style={{ color: isDark ? '#64748B' : '#94A3B8' }}>
-                <BookOpen className="w-3.5 h-3.5 text-blue-500" />
-                <span>Official Erlang Docs &amp; Function Reference</span>
+            {/* Slot 3: Interactive Step-Diagram (Collapsible) */}
+            {resolveVisualScene(lesson) && (
+              <div className="mt-4">
+                <BeamConceptVisualizer scene={resolveVisualScene(lesson)!} />
               </div>
-              {lesson.otpDocCards.map((card) => (
-                <OtpDocCard key={`${card.module}:${card.functionName}`} card={card} isDark={isDark} />
-              ))}
+            )}
+
+            {/* Slot 4: OTP Doc Cards */}
+            {lesson.otpDocCards.length > 0 && (
+              <div className="mt-4">
+                <div className="text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-1.5"
+                  style={{ color: isDark ? '#64748B' : '#94A3B8' }}>
+                  <BookOpen className="w-3.5 h-3.5 text-blue-500" />
+                  <span>Official Erlang Docs &amp; Function Reference</span>
+                </div>
+                {lesson.otpDocCards.map((card) => (
+                  <OtpDocCard key={`${card.module}:${card.functionName}`} card={card} isDark={isDark} />
+                ))}
+              </div>
+            )}
+
+            {/* Slot 5: Quick Mental Model Check (Collapsible) */}
+            <MentalModelCheckCard
+              check={lesson.mentalModelCheck}
+              lessonId={lesson.id}
+              chapterNumber={lesson.chapterNumber}
+              lessonNumber={lesson.lessonNumber}
+              title={lesson.title}
+              isDark={isDark}
+            />
+
+            {/* Slot 6: Strict Rules & Verification Constraints Card */}
+            {lesson.astRules && <AstRulesCard rules={lesson.astRules} isDark={isDark} />}
+
+            {/* Mobile Quick-Jump to Code Editor */}
+            <div className="flex md:hidden pt-4 pb-2">
+              <button
+                onClick={() => setMobileTab('code')}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all shadow-md active:scale-[0.99]"
+                style={{
+                  background: 'linear-gradient(135deg, #007AFF 0%, #0056B3 100%)',
+                  color: '#FFFFFF',
+                }}
+              >
+                <Code2 className="w-4 h-4" />
+                <span>Open Code Editor</span>
+              </button>
             </div>
-          )}
 
-          {/* Slot 5: Quick Mental Model Check (Collapsible) */}
-          <MentalModelCheckCard
-            check={lesson.mentalModelCheck}
-            lessonId={lesson.id}
-            chapterNumber={lesson.chapterNumber}
-            lessonNumber={lesson.lessonNumber}
-            title={lesson.title}
-            isDark={isDark}
-          />
-
-          {/* Slot 6: Strict Rules & Verification Constraints Card */}
-          {lesson.astRules && <AstRulesCard rules={lesson.astRules} isDark={isDark} />}
-
-          {/* Mobile Quick-Jump to Code Editor */}
-          <div className="flex md:hidden pt-4 pb-2">
-            <button
-              onClick={() => setMobileTab('code')}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all shadow-md active:scale-[0.99]"
-              style={{
-                background: 'linear-gradient(135deg, #007AFF 0%, #0056B3 100%)',
-                color: '#FFFFFF',
-              }}
-            >
-              <Code2 className="w-4 h-4" />
-              <span>Open Code Editor</span>
-            </button>
+            <div className="h-8" />
           </div>
-
-          <div className="h-8" />
-        </div>
+        ) : activeSubmissionDetail ? (
+          <LessonSubmissionDetail
+            submission={activeSubmissionDetail}
+            isDark={isDark}
+            onBack={() => setActiveSubmissionDetail(null)}
+            onRestore={(sub) => {
+              restoreSubmissionToEditor(sub);
+            }}
+          />
+        ) : (
+          <LessonSubmissionsList
+            submissions={submissions}
+            isLoading={isLoadingSubmissions}
+            isDark={isDark}
+            onSelectSubmission={(sub) => setActiveSubmissionDetail(sub)}
+          />
+        )}
       </div>
 
       {/* ════════════════════════════════════════════════════════════════════
@@ -1917,7 +2006,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
         fileName={activeFile?.name || 'workspace'}
         isDark={isDark}
         onClose={() => setIsResetModalOpen(false)}
-        onConfirm={resetWorkspace}
+        onConfirm={resetCurrentExerciseToStarter}
       />
     </div>
   );

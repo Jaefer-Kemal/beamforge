@@ -1369,3 +1369,34 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Saved screenshot artifacts:
     - playwright_reset_modal_verified.png
     - playwright_reset_verified_shelf.png
+
+
+## Phase 61: User-Aware Code Drafts, Neon Submissions Persistence & Left-Pane Non-Destructive Inspector
+- [x] **61.1: User-Scoped Editor Drafts & Auto-Restoration (useWorkspaceStore.ts)**:
+  - Isolated Monaco editor working code and uncommitted drafts per user via `beamforge_draft_${userId}_${exerciseId}`.
+  - When switching users (`switchUser`), saves active user draft, switches context, and loads target user draft, accepted solution (`beamforge_accepted_${userId}_${exerciseId}`), or starter template.
+  - Verified user draft isolation with Playwright: Alpha's uncommitted work is strictly isolated and invisible to Beta, and restored intact upon switching back.
+- [x] **61.2: Persistent Submissions in Neon PostgreSQL & REST API (route.ts & submissions.ts)**:
+  - Added Neon table `beamforge_submissions` with columns `id`, `user_id`, `exercise_id`, `status` (`passed` | `failed` | `compile_error`), `score`, `files` (JSONB), `stages_summary` (JSONB), `duration_ms`, and `created_at`.
+  - Added index `idx_submissions_user_exercise` on `(user_id, exercise_id, created_at DESC)`.
+  - Exposed `GET /api/user-progress?mode=submissions&userId=...&exerciseId=...` for retrieving attempts.
+  - Exposed `POST /api/user-progress` with `action === 'record_submission'` and `action === 'reset_submissions'`.
+- [x] **61.3: De-Cluttered Left-Pane Submissions Tab (LessonSplitView.tsx & LessonSubmissionsList.tsx)**:
+  - Added segmented switcher in Left Pane header: `[ Guide ]` vs `[ Submissions (N) ]` with Lucide SVG icons.
+  - Submissions list displays attempt status badge (Accepted, Failed, Compile Error), score (`X/100`), duration (`Xms`), relative timestamp, and stage summary chips.
+  - Displays polished glass empty state (`#empty-submissions-card`) when no submissions exist.
+- [x] **61.4: Non-Destructive Inspection & Guarded Restoration (LessonSubmissionDetail.tsx & RestoreConfirmModal.tsx)**:
+  - Clicking any past submission opens read-only detail view in Left Pane displaying syntax-highlighted Erlang code (`ErlangCodeBlock`), duration, and stage chips.
+  - Strictly non-destructive: Right Pane Monaco editor code is never touched while browsing past attempts.
+  - Added `Copy Code` button with feedback.
+  - Added `Restore to Editor` button guarded by `RestoreConfirmModal` requiring explicit confirmation before replacing editor draft.
+- [x] **61.5: 1-Click Reset to Starter Template**:
+  - Wired `#reset-template-btn` to `resetCurrentExerciseToStarter`, purging drafts and accepted cache and resetting workspace to starter files.
+- [x] **61.6: E2E Playwright Verification (scripts/test_user_aware_submissions.mjs)**:
+  - All 5 automated test suites passed with 100% success.
+  - Zero emojis across all new and edited files in `apps/web-ide/src` (strictly Lucide SVG icons).
+  - Saved screenshot artifacts:
+    - `playwright_user_aware_draft_isolation.png`
+    - `playwright_submissions_left_pane_list.png`
+    - `playwright_submissions_read_only_detail.png`
+    - `playwright_restore_confirm_modal.png`
