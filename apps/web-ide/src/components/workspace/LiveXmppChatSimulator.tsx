@@ -114,10 +114,10 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     id: 'msg-1',
     sender: 'alice',
     senderJid: 'alice@beamforge.local/web',
-    body: 'Hey Bob! The 5-module OTP XMPP server is live and routing stanzas!',
+    body: 'Hey Bob! The 6-milestone OTP XMPP server is live and routing stanzas!',
     timestamp: '10:14:05',
     status: 'delivered',
-    rawXml: `<message from="alice@beamforge.local/web" to="bob@beamforge.local/mobile" type="chat" id="m-101">\n  <body>Hey Bob! The 5-module OTP XMPP server is live and routing stanzas!</body>\n</message>`,
+    rawXml: `<message from="alice@beamforge.local/web" to="bob@beamforge.local/mobile" type="chat" id="m-101">\n  <body>Hey Bob! The 6-milestone OTP XMPP server is live and routing stanzas!</body>\n</message>`,
     routedVia: 'xmpp_router:route/2 -> ETS PID <0.142.0>',
   },
   {
@@ -143,7 +143,7 @@ export function LiveXmppChatSimulator({
   milestoneStatus,
   isMasterUnlocked = false,
 }: LiveXmppChatSimulatorProps) {
-  // Milestone activation resolution
+  // Granular milestone activation resolution
   const m1Passed = Boolean(milestoneStatus?.[0] || isMasterUnlocked);
   const m2Passed = Boolean(milestoneStatus?.[1] || isMasterUnlocked);
   const m3Passed = Boolean(milestoneStatus?.[2] || isMasterUnlocked);
@@ -151,9 +151,19 @@ export function LiveXmppChatSimulator({
   const m5Passed = Boolean(milestoneStatus?.[4] || isMasterUnlocked);
   const m6Passed = Boolean(milestoneStatus?.[5] || isMasterUnlocked);
 
-  const passedCoreCount = [m1Passed, m2Passed, m3Passed, m4Passed, m5Passed].filter(Boolean).length;
-  // Core routing is active once M5 passes or user is in master / golden preview mode
-  const isClusterBooted = m5Passed;
+  // Total verified count across all 6 milestones
+  const passedTotalCount = [m1Passed, m2Passed, m3Passed, m4Passed, m5Passed, m6Passed].filter(Boolean).length;
+
+  // Strict dependency check: Port 5222 requires all 5 core modules (M1–M5) to prevent broken routing
+  const isClusterBooted = m1Passed && m2Passed && m3Passed && m4Passed && m5Passed;
+
+  // Identify any missing core dependencies for transparent feedback
+  const missingCoreDependencies: string[] = [];
+  if (!m1Passed) missingCoreDependencies.push('M1 Supervisor');
+  if (!m2Passed) missingCoreDependencies.push('M2 XML Framer');
+  if (!m3Passed) missingCoreDependencies.push('M3 ETS Registry');
+  if (!m4Passed) missingCoreDependencies.push('M4 SASL FSM');
+  if (!m5Passed) missingCoreDependencies.push('M5 Router');
 
   const [previewGoldenModel, setPreviewGoldenModel] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
@@ -405,7 +415,7 @@ export function LiveXmppChatSimulator({
 
           <div className="hidden lg:flex items-center gap-1.5 text-xs font-semibold" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
             <Layers className="w-3.5 h-3.5 text-purple-400" />
-            <span>BeamForge XMPP Core (M1–M5 Integrated)</span>
+            <span>BeamForge XMPP Core (6 Milestones Integrated)</span>
           </div>
         </div>
 
@@ -516,14 +526,25 @@ export function LiveXmppChatSimulator({
             <h3 className="text-sm sm:text-base font-bold mb-1" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
               XMPP Cluster Standby
             </h3>
-            <p className="text-xs mb-4 leading-relaxed" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-              Your server cluster requires Milestones 1 through 5 to boot. Pass and submit your OTP modules to route live stanzas.
+            <p className="text-xs mb-3 leading-relaxed" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+              Your server cluster requires all core OTP modules to boot. Solve and verify your components to start routing stanzas on Port 5222.
             </p>
 
-            {/* 5-Module Power-Up Assembly Rack */}
-            <div className="space-y-2 mb-4 text-left text-xs font-mono">
+            {/* Missing Dependencies Notice if learner solved out-of-order */}
+            {missingCoreDependencies.length > 0 && passedTotalCount > 0 && (
               <div
-                className={`p-2.5 rounded-xl border flex items-center justify-between transition-colors ${
+                className="mb-3 px-3 py-1.5 rounded-xl border text-[11px] font-semibold text-amber-500 bg-amber-500/10 border-amber-500/25 flex items-center justify-center gap-1.5"
+              >
+                <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                <span>Waiting on: {missingCoreDependencies.join(', ')}</span>
+              </div>
+            )}
+
+            {/* 6-Milestone Power-Up Assembly Rack */}
+            <div className="space-y-1.5 mb-4 text-left text-xs font-mono">
+              {/* M1: Supervisor */}
+              <div
+                className={`p-2 rounded-xl border flex items-center justify-between transition-colors ${
                   m1Passed
                     ? 'border-emerald-500/30 bg-emerald-500/10'
                     : isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'
@@ -543,8 +564,9 @@ export function LiveXmppChatSimulator({
                 </span>
               </div>
 
+              {/* M2: Stream Parser */}
               <div
-                className={`p-2.5 rounded-xl border flex items-center justify-between transition-colors ${
+                className={`p-2 rounded-xl border flex items-center justify-between transition-colors ${
                   m2Passed
                     ? 'border-emerald-500/30 bg-emerald-500/10'
                     : isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'
@@ -564,8 +586,9 @@ export function LiveXmppChatSimulator({
                 </span>
               </div>
 
+              {/* M3: Session Registry */}
               <div
-                className={`p-2.5 rounded-xl border flex items-center justify-between transition-colors ${
+                className={`p-2 rounded-xl border flex items-center justify-between transition-colors ${
                   m3Passed
                     ? 'border-emerald-500/30 bg-emerald-500/10'
                     : isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'
@@ -585,8 +608,9 @@ export function LiveXmppChatSimulator({
                 </span>
               </div>
 
+              {/* M4: C2S StateM */}
               <div
-                className={`p-2.5 rounded-xl border flex items-center justify-between transition-colors ${
+                className={`p-2 rounded-xl border flex items-center justify-between transition-colors ${
                   m4Passed
                     ? 'border-emerald-500/30 bg-emerald-500/10'
                     : isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'
@@ -606,8 +630,9 @@ export function LiveXmppChatSimulator({
                 </span>
               </div>
 
+              {/* M5: Router */}
               <div
-                className={`p-2.5 rounded-xl border flex items-center justify-between transition-colors ${
+                className={`p-2 rounded-xl border flex items-center justify-between transition-colors ${
                   m5Passed
                     ? 'border-emerald-500/30 bg-emerald-500/10'
                     : isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'
@@ -619,11 +644,33 @@ export function LiveXmppChatSimulator({
                     <span className="font-bold font-sans" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
                       M5: xmpp_router
                     </span>
-                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">Router & Offline Queue</span>
+                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">Router & Queue</span>
                   </div>
                 </div>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m5Passed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/10 text-slate-400'}`}>
                   {m5Passed ? 'ONLINE' : 'LOCKED'}
+                </span>
+              </div>
+
+              {/* M6: Chaos Monkey Resilience Lab */}
+              <div
+                className={`p-2 rounded-xl border flex items-center justify-between transition-colors ${
+                  m6Passed
+                    ? 'border-emerald-500/30 bg-emerald-500/10'
+                    : isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  {m6Passed ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <Lock className="w-4 h-4 text-slate-400" />}
+                  <div>
+                    <span className="font-bold font-sans" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
+                      M6: xmpp_chaos_test
+                    </span>
+                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">Chaos Resilience</span>
+                  </div>
+                </div>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m6Passed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/10 text-slate-400'}`}>
+                  {m6Passed ? 'RESILIENT' : 'STANDBY'}
                 </span>
               </div>
             </div>
@@ -634,7 +681,7 @@ export function LiveXmppChatSimulator({
               style={{ borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)' }}
             >
               <span className="text-[11px]" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                Verified modules: <strong>{passedCoreCount}/5</strong>
+                Verified milestones: <strong>{passedTotalCount}/6</strong>
               </span>
               <button
                 onClick={() => setPreviewGoldenModel(true)}
@@ -784,9 +831,16 @@ export function LiveXmppChatSimulator({
                   </button>
                   <button
                     onClick={handleSimulateChaosCrash}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 transition-colors border text-amber-400 bg-amber-500/10 border-amber-500/25 cursor-pointer"
+                    disabled={!m6Passed && !previewGoldenModel}
+                    title={!m6Passed && !previewGoldenModel ? 'Verify Milestone 6 (Chaos Monkey) to unlock live crash triage' : 'Simulate supervisor recovery'}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 transition-colors border cursor-pointer ${
+                      m6Passed || previewGoldenModel
+                        ? 'text-amber-400 bg-amber-500/10 border-amber-500/25 hover:bg-amber-500/20'
+                        : 'text-slate-500 bg-slate-500/10 border-slate-500/20 opacity-50 cursor-not-allowed'
+                    }`}
                   >
-                    Crash Router with Chaos (M1)
+                    {!m6Passed && !previewGoldenModel ? <Lock className="w-3 h-3 inline mr-1" /> : null}
+                    <span>Crash Router with Chaos (M1)</span>
                   </button>
                 </div>
 
@@ -863,13 +917,14 @@ export function LiveXmppChatSimulator({
                 </div>
 
                 {/* Architectural Module Mapping Cards */}
-                <div className="p-3.5 space-y-2.5 overflow-y-auto flex-1 text-xs">
-                  <div className="text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                    Live Milestone Architecture
+                <div className="p-3.5 space-y-2 overflow-y-auto flex-1 text-xs">
+                  <div className="text-[11px] font-bold uppercase tracking-wider mb-1 flex items-center justify-between" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                    <span>XMPP Blueprint (6/6)</span>
+                    <span className="text-[10px] font-mono text-emerald-400">{passedTotalCount}/6 Live</span>
                   </div>
 
                   <div
-                    className="p-2.5 rounded-xl border text-xs space-y-1"
+                    className="p-2 rounded-xl border text-xs space-y-1"
                     style={{
                       background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
                       borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
@@ -887,7 +942,7 @@ export function LiveXmppChatSimulator({
                   </div>
 
                   <div
-                    className="p-2.5 rounded-xl border text-xs space-y-1"
+                    className="p-2 rounded-xl border text-xs space-y-1"
                     style={{
                       background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
                       borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
@@ -905,7 +960,7 @@ export function LiveXmppChatSimulator({
                   </div>
 
                   <div
-                    className="p-2.5 rounded-xl border text-xs space-y-1"
+                    className="p-2 rounded-xl border text-xs space-y-1"
                     style={{
                       background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
                       borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
@@ -923,7 +978,25 @@ export function LiveXmppChatSimulator({
                   </div>
 
                   <div
-                    className="p-2.5 rounded-xl border text-xs space-y-1"
+                    className="p-2 rounded-xl border text-xs space-y-1"
+                    style={{
+                      background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
+                      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-teal-400">M4: xmpp_c2s_statem</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-teal-500/10 text-teal-300">
+                        SASL FSM
+                      </span>
+                    </div>
+                    <p className="text-[11px] opacity-80" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
+                      4-phase client connection FSM handling SASL PLAIN & resource binding.
+                    </p>
+                  </div>
+
+                  <div
+                    className="p-2 rounded-xl border text-xs space-y-1"
                     style={{
                       background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
                       borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
@@ -939,18 +1012,37 @@ export function LiveXmppChatSimulator({
                       Delivered: <strong className="text-emerald-500">{totalDelivered}</strong> | Spooled: <strong className="text-amber-500">{totalSpooled}</strong>
                     </p>
                   </div>
+
+                  <div
+                    className="p-2 rounded-xl border text-xs space-y-1"
+                    style={{
+                      background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
+                      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-rose-400">M6: xmpp_chaos_test</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-500/10 text-rose-300">
+                        Chaos Monkey
+                      </span>
+                    </div>
+                    <p className="text-[11px] opacity-80" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
+                      Validates supervisor recovery under untrappable exit(kill) signals.
+                    </p>
+                  </div>
                 </div>
               </div>
             </>
           ) : subTab === 'arch' ? (
             /* ── Dedicated Mobile Architecture View (< md) ── */
-            <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ background: isDark ? '#0B0F17' : '#FFFFFF' }}>
-              <div className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                XMPP Milestone Architecture
+            <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5" style={{ background: isDark ? '#0B0F17' : '#FFFFFF' }}>
+              <div className="text-xs font-bold uppercase tracking-wider mb-1 flex items-center justify-between" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                <span>XMPP Blueprint (6/6)</span>
+                <span className="text-[10px] font-mono text-emerald-400">{passedTotalCount}/6 Live</span>
               </div>
 
               <div
-                className="p-3 rounded-xl border text-xs space-y-1.5"
+                className="p-2.5 rounded-xl border text-xs space-y-1"
                 style={{
                   background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
                   borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
@@ -968,7 +1060,7 @@ export function LiveXmppChatSimulator({
               </div>
 
               <div
-                className="p-3 rounded-xl border text-xs space-y-1.5"
+                className="p-2.5 rounded-xl border text-xs space-y-1"
                 style={{
                   background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
                   borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
@@ -986,7 +1078,7 @@ export function LiveXmppChatSimulator({
               </div>
 
               <div
-                className="p-3 rounded-xl border text-xs space-y-1.5"
+                className="p-2.5 rounded-xl border text-xs space-y-1"
                 style={{
                   background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
                   borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
@@ -1004,7 +1096,25 @@ export function LiveXmppChatSimulator({
               </div>
 
               <div
-                className="p-3 rounded-xl border text-xs space-y-1.5"
+                className="p-2.5 rounded-xl border text-xs space-y-1"
+                style={{
+                  background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
+                  borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-teal-400">M4: xmpp_c2s_statem</span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-teal-500/10 text-teal-300">
+                    SASL FSM
+                  </span>
+                </div>
+                <p className="text-[11px] opacity-80 leading-relaxed" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
+                  4-phase client connection FSM handling SASL PLAIN & resource binding.
+                </p>
+              </div>
+
+              <div
+                className="p-2.5 rounded-xl border text-xs space-y-1"
                 style={{
                   background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
                   borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
@@ -1018,6 +1128,24 @@ export function LiveXmppChatSimulator({
                 </div>
                 <p className="text-[11px] opacity-80 leading-relaxed" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
                   Delivered: <strong className="text-emerald-500">{totalDelivered}</strong> | Spooled: <strong className="text-amber-500">{totalSpooled}</strong>
+                </p>
+              </div>
+
+              <div
+                className="p-2.5 rounded-xl border text-xs space-y-1"
+                style={{
+                  background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
+                  borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-rose-400">M6: xmpp_chaos_test</span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-500/10 text-rose-300">
+                    Chaos Monkey
+                  </span>
+                </div>
+                <p className="text-[11px] opacity-80 leading-relaxed" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
+                  Validates supervisor recovery under untrappable exit(kill) signals.
                 </p>
               </div>
             </div>

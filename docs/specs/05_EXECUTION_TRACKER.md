@@ -1311,3 +1311,40 @@ We execute the platform overhaul incrementally so every single piece is built to
 
 
 
+
+## Phase 59: Capstone Out-of-Order Milestone Dependency Gating, 6-Milestone Harmonization & Render Cold-Start Notification
+- [x] **59.1: Out-of-Order Milestone Dependency Gating (LiveXmppChatSimulator.tsx)**:
+  - Replaced naive single-milestone check (isClusterBooted = m5Passed) with strict multi-dependency check: isClusterBooted = m1Passed && m2Passed && m3Passed && m4Passed && m5Passed.
+  - Added dynamic missingCoreDependencies analyzer: when learners solve milestones out of order (e.g. solving M2 XML Parser and M5 Router before M1 Root Supervisor or M3 ETS Registry), the cluster remains safely in Port 5222 Standby.
+  - Displayed a prominent glassmorphic warning banner in the Standby Rack: "Waiting on: M1 Supervisor, M3 ETS Registry, M4 SASL FSM" explaining exactly which structural dependencies are still missing.
+- [x] **59.2: 6-Milestone Harmonization Across the Entire Capstone Rack**:
+  - Harmonized top stepper count (6-Milestone Production Blueprint) with the simulator assembly rack: added M6: xmpp_chaos_test (Chaos Monkey Resilience Lab) into the assembly rack with status (RESILIENT vs STANDBY).
+  - Gated the Crash Router with Chaos (M1) simulator button so it requires m6Passed || previewGoldenModel (shows lock icon when unverified).
+  - Updated all progress badges to X/6 Milestones Verified across both desktop and mobile architecture panels.
+- [x] **59.3: Render Free-Tier Cold-Start Notification (CapstoneStudioView.tsx)**:
+  - Implemented isColdBooting state detector with a 3.5s inactivity threshold when isVerifying or isRunning is active.
+  - Added glassmorphic pulse notification (#render-cold-boot-banner and #mobile-render-cold-boot-banner):
+    "Cloud Worker Resuming: Waking up grading container on Render (~30s spin-up from inactivity)..."
+  - Rendered in both the desktop bottom drawer and mobile results tab, reassuring users during Render free-tier container spin-up.
+- [x] **59.4: Neon PostgreSQL Clean Slate & Cloud Deployment Audit**:
+  - Audited live database with scripts/inspect_db.mjs: exactly 1 table (beamforge_users), exactly 3 rows (user_alpha, user_beta, user_master), zero orphan schemas or test records.
+  - Documented cloud environment variable configurations for Vercel (Frontend) and Render (Go Orchestrator + Erlang OTP 29 backend).
+  - Verified Go orchestrator CORS (*) and Gorilla WebSocket CheckOrigin (true) for cross-origin production communication.
+- [x] **59.5: Zero Emojis & Verification Loop**:
+  - Full codebase scanned: 0 emojis across all .ts and .tsx files in apps/web-ide/src (strictly Lucide SVG icons).
+  - npx tsc --noEmit passed with 0 errors.
+  - npm run build compiled 6/6 static & dynamic routes with 0 errors.
+  - Go orchestrator package compiled cleanly with go build ./... (exit 0).
+  - Go orchestrator live on port 8080 responding to /health (otp_release: 29, status: ok).
+  - E2E Playwright test suite (scripts/test_xmpp_chat_simulator.mjs) verified:
+    1. Upper action bar & drawer header de-cluttering.
+    2. Grandmaster Port 5222 Live routing, offline queue buffering & flush, M6 chaos crash simulation.
+    3. Unsolved User Alpha Standby Rack displaying all 6 milestones (0/6 Verified).
+    4. Out-of-order scenario (M2 & M5 passed): cluster remains in Standby and displays Waiting on: M1 Supervisor, M3 ETS Registry, M4 SASL FSM.
+    5. Render cold-start notification banner (#render-cold-boot-banner) appearing after 3.5s delay and clearing cleanly.
+    6. Mobile responsive layout on 390x844 viewport.
+  - Saved screenshot artifacts:
+    - playwright_xmpp_6_milestones_live.png
+    - playwright_xmpp_standby_rack.png
+    - playwright_xmpp_out_of_order_rack.png
+    - playwright_xmpp_chat_mobile.png

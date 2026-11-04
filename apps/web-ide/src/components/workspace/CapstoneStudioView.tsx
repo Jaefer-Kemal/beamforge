@@ -37,6 +37,7 @@ import {
   Terminal,
   ArrowRight,
   MessageSquare,
+  Server,
 } from 'lucide-react';
 import type { OtpDocSignatureCard } from '../../types/workspace';
 import { BeamConceptVisualizer } from '../pedagogy/BeamConceptVisualizer';
@@ -223,6 +224,22 @@ export function CapstoneStudioView() {
   const [drawerTab, setDrawerTab] = useState<'stages' | 'terminal' | 'chat' | 'tests' | 'solution'>('stages');
   const [copiedCode, setCopiedCode] = useState(false);
   const [mobileTab, setMobileTab] = useState<'guide' | 'code' | 'results'>('guide');
+  const [isColdBooting, setIsColdBooting] = useState(false);
+
+  // Render Cold-Start Notification (detects when cloud container on Render is waking up after inactivity)
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    if (isVerifying || isRunning) {
+      timer = setTimeout(() => {
+        setIsColdBooting(true);
+      }, 3500);
+    } else {
+      setIsColdBooting(false);
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [isVerifying, isRunning]);
 
   // Confirmation Modals
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
@@ -796,7 +813,7 @@ export function CapstoneStudioView() {
                         border: isDark ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid rgba(245, 158, 11, 0.35)',
                       }}
                     >
-                      ★ TARGET
+                      TARGET
                     </span>
                   )}
                   {isPassed && <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0 ml-0.5" />}
@@ -1147,6 +1164,23 @@ export function CapstoneStudioView() {
 
             {/* Drawer Body Content */}
             <div className="flex-1 overflow-y-auto p-3 text-xs">
+              {/* Render Cold-Start Cloud Awakening Notification */}
+              {isColdBooting && (
+                <div
+                  id="render-cold-boot-banner"
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl border mb-3 text-xs font-medium animate-pulse"
+                  style={{
+                    background: isDark ? 'rgba(59, 130, 246, 0.12)' : 'rgba(59, 130, 246, 0.08)',
+                    borderColor: isDark ? 'rgba(59, 130, 246, 0.35)' : 'rgba(59, 130, 246, 0.25)',
+                    color: isDark ? '#93C5FD' : '#1D4ED8',
+                  }}
+                >
+                  <Server className="w-4 h-4 shrink-0 text-blue-500 animate-spin" />
+                  <div className="flex-1">
+                    <span className="font-semibold">Cloud Worker Resuming:</span> Waking up grading container on Render (~30s spin-up from inactivity)...
+                  </div>
+                </div>
+              )}
               {drawerTab === 'stages' && (
                 <div className="space-y-2">
                   {verificationStages.length > 0 ? (
@@ -1440,6 +1474,23 @@ export function CapstoneStudioView() {
 
         {/* Mobile Results Scrollable Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {/* Render Cold-Start Cloud Awakening Notification */}
+          {isColdBooting && (
+            <div
+              id="mobile-render-cold-boot-banner"
+              className="flex items-center gap-2.5 px-3 py-2 rounded-xl border mb-3 text-xs font-medium animate-pulse"
+              style={{
+                background: isDark ? 'rgba(59, 130, 246, 0.12)' : 'rgba(59, 130, 246, 0.08)',
+                borderColor: isDark ? 'rgba(59, 130, 246, 0.35)' : 'rgba(59, 130, 246, 0.25)',
+                color: isDark ? '#93C5FD' : '#1D4ED8',
+              }}
+            >
+              <Server className="w-4 h-4 shrink-0 text-blue-500 animate-spin" />
+              <div className="flex-1">
+                <span className="font-semibold">Cloud Worker Resuming:</span> Waking up grading container on Render (~30s spin-up from inactivity)...
+              </div>
+            </div>
+          )}
           {drawerTab === 'stages' && (
             <div className="space-y-2">
               <div className="flex items-center justify-between pb-1">
