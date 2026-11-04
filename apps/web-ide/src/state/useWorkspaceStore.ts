@@ -186,7 +186,7 @@ interface WorkspaceState {
   wsStatus: WSConnectionStatus;
   setWsStatus: (status: WSConnectionStatus) => void;
   isBackendOnline: boolean;
-  checkBackendHealth: () => Promise<boolean>;
+  checkBackendHealth: (force?: boolean) => Promise<boolean>;
 
   // Exercises
   activeExerciseId: string;
@@ -393,17 +393,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
   // Initialize WebSocket multiplexer listeners
   wsMux.onStatusChange((status) => {
-    set({ wsStatus: status, isBackendOnline: status === 'connected' });
+    // wsStatus is decoupled from isBackendOnline so WebSocket reconnects/drops do NOT disable Submit button
+    set({ wsStatus: status });
     if (status === 'connected') {
       if (typeof get === 'function' && get()?.addTerminalEntry) {
         get().addTerminalEntry({
           type: 'output',
           text: `[Gateway] Connected to live Go Orchestrator (${ORCHESTRATOR_HTTP_URL}) • Native Erlang/OTP 29`,
         });
-      }
-    } else {
-      if (typeof get === 'function' && get()?.checkBackendHealth) {
-        get().checkBackendHealth();
       }
     }
   });
@@ -1153,14 +1150,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     },
 
     wsStatus: wsMux.isConnected() ? 'connected' : 'disconnected',
-    setWsStatus: (status) => set({ wsStatus: status, isBackendOnline: status === 'connected' }),
-    isBackendOnline: false,
-    checkBackendHealth: async () => {
-      if (typeof window === 'undefined') return false;
+    setWsStatus: (status) => set({ wsStatus: status }),
+    isBackendOnline: true, // Optimistic default so button is never prematurely disabled
+    checkBackendHealth: async (force?: boolean) => {
+      if (typeof window === 'undefined') return true;
+      // If already verified online and not forcing recheck, return cached online state
+      if (get().isBackendOnline && !force) return true;
       try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 1200);
-        const res = await fetch(`${ORCHESTRATOR_HTTP_URL}/health`, { signal: controller.signal });
+        const timer = setTimeout(() => controller.abort(), 8000); // 8s timeout handles cloud latency / cold start
+        const res = await fetch(`${ORCHESTRATOR_HTTP_URL}/health`, {
+          signal: controller.signal,
+          cache: 'no-store',
+        });
         clearTimeout(timer);
         const online = res.ok;
         if (get().isBackendOnline !== online) {

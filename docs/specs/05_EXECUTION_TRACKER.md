@@ -1458,3 +1458,18 @@ We execute the platform overhaul incrementally so every single piece is built to
 - [x] **64.3: Continuous Deployment & GitHub Sync**:
   - Connected Vercel project directly to GitHub repository (`vercel git connect`).
   - Both Render backend and Vercel frontend are configured for automatic zero-downtime deployment on git push to `main`.
+
+## Phase 65: Stream Stabilization & Health Check Flapping Resolution
+- [x] **65.1: Health Check Polling Loop Elimination ("Try Once & Cache")**:
+  - Removed aggressive `setInterval(3000)` polling loops from `LessonSplitView.tsx` and `CapstoneStudioView.tsx`.
+  - Replaced with optimistic single on-mount health check with smart caching (`isBackendOnline: true` by default).
+- [x] **65.2: WebSocket State & HTTP Readiness Decoupling**:
+  - Removed state pollution where WebSocket disconnect events flipped `isBackendOnline = false`.
+  - Submit and Run buttons remain enabled for HTTP REST execution regardless of WebSocket reconnect cycles.
+- [x] **65.3: Timeout Tolerance & Network Jitter Resilience**:
+  - Increased AbortController timeout from 1,200ms to 8,000ms in `useWorkspaceStore.ts` to accommodate cloud container roundtrips, TLS handshakes, and Render cold-start latency.
+- [x] **65.4: WebSocket 25-Second Keep-Alive Heartbeat**:
+  - Added automated 25-second ping frame (`channel: 0`, `type: 'ping'`) in `ws-multiplexer.ts` to prevent Render's 100-second idle proxy timeout from terminating the stream.
+  - Implemented channel 0 `ping`/`pong` handler in Go orchestrator (`ws_mux.go`).
+- [x] **65.5: Production Verification**:
+  - `go build` and `npm run build` compiled with zero errors. All changes deployed to production via `main`.

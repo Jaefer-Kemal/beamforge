@@ -129,6 +129,16 @@ func (h *Handler) handleJSONChannel(
 	send func(ResponseFrame),
 ) {
 	switch frame.Channel {
+	case 0: // 0x00 Control & Keep-Alive Heartbeat (prevents Render 100s proxy timeout)
+		if frame.Type == "ping" {
+			send(ResponseFrame{
+				Channel: 0,
+				Type:    "pong",
+				ID:      frame.ID,
+				Payload: map[string]interface{}{"status": "alive", "timestamp": time.Now().UTC().Format(time.RFC3339)},
+			})
+		}
+
 	case 1: // 0x01 PTY
 		var req struct {
 			Command string `json:"command"`

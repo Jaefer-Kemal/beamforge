@@ -268,13 +268,9 @@ export function CapstoneStudioView() {
     }
   };
 
-  // Continuously check Go Orchestrator backend health
+  // Verify Go Orchestrator backend health once on initial mount (no aggressive polling)
   useEffect(() => {
     checkBackendHealth();
-    const interval = setInterval(() => {
-      checkBackendHealth();
-    }, 3000);
-    return () => clearInterval(interval);
   }, [checkBackendHealth]);
 
   // Real-time debounced Erlang linter (300ms)

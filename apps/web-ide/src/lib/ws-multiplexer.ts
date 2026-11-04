@@ -17,6 +17,7 @@ class WSMultiplexer {
   private statusListeners: Array<(status: WSConnectionStatus) => void> = [];
   private messageListeners: Array<(frame: WSResponseFrame) => void> = [];
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private heartbeatTimer: NodeJS.Timeout | null = null;
   private url: string = getOrchestratorWsUrl();
 
   constructor() {
@@ -98,6 +99,7 @@ class WSMultiplexer {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
         }
+        this.startHeartbeat();
       };
 
       this.ws.onmessage = (event) => {
@@ -110,16 +112,36 @@ class WSMultiplexer {
       };
 
       this.ws.onclose = () => {
+        this.stopHeartbeat();
         this.updateStatus('disconnected');
         this.scheduleReconnect();
       };
 
       this.ws.onerror = () => {
+        this.stopHeartbeat();
         this.updateStatus('disconnected');
       };
     } catch {
+      this.stopHeartbeat();
       this.updateStatus('disconnected');
       this.scheduleReconnect();
+    }
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    // Keep-alive heartbeat every 25s prevents Render's 100s proxy timeout from dropping the stream
+    this.heartbeatTimer = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.sendFrame(0, 'ping', { ts: Date.now() });
+      }
+    }, 25000);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
     }
   }
 
@@ -133,7 +155,7 @@ class WSMultiplexer {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.initConnection();
-    }, 3000);
+    }, 5000);
   }
 }
 

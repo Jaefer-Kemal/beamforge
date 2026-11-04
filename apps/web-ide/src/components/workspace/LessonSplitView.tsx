@@ -606,13 +606,9 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
     }
   };
 
-  // Continuously verify Go Orchestrator backend health
+  // Verify Go Orchestrator backend health once on initial mount (no aggressive polling)
   useEffect(() => {
     checkBackendHealth();
-    const interval = setInterval(() => {
-      checkBackendHealth();
-    }, 3000);
-    return () => clearInterval(interval);
   }, [checkBackendHealth]);
 
   // Click-to-jump navigation: Reveal and place cursor at line/column in Monaco editor
