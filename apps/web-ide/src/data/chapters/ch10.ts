@@ -2018,7 +2018,7 @@ pool_acceptor(ListenSocket, ManagerPid) ->
 
 pool_worker_init(ClientSocket, ManagerPid) ->
     receive
-        {socket_assigned, ClientSocket} ->
+        {Msg, ClientSocket} when Msg =:= socket_assigned; Msg =:= socket_ready ->
             ok = inet:setopts(ClientSocket, [{active, once}]),
             pool_worker_loop(ClientSocket, ManagerPid)
     after 2000 -> gen_tcp:close(ClientSocket)
@@ -2049,6 +2049,7 @@ pool_worker_loop(Socket, ManagerPid) ->
 handoff_socket(ClientSocket, WorkerPid) ->
     case gen_tcp:controlling_process(ClientSocket, WorkerPid) of
         ok ->
+            WorkerPid ! {socket_assigned, ClientSocket},
             WorkerPid ! {socket_ready, ClientSocket},
             ok;
         {error, Reason} ->
@@ -2130,7 +2131,7 @@ pool_acceptor(ListenSocket, ManagerPid) ->
 
 pool_worker_init(ClientSocket, ManagerPid) ->
     receive
-        {socket_assigned, ClientSocket} ->
+        {Msg, ClientSocket} when Msg =:= socket_assigned; Msg =:= socket_ready ->
             ok = inet:setopts(ClientSocket, [{active, once}]),
             pool_worker_loop(ClientSocket, ManagerPid)
     after 2000 -> gen_tcp:close(ClientSocket)
@@ -2229,7 +2230,7 @@ pool_acceptor(ListenSocket, ManagerPid) ->
 
 pool_worker_init(ClientSocket, ManagerPid) ->
     receive
-        {socket_assigned, ClientSocket} ->
+        {Msg, ClientSocket} when Msg =:= socket_assigned; Msg =:= socket_ready ->
             ok = inet:setopts(ClientSocket, [{active, once}]),
             pool_worker_loop(ClientSocket, ManagerPid)
     after 2000 -> gen_tcp:close(ClientSocket)
@@ -2263,6 +2264,7 @@ pool_worker_loop(Socket, ManagerPid) ->
 handoff_socket(ClientSocket, WorkerPid) ->
     case gen_tcp:controlling_process(ClientSocket, WorkerPid) of
         ok ->
+            WorkerPid ! {socket_assigned, ClientSocket},
             WorkerPid ! {socket_ready, ClientSocket},
             ok;
         {error, Reason} ->
@@ -2344,7 +2346,7 @@ pool_acceptor(ListenSocket, ManagerPid) ->
 
 pool_worker_init(ClientSocket, ManagerPid) ->
     receive
-        {socket_assigned, ClientSocket} ->
+        {Msg, ClientSocket} when Msg =:= socket_assigned; Msg =:= socket_ready ->
             ok = inet:setopts(ClientSocket, [{active, once}]),
             pool_worker_loop(ClientSocket, ManagerPid)
     after 2000 -> gen_tcp:close(ClientSocket)

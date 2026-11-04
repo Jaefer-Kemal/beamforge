@@ -1555,7 +1555,7 @@ transition_subscription(Current, _)                  -> Current.
         id: 'tc-ch11-l04-2',
         title: 'Structured Stanza Error Synthesis',
         erlangCall: 'xmpp_error_and_roster:build_stanza_error(<<"message">>, <<"msg_1">>, <<"bob@localhost">>, item_not_found)',
-        expectedOutput: '<message type=\'error\' id=\'msg_1\' to=\'bob@localhost\'><error type=\'cancel\'><item-not-found xmlns=\'urn:ietf:params:xml:ns:xmpp-stanzas\'/></error></message>',
+        expectedOutput: '<<"<message type=\'error\' id=\'msg_1\' to=\'bob@localhost\'><error type=\'cancel\'><item-not-found xmlns=\'urn:ietf:params:xml:ns:xmpp-stanzas\'/></error></message>">>',
         explanation: 'Verifies structured XML stanza error formatting.',
       },
       {
@@ -3016,15 +3016,15 @@ broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
       {
         id: 'tc-ch11-l08-1',
         title: 'Priority-Based Message Routing (Desktop vs Phone vs Watch)',
-        erlangCall: 'begin P1 = spawn(fun() -> ok end), P2 = spawn(fun() -> ok end), P3 = spawn(fun() -> ok end), S0 = [], S1 = xmpp_presence_router:upsert_session(S0, <<"alice@host/watch">>, -5, P1, #{}), S2 = xmpp_presence_router:upsert_session(S1, <<"alice@host/phone">>, 5, P2, #{}), S3 = xmpp_presence_router:upsert_session(S2, <<"alice@host/desktop">>, 10, P3, #{}), {xmpp_presence_router:resolve_message_targets(S3, <<"alice@host">>), xmpp_presence_router:resolve_message_targets(S3, <<"alice@host/phone">>)} end',
-        expectedOutput: '{{route_online,[P3]},{route_online,[P2]}}',
+        erlangCall: 'begin P1 = spawn(fun() -> ok end), P2 = spawn(fun() -> ok end), P3 = spawn(fun() -> ok end), S0 = [], S1 = xmpp_presence_router:upsert_session(S0, <<"alice@host/watch">>, -5, P1, #{}), S2 = xmpp_presence_router:upsert_session(S1, <<"alice@host/phone">>, 5, P2, #{}), S3 = xmpp_presence_router:upsert_session(S2, <<"alice@host/desktop">>, 10, P3, #{}), T1 = xmpp_presence_router:resolve_message_targets(S3, <<"alice@host">>), T2 = xmpp_presence_router:resolve_message_targets(S3, <<"alice@host/phone">>), {T1 =:= {route_online, [P3]}, T2 =:= {route_online, [P2]}} end',
+        expectedOutput: '{true, true}',
         explanation: 'Bare JID routes to highest priority (P3 with priority 10); Full JID routes directly to specific resource (P2).',
       },
       {
         id: 'tc-ch11-l08-2',
         title: 'Pruning Dead Sessions on Process Down',
-        erlangCall: 'begin P1 = spawn(fun() -> ok end), P2 = spawn(fun() -> ok end), S0 = xmpp_presence_router:upsert_session([], <<"bob@host/web">>, 1, P1, #{}), S1 = xmpp_presence_router:upsert_session(S0, <<"bob@host/cli">>, 2, P2, #{}), S2 = xmpp_presence_router:remove_session_by_pid(S1, P1), xmpp_presence_router:resolve_message_targets(S2, <<"bob@host/web">>) end',
-        expectedOutput: '{route_online,[P2]}',
+        erlangCall: 'begin P1 = spawn(fun() -> ok end), P2 = spawn(fun() -> ok end), S0 = xmpp_presence_router:upsert_session([], <<"bob@host/web">>, 1, P1, #{}), S1 = xmpp_presence_router:upsert_session(S0, <<"bob@host/cli">>, 2, P2, #{}), S2 = xmpp_presence_router:remove_session_by_pid(S1, P1), T = xmpp_presence_router:resolve_message_targets(S2, <<"bob@host/web">>), T =:= {route_online, [P2]} end',
+        expectedOutput: 'true',
         explanation: 'After removing P1, routing to offline web resource falls back to online cli resource.',
       },
       {

@@ -11,6 +11,9 @@ async function check() {
   const rows = await sql`SELECT id, name, role, total_xp, streak_days FROM beamforge_users`;
   console.log(`\nTable beamforge_users (${rows.length} rows):`);
   console.table(rows);
+  const subs = await sql`SELECT id, user_id, exercise_id, status, score, duration_ms, created_at FROM beamforge_submissions`;
+  console.log(`\nTable beamforge_submissions (${subs.length} rows):`);
+  console.table(subs.slice(0, 10));
 }
 
 check().catch(console.error);

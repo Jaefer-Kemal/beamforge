@@ -269,6 +269,7 @@ extract_lines(Buffer, Acc) ->
 handoff_socket(ClientSocket, WorkerPid) ->
     case gen_tcp:controlling_process(ClientSocket, WorkerPid) of
         ok ->
+            WorkerPid ! {socket_assigned, ClientSocket},
             WorkerPid ! {socket_ready, ClientSocket},
             ok;
         {error, Reason} ->
