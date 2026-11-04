@@ -1653,6 +1653,42 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                         <StageRow key={s.id} stage={s} isDark={isDark} />
                       ))}
 
+                      {/* Visible Test Cases & Assertions Evaluated During Verification */}
+                      {lesson.visibleTestCases && lesson.visibleTestCases.length > 0 && (
+                        <div className="pt-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold uppercase tracking-wider" style={{ color: isDark ? '#64748B' : '#94A3B8' }}>
+                              Visible Test Cases &amp; Assertions
+                            </span>
+                            {runResult?.visibleTests && runResult.visibleTests.length > 0 && (
+                              <span
+                                className="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                                style={{
+                                  background: runResult.visibleTests.every((t) => t.passed) ? 'rgba(16,185,129,0.20)' : 'rgba(239,68,68,0.20)',
+                                  color: runResult.visibleTests.every((t) => t.passed) ? '#10B981' : '#EF4444',
+                                }}
+                              >
+                                {runResult.visibleTests.filter((t) => t.passed).length}/{runResult.visibleTests.length} Passed
+                              </span>
+                            )}
+                          </div>
+                          {lesson.visibleTestCases.map((tc, idx) => {
+                            const matchedTest = runResult?.visibleTests?.find(
+                              (t) => t.callStr.trim() === tc.erlangCall.trim() || t.expected.trim() === tc.expectedOutput.trim()
+                            ) || (runResult?.visibleTests ? runResult.visibleTests[idx] : undefined);
+
+                            return (
+                              <UnifiedTestCaseCard
+                                key={`verify-${tc.id || idx}`}
+                                testCase={tc}
+                                runTest={matchedTest}
+                                isDark={isDark}
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+
                       {/* BEAM VM Real Telemetry Strip placed under submit verification pipeline */}
                       {beamFootprint && (
                         <div className="pt-3">
@@ -1925,6 +1961,40 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                   {verificationStages.map((s) => (
                     <StageRow key={s.id} stage={s} isDark={isDark} />
                   ))}
+                  {lesson.visibleTestCases && lesson.visibleTestCases.length > 0 && (
+                    <div className="pt-2">
+                      <div className="flex items-center justify-between pb-1">
+                        <span className="text-xs font-bold uppercase tracking-wider" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                          Visible Test Assertions
+                        </span>
+                        {runResult?.visibleTests && runResult.visibleTests.length > 0 && (
+                          <span
+                            className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                            style={{
+                              background: runResult.visibleTests.every((t) => t.passed) ? 'rgba(16,185,129,0.20)' : 'rgba(239,68,68,0.20)',
+                              color: runResult.visibleTests.every((t) => t.passed) ? '#10B981' : '#EF4444',
+                            }}
+                          >
+                            {runResult.visibleTests.filter((t) => t.passed).length}/{runResult.visibleTests.length} Passed
+                          </span>
+                        )}
+                      </div>
+                      {lesson.visibleTestCases.map((tc, idx) => {
+                        const matchedTest = runResult?.visibleTests?.find(
+                          (t) => t.callStr.trim() === tc.erlangCall.trim() || t.expected.trim() === tc.expectedOutput.trim()
+                        ) || (runResult?.visibleTests ? runResult.visibleTests[idx] : undefined);
+
+                        return (
+                          <UnifiedTestCaseCard
+                            key={`m-verify-${tc.id || idx}`}
+                            testCase={tc}
+                            runTest={matchedTest}
+                            isDark={isDark}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
                   {beamFootprint && (
                     <div className="pt-2">
                       <BeamFootprintCard footprint={beamFootprint} isDark={isDark} />

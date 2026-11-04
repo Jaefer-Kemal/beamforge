@@ -70,8 +70,8 @@ class WSMultiplexer {
     this.sendFrame(4, 'xmpp_handshake', {});
   }
 
-  public triggerLiveVerification(exerciseId: string, files: Record<string, string>): void {
-    this.sendFrame(5, 'run_verification', { exercise_id: exerciseId, files });
+  public triggerLiveVerification(exerciseId: string, files: Record<string, string>, visibleTests?: any[]): void {
+    this.sendFrame(5, 'run_verification', { exercise_id: exerciseId, files, visible_tests: visibleTests || [] });
   }
 
   private sendFrame(channel: number, type: string, payload: any): void {

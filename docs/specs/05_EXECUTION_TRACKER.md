@@ -1473,3 +1473,36 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Implemented channel 0 `ping`/`pong` handler in Go orchestrator (`ws_mux.go`).
 - [x] **65.5: Production Verification**:
   - `go build` and `npm run build` compiled with zero errors. All changes deployed to production via `main`.
+
+
+## Phase 66: Ch01-L01 Visible Test Evaluator Fix
+- [x] **66.1: Root Cause Diagnosis — Hardcoded `expectedOutput` Pattern**:
+  - File: `apps/web-ide/src/data/chapters/ch01.ts`, line 123.
+  - `'{vm_info, "29", Schedulers, 1048576, 1048576}'` contained an unbound variable `Schedulers` causing `parse_expected_term/1` in `bf_test_evaluator.erl` to return `error`.
+  - Fallback `fuzzy_match/2` path checked for `{vm_info` and `"29"` in actual output — technically passes on OTP 29 but hardcodes the release string and is fragile across environments.
+- [x] **66.2: Fix — OTP-Agnostic Wildcard Pattern**:
+  - Changed `expectedOutput` from `'{vm_info, "29", Schedulers, 1048576, 1048576}'` to `'{vm_info,...}'`.
+  - `bf_test_evaluator`'s `fuzzy_match/2` splits on `...` → parts `["{vm_info,", "}"]` → `contains_parts_in_order/2` checks both are present in actual output in order.
+  - Accepts any valid OTP release string and any scheduler count — correct for local dev, Render (OTP 29), and future OTP upgrades.
+  - Updated `explanation` text to be version-agnostic.
+- [x] **66.3: Submit Flow Confirmed Correct (No Changes Required)**:
+  - `RunVerification` calls `runCodeLocked(ctx, session, exerciseID, files, nil)` with empty variadic visible tests.
+  - `buildRunScript` falls through to `buildChapterRunScript` → `ch01-l01` hardcoded script with Erlang guard-based pattern matching (`when is_list(Rel), is_integer(Sched),...`).
+  - `VisibleTests` and `Stdout` correctly populated from guard-validated result.
+- [x] **66.4: Verification**:
+  - `npx tsc --noEmit` — 0 errors.
+  - Committed `5861a5f`, pushed to `main`, deployed to Vercel production (`beamforge-eight.vercel.app`).
+
+## Phase 67: Full Verification Suite Visible Test Synchronization & UI Integration
+- [x] **67.1: UI Verification Tab Visible Test Integration**:
+  - In `apps/web-ide/src/components/workspace/LessonSplitView.tsx`, enhanced the `verification` drawer tab (both Desktop and Mobile) to render the full suite of `lesson.visibleTestCases` alongside `StageRow` grading stages and BEAM telemetry.
+  - When submitting, learners now see both the overarching grading invariants (clean compilation, AST rules, TCO recursion, hidden property assertions) AND each visible test case with input, expected output, actual output, PASS/FAIL badge, and term diff.
+- [x] **67.2: Submission Pipeline Race Condition Elimination**:
+  - Removed `get().runCode(true)` from `runVerificationSuite()` in `useWorkspaceStore.ts`. Previously, running a background `runCode` concurrently wiped `runResult` to null and raced to overwrite visible test results.
+- [x] **67.3: End-to-End Visible Test Forwarding in Verification**:
+  - Updated `useWorkspaceStore.ts` to pass `visible_tests: visibleTestInputs` in both WebSocket (`triggerLiveVerification`) and HTTP (`POST /api/v1/verify`).
+  - Updated Go orchestrator (`erl_runner.go`, `main.go`, `ws_mux.go`) to accept `VisibleTests` in verification and forward them to `runCodeLocked(inputVisibleTests...)`.
+  - Guarantees visible test execution against `bf_test_evaluator` for all chapters and lessons upon submission.
+- [x] **67.4: Verification**:
+  - `go build` compiled cleanly.
+  - `npx tsc --noEmit` passed with 0 errors.

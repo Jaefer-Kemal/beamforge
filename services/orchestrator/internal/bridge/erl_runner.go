@@ -318,7 +318,7 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 }
 
 // RunVerification executes the verification pipeline corresponding to exerciseID
-func (r *Runner) RunVerification(ctx context.Context, session *pool.Session, exerciseID string, files map[string]string) (*VerificationReport, error) {
+func (r *Runner) RunVerification(ctx context.Context, session *pool.Session, exerciseID string, files map[string]string, inputVisibleTests ...VisibleTestCaseInput) (*VerificationReport, error) {
 	session.Lock()
 	defer session.Unlock()
 
@@ -409,7 +409,7 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
 			if err := json.Unmarshal([]byte(line), &report); err == nil {
-				if runRes, errRun := r.runCodeLocked(ctx, session, exerciseID, files, nil); errRun == nil && runRes != nil {
+				if runRes, errRun := r.runCodeLocked(ctx, session, exerciseID, files, nil, inputVisibleTests...); errRun == nil && runRes != nil {
 					report.VisibleTests = runRes.VisibleTests
 					report.Stdout = runRes.Stdout
 					if report.BeamFootprint == nil {

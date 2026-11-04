@@ -234,8 +234,9 @@ func (h *Handler) handleJSONChannel(
 		}
 
 		var req struct {
-			ExerciseID string            `json:"exercise_id"`
-			Files      map[string]string `json:"files"`
+			ExerciseID   string                        `json:"exercise_id"`
+			Files        map[string]string             `json:"files"`
+			VisibleTests []bridge.VisibleTestCaseInput `json:"visible_tests"`
 		}
 		_ = json.Unmarshal(frame.Payload, &req)
 
@@ -249,7 +250,7 @@ func (h *Handler) handleJSONChannel(
 
 		time.Sleep(100 * time.Millisecond)
 
-		report, err := h.runner.RunVerification(ctx, session, req.ExerciseID, req.Files)
+		report, err := h.runner.RunVerification(ctx, session, req.ExerciseID, req.Files, req.VisibleTests...)
 		send(ResponseFrame{
 			Channel: 5,
 			Type:    "report",

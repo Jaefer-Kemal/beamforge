@@ -481,11 +481,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             compileOk: true,
             stdout: report.stdout || '',
             visibleTests: report.visible_tests.map((t: any) => ({
-              callStr: t.call_str,
-              expected: t.expected,
-              actual: t.actual,
-              passed: t.passed,
-              timeMs: t.time_ms,
+              callStr: t.call_str || t.callStr || '',
+              expected: t.expected || '',
+              actual: t.actual || '',
+              passed: Boolean(t.passed),
+              timeMs: t.time_ms ?? t.timeMs ?? 0,
             })),
             totalDurationMs: report.total_time_ms || 0,
             diagnostics: [],
@@ -1640,32 +1640,36 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         text: '==> [bf_grader] Initializing verification pipeline...',
       });
 
-      // Concurrently run visible tests in background so Test Suite & Diffs tab is updated live for this code revision
-      get().runCode(true);
+      const activeId = get().activeExerciseId;
+      const lesson = getLessonById(activeId);
+      const visibleTestInputs = (lesson?.visibleTestCases || []).map((tc) => ({
+        id: tc.id,
+        call_str: tc.erlangCall || tc.callStr || '',
+        expected: tc.expectedOutput || '',
+        title: tc.title || '',
+      }));
+
+      const fileMap: Record<string, string> = {};
+      get().files.forEach((f) => {
+        fileMap[f.path] = f.content;
+      });
 
       // If connected to Go Orchestrator, trigger live OTP verification over WebSocket
       if (wsMux.isConnected()) {
-        const fileMap: Record<string, string> = {};
-        get().files.forEach((f) => {
-          fileMap[f.path] = f.content;
-        });
-        wsMux.triggerLiveVerification(get().activeExerciseId, fileMap);
+        wsMux.triggerLiveVerification(activeId, fileMap, visibleTestInputs);
         return;
       }
 
       // If WebSocket is not connected, try HTTP REST verification endpoint
       try {
-        const fileMap: Record<string, string> = {};
-        get().files.forEach((f) => {
-          fileMap[f.path] = f.content;
-        });
         const res = await fetch(`${ORCHESTRATOR_HTTP_URL}/api/v1/verify`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            exercise_id: get().activeExerciseId,
-            session_id: `verify-${get().activeExerciseId}`,
+            exercise_id: activeId,
+            session_id: `verify-${activeId}`,
             files: fileMap,
+            visible_tests: visibleTestInputs,
           }),
         });
         if (res.ok) {
@@ -1691,11 +1695,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
                 compileOk: true,
                 stdout: report.stdout || '',
                 visibleTests: report.visible_tests.map((t: any) => ({
-                  callStr: t.call_str,
-                  expected: t.expected,
-                  actual: t.actual,
-                  passed: t.passed,
-                  timeMs: t.time_ms,
+                  callStr: t.call_str || t.callStr || '',
+                  expected: t.expected || '',
+                  actual: t.actual || '',
+                  passed: Boolean(t.passed),
+                  timeMs: t.time_ms ?? t.timeMs ?? 0,
                 })),
                 totalDurationMs: report.total_time_ms || 0,
                 diagnostics: [],
