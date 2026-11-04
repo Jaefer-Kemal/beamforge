@@ -1348,3 +1348,24 @@ We execute the platform overhaul incrementally so every single piece is built to
     - playwright_xmpp_standby_rack.png
     - playwright_xmpp_out_of_order_rack.png
     - playwright_xmpp_chat_mobile.png
+
+## Phase 60: Account Progress Reset Verification & Active User Scope Fix
+- [x] **60.1: Active User Scope Resolution in Progress Reset (useWorkspaceStore.ts)**:
+  - Resolved bug where resetUserProgress was hardcoded to user_alpha rather than the active user.
+  - Dynamically scopes the wipe to the active account (e.g. user_beta, user_master, or user_alpha), resetting totalXp to 0, level to 1, role to "BEAM Initiate", completedLevelIds to [], streakDays to 1, and unlockedSolutionLessonIds to [].
+  - Purges browser localStorage cache keys (beamforge_user_{id}, beamforge_progress).
+  - Syncs the clean reset state to Neon PostgreSQL via POST /api/user-progress.
+- [x] **60.2: Full Badge & Trophy Shelf Wipe Verification (badges.ts)**:
+  - Because all 14 badges in BADGE_CATALOG are functionally derived from completedLevelIds and streakDays, wiping completedLevelIds to [] immediately and permanently locks all 14 badges (0 / 14 Unlocked, 0%).
+  - Added useEffect in LeaderboardDrawer.tsx to synchronize activeTab when initialTab changes upon opening from the Settings Role Card.
+- [x] **60.3: Safety Confirmation Modal Polish (ResetAccountModal.tsx)**:
+  - Added unique button ID #confirm-reset-btn.
+  - Requires explicit typed confirmation: "RESET PROGRESS" before the destructive reset button is enabled.
+- [x] **60.4: E2E Playwright Verification (scripts/test_reset_progress_flow.mjs)**:
+  - Tested live on user_beta (starting at 1450 XP, 38 completed lessons).
+  - Verified safety modal display, target profile display ("Target Profile: Beta Learner"), typing "RESET PROGRESS", and execution.
+  - Verified post-reset state: 0 XP, BEAM Initiate, 0 completed lessons, 0/14 badges unlocked, active exercise ch01-l01.
+  - Verified Neon PostgreSQL database row is updated to 0 XP.
+  - Saved screenshot artifacts:
+    - playwright_reset_modal_verified.png
+    - playwright_reset_verified_shelf.png
