@@ -1279,5 +1279,35 @@ We execute the platform overhaul incrementally so every single piece is built to
     - `playwright_xmpp_chat_active.png`
     - `playwright_xmpp_wire_terminal.png`
 
+## Phase 58: Capstone Studio Action Bar De-Cluttering, Progressive Milestone Gating & Mobile Responsiveness
+- [x] **58.1: Action Bar & Drawer Header De-Cluttering (`CapstoneStudioView.tsx`)**:
+  - Removed redundant `Live Chat` (`#xmpp-chat-btn`) from the upper Boot.dev Action Bar, reserving it exclusively for core execution actions (`Submit`, `Run`, `Solution`, `Test Cases`, and `#drawer-toggle-btn`).
+  - Retained `Live XMPP Chat` (`#tab-btn-chat` and `#expanded-tab-btn-chat`) in the bottom drawer tab bar.
+  - Removed the redundant `X Close` button at the right end of the drawer tabs, relying on the action bar chevron toggle and restoring 65px horizontal width for tab navigation.
+- [x] **58.2: Progressive Milestone Assembly & Power-Up Rack (`LiveXmppChatSimulator.tsx`)**:
+  - Implemented hardware/OTP assembly rack displaying the live status of all 5 core modules: M1 (`xmpp_sup`), M2 (`xmpp_stream_parser`), M3 (`xmpp_session_registry`), M4 (`xmpp_c2s_statem`), M5 (`xmpp_router`).
+  - Progressive power-up: cluster boots automatically once M5 (`xmpp_router`) is passed (`isClusterBooted = m5Passed`). Unsolved users see the sleek glassmorphic "XMPP Cluster Standby" card with live module statuses (`RUNNING` / `ACTIVE` / `OFFLINE` / `LOCKED`).
+  - Added "Preview Spec Sandbox" button allowing learners to preview the target RFC 6120/6121 architecture and wire stanzas while studying specifications.
+  - Synchronized `DEFAULT_USERS` and seeded Neon PostgreSQL database: `user_master` has all capstone milestones (`ch12-m1` to `ch12-m6`), booting Port 5222 Live immediately; `user_alpha` shows the Standby Rack.
+- [x] **58.3: Mobile Responsiveness (< 768px) & High-Contrast Light/Dark Glass Tokens**:
+  - In mobile results view (`390x844`), added dedicated `Modules` architecture sub-tab, elevated Bob's presence toggle directly into Alice's mobile chat subheader, and prevented vertical squishing.
+  - Verified WCAG AA contrast across Daylight frosted glass and Midnight glass modes.
+- [x] **58.4: Verification Loop**:
+  - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
+  - `apps/web-ide`: `npm run build` compiled 6/6 static & dynamic routes with 0 errors.
+  - Zero emojis anywhere in code, JSX, or styles (Lucide SVG icons only).
+  - E2E Playwright test suite (`scripts/test_xmpp_chat_simulator.mjs`) verified:
+    1. Upper bar de-cluttering (no `#xmpp-chat-btn`).
+    2. Drawer header de-cluttering (no `X Close`).
+    3. Live XMPP Chat tab opening.
+    4. Grandmaster Port 5222 Live routing and offline queue flush.
+    5. User Alpha Standby Rack with 5 modules and Preview Spec Sandbox toggle.
+    6. Mobile responsive layout on 390x844 viewport.
+  - Saved screenshot artifacts:
+    - `playwright_capstone_decluttered.png`
+    - `playwright_xmpp_standby_rack.png`
+    - `playwright_xmpp_chat_mobile.png`
+
+
 
 

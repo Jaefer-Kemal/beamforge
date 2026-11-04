@@ -353,15 +353,19 @@ export function CapstoneStudioView() {
   // Check stage passes for milestone pills
   const milestonePassStatus = useMemo(() => {
     const map: Record<number, boolean> = {};
-    if (!verificationStages || verificationStages.length === 0) return map;
+    const isMaster = (completedLevelIds || []).includes('ch12-m6');
     CH12_CAPSTONE_MILESTONES.forEach((_m, idx) => {
-      const stage = verificationStages[idx];
-      map[idx] = stage?.status === 'passed';
+      const milestoneKey = `ch12-m${idx + 1}`;
+      const isSolvedInDb = isMaster || (completedLevelIds || []).includes(milestoneKey);
+      const stagePassed = verificationStages && verificationStages[idx]?.status === 'passed';
+      map[idx] = Boolean(isSolvedInDb || stagePassed);
     });
     return map;
-  }, [verificationStages]);
+  }, [verificationStages, completedLevelIds]);
 
-  const passedCount = verificationStages.filter((s) => s.status === 'passed').length;
+  const passedCount = useMemo(() => {
+    return Object.values(milestonePassStatus).filter(Boolean).length;
+  }, [milestonePassStatus]);
 
   // Reset active file to initial starter code (invoked after confirmation)
   const handleConfirmReset = () => {
@@ -988,35 +992,6 @@ export function CapstoneStudioView() {
             <span>Test Cases</span>
           </button>
 
-          {/* Live XMPP Chat Simulator Toggle */}
-          <button
-            id="xmpp-chat-btn"
-            onClick={() => {
-              if (isDrawerOpen && drawerTab === 'chat') {
-                setIsDrawerOpen(false);
-              } else {
-                setDrawerTab('chat');
-                setIsDrawerOpen(true);
-                setIsDrawerExpanded(true);
-                if (typeof window !== 'undefined' && window.innerWidth < 768) {
-                  setMobileTab('results');
-                }
-              }
-            }}
-            title="Interactive Live XMPP Chat Simulator & Wire Stanza Terminal"
-            className="glass-pill flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg cursor-pointer transition-all hover:scale-105"
-            style={{
-              background: isDrawerOpen && drawerTab === 'chat'
-                ? (isDark ? 'rgba(16, 185, 129, 0.25)' : 'rgba(16, 185, 129, 0.16)')
-                : (isDark ? 'rgba(16, 185, 129, 0.12)' : 'rgba(16, 185, 129, 0.08)'),
-              border: isDark ? '1px solid rgba(16, 185, 129, 0.40)' : '1px solid rgba(16, 185, 129, 0.30)',
-              color: isDark ? '#6EE7B7' : '#059669',
-            }}
-          >
-            <MessageSquare className="w-3.5 h-3.5 text-emerald-500" />
-            <span className="font-bold">Live Chat</span>
-          </button>
-
           {/* Right: Keyboard Hint & Drawer Chevron */}
           <div className="ml-auto flex items-center gap-2">
             <div className="text-xs hidden md:block" style={{ color: isDark ? '#64748B' : '#94A3B8' }}>
@@ -1026,6 +1001,7 @@ export function CapstoneStudioView() {
             </div>
 
             <button
+              id="drawer-toggle-btn"
               onClick={() => setIsDrawerOpen(!isDrawerOpen)}
               className="p-1 rounded-lg text-xs transition-colors cursor-pointer"
               style={{
@@ -1167,16 +1143,6 @@ export function CapstoneStudioView() {
                   ) : null}
                 </button>
               </div>
-
-              {/* Close Drawer */}
-              <button
-                onClick={() => setIsDrawerOpen(false)}
-                className="text-xs transition-colors cursor-pointer px-2 py-0.5 rounded hover:bg-black/5 dark:hover:bg-white/5 flex items-center gap-1"
-                style={{ color: isDark ? '#94A3B8' : '#64748B' }}
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>Close</span>
-              </button>
             </div>
 
             {/* Drawer Body Content */}
@@ -1315,7 +1281,11 @@ export function CapstoneStudioView() {
 
               {drawerTab === 'chat' && (
                 <div className="h-[460px] md:h-[500px]">
-                  <LiveXmppChatSimulator isDark={isDark} />
+                  <LiveXmppChatSimulator
+                    isDark={isDark}
+                    milestoneStatus={milestonePassStatus}
+                    isMasterUnlocked={isCurrentFileSolved}
+                  />
                 </div>
               )}
 
@@ -1619,7 +1589,11 @@ export function CapstoneStudioView() {
 
           {drawerTab === 'chat' && (
             <div className="h-[480px] md:h-[540px]">
-              <LiveXmppChatSimulator isDark={isDark} />
+              <LiveXmppChatSimulator
+                isDark={isDark}
+                milestoneStatus={milestonePassStatus}
+                isMasterUnlocked={isCurrentFileSolved}
+              />
             </div>
           )}
 

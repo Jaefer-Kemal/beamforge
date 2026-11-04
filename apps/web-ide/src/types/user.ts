@@ -80,7 +80,7 @@ export const DEFAULT_USERS: Record<string, UserProfile> = {
       'ch09-l01', 'ch09-l02', 'ch09-l03', 'ch09-l04', 'ch09-l05', 'ch09-l06', 'ch09-l07', 'ch09-l08',
       'ch10-l01', 'ch10-l02', 'ch10-l03', 'ch10-l04', 'ch10-l05', 'ch10-l06', 'ch10-l07',
       'ch11-l01', 'ch11-l02', 'ch11-l03', 'ch11-l04', 'ch11-l05', 'ch11-l06', 'ch11-l07', 'ch11-l08',
-      'ch12-m1', 'ch12-m2', 'ch12-m3',
+      'ch12-m1', 'ch12-m2', 'ch12-m3', 'ch12-m4', 'ch12-m5', 'ch12-m6',
     ],
     totalXp: 5200,
     unlockedSolutionLessonIds: ['ch06-l10', 'ch09-l08'],
