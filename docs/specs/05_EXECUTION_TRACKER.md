@@ -1442,3 +1442,19 @@ We execute the platform overhaul incrementally so every single piece is built to
 - [x] **63.5: Cloud Deployment Architecture & Runbook**:
   - Documented complete deployment configurations for Render (Go backend + Erlang OTP 29 runtime) and Vercel (Next.js frontend).
   - Verified CORS (`*`) and WebSocket origin policies for cross-origin cloud operation.
+
+## Phase 64: Production Cloud Deployment to Render & Vercel
+- [x] **64.1: Render Web Service Provisioning (Docker + OTP 29)**:
+  - Created service `beamforge-orchestrator` (`srv-dblioqjbc2fs73ed02qg`) via Render CLI v2.35.0.
+  - Linked to GitHub `https://github.com/Jaefer-Kemal/beamforge.git` on branch `main` with auto-deploy enabled.
+  - Resolved Alpine 3.19 package list in `Dockerfile` (removed non-existent `erlang-tools`).
+  - Container build succeeded with multi-stage Go 1.22 builder and Alpine 3.19 Erlang/OTP 29 runtime.
+  - Live health check verified: `https://beamforge-orchestrator.onrender.com/health` returns `status: "ok"`, `otp_release: "29"`.
+- [x] **64.2: Vercel Frontend Deployment (Next.js 14 App)**:
+  - Deployed `apps/web-ide` to Vercel production under project `beamforge` via Vercel CLI 65.10.0.
+  - Configured environment variables: `DATABASE_URL` (Neon PostgreSQL), `NEXT_PUBLIC_ORCHESTRATOR_URL` (`https://beamforge-orchestrator.onrender.com`), and `NEXT_PUBLIC_ORCHESTRATOR_WS_URL` (`wss://beamforge-orchestrator.onrender.com`).
+  - Production URL live and verified: `https://beamforge-eight.vercel.app`.
+  - Database connectivity verified: `GET /api/user-progress?userId=user_alpha` returns `source: "neon"`, `dbConnected: true`.
+- [x] **64.3: Continuous Deployment & GitHub Sync**:
+  - Connected Vercel project directly to GitHub repository (`vercel git connect`).
+  - Both Render backend and Vercel frontend are configured for automatic zero-downtime deployment on git push to `main`.
