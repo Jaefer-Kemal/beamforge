@@ -18,45 +18,60 @@ async function run() {
     await page.goto('http://localhost:3000', { waitUntil: 'networkidle' });
     console.log('✓ Page loaded.');
 
-    // 2. Verify Initial User Alpha (Level 1, BEAM Newcomer, 0 XP)
+    // 2. Verify Initial User Alpha (Level 1, BEAM Newcomer, 0 XP) inside Settings Popover
+    await page.click('#settings-dropdown-btn');
     await page.waitForSelector('#role-badge', { timeout: 5000 });
     const initialRole = await page.textContent('#role-badge');
-    console.log(`Initial role badge: "${initialRole?.trim()}"`);
+    console.log(`Initial role badge in Settings: "${initialRole?.trim().replace(/\s+/g, ' ')}"`);
     if (!initialRole?.includes('BEAM Newcomer') || !initialRole?.includes('Lv1')) {
       throw new Error(`Expected Level 1 BEAM Newcomer, got: ${initialRole}`);
     }
+    await page.click('#settings-dropdown-btn');
+    await page.waitForTimeout(300);
 
     // 3. Switch to User Beta via Dropdown
     await page.click('#user-switcher-btn');
     await page.waitForTimeout(500);
     await page.waitForSelector('#switch-user-user_beta', { timeout: 5000 });
     await page.click('#switch-user-user_beta');
+    await page.waitForTimeout(500);
+
+    // Verify Beta Role in Settings
+    await page.click('#settings-dropdown-btn');
+    await page.waitForSelector('#role-badge', { timeout: 5000 });
     await page.waitForFunction(() => {
       const el = document.querySelector('#role-badge');
       return el && el.textContent && el.textContent.includes('Concurrency Artisan');
     }, { timeout: 10000 });
 
     const betaRole = await page.textContent('#role-badge');
-    console.log(`Beta role badge: "${betaRole?.trim()}"`);
+    console.log(`Beta role badge in Settings: "${betaRole?.trim().replace(/\s+/g, ' ')}"`);
+    await page.click('#settings-dropdown-btn');
+    await page.waitForTimeout(300);
 
     // 4. Switch to User Master
     await page.click('#user-switcher-btn');
     await page.waitForTimeout(500);
     await page.waitForSelector('#switch-user-user_master', { timeout: 5000 });
     await page.click('#switch-user-user_master');
+    await page.waitForTimeout(500);
+
+    // Verify Master Role in Settings (Level 7 BEAM Grandmaster)
+    await page.click('#settings-dropdown-btn');
+    await page.waitForSelector('#role-badge', { timeout: 5000 });
     await page.waitForFunction(() => {
       const el = document.querySelector('#role-badge');
       return el && el.textContent && el.textContent.includes('BEAM Grandmaster');
     }, { timeout: 10000 });
 
     const masterRole = await page.textContent('#role-badge');
-    console.log(`Master role badge: "${masterRole?.trim()}"`);
+    console.log(`Master role badge in Settings: "${masterRole?.trim().replace(/\s+/g, ' ')}"`);
 
-    // Take screenshot of Grandmaster Topbar & Workspace
+    // Take screenshot of Grandmaster Settings Popover & Decluttered Topbar
     await page.screenshot({ path: `${ARTIFACT_DIR}/playwright_xp_grandmaster.png` });
     console.log('✓ Saved playwright_xp_grandmaster.png');
 
-    // Let's click the role-badge to open Trophy shelf and inspect badges
+    // Click the role-badge inside Settings to open Trophy shelf and inspect badges
     await page.locator('#role-badge').click();
     await page.waitForSelector('text=Badges & Trophies', { state: 'visible', timeout: 5000 });
     await page.waitForTimeout(600);

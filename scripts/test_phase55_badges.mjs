@@ -21,8 +21,10 @@ async function run() {
   await page.locator('#user-switcher-menu button:has-text("Beta Learner")').click();
   await page.waitForTimeout(1000);
 
-  // 2. Click the Role badge in TopBar to directly open Badges & Trophies Shelf
-  console.log('[Test] Clicking Role Badge to open Badges Drawer...');
+  // 2. Click the Role badge inside Settings to directly open Badges & Trophies Shelf
+  console.log('[Test] Clicking Role Badge inside Settings to open Badges Drawer...');
+  await page.locator('#settings-dropdown-btn').click();
+  await page.waitForSelector('#role-badge', { state: 'visible', timeout: 5000 });
   await page.locator('#role-badge').click();
   await page.waitForSelector('text=Badges & Trophies', { state: 'visible', timeout: 5000 });
   await page.waitForTimeout(600);

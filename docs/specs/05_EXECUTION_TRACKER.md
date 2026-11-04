@@ -1248,4 +1248,10 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `runtimes/erl-harness`: `erlc.exe` compiled `bf_ast_verifier.erl`, `bf_compiler.erl`, `bf_json.erl` with 0 errors.
   - Zero emojis anywhere in `apps/web-ide/src` (strictly Lucide SVG icons).
   - Playwright test suites (`test_phase56_xp_and_celebration.mjs` and `test_auto_celebration.mjs`) verified 100% pass rate with zero errors.
+- [x] **56.8: TopBar De-Cluttering & Settings Role Card Relocation (`BootDevTopBar.tsx`)**:
+  - Relocated role badge (`Lv{level} • {role}`) from the main horizontal top bar strip into the Settings popover (`#settings-popover-menu`).
+  - Implemented an Apple glass card inside Settings featuring the `Award` icon, glowing `Lv{level}` pill, role title, and direct 1-click navigation to the Badges & Trophy shelf.
+  - Restored 170px of horizontal real estate to the top bar, allowing the center connected lesson progress dots to render without clipping across screen widths.
+  - Updated Playwright regression suites (`test_phase56_xp_and_celebration.mjs`, `test_auto_celebration.mjs`, and `test_phase55_badges.mjs`) to verify Settings role display and shelf navigation with 100% pass.
+
 

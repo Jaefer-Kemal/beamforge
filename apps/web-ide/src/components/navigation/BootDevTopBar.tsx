@@ -21,6 +21,7 @@ import {
   ShieldAlert,
   Trash2,
   Lock,
+  Award,
 } from 'lucide-react';
 import { BeamForgeLogo } from './BeamForgeLogo';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
@@ -391,27 +392,6 @@ export function BootDevTopBar() {
             <span suppressHydrationWarning>{mounted ? (currentUser?.streakDays || 1) : 1}d</span>
           </div>
 
-          {/* Role Badge (Large screens only — Clickable Trophy Shelf) */}
-          <button
-            id="role-badge"
-            suppressHydrationWarning
-            onClick={() => {
-              setDrawerTab('badges');
-              setIsLeaderboardOpen(true);
-            }}
-            title="View My Badges & Achievements Shelf"
-            className="hidden xl:flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-all hover:scale-105 hover:border-purple-400"
-            style={{
-              background: isDark ? 'rgba(139,92,246,0.18)' : 'rgba(139,92,246,0.10)',
-              border: '1px solid rgba(139,92,246,0.30)',
-              color: '#8B5CF6',
-            }}
-          >
-            <span suppressHydrationWarning>Lv{mounted ? level : 1}</span>
-            <span className="opacity-60">•</span>
-            <span suppressHydrationWarning>{mounted ? role : 'BEAM Newcomer'}</span>
-          </button>
-
           {/* Tester Mode Active Indicator (Pill) */}
           {devModeUnlockedAll && (
             <div
@@ -431,7 +411,7 @@ export function BootDevTopBar() {
 
           {/* View Switcher Pill */}
           <div
-            className="hidden xl:flex items-center gap-0.5 p-0.5 rounded-xl"
+            className="hidden lg:flex items-center gap-0.5 p-0.5 rounded-xl"
             style={{
               background: isDark ? 'rgba(30,41,59,0.60)' : 'rgba(255,255,255,0.60)',
               border: isDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(255,255,255,0.80)',
@@ -886,6 +866,50 @@ export function BootDevTopBar() {
                     OTP 29
                   </span>
                 </div>
+
+                {/* Learner Role & Badges Shelf Card */}
+                <button
+                  id="role-badge"
+                  suppressHydrationWarning
+                  onClick={() => {
+                    setDrawerTab('badges');
+                    setIsLeaderboardOpen(true);
+                    setSettingsOpen(false);
+                  }}
+                  className="w-full p-3 rounded-xl flex items-center justify-between transition-all cursor-pointer hover:border-purple-400/60 group text-left"
+                  style={{
+                    background: isDark ? 'rgba(139, 92, 246, 0.14)' : 'rgba(139, 92, 246, 0.08)',
+                    border: isDark ? '1px solid rgba(139, 92, 246, 0.35)' : '1px solid rgba(139, 92, 246, 0.25)',
+                  }}
+                  title="Click to view Badges & Trophies Shelf"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                      style={{
+                        background: isDark ? 'rgba(139, 92, 246, 0.25)' : 'rgba(139, 92, 246, 0.18)',
+                        border: '1px solid rgba(139, 92, 246, 0.35)',
+                        color: '#A78BFA',
+                      }}
+                    >
+                      <Award className="w-4 h-4 text-purple-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300">
+                          Lv{mounted ? level : 1}
+                        </span>
+                        <span className="text-xs font-bold truncate" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
+                          {mounted ? role : 'BEAM Newcomer'}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-purple-400/90 font-medium truncate flex items-center gap-1 mt-0.5">
+                        <span>View Badges & Trophy Shelf</span>
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-purple-400 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+                </button>
 
                 {/* Appearance / Theme Toggle */}
                 <div>

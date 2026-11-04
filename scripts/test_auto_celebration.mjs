@@ -35,17 +35,21 @@ async function testAutoCelebration() {
   await page.screenshot({ path: `${ARTIFACT_DIR}/playwright_auto_celebration_flow.png` });
   console.log('✓ Saved playwright_auto_celebration_flow.png');
 
-  // Verify XP updated in TopBar
-  const roleText = await page.textContent('#role-badge');
-  console.log(`Updated role badge: "${roleText?.trim()}"`);
-
   // Close modal via "Done" button
   await page.locator('button:has-text("Done")').click();
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(500);
 
   const isModalVisible = await page.isVisible('#badge-celebration-modal');
   console.log(`Modal closed after Done: ${!isModalVisible}`);
   if (isModalVisible) throw new Error('Modal should close after Done click');
+
+  // Verify XP updated in Settings
+  await page.click('#settings-dropdown-btn');
+  await page.waitForSelector('#role-badge', { timeout: 5000 });
+  const roleText = await page.textContent('#role-badge');
+  console.log(`Updated role badge in Settings: "${roleText?.trim().replace(/\s+/g, ' ')}"`);
+  await page.click('#settings-dropdown-btn');
+  await page.waitForTimeout(300);
 
   await browser.close();
   console.log('\n🎉 Auto-Celebration verification completed successfully with 100% PASS!');
