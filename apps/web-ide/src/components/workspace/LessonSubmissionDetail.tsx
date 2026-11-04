@@ -35,8 +35,13 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
 
   const fileEntries = Object.entries(submission.files || {});
-  const filePath = fileEntries[0]?.[0] || 'src/solution.erl';
-  const fileContent = typeof fileEntries[0]?.[1] === 'string' ? fileEntries[0][1] : '% No file content recorded';
+  const [selectedFilePath, setSelectedFilePath] = useState<string>(
+    fileEntries[0]?.[0] || 'src/solution.erl'
+  );
+
+  const activeEntry = fileEntries.find(([path]) => path === selectedFilePath) || fileEntries[0];
+  const filePath = activeEntry?.[0] || 'src/solution.erl';
+  const fileContent = typeof activeEntry?.[1] === 'string' ? activeEntry[1] : '% No file content recorded';
 
   const isAccepted = submission.status === 'passed';
   const isCompileError = submission.status === 'compile_error';
@@ -194,9 +199,49 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
         )}
       </div>
 
+      {/* Multi-File Tab Bar (When submission contains multiple files) */}
+      {fileEntries.length > 1 && (
+        <div
+          id="submission-files-tab-bar"
+          className="flex items-center gap-1.5 px-3 py-2 rounded-t-xl border-t border-x overflow-x-auto flex-shrink-0"
+          style={{
+            background: isDark ? 'rgba(15, 23, 42, 0.70)' : 'rgba(241, 245, 249, 0.95)',
+            borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
+          }}
+        >
+          {fileEntries.map(([fPath]) => {
+            const fileName = fPath.split('/').pop() || fPath;
+            const isSelected = fPath === filePath;
+            return (
+              <button
+                key={fPath}
+                id={`submission-tab-${fileName}`}
+                onClick={() => setSelectedFilePath(fPath)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-all cursor-pointer flex-shrink-0"
+                style={{
+                  background: isSelected
+                    ? (isDark ? 'rgba(255, 255, 255, 0.12)' : '#FFFFFF')
+                    : 'transparent',
+                  color: isSelected
+                    ? (isDark ? '#F8FAFC' : '#0F172A')
+                    : (isDark ? '#94A3B8' : '#64748B'),
+                  boxShadow: isSelected && !isDark ? '0 1px 3px rgba(15,23,42,0.08)' : 'none',
+                  border: isSelected
+                    ? (isDark ? '1px solid rgba(255, 255, 255, 0.12)' : '1px solid rgba(15, 23, 42, 0.08)')
+                    : '1px solid transparent',
+                }}
+              >
+                <FileCode className="w-3.5 h-3.5 text-blue-500" />
+                <span>{fileName}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Code Header with Copy and Restore Actions */}
       <div
-        className="flex items-center justify-between px-3.5 py-2.5 rounded-t-xl border-t border-x"
+        className={`flex items-center justify-between px-3.5 py-2.5 ${fileEntries.length > 1 ? 'border-t border-x' : 'rounded-t-xl border-t border-x'}`}
         style={{
           background: isDark ? 'rgba(15, 23, 42, 0.50)' : 'rgba(241, 245, 249, 0.80)',
           borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',

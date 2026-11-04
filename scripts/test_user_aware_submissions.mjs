@@ -309,7 +309,133 @@ async function testUserAwareSubmissions() {
       throw new Error('LocalStorage draft was not purged after reset!');
     }
 
-    console.log('\nALL 5 TESTS PASSED WITH 100% SUCCESS!');
+    // ── Test 6: Undo Restore Banner ────────────────────────────────────────
+    console.log('\n--- Step 6: Testing Pre-Restore Backup & Undo Restore Banner ---');
+    const preRestoreUncommitted = '% Uncommitted custom work to be preserved by pre-restore backup\n-module(beam_intro).\n-export([save_me/0]).\nsave_me() -> true.\n';
+    await page.evaluate((code) => {
+      const store = (window).useWorkspaceStore;
+      if (store) {
+        const activePath = store.getState().activeFilePath || 'src/beam_intro.erl';
+        store.getState().updateFileContent(activePath, code);
+      }
+    }, preRestoreUncommitted);
+    await page.waitForTimeout(300);
+
+    // Open detail view for Attempt 2
+    await page.click('#left-tab-submissions');
+    await page.waitForTimeout(300);
+    await page.click('#submission-item-0');
+    await page.waitForTimeout(400);
+
+    // Restore Attempt 2
+    await page.click('#restore-to-editor-btn');
+    await page.waitForTimeout(400);
+    await page.click('#confirm-restore-btn');
+    await page.waitForTimeout(500);
+
+    // Verify #undo-restore-banner is visible
+    const undoBannerVisible = await page.isVisible('#undo-restore-banner');
+    console.log('Undo Restore banner visible:', undoBannerVisible ? 'YES' : 'NO');
+    if (!undoBannerVisible) {
+      throw new Error('Expected #undo-restore-banner after restoring submission!');
+    }
+    await page.screenshot({ path: `${ARTIFACT_DIR}/playwright_undo_restore_banner.png` });
+
+    // Click Undo Restore
+    await page.click('#undo-restore-btn');
+    await page.waitForTimeout(500);
+
+    // Verify editor reverted to pre-restore uncommitted work
+    const postUndoEditorCode = await page.evaluate(() => {
+      const store = (window).useWorkspaceStore;
+      return store?.getState().files.find(f => f.path === store.getState().activeFilePath)?.content || '';
+    });
+    console.log('Post-undo editor reverted to uncommitted work (save_me() -> true):',
+      postUndoEditorCode.includes('save_me() -> true') ? 'YES' : 'NO');
+    if (!postUndoEditorCode.includes('save_me() -> true')) {
+      throw new Error('Undo Restore failed to revert to pre-restore backup!');
+    }
+
+    // ── Test 7: Multi-File Submissions Inspection ───────────────────────────
+    console.log('\n--- Step 7: Testing Multi-File Submissions Inspector ---');
+    // Go back to submissions list
+    await page.click('#back-to-submissions-btn');
+    await page.waitForTimeout(400);
+
+    await page.evaluate(async () => {
+      const store = (window).useWorkspaceStore;
+      if (store) {
+        await store.getState().recordSubmission({
+          userId: 'user_alpha',
+          exerciseId: 'ch01-l01',
+          status: 'passed',
+          score: 100,
+          files: {
+            'src/xmpp_sup.erl': '% Root OTP Supervisor\n-module(xmpp_sup).\n-behaviour(supervisor).\n',
+            'src/xmpp_stream_parser.erl': '% Binary Stream Parser\n-module(xmpp_stream_parser).\n-export([parse_stream/1]).\nparse_stream(Bin) -> ok.\n',
+          },
+          stagesSummary: [
+            { id: 'ast', title: 'AST Rules', status: 'passed' },
+            { id: 'visible', title: 'Visible Tests', status: 'passed' },
+          ],
+          durationMs: 45,
+        });
+      }
+    });
+    await page.waitForTimeout(600);
+
+    // Click newly recorded multi-file submission (top item)
+    await page.waitForSelector('#submission-item-0', { timeout: 5000 });
+    await page.click('#submission-item-0');
+    await page.waitForTimeout(500);
+
+    // Verify #submission-files-tab-bar is visible
+    const filesTabBarVisible = await page.isVisible('#submission-files-tab-bar');
+    console.log('Multi-file tabs bar visible in Left Pane inspector:', filesTabBarVisible ? 'YES' : 'NO');
+    if (!filesTabBarVisible) {
+      throw new Error('Multi-file tabs bar failed to render for multi-file submission!');
+    }
+
+    // Click second file tab: #submission-tab-xmpp_stream_parser.erl
+    await page.click('#submission-tab-xmpp_stream_parser\\.erl');
+    await page.waitForTimeout(300);
+
+    const viewerMultiText = await page.textContent('#submission-code-viewer');
+    console.log('Viewer displays second file content (parse_stream(Bin) -> ok):',
+      viewerMultiText?.includes('parse_stream(Bin) -> ok') ? 'YES' : 'NO');
+    if (!viewerMultiText?.includes('parse_stream(Bin) -> ok')) {
+      throw new Error(`Expected second file content in viewer, got: ${viewerMultiText}`);
+    }
+    await page.screenshot({ path: `${ARTIFACT_DIR}/playwright_submission_multifile_tabs.png` });
+
+    // ── Test 8: Mobile Viewport Auto-Switch to Code on Restore ───────────────
+    console.log('\n--- Step 8: Testing Mobile Viewport Auto-Switch on Restore ---');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(400);
+
+    // Ensure we are viewing Left pane in mobile
+    await page.click('#mobile-tab-guide');
+    await page.waitForTimeout(400);
+
+    // Click Restore to Editor in mobile view
+    await page.click('#restore-to-editor-btn');
+    await page.waitForTimeout(400);
+    await page.click('#confirm-restore-btn');
+    await page.waitForTimeout(600);
+
+    // Verify mobileTab automatically switched to 'code' and monaco editor is active
+    const mobileCodeTabSelected = await page.evaluate(() => {
+      const codeTabBtn = document.querySelector('#mobile-tab-code');
+      const style = codeTabBtn?.getAttribute('style') || '';
+      return style.includes('rgba(0, 122, 255') || style.includes('rgba(0,122,255') || style.includes('#007AFF');
+    });
+    console.log('Mobile tab automatically switched to Code view:', mobileCodeTabSelected ? 'YES' : 'NO');
+    if (!mobileCodeTabSelected) {
+      throw new Error('Expected mobile view to automatically switch to Code tab on restore!');
+    }
+    await page.screenshot({ path: `${ARTIFACT_DIR}/playwright_mobile_auto_code_restore.png` });
+
+    console.log('\nALL 8 TESTS PASSED WITH 100% SUCCESS!');
   } finally {
     await browser.close();
   }

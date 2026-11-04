@@ -15,3 +15,4 @@ export interface UserSubmissionRecord {
   durationMs: number;
   createdAt: string;
 }
+

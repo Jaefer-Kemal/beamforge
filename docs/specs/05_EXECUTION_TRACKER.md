@@ -1400,3 +1400,24 @@ We execute the platform overhaul incrementally so every single piece is built to
     - `playwright_submissions_left_pane_list.png`
     - `playwright_submissions_read_only_detail.png`
     - `playwright_restore_confirm_modal.png`
+
+
+## Phase 62: Submissions Edge-Case Hardening (Multi-File Tabs, Undo Restore, Mobile Switch & Quota Capping)
+- [x] **62.1: Multi-File Submissions Tab Inspector (LessonSubmissionDetail.tsx)**:
+  - Added horizontal multi-file tabs bar (`#submission-files-tab-bar`) that renders when an attempt contains multiple modules (e.g. `src/xmpp_sup.erl`, `src/xmpp_stream_parser.erl`).
+  - Supports instant inspection across files with file-level syntax highlighting and file-specific copy action.
+- [x] **62.2: Pre-Restore Backup & 1-Click "Undo Restore" Banner (useWorkspaceStore.ts & LessonSplitView.tsx)**:
+  - Before replacing editor files during submission restoration, automatically saves a pre-restore backup in localStorage: `beamforge_draft_backup_${userId}_${exerciseId}` and flags `canUndoRestore: true`.
+  - Displays a glassmorphic floating alert banner (`#undo-restore-banner`) above Monaco editor with an `[ Undo Restore ]` action (`#undo-restore-btn`).
+  - Clicking `Undo Restore` immediately reverts Monaco to the learner's pre-restore uncommitted code draft.
+- [x] **62.3: Mobile Viewport Auto-Switch to Code View (LessonSplitView.tsx)**:
+  - On mobile viewports (`< 768px`), restoring a submission in the Left Pane automatically transitions `mobileTab` to `'code'`, presenting the restored code to the learner immediately without requiring manual navigation.
+- [x] **62.4: LocalStorage Quota Capping**:
+  - Implemented 10-item capping on per-exercise local storage submission caches (`next.slice(0, 10)`), safeguarding against 5MB browser quota exhaustion while retaining full history in Neon PostgreSQL.
+- [x] **62.5: Full 8-Step E2E Playwright Suite Verification (scripts/test_user_aware_submissions.mjs)**:
+  - All 8 end-to-end tests passed with 100% success.
+  - Zero emojis found in code, UI, or commit messages (strictly Lucide SVG icons).
+  - Saved screenshot artifacts:
+    - `playwright_undo_restore_banner.png`
+    - `playwright_submission_multifile_tabs.png`
+    - `playwright_mobile_auto_code_restore.png`

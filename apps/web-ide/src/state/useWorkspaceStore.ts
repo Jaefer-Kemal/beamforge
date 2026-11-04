@@ -58,6 +58,35 @@ export const clearUserDraft = (userId: string, exerciseId: string) => {
   } catch {}
 };
 
+export const getUserDraftBackupKey = (userId: string, exerciseId: string) =>
+  `beamforge_draft_backup_${userId}_${exerciseId}`;
+
+export const saveUserDraftBackup = (userId: string, exerciseId: string, files: WorkspaceFile[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(getUserDraftBackupKey(userId, exerciseId), JSON.stringify(files));
+  } catch {}
+};
+
+export const loadUserDraftBackup = (userId: string, exerciseId: string): WorkspaceFile[] | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(getUserDraftBackupKey(userId, exerciseId));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return null;
+};
+
+export const clearUserDraftBackup = (userId: string, exerciseId: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(getUserDraftBackupKey(userId, exerciseId));
+  } catch {}
+};
+
 export const ALL_EXERCISES: Record<string, ExerciseManifest> = { ...EXERCISES };
 for (const world of CURRICULUM_WORLDS) {
   for (const level of world.levels) {
@@ -217,6 +246,9 @@ interface WorkspaceState {
   recordSubmission: (sub: Omit<UserSubmissionRecord, 'id' | 'createdAt'>) => Promise<void>;
   restoreSubmissionToEditor: (sub: UserSubmissionRecord) => void;
   resetCurrentExerciseToStarter: () => void;
+  canUndoRestore: boolean;
+  undoRestore: () => void;
+  clearUndoRestore: () => void;
 }
 
 const INITIAL_STAGES: VerificationStage[] = [
@@ -1199,6 +1231,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           lessonOutputTab: 'test_results',
           isLessonOutputOpen: false,
           activeSubmissionDetail: null,
+          canUndoRestore: false,
         });
 
         get().fetchSubmissions(id);
@@ -1340,6 +1373,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     isLoadingSubmissions: false,
     activeSubmissionDetail: null,
     setActiveSubmissionDetail: (sub: UserSubmissionRecord | null) => set({ activeSubmissionDetail: sub }),
+    canUndoRestore: false,
 
     fetchSubmissions: async (targetExerciseId?: string) => {
       const exerciseId = targetExerciseId || get().activeExerciseId;
@@ -1390,9 +1424,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         const next = [newRecord, ...state.submissions.filter((s) => s.id !== subId)];
         if (typeof window !== 'undefined') {
           try {
+            // Keep at most latest 10 submissions in localStorage to protect 5MB quota
             localStorage.setItem(
               `beamforge_submissions_${payload.userId}_${payload.exerciseId}`,
-              JSON.stringify(next)
+              JSON.stringify(next.slice(0, 10))
             );
           } catch {}
         }
@@ -1428,6 +1463,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       const user = get().currentUser;
       const exId = get().activeExerciseId;
       const currentFiles = get().files;
+
+      // 1. Save pre-restore backup of the current uncommitted files
+      if (user && exId && currentFiles.length > 0) {
+        saveUserDraftBackup(user.id, exId, currentFiles);
+      }
+
       const fileMap = sub.files || {};
       const fileMapKeys = Object.keys(fileMap);
 
@@ -1448,15 +1489,40 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         return f;
       });
 
-      set({ files: restoredFiles });
+      set({ files: restoredFiles, canUndoRestore: true });
       if (user && exId) {
         saveUserDraft(user.id, exId, restoredFiles);
       }
 
       get().addTerminalEntry({
         type: 'output',
-        text: `[Submission Restored] Editor updated with snapshot from ${new Date(sub.createdAt).toLocaleTimeString()} (${sub.status.toUpperCase()}, Score: ${sub.score}).`,
+        text: `[Submission Restored] Editor updated with snapshot from ${new Date(sub.createdAt).toLocaleTimeString()} (${sub.status.toUpperCase()}, Score: ${sub.score}). Click 'Undo' if you want your previous edits back.`,
       });
+    },
+
+    undoRestore: () => {
+      const user = get().currentUser;
+      const exId = get().activeExerciseId;
+      if (!user || !exId) return;
+      const backup = loadUserDraftBackup(user.id, exId);
+      if (backup && backup.length > 0) {
+        set({ files: backup, canUndoRestore: false });
+        saveUserDraft(user.id, exId, backup);
+        clearUserDraftBackup(user.id, exId);
+        get().addTerminalEntry({
+          type: 'output',
+          text: `[Restore Undone] Workspace reverted to your previous uncommitted code.`,
+        });
+      }
+    },
+
+    clearUndoRestore: () => {
+      const user = get().currentUser;
+      const exId = get().activeExerciseId;
+      if (user && exId) {
+        clearUserDraftBackup(user.id, exId);
+      }
+      set({ canUndoRestore: false });
     },
 
     resetCurrentExerciseToStarter: () => {

@@ -24,6 +24,8 @@ import {
   ArrowRight,
   WifiOff,
   History,
+  Undo2,
+  X,
 } from 'lucide-react';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import type {
@@ -560,6 +562,9 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
     setActiveSubmissionDetail,
     restoreSubmissionToEditor,
     resetCurrentExerciseToStarter,
+    canUndoRestore,
+    undoRestore,
+    clearUndoRestore,
   } = useWorkspaceStore();
 
   const isDark = theme === 'dark';
@@ -1005,6 +1010,9 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             onBack={() => setActiveSubmissionDetail(null)}
             onRestore={(sub) => {
               restoreSubmissionToEditor(sub);
+              if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                setMobileTab('code');
+              }
             }}
           />
         ) : (
@@ -1075,6 +1083,46 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             <span>Reset</span>
           </button>
         </div>
+
+        {/* Undo Restore Notification Banner */}
+        {canUndoRestore && (
+          <div
+            id="undo-restore-banner"
+            className="flex items-center justify-between px-3.5 py-2 border-b animate-fade-in flex-shrink-0"
+            style={{
+              background: isDark ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.08)',
+              borderColor: isDark ? 'rgba(245, 158, 11, 0.25)' : 'rgba(245, 158, 11, 0.20)',
+            }}
+          >
+            <div className="flex items-center gap-2 text-xs font-medium" style={{ color: isDark ? '#FDE68A' : '#B45309' }}>
+              <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
+              <span>Restored snapshot from past submission.</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                id="undo-restore-btn"
+                onClick={undoRestore}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                style={{
+                  background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+                  color: '#FFFFFF',
+                  boxShadow: '0 2px 6px rgba(245, 158, 11, 0.25)',
+                }}
+              >
+                <Undo2 className="w-3 h-3" />
+                <span>Undo Restore</span>
+              </button>
+              <button
+                id="dismiss-undo-restore-btn"
+                onClick={clearUndoRestore}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+                style={{ background: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(15, 23, 42, 0.05)' }}
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Monaco Editor */}
         <div className="flex-1 w-full min-h-0 overflow-hidden relative">
