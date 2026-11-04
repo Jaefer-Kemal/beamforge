@@ -9,6 +9,7 @@ export const CHAPTER_10_LESSONS: LessonContent[] = [
     lessonType: 'guided_demo',
     title: 'Guided Demo: Inside gen_tcp:listen/2, accept/1, connect/3 & Live TCP Socket Telemetry',
     difficulty: 'Intermediate',
+    xpReward: 50,
     visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'What is the critical architectural difference between a ListenSocket and an accepted ClientSocket in Erlang?',
@@ -493,6 +494,7 @@ solutionExplanation: `### How the TCP Socket Lifecycle Operates
     lessonType: 'concept_exercise',
     title: 'Socket Options (nodelay, reuseaddr), Built-In C Framing ({packet, 4 | line}) & Clean Disconnects',
     difficulty: 'Intermediate',
+    xpReward: 100,
     visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Why is {nodelay, true} (disabling Nagle\'s algorithm) critical for real-time protocols like XMPP and multiplayer games?',
@@ -859,6 +861,7 @@ solutionExplanation: `### Solution Breakdown: Low-Latency Socket Configuration
     lessonType: 'concept_exercise',
     title: 'TCP Flow Control: {active, false} vs. {active, true} vs. {active, once} Backpressure',
     difficulty: 'Intermediate',
+    xpReward: 100,
     visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'When an incoming packet arrives under {active, once}, what does the BEAM socket driver do before delivering {tcp, Socket, Data} to the process?',
@@ -1489,6 +1492,7 @@ solutionExplanation: `### Solution Breakdown: Bounded Flow Control Worker
     lessonType: 'concept_exercise',
     title: 'Custom Stream Framing: Reconstructing Fragmented & Coalesced Raw TCP Byte Streams',
     difficulty: 'Advanced',
+    xpReward: 100,
     visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'When splitting an accumulated binary stream on "\\r\\n", why is calling binary:copy/1 on the remaining buffer essential for long-lived processes?',
@@ -1778,6 +1782,7 @@ solutionExplanation: `### Solution Breakdown: Zero-Leak Stream Framing
     lessonType: 'concept_exercise',
     title: 'Building a Ranch-Style Concurrent Acceptor Pool & gen_tcp:controlling_process/2 Handoff',
     difficulty: 'Advanced',
+    xpReward: 100,
     visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Why must the ListenSocket be opened in passive mode ({active, false}) when using an acceptor pool with connection workers?',
@@ -2400,6 +2405,7 @@ solutionExplanation: `### Solution Breakdown: High-Concurrency Socket Handoff
     lessonType: 'incident_triage',
     title: 'Incident #106: Slowloris & {active, true} TCP Mailbox OOM Crash',
     difficulty: 'Production',
+    xpReward: 175,
     visualScene: 'tcp_xmpp_stream_framing',
     incidentAlert: {
       incidentId: 'INC-106',
@@ -2767,6 +2773,7 @@ solutionExplanation: `### Incident #106 Triage Verification
     lessonType: 'problem_set',
     title: 'Chapter 10 Mini-Capstone: High-Throughput TCP Key-Value Backend Server',
     difficulty: 'Advanced',
+    xpReward: 250,
     visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Why does pairing an ETS table ({read_concurrency, true}, {write_concurrency, true}) with an acceptor pool achieve linear scalability across multi-core CPUs?',

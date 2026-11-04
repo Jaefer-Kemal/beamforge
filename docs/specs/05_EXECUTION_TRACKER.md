@@ -1205,3 +1205,47 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `services/orchestrator`: `go build ./...` passed with 0 errors.
   - Zero emojis anywhere in `apps/web-ide/src`.
   - Playwright test suite (`scripts/test_phase55_badges.mjs`) verified Badges shelf opening via Role badge, filter pills, unlocked/locked modals, share card copying, and tab switching.
+
+## Phase 56: Tiered XP, 2-Tier Celebration & End-to-End Data Consistency
+- [x] **56.1: Canonical XP-to-Role Mapping & Progression Single Source of Truth (`types/user.ts`)**:
+  - Exported pure function `xpToRole(xp: number)` defining the 7 canonical progression tiers:
+    - Level 1: `BEAM Newcomer` (0 – 299 XP)
+    - Level 2: `Pattern Matcher` (300 – 699 XP)
+    - Level 3: `OTP Apprentice` (700 – 1,199 XP)
+    - Level 4: `Concurrency Artisan` (1,200 – 1,999 XP)
+    - Level 5: `Fault Tolerance Engineer` (2,000 – 2,999 XP)
+    - Level 6: `OTP Architect` (3,000 – 4,499 XP)
+    - Level 7: `BEAM Grandmaster` (4,500+ XP)
+  - Synchronized `DEFAULT_USERS` (`user_alpha`: Lvl 1, 0 XP; `user_beta`: Lvl 4, 1450 XP; `user_master`: Lvl 7, 5200 XP).
+- [x] **56.2: Elimination of Premature Badge Unlock Bug (`types/badges.ts`)**:
+  - Defined `CHAPTER_FINAL_LESSON_IDS` mapping each chapter (1–12) to its exact capstone problem set (`ch01-l08`, `ch02-l08`, `ch03-l07`, `ch04-l08`, `ch05-l08`, `ch06-l10`, `ch07-l08`, `ch08-l07`, `ch09-l08`, `ch10-l07`, `ch11-l08`, `ch12-m6`).
+  - Fixed `isBadgeUnlocked()` to require completion of the actual chapter problem set (`ids.includes(finalLessonId)`), completely removing the flawed `user.level > ch` shortcut that previously caused premature badge unlocks.
+- [x] **56.3: Upgraded HTML5 Canvas Confetti to 2 Tiers (`lib/confetti.ts`)**:
+  - Re-architected `triggerCelebrationConfetti(tier: 'micro' | 'milestone' = 'micro')`:
+    - `'micro'`: 22 subtle emerald/sky particles near the bottom test drawer (1.4s) for uninterrupted coding flow.
+    - `'milestone'`: 120-particle dual-cannon gold/emerald/sapphire/amethyst burst (3.2s) for major milestones, capstones, and newly unlocked badges.
+- [x] **56.4: Tiered XP Applied Across Entire 12-Chapter Curriculum (`data/chapters/ch01.ts` to `ch12.ts`)**:
+  - Replaced uniform flat XP with tiered values reflecting cognitive complexity:
+    - `guided_demo`: **50 XP**
+    - `concept_exercise`: **100 XP**
+    - `incident_triage`: **175 XP**
+    - `problem_set`: **250 XP**
+    - `capstone_milestone`: **400 XP**
+    - `capstone_studio` / final chaos milestone: **750 XP**
+  - Total platform XP available: **16,875 XP** (comfortably covers Level 7 `BEAM Grandmaster` at 4,500 XP).
+- [x] **56.5: Store Progression & Anti-Cheat Logic (`state/useWorkspaceStore.ts`, `api/user-progress/route.ts`)**:
+  - Added `completedWithXpLevelIds` tracking in store to ensure lessons tested in Tester Mode (with 0 XP) can later award full XP when solved legitimately in Normal Mode.
+  - Snapshot badge state before and after level completion to detect new badge unlocks, automatically trigger `BadgeCelebrationModal`, and fire milestone confetti.
+  - Server-side validation in `route.ts`: role and level are strictly computed via `xpToRole(totalXp)` so client-side forgery is impossible.
+  - Live Neon PostgreSQL database seeded and verified (`scripts/seed_neon.mjs`).
+- [x] **56.6: Root Auto-Celebration Modal Mounting (`app/page.tsx`, `BadgeCelebrationModal.tsx`)**:
+  - Mounted `<BadgeCelebrationModal />` at the root page level, auto-displaying whenever a badge is newly earned.
+  - Added unique DOM IDs (`#badge-celebration-modal`, `#celebration-badge-title`) for testability and accessibility.
+- [x] **56.7: Comprehensive Verification Loop**:
+  - `apps/web-ide`: `npx tsc --noEmit` passed with 0 errors.
+  - `apps/web-ide`: `npm run build` passed with 0 errors (6/6 static and dynamic routes).
+  - `services/orchestrator`: `go build ./...` passed with 0 errors.
+  - `runtimes/erl-harness`: `erlc.exe` compiled `bf_ast_verifier.erl`, `bf_compiler.erl`, `bf_json.erl` with 0 errors.
+  - Zero emojis anywhere in `apps/web-ide/src` (strictly Lucide SVG icons).
+  - Playwright test suites (`test_phase56_xp_and_celebration.mjs` and `test_auto_celebration.mjs`) verified 100% pass rate with zero errors.
+

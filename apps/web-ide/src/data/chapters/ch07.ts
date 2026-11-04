@@ -9,6 +9,7 @@ export const CHAPTER_7_LESSONS: LessonContent[] = [
     lessonType: 'guided_demo',
     title: 'From my_gen_server to OTP gen_server & Live sys:get_state/1 Introspection',
     difficulty: 'Intermediate',
+    xpReward: 50,
     visualScene: 'supervision_rest_for_one_ets_heir',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -466,6 +467,7 @@ code_change(_OldVsn, State, _Extra) ->
     lessonType: 'concept_exercise',
     title: 'gen_server Essentials: start_link, Synchronous call & Async cast',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In distributed systems, choosing between synchronous and asynchronous communication dictates system reliability, throughput, and memory stability:
@@ -905,6 +907,7 @@ code_change(_OldVsn, State, _Extra) ->
     lessonType: 'concept_exercise',
     title: 'Non-Blocking Init with {continue, Term}, handle_continue/2 & Periodic handle_info/2 Timers',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In production backend clusters, slow startup times can bring down an entire system during a rolling deployment.
@@ -1394,6 +1397,7 @@ code_change(_OldVsn, State, _Extra) ->
     lessonType: 'concept_exercise',
     title: 'Async Worker Offloading with gen_server:reply/2 & Process Hibernation',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 A \`gen_server\` process handles messages from its mailbox strictly one at a time. This guarantees that your state map is never subject to concurrent data races.
@@ -1865,6 +1869,7 @@ code_change(_OldVsn, State, _Extra) ->
     lessonType: 'concept_exercise',
     title: 'gen_statem: Protocol & Circuit Breaker State Machines',
     difficulty: 'Production',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In Chapter 5 (Lesson 5.6), we modeled a stateful door lock actor using **mutual tail-recursion** (\`locked(Code, Attempts)\` $\leftrightarrow$ \`unlocked(Code)\`).
@@ -2352,6 +2357,7 @@ code_change(_OldVsn, State, Data, _Extra) ->
     lessonType: 'concept_exercise',
     title: 'gen_event: Decoupled Event Buses & Security Audit Loggers',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In microservices and high-throughput backends, decoupling event producers from consumers is essential for software evolution.
@@ -2730,6 +2736,7 @@ code_change(_OldVsn, State, _Extra) ->
     lessonType: 'incident_triage',
     title: 'Incident #103: Slow gen_server:init/1 Blocking Supervisor Startup',
     difficulty: 'Production',
+    xpReward: 175,
     incidentAlert: {
       incidentId: 'INC-103',
       severity: 'CRITICAL',
@@ -3156,6 +3163,7 @@ code_change(_OldVsn, State, _Extra) ->
     lessonType: 'problem_set',
     title: 'Chapter 7 Problem Set: API Gateway Token-Bucket Rate Limiter (rate_limiter_srv.erl)',
     difficulty: 'Production',
+    xpReward: 250,
     conceptMarkdown: `## Why This Matters in Production
 
 In microservice ecosystems and public developer platforms (such as Stripe, GitHub, or AWS API Gateway), rate limiting is the primary defense line against distributed denial-of-service (DDoS) attacks, abusive web scrapers, and runaway client retry loops.

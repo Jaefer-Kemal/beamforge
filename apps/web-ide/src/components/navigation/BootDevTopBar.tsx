@@ -25,7 +25,7 @@ import {
 import { BeamForgeLogo } from './BeamForgeLogo';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import { ALL_CURRICULUM_CHAPTERS } from '../../data/curriculumCatalog';
-import { DEFAULT_USERS, UserProfile } from '../../types/user';
+import { DEFAULT_USERS, UserProfile, xpToRole } from '../../types/user';
 import { LeaderboardDrawer } from '../workspace/LeaderboardDrawer';
 import { ResetAccountModal } from './ResetAccountModal';
 import { PrerequisiteModal } from '../workspace/PrerequisiteModal';
@@ -166,16 +166,6 @@ export const LESSONS_PER_CHAPTER: Record<number, string[]> = {
   ],
 };
 
-// XP-to-role lookup
-function xpToRole(xp: number): { level: number; role: string } {
-  if (xp < 300) return { level: 1, role: 'BEAM Newcomer' };
-  if (xp < 700) return { level: 2, role: 'Pattern Matcher' };
-  if (xp < 1200) return { level: 3, role: 'OTP Apprentice' };
-  if (xp < 2000) return { level: 4, role: 'Concurrency Artisan' };
-  if (xp < 3000) return { level: 5, role: 'Fault Tolerance Engineer' };
-  if (xp < 4500) return { level: 6, role: 'OTP Architect' };
-  return { level: 7, role: 'BEAM Grandmaster' };
-}
 
 export function BootDevTopBar() {
   const {
@@ -807,6 +797,7 @@ export function BootDevTopBar() {
                     return (
                       <button
                         key={u.id}
+                        id={`switch-user-${u.id}`}
                         onClick={() => {
                           switchUser(u.id);
                           setUserMenuOpen(false);

@@ -8,6 +8,7 @@ import { CurriculumWorldMap } from '../components/curriculum/CurriculumWorldMap'
 import { GlassWorkspace } from '../components/workspace/GlassWorkspace';
 import { ReferencesVaultView } from '../components/references/ReferencesVaultView';
 import { CommandPalette } from '../components/workspace/CommandPalette';
+import { BadgeCelebrationModal } from '../components/workspace/BadgeCelebrationModal';
 import { useWorkspaceStore } from '../state/useWorkspaceStore';
 import { wsMux } from '../lib/ws-multiplexer';
 import { getLessonByChapterAndNum, getLessonById } from '../data/curriculumCatalog';
@@ -214,6 +215,10 @@ export default function WorkspacePage() {
     activeLesson,
     activeExerciseId,
     theme,
+    currentUser,
+    celebrationBadge,
+    isBadgeCelebrationOpen,
+    closeBadgeCelebration,
   } = useWorkspaceStore();
 
   // Apply theme class to <html> on mount and when theme changes
@@ -290,6 +295,19 @@ export default function WorkspacePage() {
 
       {/* Command Palette (Cmd+K) */}
       <CommandPalette />
+
+      {/* Badge Celebration Modal (Auto-triggered upon earning an achievement/milestone badge) */}
+      {isBadgeCelebrationOpen && celebrationBadge && (
+        <BadgeCelebrationModal
+          badge={celebrationBadge}
+          isUnlocked={true}
+          userName={currentUser?.name || 'Explorer'}
+          userRole={currentUser?.role || 'BEAM Newcomer'}
+          userLevel={currentUser?.level || 1}
+          isDark={theme === 'dark'}
+          onClose={closeBadgeCelebration}
+        />
+      )}
     </main>
   );
 }

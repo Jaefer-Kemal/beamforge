@@ -10,6 +10,7 @@ export const CHAPTER_8_LESSONS: LessonContent[] = [
     title: 'Supervisor Flags & Restart Strategies: one_for_one, rest_for_one, and one_for_all',
     visualScene: 'supervision_rest_for_one_ets_heir',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In production backends, individual worker processes will inevitably encounter hardware timeouts, unexpected corrupt payloads, or database connection drops. The foundational architectural superpower of Erlang and the BEAM VM is **Supervision Trees** (\`-behaviour(supervisor).\`).
@@ -313,6 +314,7 @@ calculate_restart_budget(MaxCrashes, WindowSeconds)
     title: 'Child Specifications, Restart Types (permanent/transient/temporary) & Shutdown Semantics',
     visualScene: 'supervision_rest_for_one_ets_heir',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 A supervisor does not spawn processes randomly. Every process supervised by an OTP supervisor is defined by a **Child Specification** (\`child_spec()\`).
@@ -622,6 +624,7 @@ classify_restart(transient, _AbnormalReason) ->
     title: 'Restart Intensity Blizzards (intensity/period) & Upward Crash Escalation',
     visualScene: 'supervision_rest_for_one_ets_heir',
     difficulty: 'Advanced',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 What happens when a fatal dependency goes down—for instance, when the primary PostgreSQL database suffers a network partition, or a configuration file is corrupt?
@@ -895,6 +898,7 @@ reverse_shutdown_order(StartupChildIdsList) when is_list(StartupChildIdsList) ->
     title: 'Dynamic Worker Supervision (simple_one_for_one & supervisor:start_child)',
     visualScene: 'supervision_rest_for_one_ets_heir',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 Standard supervisors (\`one_for_one\`, \`rest_for_one\`) supervise a **static list of known children** declared at boot time.
@@ -1326,6 +1330,7 @@ code_change(_OldVsn, State, _Extra) ->
     title: 'OTP Applications: .app.src, -behaviour(application) & Runtime Configuration',
     visualScene: 'supervision_rest_for_one_ets_heir',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In Erlang/OTP, an **Application** is a self-contained component that can be started and stopped as a single unit, packaged into production releases, and configured at runtime.
@@ -1652,6 +1657,7 @@ init([]) ->
     title: 'Incident #104: Misconfigured Supervision Strategy Leaving Stale Downstream Workers',
     visualScene: 'supervision_rest_for_one_ets_heir',
     difficulty: 'Advanced',
+    xpReward: 175,
     incidentAlert: {
       incidentId: 'INC-104',
       severity: 'HIGH',
@@ -2123,6 +2129,7 @@ test_chaos_cascade() ->
     title: 'Chapter 8 Problem Set: Fault-Isolated E-Commerce Checkout Supervision Tree',
     visualScene: 'supervision_rest_for_one_ets_heir',
     difficulty: 'Advanced',
+    xpReward: 250,
     conceptMarkdown: `## Architectural Mission: E-Commerce Checkout Pipeline
 
 Welcome to the Chapter 8 Problem Set! You will architect a production-grade, fault-isolated **E-Commerce Checkout Supervision Tree**.

@@ -9,6 +9,7 @@ export const CHAPTER_1_LESSONS: LessonContent[] = [
     lessonType: 'guided_demo',
     title: 'Welcome to Erlang, The BEAM VM & Expression Syntax',
     difficulty: 'Beginner',
+    xpReward: 50,
     conceptMarkdown: `## Why This Matters in Production
 
 In 1986, Ericsson computer scientists Joe Armstrong, Robert Virding, and Mike Williams designed Erlang to power telephone switches that could never go down. Their benchmark was **nine nines (99.9999999%) availability**—less than one second of downtime every 31 years.
@@ -193,6 +194,7 @@ inspect_vm() ->
     lessonType: 'concept_exercise',
     title: "Numbers, Booleans & Erlang's Comparison Operators",
     difficulty: 'Beginner',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 High-throughput backend systems must never crash due to integer overflow, precision loss, or unexpected type coercions. Telecom switches calculate billing in exact micro-cents, and bandwidth shapers throttle network packets based on microsecond quotas.
@@ -439,6 +441,7 @@ is_within_quota(UsedMb, LimitMb, IsAdmin) ->
     lessonType: 'concept_exercise',
     title: 'Variables, Single Assignment & The = Pattern Match Operator',
     difficulty: 'Beginner',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In imperative languages (C++, Java, Go, Python), variables are mutable memory slots that can be modified at any time by any thread. When multiple threads modify the same variable concurrently, race conditions and corrupted states occur.
@@ -667,6 +670,7 @@ extract_middle(TripleTuple) ->
     lessonType: 'concept_exercise',
     title: 'Atoms & Tuples: Modeling Structured Telecom Events',
     difficulty: 'Beginner',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 Telecommunication switches and payment gateways process millions of discrete events per second: call connection attempts, packet handoffs, credit reservations, and circuit heartbeats.
@@ -909,6 +913,7 @@ swap_endpoints(Event) ->
     lessonType: 'concept_exercise',
     title: 'Lists, Cons Cells [H | T] & The Character List Mystery',
     difficulty: 'Beginner',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In distributed systems, streams of incoming network packets, database query rows, and log records are processed as **dynamically sized linked lists**.
@@ -1152,6 +1157,7 @@ ascii_initial(NameString) ->
     lessonType: 'concept_exercise',
     title: 'Modules, Exports, Function Arity & Compile-Time Macros',
     difficulty: 'Beginner',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 Large software systems fail when interfaces are ambiguous. In Erlang, every unit of code belongs to a **Module**, and every function is strictly identified by both its name and its **Arity** (the number of arguments it accepts), written as \`Function/Arity\`.
@@ -1407,6 +1413,7 @@ connect(Host, Port, Timeout) ->
     lessonType: 'concept_exercise',
     title: 'Multi-Clause Functions & The Punctuation Triad (, ; .)',
     difficulty: 'Beginner',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In mainstream programming languages, decision-making is expressed using nested \`if / else if / else\` branches or \`switch / case\` statements. In Erlang, branching is elevated to the function signature itself through **Multi-Clause Functions**.
@@ -1681,6 +1688,7 @@ verify_identical_pair(_) ->
     lessonType: 'problem_set',
     title: 'Problem Set: Telecom CDR Packet Classifier & Billing Engine',
     difficulty: 'Beginner',
+    xpReward: 250,
     conceptMarkdown: `## Why This Matters in Production
 
 In real-world telecommunication gateways and message brokers, incoming Call Detail Records (CDRs) and protocol packets must be inspected, validated, categorized, and priced across millions of subscribers.

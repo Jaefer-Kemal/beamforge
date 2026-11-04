@@ -154,6 +154,21 @@ export const BADGE_CATALOG: Badge[] = [
   },
 ];
 
+export const CHAPTER_FINAL_LESSON_IDS: Record<number, string> = {
+  1: 'ch01-l08',
+  2: 'ch02-l08',
+  3: 'ch03-l07',
+  4: 'ch04-l08',
+  5: 'ch05-l08',
+  6: 'ch06-l10',
+  7: 'ch07-l08',
+  8: 'ch08-l07',
+  9: 'ch09-l08',
+  10: 'ch10-l07',
+  11: 'ch11-l08',
+  12: 'ch12-m6',
+};
+
 // Check if a badge is unlocked for a given user
 export function isBadgeUnlocked(
   badge: Badge,
@@ -166,21 +181,11 @@ export function isBadgeUnlocked(
 
   if (badge.category === 'chapter' && badge.chapterNumber) {
     const ch = badge.chapterNumber;
-    // Level-based mastery guarantee
-    if (user && user.level && user.level > ch) return true;
-
-    // Check if the final lesson or any lesson of that chapter is completed
-    const finalLessonId = ch < 10 ? `ch0${ch}-l08` : `ch${ch}-l08`;
-    if (ch === 3) return ids.includes('ch03-l07') || ids.some((id) => id.startsWith('ch03-'));
-    if (ch === 5) return ids.includes('ch05-l07') || ids.some((id) => id.startsWith('ch05-'));
-    if (ch === 6) return ids.includes('ch06-l10') || ids.some((id) => id.startsWith('ch06-'));
-    if (ch === 7) return ids.includes('ch07-l08') || ids.some((id) => id.startsWith('ch07-'));
-    if (ch === 8) return ids.includes('ch08-l07') || ids.some((id) => id.startsWith('ch08-'));
-    if (ch === 9) return ids.includes('ch09-l08') || ids.some((id) => id.startsWith('ch09-'));
-    if (ch === 10) return ids.includes('ch10-l07') || ids.some((id) => id.startsWith('ch10-'));
-    if (ch === 11) return ids.includes('ch11-l08') || ids.some((id) => id.startsWith('ch11-'));
-    if (ch === 12) return ids.includes('ch12-capstone') || ids.some((id) => id.startsWith('ch12-'));
-    return ids.includes(finalLessonId) || ids.some((id) => id.startsWith(`ch0${ch}-`));
+    const finalLessonId = CHAPTER_FINAL_LESSON_IDS[ch];
+    if (ch === 12) {
+      return ids.includes('ch12-m6') || ids.includes('ch12-capstone');
+    }
+    return Boolean(finalLessonId && ids.includes(finalLessonId));
   }
 
   if (badge.id === 'badge_streak_7d') {
@@ -197,7 +202,7 @@ export function isBadgeUnlocked(
       'ch10-l06',
       'ch11-l07',
     ];
-    return ids.some((id) => incidentIds.includes(id)) || Boolean(user?.level && user.level >= 6);
+    return ids.some((id) => incidentIds.includes(id));
   }
 
   return false;

@@ -9,6 +9,7 @@ export const CHAPTER_3_LESSONS: LessonContent[] = [
     lessonType: 'concept_exercise',
     title: 'First-Class Functions: Anonymous fun Closures & fun Mod:Fun/Arity Captures',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In distributed systems, microservices, and asynchronous event-driven pipelines, hardcoding business logic inside rigid control flow leads to brittle, repetitive code. For example, an e-commerce platform needs different calculation engines for VIP users, wholesale bulk buyers, and retail customers; a payment processor needs configurable validation hooks before authorizing a charge.
@@ -327,6 +328,7 @@ choose_pricing_strategy(_) ->
     lessonType: 'concept_exercise',
     title: 'Transforming & Filtering Collections (lists:map/2, lists:filter/2, lists:filtermap/2)',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In Chapter 2, you wrote manual tail-recursive loops with accumulators to search, filter, and transform lists. While writing recursion by hand is essential for understanding the BEAM VM stack, writing 12 lines of recursive boilerplate for every collection operation in production is slow, tedious, and error-prone.
@@ -622,6 +624,7 @@ sanitize_metrics(RawMetrics) ->
     lessonType: 'concept_exercise',
     title: 'Boolean Predicates & Single-Pass Partitioning (lists:all/2, lists:any/2, lists:partition/2)',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 Before performing a critical transaction—such as placing a batch order, executing a database migration, or taking a node offline for maintenance—systems need to evaluate collection-wide invariants:
@@ -892,6 +895,7 @@ split_orders_by_stock(Orders, MaxSingleOrderQty) ->
     lessonType: 'concept_exercise',
     title: 'Folding & State Aggregation (lists:foldl/3 vs. lists:foldr/3)',
     difficulty: 'Intermediate',
+    xpReward: 100,
     visualScene: 'tco_vs_body_stack',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -1153,6 +1157,7 @@ reverse_with_fold(List) ->
     lessonType: 'concept_exercise',
     title: 'Keyed Tuple Lists (lists:keyfind/3, keystore/4) & proplists',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In Chapter 2 (\`inventory.erl\`), you wrote recursive lookup and update functions to find and modify tuples in a list like \`[{product, Id, Name, Price, Stock}, ...]\`.
@@ -1444,6 +1449,7 @@ read_socket_options(OptsList) ->
     lessonType: 'concept_exercise',
     title: 'List Comprehensions ([Expr || Generator, Filter]), Pattern Filtering & Joins',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In database systems (like SQL) and query languages, you routinely express transformations as declarative queries:
@@ -1717,6 +1723,7 @@ fulfilled_order_receipts(Inventory, Orders) ->
     lessonType: 'problem_set',
     title: 'Chapter 3 Problem Set: Refactoring Inventory Analytics & SLA Log Aggregator (inventory_hof.erl)',
     difficulty: 'Intermediate',
+    xpReward: 250,
     visualScene: 'tco_vs_body_stack',
     conceptMarkdown: `## Why This Matters in Production
 

@@ -14,11 +14,24 @@ export interface UserProfile {
   badges?: string[];
 }
 
+/**
+ * Single Canonical Source of Truth for XP, Level (1-7), and Role titles across BeamForge.
+ */
+export function xpToRole(xp: number): { level: number; role: string } {
+  if (xp < 300) return { level: 1, role: 'BEAM Newcomer' };
+  if (xp < 700) return { level: 2, role: 'Pattern Matcher' };
+  if (xp < 1200) return { level: 3, role: 'OTP Apprentice' };
+  if (xp < 2000) return { level: 4, role: 'Concurrency Artisan' };
+  if (xp < 3000) return { level: 5, role: 'Fault Tolerance Engineer' };
+  if (xp < 4500) return { level: 6, role: 'OTP Architect' };
+  return { level: 7, role: 'BEAM Grandmaster' };
+}
+
 export const DEFAULT_USERS: Record<string, UserProfile> = {
   user_alpha: {
     id: 'user_alpha',
     name: 'Alpha Tester',
-    role: 'BEAM Explorer (Junior)',
+    role: 'BEAM Newcomer',
     level: 1,
     avatarColor: '#3B82F6', // Blue
     bio: 'Fresh recruit tackling Erlang functional syntax and immutable pattern matching.',
@@ -31,8 +44,8 @@ export const DEFAULT_USERS: Record<string, UserProfile> = {
   user_beta: {
     id: 'user_beta',
     name: 'Beta Learner',
-    role: 'Actor Architect (Intermediate)',
-    level: 5,
+    role: 'Concurrency Artisan',
+    level: 4,
     avatarColor: '#8B5CF6', // Purple
     bio: 'Intermediate developer implementing supervision trees, link/monitor traps, and gen_servers.',
     completedLevelIds: [
@@ -50,8 +63,8 @@ export const DEFAULT_USERS: Record<string, UserProfile> = {
   user_master: {
     id: 'user_master',
     name: 'BEAM Master',
-    role: 'Telecom Principal (Senior)',
-    level: 12,
+    role: 'BEAM Grandmaster',
+    level: 7,
     avatarColor: '#10B981', // Emerald
     bio: 'Senior systems engineer building distributed XMPP RFC 6120 clusters with zero downtime.',
     completedLevelIds: [
@@ -67,11 +80,11 @@ export const DEFAULT_USERS: Record<string, UserProfile> = {
       'ch09-l01', 'ch09-l02', 'ch09-l03', 'ch09-l04', 'ch09-l05', 'ch09-l06', 'ch09-l07', 'ch09-l08',
       'ch10-l01', 'ch10-l02', 'ch10-l03', 'ch10-l04', 'ch10-l05', 'ch10-l06', 'ch10-l07',
       'ch11-l01', 'ch11-l02', 'ch11-l03', 'ch11-l04', 'ch11-l05', 'ch11-l06', 'ch11-l07', 'ch11-l08',
-      'ch12-l01', 'ch12-l02', 'ch12-l03',
+      'ch12-m1', 'ch12-m2', 'ch12-m3',
     ],
-    totalXp: 4200,
+    totalXp: 5200,
     unlockedSolutionLessonIds: ['ch06-l10', 'ch09-l08'],
-    lastActiveExercise: 'ch12-l04',
+    lastActiveExercise: 'ch12-m4',
     streakDays: 14,
   },
 };

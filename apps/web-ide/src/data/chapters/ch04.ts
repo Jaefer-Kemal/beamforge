@@ -9,6 +9,7 @@ export const CHAPTER_4_LESSONS: LessonContent[] = [
     lessonType: 'concept_exercise',
     title: 'Maps (#{}): Association (=>), Exact Matching (:=), and FlatMap vs. HAMT Internals',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In distributed systems, REST APIs, and actor process state stores, data structures need to evolve rapidly. While tuples require knowing exact numerical offsets and records require compile-time headers, **Maps (\`#{}\`)** provide arbitrary key-value associations where keys can be added, updated, or removed dynamically at runtime.
@@ -284,6 +285,7 @@ is_admin_session(_) ->
     lessonType: 'concept_exercise',
     title: 'The maps Standard Library: get/3, find/2, update_with/4, merge/2 & fold/3',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 While pattern matching (\`#{key := Val}\`) is ideal when keys are guaranteed to exist, production applications constantly deal with optional configurations, dynamic metric counters, and security sanitization where keys must be inspected dynamically.
@@ -564,6 +566,7 @@ sum_map_values(NumericMap) ->
     lessonType: 'concept_exercise',
     title: 'Records (-record): Compile-Time Tuple Sugar, #rec.field Indices & Header Files',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 While maps provide dynamic key flexibility, **records** provide named field access with **zero runtime lookup overhead**.
@@ -862,6 +865,7 @@ find_frame_by_seq(FrameList, TargetSeq) ->
     lessonType: 'concept_exercise',
     title: 'Binaries (<<...>>) vs. Character Lists, UTF-8 & Zero-Copy IOLists',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In Chapter 1 Lesson 1.5, you learned that string literals like \`"hello"\` are actually singly linked lists of integer Unicode codepoints (\`[104, 101, 108, 108, 111]\`). On a 64-bit BEAM VM, each linked list cons cell requires two machine words (16 bytes). A simple 5-character string \`"hello"\` takes **80 bytes of RAM**!
@@ -1125,6 +1129,7 @@ flatten_iolist(IoList) ->
     lessonType: 'concept_exercise',
     title: 'Erlang Bit Syntax (<<Val:Size/TypeSpecifiers>>): Bit-Level Protocol Packing & Endianness',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 Erlang's **Bit Syntax (\`<<...>>\`)** is widely celebrated as one of the greatest inventions in programming language history.
@@ -1372,6 +1377,7 @@ encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
     lessonType: 'concept_exercise',
     title: 'Binary Scanning (binary:split/2,3, binary:match/2) & Binary Comprehensions',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 When parsing HTTP headers, MIME multipart streams, or raw TCP line protocols, developers in other languages often convert raw bytes into character strings before splitting on \`\\r\\n\`.
@@ -1626,6 +1632,7 @@ xor_mask_payload(PayloadBin, MaskByte) ->
     lessonType: 'concept_exercise',
     title: 'Under the Hood: Off-Heap ProcBin Refc Binaries & Avoiding Sub-Binary Leaks (binary:copy/1)',
     difficulty: 'Advanced',
+    xpReward: 100,
     visualScene: 'sub_binary_procbin_refc',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -1881,6 +1888,7 @@ inspect_refc_ratio(Bin) ->
     lessonType: 'problem_set',
     title: 'Chapter 4 Problem Set: Binary Network Packet & Multi-Frame TLV Stream Parser (packet_parser.erl)',
     difficulty: 'Advanced',
+    xpReward: 250,
     visualScene: 'sub_binary_procbin_refc',
     conceptMarkdown: `## Why This Matters in Production
 

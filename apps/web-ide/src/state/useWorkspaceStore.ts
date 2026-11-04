@@ -25,8 +25,9 @@ import {
 } from '../data/curriculumCatalog';
 import { wsMux, WSConnectionStatus, WSResponseFrame } from '../lib/ws-multiplexer';
 import { ORCHESTRATOR_HTTP_URL } from '../lib/orchestratorConfig';
-import { UserProfile, DEFAULT_USERS } from '../types/user';
+import { UserProfile, DEFAULT_USERS, xpToRole } from '../types/user';
 import { triggerCelebrationConfetti } from '../lib/confetti';
+import { Badge, BADGE_CATALOG, isBadgeUnlocked } from '../types/badges';
 
 export const ALL_EXERCISES: Record<string, ExerciseManifest> = { ...EXERCISES };
 for (const world of CURRICULUM_WORLDS) {
@@ -108,6 +109,11 @@ interface WorkspaceState {
   switchUser: (userId: string) => Promise<void>;
   resetUserProgress: () => Promise<void>;
   completedLevelIds: string[];
+  completedWithXpLevelIds: string[];
+  celebrationBadge: Badge | null;
+  isBadgeCelebrationOpen: boolean;
+  openBadgeCelebration: (badge: Badge) => void;
+  closeBadgeCelebration: () => void;
   totalXp: number;
   unlockedWorldIds: string[];
   devModeUnlockedAll: boolean;
@@ -422,7 +428,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         set({ beamFootprint: report.beam_footprint || report.beamFootprint });
       }
       if (report.score === 100 || report.verdict === 'PASSED') {
-        triggerCelebrationConfetti();
         get().onLevelCompleted(get().activeExerciseId);
       }
     }
@@ -654,7 +659,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       set({
         currentUser: targetUser,
         completedLevelIds: targetUser.completedLevelIds,
+        completedWithXpLevelIds: targetUser.completedLevelIds,
         totalXp: targetUser.totalXp,
+        celebrationBadge: null,
+        isBadgeCelebrationOpen: false,
         unlockedSolutionLessonIds: targetUser.unlockedSolutionLessonIds,
       });
 
@@ -687,7 +695,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       set({
         currentUser: freshAlpha,
         completedLevelIds: [],
+        completedWithXpLevelIds: [],
         totalXp: 0,
+        celebrationBadge: null,
+        isBadgeCelebrationOpen: false,
         unlockedSolutionLessonIds: [],
       });
       get().switchExercise('ch01-l01');
@@ -698,6 +709,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     },
 
     completedLevelIds: initialUser.completedLevelIds,
+    completedWithXpLevelIds: initialUser.completedLevelIds,
+    celebrationBadge: null,
+    isBadgeCelebrationOpen: false,
+    openBadgeCelebration: (badge: Badge) => set({ celebrationBadge: badge, isBadgeCelebrationOpen: true }),
+    closeBadgeCelebration: () => set({ isBadgeCelebrationOpen: false, celebrationBadge: null }),
     totalXp: initialUser.totalXp,
     unlockedWorldIds: ['world-1-foundations'],
     devModeUnlockedAll: typeof window !== 'undefined' ? localStorage.getItem('beamforge_dev_tester') === 'true' : false,
@@ -840,14 +856,42 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     },
 
     onLevelCompleted: (levelId: string) => {
-      const { completedLevelIds, totalXp, unlockedWorldIds, devModeUnlockedAll, unlockedSolutionLessonIds, activeExerciseId } = get();
+      const {
+        completedLevelIds,
+        completedWithXpLevelIds,
+        totalXp,
+        unlockedWorldIds,
+        devModeUnlockedAll,
+        unlockedSolutionLessonIds,
+        activeExerciseId,
+        currentUser,
+      } = get();
+
       const level = getLevelById(levelId);
+      const lessonObj = getLessonById(levelId);
       const isAlreadyCompleted = completedLevelIds.includes(levelId);
-      const isSolutionUnlocked = (unlockedSolutionLessonIds || []).includes(levelId) || (unlockedSolutionLessonIds || []).includes(activeExerciseId);
+      const isAlreadyCompletedWithXp = (completedWithXpLevelIds || []).includes(levelId);
+      const isSolutionUnlocked =
+        (unlockedSolutionLessonIds || []).includes(levelId) ||
+        (unlockedSolutionLessonIds || []).includes(activeExerciseId);
       const isTesterMode = devModeUnlockedAll;
-      const effectiveXpReward = isTesterMode ? 0 : (isSolutionUnlocked ? 0 : (level?.xpReward || 100));
-      let finalCompleted = isAlreadyCompleted ? [...completedLevelIds] : [...completedLevelIds, levelId];
-      const newXp = isAlreadyCompleted ? totalXp : totalXp + effectiveXpReward;
+
+      // Determine XP reward: If completed previously with XP, 0 XP. If in tester mode or solution viewed, 0 XP.
+      // If completed previously in Tester Mode (with 0 XP) and now solved in normal mode without solution, award XP!
+      const rawReward = lessonObj?.xpReward || level?.xpReward || 100;
+      const effectiveXpReward = isTesterMode || isSolutionUnlocked || isAlreadyCompletedWithXp ? 0 : rawReward;
+
+      const finalCompleted = isAlreadyCompleted ? [...completedLevelIds] : [...completedLevelIds, levelId];
+      const finalCompletedWithXp =
+        effectiveXpReward > 0 && !isAlreadyCompletedWithXp
+          ? [...(completedWithXpLevelIds || []), levelId]
+          : [...(completedWithXpLevelIds || [])];
+
+      const newXp = totalXp + effectiveXpReward;
+      const roleObj = xpToRole(newXp);
+
+      // Snapshot badges BEFORE updating
+      const badgesBefore = BADGE_CATALOG.filter((b) => isBadgeUnlocked(b, currentUser, completedLevelIds));
 
       if (isTesterMode && !isAlreadyCompleted) {
         get().addTerminalEntry({
@@ -857,7 +901,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       }
 
       // Fast-Track Assessment: If completing the final lesson of a chapter, auto-complete all earlier chapter lessons
-      const lessonObj = getLessonById(levelId);
       if (lessonObj && lessonObj.chapterNumber) {
         const chLessons = ALL_CURRICULUM_CHAPTERS[lessonObj.chapterNumber] || [];
         const isChapterFinal = chLessons.length > 0 && lessonObj.lessonNumber === chLessons.length;
@@ -926,19 +969,54 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         ...get().currentUser,
         completedLevelIds: finalCompleted,
         totalXp: newXp,
-        level: Math.max(1, Math.floor(newXp / 300) + 1),
+        level: roleObj.level,
+        role: roleObj.role,
         lastActiveExercise: levelId,
         streakDays: newStreak,
         lastActivityDate: todayStr,
       };
       syncUserToStorageAndDb(updatedUser);
 
-      set({
-        completedLevelIds: finalCompleted,
-        totalXp: newXp,
-        unlockedWorldIds: newUnlockedWorlds,
-        currentUser: updatedUser,
-      });
+      // Snapshot badges AFTER updating
+      const badgesAfter = BADGE_CATALOG.filter((b) => isBadgeUnlocked(b, updatedUser, finalCompleted));
+      const newlyEarnedBadges = badgesAfter.filter((b) => !badgesBefore.some((prev) => prev.id === b.id));
+
+      const isMilestoneType =
+        lessonObj?.lessonType === 'problem_set' ||
+        lessonObj?.lessonType === 'incident_triage' ||
+        lessonObj?.lessonType === 'capstone_studio' ||
+        lessonObj?.chapterNumber === 12;
+
+      if (newlyEarnedBadges.length > 0) {
+        const primaryBadge = newlyEarnedBadges[0];
+        set({
+          completedLevelIds: finalCompleted,
+          completedWithXpLevelIds: finalCompletedWithXp,
+          totalXp: newXp,
+          unlockedWorldIds: newUnlockedWorlds,
+          currentUser: updatedUser,
+          celebrationBadge: primaryBadge,
+          isBadgeCelebrationOpen: true,
+        });
+        triggerCelebrationConfetti('milestone');
+        get().addTerminalEntry({
+          type: 'output',
+          text: `==> [Achievement] NEW BADGE UNLOCKED: ${primaryBadge.title}! Opened in Trophy Showcase.`,
+        });
+      } else {
+        set({
+          completedLevelIds: finalCompleted,
+          completedWithXpLevelIds: finalCompletedWithXp,
+          totalXp: newXp,
+          unlockedWorldIds: newUnlockedWorlds,
+          currentUser: updatedUser,
+        });
+        if (isMilestoneType) {
+          triggerCelebrationConfetti('milestone');
+        } else {
+          triggerCelebrationConfetti('micro');
+        }
+      }
 
       get().addTerminalEntry({
         type: 'output',
@@ -946,7 +1024,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           ? `[Tester Mode] Level ${level?.levelNumber || levelId} verified! (+0 XP - Tester mode active). Total XP: ${newXp}`
           : isSolutionUnlocked
           ? `[Mastery] Level ${level?.levelNumber || levelId} passed! (+0 XP - Solution was viewed). Total XP: ${newXp}`
-          : `[Mastery] Level ${level?.levelNumber || levelId} passed! (+${effectiveXpReward} XP). Total XP: ${newXp}`,
+          : isAlreadyCompletedWithXp
+          ? `[Mastery] Level ${level?.levelNumber || levelId} re-verified! (+0 XP - Already completed). Total XP: ${newXp}`
+          : `[Mastery] Level ${level?.levelNumber || levelId} passed! (+${effectiveXpReward} XP). Total XP: ${newXp} [${roleObj.role}]`,
       });
     },
 
@@ -1293,7 +1373,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             });
           }
           if (report.score === 100 || report.verdict === 'PASSED') {
-            triggerCelebrationConfetti();
             get().onLevelCompleted(get().activeExerciseId);
             get().addTerminalEntry({
               type: 'output',
@@ -1592,3 +1671,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     },
   };
 });
+
+if (typeof window !== 'undefined') {
+  (window as any).useWorkspaceStore = useWorkspaceStore;
+}

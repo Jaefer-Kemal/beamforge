@@ -1125,7 +1125,7 @@ export const CHAPTER_12_LESSONS: LessonContent[] = [
     lessonType: 'capstone_studio',
     title: 'Capstone: 5-Module Production OTP XMPP Server',
     difficulty: 'Production',
-    xpReward: 500,
+    xpReward: 750,
     capabilityMode: 'xmpp_full',
     visualScene: 'xmpp_5_module_capstone_arch',
     mentalModelCheck: {

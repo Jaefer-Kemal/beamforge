@@ -9,6 +9,7 @@ export const CHAPTER_9_LESSONS: LessonContent[] = [
     lessonType: 'concept_exercise',
     title: 'ETS Fundamentals: Table Types (set, ordered_set, bag), keypos & Atomic Counters',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In mainstream backend languages such as Node.js, Python, Go, and Ruby, scaling high-throughput APIs requires deploying an external **Redis** or **Memcached** cluster over the network. Every single cache read incurs network TCP roundtrips (1–3ms), OS socket serialization, connection pooling overhead, and JSON or Protobuf parsing costs.
@@ -366,6 +367,7 @@ get_user_profile(UserId) ->
     lessonType: 'concept_exercise',
     title: 'ETS Pattern Matching, Match Specs (select, select_delete) & protected Reads',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In a high-throughput API gateway, thousands of concurrent requests need to validate auth tokens on every HTTP request. If token verification is handled by sending a message to a \`gen_server\`, that server's mailbox becomes a severe single-threaded bottleneck: 50,000 requests/sec will queue up, causing latency spikes and timeouts.
@@ -681,6 +683,7 @@ delete_expired_tokens(CurrentTimestamp) ->
     lessonType: 'concept_exercise',
     title: 'Surviving Worker Crashes: The ETS Heir Handshake & ets:give_away/3',
     difficulty: 'Advanced',
+    xpReward: 100,
     visualScene: 'supervision_rest_for_one_ets_heir',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -1058,6 +1061,7 @@ verify_heir_survival_demo() ->
     lessonType: 'concept_exercise',
     title: 'Distributed Erlang Core: Nodes, Magic Cookies, rpc:call & pg Groups',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 Erlang's actor model was designed from day one for distributed computing. In Erlang, sending a message to a process on the same machine (\`Pid ! Message\`) uses the exact same syntax and semantics as sending a message to a process on a machine 5,000 miles away!
@@ -1452,6 +1456,7 @@ get_subscribers(Topic) ->
     lessonType: 'concept_exercise',
     title: 'Mnesia Distributed DBMS: Tables, ACID Transactions & Rollback',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 ETS gives you nanosecond-speed single-operation in-memory lookups. **However, ETS has no multi-row ACID transactions.**
@@ -1866,6 +1871,7 @@ get_wallet_balance(Owner) ->
     lessonType: 'concept_exercise',
     title: 'Production QA: EUnit Test Generators (?_assertEqual) & Dialyzer Specs',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In mission-critical BEAM architectures, dynamic typing gives incredible development velocity and runtime hot-code loading. But how do telecom switches, banking ledgers, and payment platforms guarantee that a function never crashes with a \`function_clause\` or \`badarith\` error in production?
@@ -2172,6 +2178,7 @@ run_unit_tests() ->
     lessonType: 'incident_triage',
     title: 'Incident #105: ETS Session Wipeout When Cache Worker Crashes',
     difficulty: 'Production',
+    xpReward: 175,
     visualScene: 'supervision_rest_for_one_ets_heir',
     incidentAlert: {
       incidentId: 'INC-105',
@@ -2654,6 +2661,7 @@ test_heir_handover() ->
     lessonType: 'problem_set',
     title: 'Chapter 9 Problem Set: Fault-Tolerant ETS Session Store with Heir Failover',
     difficulty: 'Advanced',
+    xpReward: 250,
     visualScene: 'supervision_rest_for_one_ets_heir',
     conceptMarkdown: `## Why This Matters in Production
 

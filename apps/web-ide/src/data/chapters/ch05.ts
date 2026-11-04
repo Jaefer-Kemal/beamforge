@@ -9,6 +9,7 @@ export const CHAPTER_5_LESSONS: LessonContent[] = [
     lessonType: 'guided_demo',
     title: 'Lightweight BEAM Processes (~2.5 KB), Preemptive Reductions & Process Introspection BIFs',
     difficulty: 'Intermediate',
+    xpReward: 50,
     visualScene: 'mailbox_selective_receive',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -345,6 +346,7 @@ inspect_process(Pid) ->
     lessonType: 'concept_exercise',
     title: 'Spawning (spawn/1 vs. spawn/3), PIDs (self/0) & Asynchronous Message Passing (!)',
     difficulty: 'Intermediate',
+    xpReward: 100,
     visualScene: 'mailbox_selective_receive',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -651,6 +653,7 @@ broadcast(PidsList, Msg) ->
     lessonType: 'concept_exercise',
     title: 'Selective receive ... after: The Mailbox Save Queue, Timeouts & after 0 Non-Blocking Flush',
     difficulty: 'Intermediate',
+    xpReward: 100,
     visualScene: 'mailbox_selective_receive',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -989,6 +992,7 @@ flush_loop(Acc) ->
     lessonType: 'concept_exercise',
     title: 'The Client-Server Abstraction Barrier & Tail-Recursive Actor State Loops',
     difficulty: 'Intermediate',
+    xpReward: 100,
     visualScene: 'mailbox_selective_receive',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -1346,6 +1350,7 @@ loop(CurrentVal) ->
     lessonType: 'concept_exercise',
     title: 'Process Registry (register/2, whereis/1), Dead-PID vs. Unregistered-Atom Semantics & make_ref() Correlation',
     difficulty: 'Advanced',
+    xpReward: 100,
     visualScene: 'mailbox_selective_receive',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -1794,6 +1799,7 @@ loop(Map) ->
     lessonType: 'concept_exercise',
     title: 'Finite State Machine (FSM) Actors via Mutual Tail Recursion',
     difficulty: 'Advanced',
+    xpReward: 100,
     visualScene: 'mailbox_selective_receive',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -2330,6 +2336,7 @@ unlocked(SecretCode) ->
     lessonType: 'incident_triage',
     title: 'Production Incident #101: Unbounded Mailbox Memory Leak in Telemetry Actor',
     difficulty: 'Production',
+    xpReward: 175,
     visualScene: 'mailbox_selective_receive',
     incidentAlert: {
       incidentId: 'INC-101',
@@ -2753,6 +2760,7 @@ loop(State = #{count := Count, total := Total}) ->
     lessonType: 'problem_set',
     title: 'Chapter 5 Problem Set: Concurrent Bank Ledger & Order Actor (ledger_actor.erl)',
     difficulty: 'Production',
+    xpReward: 250,
     visualScene: 'mailbox_selective_receive',
     conceptMarkdown: `## Why This Matters in Production
 

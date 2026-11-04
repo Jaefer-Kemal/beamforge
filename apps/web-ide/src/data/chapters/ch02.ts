@@ -9,6 +9,7 @@ export const CHAPTER_2_LESSONS: LessonContent[] = [
     lessonType: 'concept_exercise',
     title: 'Deep Pattern Matching in Function Heads & Simultaneous Aliasing',
     difficulty: 'Beginner',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In distributed systems, telecommunication gateways, and message brokers, network frames arrive as deeply nested structures containing protocol wrappers, routing headers, transaction identifiers, and payload records.
@@ -255,6 +256,7 @@ repackage_envelope(Packet) ->
     lessonType: 'concept_exercise',
     title: 'Guard Clauses (when), Compound Guards & Silent Guard Failure',
     difficulty: 'Beginner',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 Pattern matching alone cannot express numerical ranges, type boundaries, or arithmetic constraints. For example, pattern matching can verify that a parameter is a tuple \`{port, Number}\`, but it cannot verify that \`Number\` is strictly between \`1024\` and \`65535\`.
@@ -543,6 +545,7 @@ safe_ratio(_, _) ->
     lessonType: 'concept_exercise',
     title: 'Branching Inside Bodies: case...of vs. if...end',
     difficulty: 'Beginner',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 While multi-clause function heads are the primary dispatch mechanism in Erlang, real-world systems frequently need to branch **in the middle of a function body** based on the result of an intermediate computation (such as calling a database, decoding a JSON envelope, or parsing an HTTP response).
@@ -823,6 +826,7 @@ grade_latency(LatencyMs) ->
     lessonType: 'concept_exercise',
     title: 'Thinking Recursively (Part 1): Base Cases & Searching a List of Tuples',
     difficulty: 'Beginner',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In imperative programming languages (Python, Go, Java, TypeScript), searching an inventory list is done with a \`for\` or \`while\` loop that mutates an index variable.
@@ -1070,6 +1074,7 @@ contains_item([_Other | Rest], Target) ->
     lessonType: 'concept_exercise',
     title: 'Body Recursion vs. Tail-Call Optimization (TCO) on the BEAM Stack',
     difficulty: 'Beginner',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In production BEAM applications processing millions of network packets, sensor readings, or ledger entries, how you write recursive functions directly determines whether your server runs smoothly or crashes with an **Out Of Memory (OOM)** error.
@@ -1321,6 +1326,7 @@ count_packets([_ | T], Acc) ->
     lessonType: 'concept_exercise',
     title: 'The List Accumulator Pattern & Why lists:reverse/1 is Mandatory',
     difficulty: 'Beginner',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In Lesson 2.5, you used an accumulator to calculate a single number (a sum or a count).
@@ -1530,6 +1536,7 @@ keep_valid_orders([_InvalidOrder | Rest], Acc) ->
     lessonType: 'concept_exercise',
     title: 'Thinking Recursively (Part 2): Updating a Tuple in a List & Dual Accumulators',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In real-world backend applications, you rarely just read or filter lists: you need to **update records inside an immutable dataset**.
@@ -1812,6 +1819,7 @@ partition_orders([O | Rest], MinQty, ValidAcc, RejAcc) ->
     lessonType: 'problem_set',
     title: 'Problem Set: Real-World Inventory Order Processor',
     difficulty: 'Intermediate',
+    xpReward: 250,
     conceptMarkdown: `## Why This Matters in Production
 
 In high-concurrency systems (such as high-frequency trading engines, e-commerce checkout backends, and logistics order dispatchers), multiple mutations must happen against complex nested datasets with **zero side effects**, **zero memory leaks**, and **guaranteed determinism**.

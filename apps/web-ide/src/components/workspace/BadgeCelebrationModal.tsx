@@ -85,7 +85,7 @@ Mastering Erlang/OTP & XMPP Distributed Systems`;
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
+    <div id="badge-celebration-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
       <div
         className="w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col items-center text-center animate-scale-up"
         style={{
@@ -144,6 +144,7 @@ Mastering Erlang/OTP & XMPP Distributed Systems`;
 
         {/* Badge Title */}
         <h2
+          id="celebration-badge-title"
           className="text-lg font-black tracking-tight"
           style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}
         >

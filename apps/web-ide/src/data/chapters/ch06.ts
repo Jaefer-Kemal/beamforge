@@ -9,6 +9,7 @@ export const CHAPTER_6_LESSONS: LessonContent[] = [
     lessonType: 'concept_exercise',
     title: 'Sequential Exceptions: throw, error, exit & Pattern Matching try...catch',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In classical languages like Java, C++, Python, or TypeScript, developers are conditioned to rely on defensive programming: wrapping entire call stacks in blanket \`try { ... } catch (Exception e)\` blocks. When an unexpected error occurs, the catch block catches the exception, logs a generic stacktrace, and leaves the application running in **partially mutated, corrupt memory**. This corrupted state quietly spreads, eventually triggering subtle data loss or cascading outages hours later.
@@ -364,6 +365,7 @@ trigger_class(exit, Reason) ->
     lessonType: 'concept_exercise',
     title: 'Safe Operations & Return Values ({ok, Val} | {error, Reason}) vs. Exceptions',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 A foundational dilemma every backend engineer faces when designing APIs in Erlang is:
@@ -737,6 +739,7 @@ process_checkout_input(EmailBin, TotalAmount, SplitCount) ->
     lessonType: 'concept_exercise',
     title: 'Guaranteed Resource Cleanup with try ... of ... catch ... after & Boundary Deserialization',
     difficulty: 'Intermediate',
+    xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
 In systems languages like C++ or Rust, resource cleanup is automated using RAII (Resource Acquisition Is Initialization) or smart pointers. In Python, it is handled by \`with\` statement context managers.
@@ -1058,6 +1061,7 @@ process_transaction_log(LinesList, CloseNotifyPid) when is_list(LinesList), is_p
     lessonType: 'concept_exercise',
     title: 'Bidirectional Process Links (link/1, spawn_link/1) & Normal vs. Abnormal Exit Signals',
     difficulty: 'Intermediate',
+    xpReward: 100,
     visualScene: 'links_monitors_signals',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -1457,6 +1461,7 @@ worker2_loop() ->
     lessonType: 'concept_exercise',
     title: 'Trapping Exits (process_flag(trap_exit, true)), The Exit Signal Truth Table & Untrappable kill',
     difficulty: 'Advanced',
+    xpReward: 100,
     visualScene: 'links_monitors_signals',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -1883,6 +1888,7 @@ simulate_exit_truth_table(TrappingBool, SignalReason) ->
     lessonType: 'concept_exercise',
     title: 'Unidirectional Monitors (erlang:monitor/2, spawn_monitor/1), \'DOWN\' Messages & The noproc Invariant',
     difficulty: 'Intermediate',
+    xpReward: 100,
     visualScene: 'links_monitors_signals',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -2194,6 +2200,7 @@ probe_pid_status(TargetPid) when is_pid(TargetPid) ->
     lessonType: 'concept_exercise',
     title: 'Race Conditions & Mailbox Hygiene: Why demonitor(Ref, [flush]) is Mandatory',
     difficulty: 'Intermediate',
+    xpReward: 100,
     visualScene: 'links_monitors_signals',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -2468,6 +2475,7 @@ drain_downs(Count) ->
     lessonType: 'concept_exercise',
     title: 'Architectural Decision Lab (Links vs. Monitors) & Building my_gen_server:call/3',
     difficulty: 'Advanced',
+    xpReward: 100,
     visualScene: 'links_monitors_signals',
     conceptMarkdown: `## Why This Matters in Production
 
@@ -2877,6 +2885,7 @@ loop(CallbackMod, State) ->
     lessonType: 'incident_triage',
     title: 'Production Incident #102: Hanging Client Calls When Worker Crashes Mid-Request',
     difficulty: 'Production',
+    xpReward: 175,
     visualScene: 'links_monitors_signals',
     incidentAlert: {
       incidentId: 'INC-102',
@@ -3192,6 +3201,7 @@ worker_loop() ->
     lessonType: 'problem_set',
     title: 'Chapter 6 Mini-Capstone: The Resilient Payment Gateway, Watcher & Idempotent Store (payment_system.erl)',
     difficulty: 'Production',
+    xpReward: 250,
     visualScene: 'links_monitors_signals',
     conceptMarkdown: `## Why This Matters in Production
 

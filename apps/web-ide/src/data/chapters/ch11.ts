@@ -8,6 +8,7 @@ export const CHAPTER_11_LESSONS: LessonContent[] = [
     lessonType: 'guided_demo',
     title: 'Guided Demo: Observing a Live XMPP Wire Protocol Session Transcript',
     difficulty: 'Intermediate',
+    xpReward: 50,
         visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Why does the XMPP C2S protocol keep a single TCP connection open persistently rather than using short-lived HTTP requests for each chat message?',
@@ -339,6 +340,7 @@ print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := 
     lessonType: 'concept_exercise',
     title: 'XMPP Addressing (RFC 7622): Parsing, Validating & Normalizing JIDs',
     difficulty: 'Intermediate',
+    xpReward: 100,
         visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Under RFC 7622, what is the architectural difference between a Bare JID (user@domain) and a Full JID (user@domain/resource)?',
@@ -780,6 +782,7 @@ is_same_bare_jid(Jid1, Jid2) ->
     lessonType: 'concept_exercise',
     title: 'XMPP Stanza Anatomy (RFC 6120): Parsing & Constructing Stanzas',
     difficulty: 'Intermediate',
+    xpReward: 100,
         visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Why does an XMPP <iq type="get"> stanza strictly require the recipient to return an <iq type="result"> or <iq type="error"> with the exact same id attribute?',
@@ -1587,6 +1590,7 @@ transition_subscription(Current, _)                  -> Current.
     lessonType: 'concept_exercise',
     title: 'Incremental XML Stream Framing Over Fragmented TCP Sockets',
     difficulty: 'Advanced',
+    xpReward: 100,
         visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Why MUST an incremental XML stream framer call binary:copy/1 when extracting attribute values or stanza bodies from a TCP buffer?',
@@ -1966,6 +1970,7 @@ try_extract_element(Bin, TagName) ->
     lessonType: 'concept_exercise',
     title: 'The C2S Connection Handshake State Machine (RFC 6120)',
     difficulty: 'Advanced',
+    xpReward: 100,
         visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Why does the C2S connection state machine set inet:setopts(Socket, [{active, once}]) after receiving each TCP packet instead of using {active, true}?',
@@ -2413,7 +2418,7 @@ decode_sasl_plain(Base64Token) ->
     lessonType: 'incident_triage',
     title: 'Incident #107: Pre-Auth Stanza Injection & XML Entity Attacks',
     difficulty: 'Advanced',
-    xpReward: 125,
+    xpReward: 175,
     visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'In Incident #107, what allowed unauthenticated attackers to inject fake admin commands into the session?',
@@ -2694,6 +2699,7 @@ test_xml_escaping() ->
     lessonType: 'problem_set',
     title: 'Chapter 11 Mini-Capstone: Multi-Device Presence Priority & Routing Engine',
     difficulty: 'Advanced',
+    xpReward: 250,
         visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'When routing a message to a Bare JID (user@domain), how does RFC 6121 select the destination among multiple online client sessions?',

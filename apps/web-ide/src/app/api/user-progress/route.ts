@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getNeonDb } from '../../../lib/db';
-import { DEFAULT_USERS, UserProfile } from '../../../types/user';
+import { DEFAULT_USERS, UserProfile, xpToRole } from '../../../types/user';
 
 async function ensureTable(sql: any) {
   try {
@@ -67,15 +67,19 @@ export async function GET(req: NextRequest) {
       `;
       return NextResponse.json({
         source: 'neon_leaderboard',
-        leaderboard: rows.map((r: any) => ({
-          id: r.id,
-          name: r.name,
-          role: r.role,
-          level: Number(r.level || 1),
-          totalXp: Number(r.total_xp || 0),
-          streakDays: Number(r.streak_days || 1),
-          completedCount: Number(r.completed_count || 0),
-        })),
+        leaderboard: rows.map((r: any) => {
+          const xp = Number(r.total_xp || 0);
+          const derived = xpToRole(xp);
+          return {
+            id: r.id,
+            name: r.name,
+            role: derived.role,
+            level: derived.level,
+            totalXp: xp,
+            streakDays: Number(r.streak_days || 1),
+            completedCount: Number(r.completed_count || 0),
+          };
+        }),
         dbConnected: true,
       });
     } catch (err: any) {
@@ -119,14 +123,16 @@ export async function GET(req: NextRequest) {
       }
       if (!Array.isArray(unlockedSolutionLessonIds)) unlockedSolutionLessonIds = [];
 
+      const totalXp = Number(r.total_xp || 0);
+      const derived = xpToRole(totalXp);
       const user: UserProfile = {
         id: r.id,
         name: r.name,
-        role: r.role,
-        level: Number(r.level || 1),
+        role: derived.role,
+        level: derived.level,
         avatarColor: preset.avatarColor,
         bio: preset.bio,
-        totalXp: Number(r.total_xp || 0),
+        totalXp,
         completedLevelIds,
         unlockedSolutionLessonIds,
         lastActiveExercise: r.last_active_exercise || preset.lastActiveExercise,
@@ -181,14 +187,15 @@ export async function POST(req: NextRequest) {
     }
 
     await ensureTable(sql);
+    const { level: canonicalLevel, role: canonicalRole } = xpToRole(user.totalXp);
     await sql`
       INSERT INTO beamforge_users (
         id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, last_activity_date, updated_at
       ) VALUES (
         ${user.id},
         ${user.name},
-        ${user.role},
-        ${user.level},
+        ${canonicalRole},
+        ${canonicalLevel},
         ${user.totalXp},
         ${JSON.stringify(user.completedLevelIds)},
         ${JSON.stringify(user.unlockedSolutionLessonIds)},
@@ -200,6 +207,7 @@ export async function POST(req: NextRequest) {
       ON CONFLICT (id) DO UPDATE SET
         total_xp = EXCLUDED.total_xp,
         level = EXCLUDED.level,
+        role = EXCLUDED.role,
         completed_level_ids = EXCLUDED.completed_level_ids,
         unlocked_solution_lesson_ids = EXCLUDED.unlocked_solution_lesson_ids,
         last_active_exercise = EXCLUDED.last_active_exercise,
