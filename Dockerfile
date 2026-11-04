@@ -21,7 +21,6 @@ FROM alpine:3.19
 RUN apk add --no-cache \
     erlang \
     erlang-dev \
-    erlang-tools \
     ca-certificates \
     tzdata \
     bash
