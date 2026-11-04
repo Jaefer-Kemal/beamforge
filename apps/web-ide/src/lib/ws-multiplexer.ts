@@ -18,6 +18,7 @@ class WSMultiplexer {
   private messageListeners: Array<(frame: WSResponseFrame) => void> = [];
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  private reconnectAttempts: number = 0;
   private url: string = getOrchestratorWsUrl();
 
   constructor() {
@@ -94,6 +95,7 @@ class WSMultiplexer {
       this.ws = new WebSocket(this.url);
 
       this.ws.onopen = () => {
+        this.reconnectAttempts = 0;
         this.updateStatus('connected');
         if (this.reconnectTimer) {
           clearTimeout(this.reconnectTimer);
@@ -152,10 +154,13 @@ class WSMultiplexer {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return;
+    // Exponential backoff: 3s, 4.5s, 6.75s, 10s... capped at 30s
+    const delay = Math.min(30000, Math.round(3000 * Math.pow(1.5, Math.min(this.reconnectAttempts, 5))));
+    this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.initConnection();
-    }, 5000);
+    }, delay);
   }
 }
 

@@ -22,17 +22,7 @@ func main() {
 	}
 
 	// Resolve monorepo root directory
-	projectRoot := os.Getenv("PROJECT_ROOT")
-	if projectRoot == "" {
-		exePath, _ := os.Executable()
-		projectRoot = filepath.Clean(filepath.Join(filepath.Dir(exePath), "..", "..", ".."))
-		if _, err := os.Stat(filepath.Join(projectRoot, "runtimes")); err != nil {
-			// Fallback to working directory parent
-			cwd, _ := os.Getwd()
-			projectRoot = filepath.Clean(filepath.Join(cwd, "..", ".."))
-		}
-	}
-
+	projectRoot := findProjectRoot()
 	log.Printf("[BeamForge] Monorepo root detected: %s", projectRoot)
 
 	// Initialize pool manager and runner
@@ -261,4 +251,51 @@ func enableCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func findProjectRoot() string {
+	if env := os.Getenv("PROJECT_ROOT"); env != "" {
+		if _, err := os.Stat(filepath.Join(env, "runtimes", "erl-harness")); err == nil {
+			return env
+		}
+	}
+
+	var candidates []string
+
+	// 1. Walk upward from executable path
+	if exePath, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exePath)
+		for i := 0; i < 6; i++ {
+			candidates = append(candidates, dir)
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+
+	// 2. Walk upward from current working directory
+	if cwd, err := os.Getwd(); err == nil {
+		dir := cwd
+		for i := 0; i < 6; i++ {
+			candidates = append(candidates, dir)
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+
+	for _, cand := range candidates {
+		cand = filepath.Clean(cand)
+		harnessPath := filepath.Join(cand, "runtimes", "erl-harness")
+		if info, err := os.Stat(harnessPath); err == nil && info.IsDir() {
+			return cand
+		}
+	}
+
+	cwd, _ := os.Getwd()
+	return cwd
 }

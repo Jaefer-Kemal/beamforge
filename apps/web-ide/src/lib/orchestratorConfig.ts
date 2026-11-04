@@ -12,11 +12,15 @@ export const getOrchestratorWsUrl = (): string => {
     return process.env.NEXT_PUBLIC_ORCHESTRATOR_WS_URL;
   }
   if (typeof window !== 'undefined') {
-    const isHttps = window.location.protocol === 'https:';
+    // If backend is on localhost or 127.0.0.1, always use plain ws:// (local dev rarely uses TLS)
+    if (RAW_HTTP.includes('localhost') || RAW_HTTP.includes('127.0.0.1')) {
+      return RAW_HTTP.replace(/^https?:\/\//, 'ws://') + '/ws';
+    }
     if (RAW_HTTP.startsWith('https://')) {
       return RAW_HTTP.replace(/^https:\/\//, 'wss://') + '/ws';
     }
     if (RAW_HTTP.startsWith('http://')) {
+      const isHttps = window.location.protocol === 'https:';
       return (isHttps ? 'wss://' : 'ws://') + RAW_HTTP.replace(/^http:\/\//, '') + '/ws';
     }
   }

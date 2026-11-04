@@ -40,6 +40,9 @@ __pycache__/
 *.env
 
 
+# Vercel
+.vercel/
+
 # Editor & OS files
 .vscode/
 .idea/

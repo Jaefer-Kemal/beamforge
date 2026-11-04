@@ -43,7 +43,27 @@ func NewManager(projectRoot string) (*Manager, error) {
 	}
 
 	otpRelease := detectOTPRelease(erlPath)
-	harnessEbin := filepath.Join(projectRoot, "runtimes", "erl-harness", "ebin")
+	harnessEbin := os.Getenv("BF_HARNESS_DIR")
+	if harnessEbin == "" {
+		harnessEbin = filepath.Join(projectRoot, "runtimes", "erl-harness", "ebin")
+	}
+
+	// Verify that harnessEbin actually exists and contains compiled beam files
+	if _, err := os.Stat(filepath.Join(harnessEbin, "bf_json.beam")); err != nil {
+		cwd, _ := os.Getwd()
+		altPaths := []string{
+			filepath.Join(cwd, "runtimes", "erl-harness", "ebin"),
+			filepath.Join(cwd, "..", "..", "runtimes", "erl-harness", "ebin"),
+			filepath.Join(cwd, "..", "runtimes", "erl-harness", "ebin"),
+		}
+		for _, alt := range altPaths {
+			if _, altErr := os.Stat(filepath.Join(alt, "bf_json.beam")); altErr == nil {
+				harnessEbin = filepath.Clean(alt)
+				break
+			}
+		}
+	}
+	log.Printf("[BeamForge Pool] Erlang harness ebin: %s", harnessEbin)
 
 	maxWorkers := 2
 	if envMax := os.Getenv("MAX_CONCURRENT_WORKERS"); envMax != "" {
