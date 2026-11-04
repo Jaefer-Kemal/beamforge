@@ -75,6 +75,12 @@ export const LeaderboardDrawer: React.FC<LeaderboardDrawerProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isDbConnected, setIsDbConnected] = useState(true);
 
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
+
   const { currentUser, completedLevelIds, totalXp } = useWorkspaceStore();
 
   const fetchLeaderboard = async () => {

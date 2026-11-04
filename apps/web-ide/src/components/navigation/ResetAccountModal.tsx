@@ -140,6 +140,7 @@ export const ResetAccountModal: React.FC<ResetAccountModalProps> = ({
             Keep My Progress
           </button>
           <button
+            id="confirm-reset-btn"
             onClick={handleConfirm}
             disabled={!isMatch}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${

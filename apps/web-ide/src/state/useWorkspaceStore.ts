@@ -677,23 +677,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     },
 
     resetUserProgress: async () => {
-      const freshAlpha: UserProfile = {
-        ...DEFAULT_USERS['user_alpha'],
+      const activeUser = get().currentUser || DEFAULT_USERS['user_alpha'];
+      const freshUser: UserProfile = {
+        ...activeUser,
         totalXp: 0,
+        level: 1,
+        role: 'BEAM Initiate',
         completedLevelIds: [],
         unlockedSolutionLessonIds: [],
         streakDays: 1,
         lastActiveExercise: 'ch01-l01',
+        lastActivityDate: new Date().toISOString().split('T')[0],
       };
       if (typeof window !== 'undefined') {
         localStorage.removeItem('beamforge_user_profile_v2');
-        localStorage.removeItem('beamforge_user_user_alpha');
-        localStorage.removeItem('beamforge_user_user_beta');
-        localStorage.removeItem('beamforge_user_user_master');
+        localStorage.removeItem(`beamforge_user_${activeUser.id}`);
+        localStorage.removeItem('beamforge_progress');
       }
-      syncUserToStorageAndDb(freshAlpha);
+      syncUserToStorageAndDb(freshUser);
       set({
-        currentUser: freshAlpha,
+        currentUser: freshUser,
         completedLevelIds: [],
         completedWithXpLevelIds: [],
         totalXp: 0,
@@ -704,7 +707,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       get().switchExercise('ch01-l01');
       get().addTerminalEntry({
         type: 'output',
-        text: '[Reset] User progress wiped clean. Starting fresh from scratch (0 XP, Chapter 1 L01).',
+        text: `[Reset] User progress for ${freshUser.name} wiped clean. Starting fresh from scratch (0 XP, Chapter 1 L01).`,
       });
     },
 
