@@ -244,6 +244,11 @@ func (r *Runner) runCodeLocked(ctx context.Context, session *pool.Session, exerc
 		}, nil
 	}
 
+	return r.runCodePrecompiledLocked(ctx, session, exerciseID, diags, rawCompileOut, customTestCalls, inputVisibleTests...)
+}
+
+func (r *Runner) runCodePrecompiledLocked(ctx context.Context, session *pool.Session, exerciseID string, diags []Diagnostic, rawCompileOut string, customTestCalls []string, inputVisibleTests ...VisibleTestCaseInput) (*RunResult, error) {
+	startTime := time.Now()
 	sessionDir := filepath.ToSlash(session.WorkspaceDir)
 	sessionEbin := filepath.ToSlash(filepath.Join(session.WorkspaceDir, "ebin"))
 	harnessDir := filepath.ToSlash(r.poolMgr.HarnessDir())
@@ -254,13 +259,22 @@ file:set_cwd("%s"),
 code:add_patha("%s"),
 code:add_patha("%s"),
 [begin
-    case compile:file(F, [{outdir, "%s"}, {i, "%s"}, {i, "%s"}, debug_info, return]) of
-        {ok, M} -> code:purge(M), code:load_file(M);
-        {ok, M, _} -> code:purge(M), code:load_file(M);
-        _Err -> ok
+    case filelib:wildcard(filename:join(["%s", "*.beam"])) of
+        [] ->
+            [begin case compile:file(F, [{outdir, "%s"}, {i, "%s"}, {i, "%s"}, debug_info, return]) of
+                {ok, M} -> code:purge(M), code:load_file(M);
+                {ok, M, _} -> code:purge(M), code:load_file(M);
+                _Err -> ok
+            end end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))];
+        Beams ->
+            [begin
+                Mod = list_to_atom(filename:rootname(filename:basename(B))),
+                code:purge(Mod),
+                code:load_file(Mod)
+            end || B <- Beams]
     end
-end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
-`, sessionDir, harnessDir, sessionEbin, sessionEbin, incDir, harnessDir, sessionDir)
+end],
+`, sessionDir, harnessDir, sessionEbin, sessionEbin, sessionEbin, incDir, harnessDir, sessionDir)
 
 	runScript := compilePreamble + wrapRunScriptWithFootprint(r.buildRunScript(session, exerciseID, customTestCalls, inputVisibleTests))
 
@@ -359,18 +373,28 @@ func (r *Runner) RunVerification(ctx context.Context, session *pool.Session, exe
 	harnessDir := filepath.ToSlash(r.poolMgr.HarnessDir())
 	incDir := filepath.ToSlash(filepath.Join(session.WorkspaceDir, "include"))
 
+	// Fast module loader: If .beam files exist in ebin, load them directly without recompiling
 	compilePreamble := fmt.Sprintf(`
 file:set_cwd("%s"),
 code:add_patha("%s"),
 code:add_patha("%s"),
 [begin
-    case compile:file(F, [{outdir, "%s"}, {i, "%s"}, {i, "%s"}, debug_info, return]) of
-        {ok, M} -> code:purge(M), code:load_file(M);
-        {ok, M, _} -> code:purge(M), code:load_file(M);
-        _Err -> ok
+    case filelib:wildcard(filename:join(["%s", "*.beam"])) of
+        [] ->
+            [begin case compile:file(F, [{outdir, "%s"}, {i, "%s"}, {i, "%s"}, debug_info, return]) of
+                {ok, M} -> code:purge(M), code:load_file(M);
+                {ok, M, _} -> code:purge(M), code:load_file(M);
+                _Err -> ok
+            end end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))];
+        Beams ->
+            [begin
+                Mod = list_to_atom(filename:rootname(filename:basename(B))),
+                code:purge(Mod),
+                code:load_file(Mod)
+            end || B <- Beams]
     end
-end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
-`, sessionDir, harnessDir, sessionEbin, sessionEbin, incDir, harnessDir, sessionDir)
+end],
+`, sessionDir, harnessDir, sessionEbin, sessionEbin, sessionEbin, incDir, harnessDir, sessionDir)
 
 	evalCmd := compilePreamble + r.buildVerificationScript(session, exerciseID)
 
@@ -409,11 +433,43 @@ end || F <- filelib:wildcard(filename:join(["%s", "src", "*.erl"]))],
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
 			if err := json.Unmarshal([]byte(line), &report); err == nil {
-				if runRes, errRun := r.runCodeLocked(ctx, session, exerciseID, files, nil, inputVisibleTests...); errRun == nil && runRes != nil {
+				if runRes, errRun := r.runCodePrecompiledLocked(ctx, session, exerciseID, diags, rawCompileOut, nil, inputVisibleTests...); errRun == nil && runRes != nil {
 					report.VisibleTests = runRes.VisibleTests
 					report.Stdout = runRes.Stdout
 					if report.BeamFootprint == nil {
 						report.BeamFootprint = runRes.BeamFootprint
+					}
+
+					// Grading Integrity: If any visible test failed, the entire submission FAILS
+					hasVisibleTestFailure := false
+					passedVisibleCount := 0
+					for _, vt := range runRes.VisibleTests {
+						if vt.Passed {
+							passedVisibleCount++
+						} else {
+							hasVisibleTestFailure = true
+						}
+					}
+
+					if hasVisibleTestFailure {
+						report.Verdict = "FAILED"
+						passedStages := 0
+						for _, s := range report.Stages {
+							if s.Status == "passed" {
+								passedStages++
+							}
+						}
+						totalChecks := len(report.Stages) + len(runRes.VisibleTests)
+						passedChecks := passedStages + passedVisibleCount
+						if totalChecks > 0 {
+							calcScore := int(float64(passedChecks) / float64(totalChecks) * 100)
+							if calcScore >= 100 {
+								calcScore = 90
+							}
+							report.Score = calcScore
+						} else {
+							report.Score = 0
+						}
 					}
 				}
 				return &report, nil

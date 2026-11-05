@@ -1506,3 +1506,19 @@ We execute the platform overhaul incrementally so every single piece is built to
 - [x] **67.4: Verification**:
   - `go build` compiled cleanly.
   - `npx tsc --noEmit` passed with 0 errors.
+
+## Phase 68: Grading Integrity, Fast Precompiled BEAM Loading & Submission Diagnostic Drawer
+- [x] **68.1: Submission Speed Optimization & Redundant Compilation Elimination**:
+  - In `services/orchestrator/internal/bridge/erl_runner.go`, separated `runCodeLocked` and introduced `runCodePrecompiledLocked`. `RunVerification` now compiles `.erl` files via `compileFilesLocked` once and passes the compiled artifacts directly to visible test execution, completely eliminating redundant re-compilation (`erlc` OS process spawn).
+  - Replaced the slow in-VM `compile:file` loop in `compilePreamble` with an instant `.beam` existence check: if `.beam` binaries already exist in `ebin/`, the BEAM VM loads them directly with `code:load_file(Mod)` without re-invoking the Erlang compiler.
+- [x] **68.2: Strict Grading Integrity Contract**:
+  - In `erl_runner.go`, added a mandatory visible test audit to `RunVerification`: if any visible test in `runRes.VisibleTests` fails (`!vt.Passed`), `report.Verdict` is strictly overridden to `"FAILED"` and `report.Score` is proportionally recalculated and capped strictly below 100.
+  - Submissions can now only earn a pass if both internal verification stages AND all visible test assertions succeed.
+- [x] **68.3: HTTP REST Submission Recording & Storage Protection**:
+  - In `useWorkspaceStore.ts`, added `recordSubmission` call to the HTTP REST verification handler for both `passed` and `failed` attempts.
+  - Added truncation (max 1,500 chars) to `stagesSummary` error details in `recordSubmission` to protect `localStorage` 5MB quota and PostgreSQL payload size during massive syntax/compiler failures.
+- [x] **68.4: Submission Detail Diagnostic Drawer**:
+  - In `apps/web-ide/src/components/workspace/LessonSubmissionDetail.tsx`, added a scrollable, terminal-styled `Diagnostics & Failure Log` card displaying stage failure reasons and compiler diagnostics when viewing rejected submissions.
+- [x] **68.5: Verification**:
+  - `go build` compiled cleanly.
+  - `npx tsc --noEmit` passed with 0 errors.

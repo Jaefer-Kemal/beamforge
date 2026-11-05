@@ -197,6 +197,31 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
             })}
           </div>
         )}
+
+        {/* Failed Stage Diagnostics Card */}
+        {submission.stagesSummary && submission.stagesSummary.some((stg) => stg.status === 'failed' && stg.details) && (
+          <div
+            className="mt-3 p-3 rounded-lg border font-mono text-xs max-h-48 overflow-y-auto leading-relaxed select-text"
+            style={{
+              background: isDark ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.04)',
+              borderColor: isDark ? 'rgba(239, 68, 68, 0.25)' : 'rgba(239, 68, 68, 0.20)',
+              color: isDark ? '#FCA5A5' : '#DC2626',
+            }}
+          >
+            <div className="font-sans font-bold text-xs mb-1.5 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
+              <span>Diagnostics &amp; Failure Log:</span>
+            </div>
+            {submission.stagesSummary
+              .filter((stg) => stg.status === 'failed' && stg.details)
+              .map((stg) => (
+                <div key={stg.id || stg.title} className="mb-2 last:mb-0">
+                  <div className="font-semibold text-[11px] text-rose-400 font-sans">{stg.title}:</div>
+                  <pre className="whitespace-pre-wrap text-[11px] mt-0.5 opacity-90">{stg.details}</pre>
+                </div>
+              ))}
+          </div>
+        )}
       </div>
 
       {/* Multi-File Tab Bar (When submission contains multiple files) */}

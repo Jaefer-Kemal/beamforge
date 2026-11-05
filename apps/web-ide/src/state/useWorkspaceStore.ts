@@ -495,19 +495,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       if (report.beam_footprint || report.beamFootprint) {
         set({ beamFootprint: report.beam_footprint || report.beamFootprint });
       }
-      if (report.score === 100 || report.verdict === 'PASSED') {
+      const isPassed = report.score === 100 && report.verdict === 'PASSED';
+      if (isPassed) {
         get().onLevelCompleted(get().activeExerciseId);
       }
 
       // Record submission from WebSocket verification frame
-      const isPassed = report.score === 100 || report.verdict === 'PASSED';
       const fileMap: Record<string, string> = {};
       get().files.forEach((f) => { fileMap[f.path] = f.content; });
 
+      const hasCompileError = report.stages?.some((st: any) => (st.id === 'compile' || st.id === 'compile_and_export_audit') && st.status === 'failed') || (report.diagnostics && report.diagnostics.length > 0);
       get().recordSubmission({
         userId: get().currentUser?.id || 'user_alpha',
         exerciseId: get().activeExerciseId,
-        status: isPassed ? 'passed' : report.diagnostics?.length ? 'compile_error' : 'failed',
+        status: isPassed ? 'passed' : hasCompileError ? 'compile_error' : 'failed',
         score: Number(report.score ?? (isPassed ? 100 : 0)),
         files: fileMap,
         stagesSummary: report.stages?.map((st: any) => ({
@@ -1415,8 +1416,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     recordSubmission: async (payload: Omit<UserSubmissionRecord, 'id' | 'createdAt'>) => {
       const subId = `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const createdAt = new Date().toISOString();
+
+      // Sanitize and truncate any massive compiler/syntax output to protect localStorage quota & DB size
+      const sanitizedStages = (payload.stagesSummary || []).map((st) => ({
+        ...st,
+        details: typeof st.details === 'string' && st.details.length > 1500
+          ? st.details.slice(0, 1500) + '... [truncated]'
+          : st.details,
+      }));
+
       const newRecord: UserSubmissionRecord = {
         ...payload,
+        stagesSummary: sanitizedStages,
         id: subId,
         createdAt,
       };
@@ -1706,8 +1717,33 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               },
             });
           }
-          if (report.score === 100 || report.verdict === 'PASSED') {
-            get().onLevelCompleted(get().activeExerciseId);
+          // Record submission from HTTP REST verification
+          const isPassed = report.score === 100 && report.verdict === 'PASSED';
+          const hasCompileError = report.stages?.some((st: any) => (st.id === 'compile' || st.id === 'compile_and_export_audit') && st.status === 'failed') || (report.diagnostics && report.diagnostics.length > 0);
+          const subStatus: 'passed' | 'failed' | 'compile_error' = isPassed
+            ? 'passed'
+            : hasCompileError
+            ? 'compile_error'
+            : 'failed';
+
+          get().recordSubmission({
+            userId: get().currentUser?.id || 'user_alpha',
+            exerciseId: activeId,
+            status: subStatus,
+            score: Number(report.score ?? (isPassed ? 100 : 0)),
+            files: fileMap,
+            stagesSummary: report.stages?.map((st: any) => ({
+              id: st.id,
+              title: st.title,
+              status: st.status === 'passed' ? 'passed' : 'failed',
+              timeMs: st.time_ms,
+              details: st.details,
+            })),
+            durationMs: Number(report.total_time_ms || 0),
+          });
+
+          if (isPassed) {
+            get().onLevelCompleted(activeId);
             get().addTerminalEntry({
               type: 'output',
               text: `==> [bf_grader] ALL VERIFICATION STAGES PASSED! (Score: 100/100, Signature: ${report.signature || 'ed25519:verified'})`,
@@ -1715,7 +1751,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           } else {
             get().addTerminalEntry({
               type: 'error',
-              text: `==> [bf_grader] Verification failed: score ${report.score}/100. Check failed stages.`,
+              text: `==> [bf_grader] Verification failed: score ${report.score ?? 0}/100. Check failed stages & test assertions.`,
             });
           }
           return;
