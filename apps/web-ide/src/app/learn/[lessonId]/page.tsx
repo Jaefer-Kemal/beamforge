@@ -10,6 +10,7 @@ import { ReferencesVaultView } from '../../../components/references/ReferencesVa
 import { GlassWorkspace } from '../../../components/workspace/GlassWorkspace';
 import { CommandPalette } from '../../../components/workspace/CommandPalette';
 import { BadgeCelebrationModal } from '../../../components/workspace/BadgeCelebrationModal';
+import { LessonSuccessToast } from '../../../components/workspace/LessonSuccessToast';
 import { useWorkspaceStore } from '../../../state/useWorkspaceStore';
 import { wsMux } from '../../../lib/ws-multiplexer';
 import { getLessonByChapterAndNum, getLessonById } from '../../../data/curriculumCatalog';
@@ -47,7 +48,7 @@ export default function LessonPage() {
         localStorage.setItem('beamforge_active_exercise', rawLessonId);
       } catch {}
     }
-  }, [rawLessonId, activeExerciseId, switchExercise, setBootDevView]);
+  }, [rawLessonId, switchExercise, setBootDevView]);
 
   // Connect WebSocket & keyboard shortcuts
   useEffect(() => {
@@ -116,6 +117,9 @@ export default function LessonPage() {
 
       {/* Command Palette */}
       <CommandPalette />
+
+      {/* Lesson Success Floating Toast */}
+      <LessonSuccessToast />
 
       {/* Badge Celebration Modal */}
       {isBadgeCelebrationOpen && celebrationBadge && (

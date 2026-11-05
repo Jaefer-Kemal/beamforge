@@ -1544,3 +1544,22 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npx tsc --noEmit -p apps/web-ide`: Passed with 0 errors.
   - `npm run build --prefix apps/web-ide`: Next.js 14 production build passed with 0 errors, successfully generating static routes for `/`, `/syllabus`, `/learn`, and dynamic SSR route for `/learn/[lessonId]`.
   - `go build -C services/orchestrator -o orchestrator.exe ./cmd/server`: Passed with 0 errors.
+
+## Phase 70: Lesson Navigation Rubber-Banding Elimination, Symmetrical Celebration Confetti & Post-Submission Glass Toast
+- [x] **70.1: Top Bar Navigation Rubber-Banding Bug Elimination**:
+  - In `apps/web-ide/src/app/learn/[lessonId]/page.tsx`, removed `activeExerciseId` from the route-sync `useEffect` dependency array. The effect now responds strictly to URL changes (`rawLessonId`), eliminating the feedback loop that snapped users back to their starting lesson.
+  - In `apps/web-ide/src/components/navigation/BootDevTopBar.tsx`, updated `handleSelectChapter`, `handleSelectLesson`, `handlePrevLesson`, `handleNextLesson`, and `PrerequisiteModal` callbacks to execute `router.push('/learn/' + targetLessonId)`.
+- [x] **70.2: Symmetrical Dual-Cannon Celebration Confetti**:
+  - In `apps/web-ide/src/lib/confetti.ts`, resolved the "too small / one side only" issue where standard lesson passes fired only 22 particles from a single point at 65% width.
+  - Replaced with a balanced, symmetrical dual-cannon emitter firing 38 particles from bottom-left (18% width) and 38 particles from bottom-right (82% width) angled inwards towards screen center.
+  - Enhanced milestone tier to a grand triple-cannon burst (left 8%, right 92%, center 50%) firing 170 particles.
+- [x] **70.3: Post-Submission Glass Toast ("Proceed to Next Lesson")**:
+  - Engineered `apps/web-ide/src/components/workspace/LessonSuccessToast.tsx`: Apple-glassmorphic floating banner positioned at `fixed bottom-6 left-1/2 -translate-x-1/2 z-50`.
+  - Features emerald checkmark, XP reward pill (`+100 XP`), next lesson preview (`Up next: L${nextLessonNum}: ...`), and primary amber glass `Next Lesson ➔ [↵]` action button.
+  - Supports `Enter` key navigation (suppressed when Monaco editor or input fields are focused).
+  - Wire into `useWorkspaceStore.ts`: `onLevelCompleted` computes next lesson from `ALL_LESSONS_FLAT` and triggers toast for Chapters 1–11 and Ch 12 milestones 1–5, suppressing on final Capstone.
+- [x] **70.4: Badge Celebration Modal Viewport Centering**:
+  - In `apps/web-ide/src/components/workspace/BadgeCelebrationModal.tsx`, upgraded z-index to `z-[99998]`, expanded card size to `max-w-md` (448px), and ensured balanced full-viewport centering.
+- [x] **70.5: Compiler & Build Verification**:
+  - `npx tsc --noEmit`: Passed with 0 errors.
+  - `npm run build`: Next.js 14 production build passed with 0 errors.

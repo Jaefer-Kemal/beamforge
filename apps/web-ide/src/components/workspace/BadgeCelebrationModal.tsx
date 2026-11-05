@@ -85,9 +85,9 @@ Mastering Erlang/OTP & XMPP Distributed Systems`;
   };
 
   return (
-    <div id="badge-celebration-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
+    <div id="badge-celebration-modal" className="fixed inset-0 z-[99998] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in">
       <div
-        className="w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col items-center text-center animate-scale-up"
+        className="w-full max-w-md rounded-3xl p-7 shadow-2xl relative overflow-hidden flex flex-col items-center text-center animate-scale-up"
         style={{
           background: isDark ? 'rgba(15, 23, 42, 0.94)' : 'rgba(255, 255, 255, 0.96)',
           border: isDark ? `1px solid ${style.border}` : `1px solid ${style.border}`,

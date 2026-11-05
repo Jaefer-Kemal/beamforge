@@ -270,6 +270,7 @@ export function BootDevTopBar() {
       const targetLessons = (ALL_CURRICULUM_CHAPTERS as any)[chNum] || [];
       if (targetLessons[0]) {
         switchExercise(targetLessons[0].id);
+        router.push(`/learn/${targetLessons[0].id}`);
       }
       if (bootDevView !== 'lesson') setBootDevView('lesson');
       setChapterOpen(false);
@@ -297,6 +298,7 @@ export function BootDevTopBar() {
       const targetLessons = (ALL_CURRICULUM_CHAPTERS as any)[activeChapter] || [];
       if (targetLessons[lessonNum - 1]) {
         switchExercise(targetLessons[lessonNum - 1].id);
+        router.push(`/learn/${targetLessons[lessonNum - 1].id}`);
       }
       if (bootDevView !== 'lesson') setBootDevView('lesson');
       setLessonOpen(false);
@@ -315,6 +317,49 @@ export function BootDevTopBar() {
       });
       setIsPrereqModalOpen(true);
       setLessonOpen(false);
+    }
+  };
+
+  const handlePrevLesson = () => {
+    if (activeLesson > 1) {
+      handleSelectLesson(activeLesson - 1);
+    } else if (activeChapter > 1) {
+      const prevChNum = activeChapter - 1;
+      const prevLessons = (ALL_CURRICULUM_CHAPTERS as any)[prevChNum] || [];
+      const lastLessonNum = prevLessons.length || 8;
+      setActiveChapter(prevChNum);
+      setActiveLesson(lastLessonNum);
+      if (prevLessons[lastLessonNum - 1]) {
+        switchExercise(prevLessons[lastLessonNum - 1].id);
+        router.push(`/learn/${prevLessons[lastLessonNum - 1].id}`);
+      }
+      if (bootDevView !== 'lesson') setBootDevView('lesson');
+    }
+  };
+
+  const handleNextLesson = () => {
+    const currChapterLessons = (ALL_CURRICULUM_CHAPTERS as any)[activeChapter] || [];
+    const maxLesson = currChapterLessons.length || 6;
+    if (activeLesson < maxLesson) {
+      handleSelectLesson(activeLesson + 1);
+    } else if (activeChapter < 12) {
+      const nextChNum = activeChapter + 1;
+      if (isChapterAccessible(nextChNum)) {
+        handleSelectChapter(nextChNum);
+      } else {
+        const prevLessons = (ALL_CURRICULUM_CHAPTERS as any)[activeChapter] || [];
+        const prevFinalLessonId = prevLessons.length > 0 ? prevLessons[prevLessons.length - 1].id : `ch0${activeChapter}-l08`;
+        const chMeta = CHAPTERS.find((c) => c.num === nextChNum);
+        setPrereqModalData({
+          targetChapterNum: nextChNum,
+          targetChapterTitle: chMeta?.title || `Chapter ${nextChNum}`,
+          prerequisiteChapterNum: activeChapter,
+          prerequisiteLessonId: prevFinalLessonId,
+          targetLessonNum: 1,
+          targetLessonId: (ALL_CURRICULUM_CHAPTERS as any)[nextChNum]?.[0]?.id || `ch0${nextChNum}-l01`,
+        });
+        setIsPrereqModalOpen(true);
+      }
     }
   };
 
@@ -714,10 +759,7 @@ export function BootDevTopBar() {
           <div className="flex items-center gap-0.5">
             <button
               id="prev-lesson-btn"
-              onClick={() => {
-                goToPrevLesson();
-                if (bootDevView !== 'lesson') setBootDevView('lesson');
-              }}
+              onClick={handlePrevLesson}
               title="Previous Lesson"
               disabled={activeChapter === 1 && activeLesson === 1}
               className="w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
@@ -731,12 +773,9 @@ export function BootDevTopBar() {
             </button>
             <button
               id="next-lesson-btn"
-              onClick={() => {
-                goToNextLesson();
-                if (bootDevView !== 'lesson') setBootDevView('lesson');
-              }}
+              onClick={handleNextLesson}
               title="Next Lesson"
-              disabled={activeChapter === 12 && activeLesson === 6}
+              disabled={activeChapter === 12 && activeLesson === (chapterLessons.length || 6)}
               className="w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               style={{
                 background: isDark ? 'rgba(30,41,59,0.70)' : 'rgba(255,255,255,0.75)',
@@ -1081,10 +1120,7 @@ export function BootDevTopBar() {
 
           <button
             id="mobile-prev-lesson-btn"
-            onClick={() => {
-              goToPrevLesson();
-              if (bootDevView !== 'lesson') setBootDevView('lesson');
-            }}
+            onClick={handlePrevLesson}
             title="Previous Lesson"
             disabled={activeChapter === 1 && activeLesson === 1}
             className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
@@ -1098,10 +1134,7 @@ export function BootDevTopBar() {
           </button>
           <button
             id="mobile-next-lesson-btn"
-            onClick={() => {
-              goToNextLesson();
-              if (bootDevView !== 'lesson') setBootDevView('lesson');
-            }}
+            onClick={handleNextLesson}
             title="Next Lesson"
             disabled={activeChapter === 12 && activeLesson === (chapterLessons.length || 6)}
             className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
@@ -1457,6 +1490,8 @@ export function BootDevTopBar() {
             setActiveLesson(prevLessons.length || 8);
             switchExercise(lessonId);
             setBootDevView('lesson');
+            setIsPrereqModalOpen(false);
+            router.push(`/learn/${lessonId}`);
           }}
           onJumpInAnyway={() => {
             toggleDevModeUnlockedAll();
@@ -1464,6 +1499,8 @@ export function BootDevTopBar() {
             setActiveLesson(prereqModalData.targetLessonNum);
             switchExercise(prereqModalData.targetLessonId);
             setBootDevView('lesson');
+            setIsPrereqModalOpen(false);
+            router.push(`/learn/${prereqModalData.targetLessonId}`);
           }}
         />
       )}

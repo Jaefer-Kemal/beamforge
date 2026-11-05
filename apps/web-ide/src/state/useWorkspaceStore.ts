@@ -22,6 +22,7 @@ import {
   getLessonById, 
   getLessonByChapterAndNum,
   ALL_CURRICULUM_CHAPTERS,
+  ALL_LESSONS_FLAT,
 } from '../data/curriculumCatalog';
 import { wsMux, WSConnectionStatus, WSResponseFrame } from '../lib/ws-multiplexer';
 import { ORCHESTRATOR_HTTP_URL } from '../lib/orchestratorConfig';
@@ -111,6 +112,17 @@ export interface TerminalEntry {
   timestamp: string;
 }
 
+export interface SuccessToastData {
+  lessonId: string;
+  lessonTitle: string;
+  xpAwarded: number;
+  nextLessonId?: string;
+  nextLessonTitle?: string;
+  nextChapterNum?: number;
+  nextLessonNum?: number;
+  isNewChapter?: boolean;
+}
+
 interface WorkspaceState {
   // Navigation & View Mode
   activeView: 'curriculum_map' | 'workspace' | 'references' | 'inspector';
@@ -172,6 +184,10 @@ interface WorkspaceState {
   isBadgeCelebrationOpen: boolean;
   openBadgeCelebration: (badge: Badge) => void;
   closeBadgeCelebration: () => void;
+  isSuccessToastOpen: boolean;
+  successToastData: SuccessToastData | null;
+  openSuccessToast: (data: SuccessToastData) => void;
+  closeSuccessToast: () => void;
   totalXp: number;
   unlockedWorldIds: string[];
   devModeUnlockedAll: boolean;
@@ -761,6 +777,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         totalXp: targetUser.totalXp,
         celebrationBadge: null,
         isBadgeCelebrationOpen: false,
+        isSuccessToastOpen: false,
+        successToastData: null,
         unlockedSolutionLessonIds: targetUser.unlockedSolutionLessonIds,
         activeSubmissionDetail: null,
       });
@@ -818,6 +836,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         totalXp: 0,
         celebrationBadge: null,
         isBadgeCelebrationOpen: false,
+        isSuccessToastOpen: false,
+        successToastData: null,
         unlockedSolutionLessonIds: [],
         submissions: [],
         activeSubmissionDetail: null,
@@ -835,6 +855,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     isBadgeCelebrationOpen: false,
     openBadgeCelebration: (badge: Badge) => set({ celebrationBadge: badge, isBadgeCelebrationOpen: true }),
     closeBadgeCelebration: () => set({ isBadgeCelebrationOpen: false, celebrationBadge: null }),
+    isSuccessToastOpen: false,
+    successToastData: null,
+    openSuccessToast: (data: SuccessToastData) => set({ isSuccessToastOpen: true, successToastData: data }),
+    closeSuccessToast: () => set({ isSuccessToastOpen: false, successToastData: null }),
     totalXp: initialUser.totalXp,
     unlockedWorldIds: ['world-1-foundations'],
     devModeUnlockedAll: typeof window !== 'undefined' ? localStorage.getItem('beamforge_dev_tester') === 'true' : false,
@@ -1108,6 +1132,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         lessonObj?.lessonType === 'capstone_studio' ||
         lessonObj?.chapterNumber === 12;
 
+      // Next Lesson calculation for post-submission "Proceed to Next Lesson" toast
+      const currIdx = ALL_LESSONS_FLAT.findIndex((l) => l.id === levelId);
+      const nextLesson = currIdx >= 0 && currIdx < ALL_LESSONS_FLAT.length - 1 ? ALL_LESSONS_FLAT[currIdx + 1] : null;
+      const isFinalCurriculumLesson = currIdx === ALL_LESSONS_FLAT.length - 1 || levelId === 'ch12-l06';
+
+      let toastPayload: SuccessToastData | null = null;
+      if (nextLesson && !isFinalCurriculumLesson) {
+        const isNewChapter = nextLesson.chapterNumber !== (lessonObj?.chapterNumber || 1);
+        toastPayload = {
+          lessonId: levelId,
+          lessonTitle: lessonObj?.title || 'Lesson Completed',
+          xpAwarded: effectiveXpReward,
+          nextLessonId: nextLesson.id,
+          nextLessonTitle: nextLesson.title,
+          nextChapterNum: nextLesson.chapterNumber,
+          nextLessonNum: nextLesson.lessonNumber,
+          isNewChapter,
+        };
+      }
+
       if (newlyEarnedBadges.length > 0) {
         const primaryBadge = newlyEarnedBadges[0];
         set({
@@ -1118,6 +1162,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           currentUser: updatedUser,
           celebrationBadge: primaryBadge,
           isBadgeCelebrationOpen: true,
+          isSuccessToastOpen: toastPayload !== null,
+          successToastData: toastPayload,
         });
         triggerCelebrationConfetti('milestone');
         get().addTerminalEntry({
@@ -1131,6 +1177,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           totalXp: newXp,
           unlockedWorldIds: newUnlockedWorlds,
           currentUser: updatedUser,
+          isSuccessToastOpen: toastPayload !== null,
+          successToastData: toastPayload,
         });
         if (isMilestoneType) {
           triggerCelebrationConfetti('milestone');
@@ -1236,6 +1284,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           isLessonOutputOpen: false,
           activeSubmissionDetail: null,
           canUndoRestore: false,
+          isSuccessToastOpen: false,
+          successToastData: null,
         });
 
         get().fetchSubmissions(id);
@@ -1646,7 +1696,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     isVerifying: false,
     verificationStages: [],
     runVerificationSuite: async () => {
-      set({ isVerifying: true, lessonOutputTab: 'verification', isLessonOutputOpen: true });
+      set({
+        isVerifying: true,
+        lessonOutputTab: 'verification',
+        isLessonOutputOpen: true,
+        isSuccessToastOpen: false,
+        successToastData: null,
+      });
       get().addTerminalEntry({
         type: 'output',
         text: '==> [bf_grader] Initializing verification pipeline...',

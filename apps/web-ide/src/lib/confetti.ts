@@ -42,42 +42,58 @@ export function triggerCelebrationConfetti(tier: ConfettiTier = 'micro'): void {
   ctx.scale(dpr, dpr);
 
   const particles: Particle[] = [];
-  const duration = tier === 'milestone' ? 3200 : 1400;
+  const duration = tier === 'milestone' ? 3400 : 2200;
 
   if (tier === 'micro') {
-    // Subtle, localized emerald spark near bottom drawer (uninterrupted coding flow)
-    const microColors = ['#10B981', '#34D399', '#059669', '#38BDF8', '#F59E0B'];
-    const count = 22;
-    const startX = window.innerWidth * 0.65;
-    const startY = window.innerHeight * 0.75;
+    // Symmetrical dual-cannon celebratory burst for standard lesson pass
+    const microColors = ['#10B981', '#34D399', '#059669', '#38BDF8', '#F59E0B', '#8B5CF6'];
+    const countPerSide = 38;
 
-    for (let i = 0; i < count; i++) {
-      const angle = -Math.PI * 0.5 + (Math.random() - 0.5) * 1.2;
-      const speed = 3 + Math.random() * 5;
+    // Left emitter (bottom-left, shooting up-right towards center)
+    for (let i = 0; i < countPerSide; i++) {
+      const angle = -Math.PI * 0.32 + (Math.random() - 0.5) * 0.7;
+      const speed = 5 + Math.random() * 7;
       particles.push({
-        x: startX,
-        y: startY,
+        x: window.innerWidth * 0.18,
+        y: window.innerHeight * 0.88,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         color: microColors[Math.floor(Math.random() * microColors.length)],
-        size: 3 + Math.random() * 4,
+        size: 4 + Math.random() * 5,
         rotation: Math.random() * Math.PI,
-        rotSpeed: (Math.random() - 0.5) * 0.15,
-        opacity: 0.9,
+        rotSpeed: (Math.random() - 0.5) * 0.18,
+        opacity: 0.95,
+      });
+    }
+
+    // Right emitter (bottom-right, shooting up-left towards center)
+    for (let i = 0; i < countPerSide; i++) {
+      const angle = -Math.PI * 0.68 + (Math.random() - 0.5) * 0.7;
+      const speed = 5 + Math.random() * 7;
+      particles.push({
+        x: window.innerWidth * 0.82,
+        y: window.innerHeight * 0.88,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color: microColors[Math.floor(Math.random() * microColors.length)],
+        size: 4 + Math.random() * 5,
+        rotation: Math.random() * Math.PI,
+        rotSpeed: (Math.random() - 0.5) * 0.18,
+        opacity: 0.95,
       });
     }
   } else {
-    // Tier 2: Dual-cannon celebratory burst for Problem Sets, Incident Triages & Capstone
+    // Grand triple-cannon burst for Problem Sets, Incident Triages & Capstone
     const colors = ['#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#F43F5E'];
-    const countPerCannon = 60;
+    const countPerCannon = 70;
 
     // Left Cannon
     for (let i = 0; i < countPerCannon; i++) {
-      const angle = -Math.PI * 0.25 + (Math.random() - 0.5) * 0.8; // angled up-right
-      const speed = 7 + Math.random() * 9;
+      const angle = -Math.PI * 0.25 + (Math.random() - 0.5) * 0.8;
+      const speed = 8 + Math.random() * 10;
       particles.push({
-        x: window.innerWidth * 0.1,
-        y: window.innerHeight * 0.85,
+        x: window.innerWidth * 0.08,
+        y: window.innerHeight * 0.88,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         color: colors[Math.floor(Math.random() * colors.length)],
@@ -90,15 +106,32 @@ export function triggerCelebrationConfetti(tier: ConfettiTier = 'micro'): void {
 
     // Right Cannon
     for (let i = 0; i < countPerCannon; i++) {
-      const angle = -Math.PI * 0.75 + (Math.random() - 0.5) * 0.8; // angled up-left
-      const speed = 7 + Math.random() * 9;
+      const angle = -Math.PI * 0.75 + (Math.random() - 0.5) * 0.8;
+      const speed = 8 + Math.random() * 10;
       particles.push({
-        x: window.innerWidth * 0.9,
-        y: window.innerHeight * 0.85,
+        x: window.innerWidth * 0.92,
+        y: window.innerHeight * 0.88,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         color: colors[Math.floor(Math.random() * colors.length)],
         size: 5 + Math.random() * 6,
+        rotation: Math.random() * Math.PI,
+        rotSpeed: (Math.random() - 0.5) * 0.2,
+        opacity: 1,
+      });
+    }
+
+    // Center Vertical Fountain
+    for (let i = 0; i < 30; i++) {
+      const angle = -Math.PI * 0.5 + (Math.random() - 0.5) * 0.5;
+      const speed = 9 + Math.random() * 9;
+      particles.push({
+        x: window.innerWidth * 0.5,
+        y: window.innerHeight * 0.92,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: 5 + Math.random() * 5,
         rotation: Math.random() * Math.PI,
         rotSpeed: (Math.random() - 0.5) * 0.2,
         opacity: 1,
