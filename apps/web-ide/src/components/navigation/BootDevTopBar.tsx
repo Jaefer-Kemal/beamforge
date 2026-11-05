@@ -251,12 +251,24 @@ export function BootDevTopBar() {
   const handleSelectChapter = (chNum: number) => {
     const access = checkLessonAccess(chNum, 1, completedLevelIds, devModeUnlockedAll);
     if (access.isUnlocked) {
-      setActiveChapter(chNum);
-      setActiveLesson(1);
       const targetLessons = (ALL_CURRICULUM_CHAPTERS as any)[chNum] || [];
-      if (targetLessons[0]) {
-        switchExercise(targetLessons[0].id);
-        router.push(`/learn/${targetLessons[0].id}`);
+      // Find learner's first incomplete lesson in this chapter, or default to lesson 1
+      let targetLesson = targetLessons[0];
+      for (const l of targetLessons) {
+        if (!completedLevelIds.includes(l.id)) {
+          targetLesson = l;
+          break;
+        }
+      }
+      if (!targetLesson && targetLessons.length > 0) {
+        targetLesson = targetLessons[0];
+      }
+      const targetNum = targetLesson?.lessonNumber || 1;
+      setActiveChapter(chNum);
+      setActiveLesson(targetNum);
+      if (targetLesson) {
+        switchExercise(targetLesson.id);
+        router.push(`/learn/${targetLesson.id}`);
       }
       if (bootDevView !== 'lesson') setBootDevView('lesson');
       setChapterOpen(false);

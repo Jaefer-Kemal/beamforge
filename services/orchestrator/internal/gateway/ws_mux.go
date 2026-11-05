@@ -226,8 +226,9 @@ func (h *Handler) handleJSONChannel(
 				Type:    "run_result",
 				ID:      frame.ID,
 				Payload: map[string]interface{}{
-					"result": res,
-					"error":  err,
+					"exercise_id": req.ExerciseID,
+					"result":      res,
+					"error":       err,
 				},
 			})
 			return
@@ -256,8 +257,9 @@ func (h *Handler) handleJSONChannel(
 			Type:    "report",
 			ID:      frame.ID,
 			Payload: map[string]interface{}{
-				"report": report,
-				"error":  err,
+				"exercise_id": req.ExerciseID,
+				"report":      report,
+				"error":       err,
 			},
 		})
 	}

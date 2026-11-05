@@ -39,9 +39,15 @@ export default function LessonPage() {
     celebrationBadge,
     isBadgeCelebrationOpen,
     closeBadgeCelebration,
+    hydrateFromStorageAndDb,
   } = useWorkspaceStore();
 
   const isDark = theme === 'dark';
+
+  // Client-side hydration of user progress from localStorage & Neon DB
+  useEffect(() => {
+    hydrateFromStorageAndDb();
+  }, [hydrateFromStorageAndDb]);
 
   // Check if current route lesson is unlocked
   const currentAccess = useMemo(() => {
@@ -60,7 +66,7 @@ export default function LessonPage() {
         localStorage.setItem('beamforge_active_exercise', rawLessonId);
       } catch {}
     }
-  }, [rawLessonId, switchExercise, setBootDevView]);
+  }, [rawLessonId, activeExerciseId, switchExercise, setBootDevView]);
 
   // Connect WebSocket & keyboard shortcuts
   useEffect(() => {
@@ -70,7 +76,7 @@ export default function LessonPage() {
       // Cmd+Enter / Ctrl+Enter → Submit
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
-        runVerificationSuite();
+        runVerificationSuite(rawLessonId);
       }
       // Cmd+M / Ctrl+M → Jump to Syllabus
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'm') {

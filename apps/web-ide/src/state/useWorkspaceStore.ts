@@ -169,7 +169,7 @@ interface WorkspaceState {
   beamFootprint: BeamFootprint | null;
   setBeamFootprint: (footprint: BeamFootprint | null) => void;
   isRunning: boolean;
-  runCode: (keepTab?: boolean) => Promise<void>;
+  runCode: (keepTab?: boolean, overrideExerciseId?: string) => Promise<void>;
   clearRunResult: () => void;
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -192,6 +192,8 @@ interface WorkspaceState {
   unlockedWorldIds: string[];
   devModeUnlockedAll: boolean;
   unlockedSolutionLessonIds: string[];
+  isHydrated: boolean;
+  hydrateFromStorageAndDb: () => Promise<void>;
   toggleDevModeUnlockedAll: () => void;
   unlockSolutionForLesson: (lessonId: string) => void;
   loadSolutionForActiveExercise: () => void;
@@ -239,7 +241,7 @@ interface WorkspaceState {
   // Chaos Grader Pipeline
   isVerifying: boolean;
   verificationStages: VerificationStage[];
-  runVerificationSuite: () => Promise<void>;
+  runVerificationSuite: (overrideExerciseId?: string) => Promise<void>;
 
   // XMPP Inspector
   xmppState: XmppC2SState;
@@ -476,66 +478,89 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       }
     }
 
-    // Channel 5: Grader Pipeline Reports
-    if (frame.channel === 5 && frame.type === 'report' && frame.payload?.report) {
-      const report = frame.payload.report;
-      if (report.stages) {
-        const mappedStages: VerificationStage[] = report.stages.map((st: any) => ({
-          id: st.id,
-          title: st.title,
-          status: st.status === 'passed' ? 'passed' : 'failed',
-          timeMs: st.time_ms,
-          assertionDetails: st.details,
-        }));
-        set({ verificationStages: mappedStages, isVerifying: false });
-      }
-      if (report.visible_tests && report.visible_tests.length > 0) {
+    // Channel 5: Grader Pipeline Reports & Run Results
+    if (frame.channel === 5) {
+      if (frame.type === 'report' && frame.payload?.report) {
+        const report = frame.payload.report;
+        const targetExerciseId = frame.payload?.exercise_id || report.exercise_id || get().activeExerciseId;
+        if (report.stages) {
+          const mappedStages: VerificationStage[] = report.stages.map((st: any) => ({
+            id: st.id,
+            title: st.title,
+            status: st.status === 'passed' ? 'passed' : 'failed',
+            timeMs: st.time_ms,
+            assertionDetails: st.details,
+          }));
+          set({ verificationStages: mappedStages, isVerifying: false });
+        }
+        if (report.visible_tests && report.visible_tests.length > 0) {
+          set({
+            runResult: {
+              mode: 'run',
+              exerciseId: targetExerciseId,
+              compileOk: true,
+              stdout: report.stdout || '',
+              visibleTests: report.visible_tests.map((t: any) => ({
+                callStr: t.call_str || t.callStr || '',
+                expected: t.expected || '',
+                actual: t.actual || '',
+                passed: Boolean(t.passed),
+                timeMs: t.time_ms ?? t.timeMs ?? 0,
+              })),
+              totalDurationMs: report.total_time_ms || 0,
+              diagnostics: [],
+            },
+          });
+        }
+        if (report.beam_footprint || report.beamFootprint) {
+          set({ beamFootprint: report.beam_footprint || report.beamFootprint });
+        }
+        const isPassed = report.score === 100 && report.verdict === 'PASSED';
+        if (isPassed) {
+          get().onLevelCompleted(targetExerciseId);
+        }
+
+        // Record submission from WebSocket verification frame
+        const fileMap: Record<string, string> = {};
+        get().files.forEach((f) => { fileMap[f.path] = f.content; });
+
+        const hasCompileError = report.stages?.some((st: any) => (st.id === 'compile' || st.id === 'compile_and_export_audit') && st.status === 'failed') || (report.diagnostics && report.diagnostics.length > 0);
+        get().recordSubmission({
+          userId: get().currentUser?.id || 'user_alpha',
+          exerciseId: targetExerciseId,
+          status: isPassed ? 'passed' : hasCompileError ? 'compile_error' : 'failed',
+          score: Number(report.score ?? (isPassed ? 100 : 0)),
+          files: fileMap,
+          stagesSummary: report.stages?.map((st: any) => ({
+            id: st.id,
+            title: st.title,
+            status: st.status === 'passed' ? 'passed' : 'failed',
+            timeMs: st.time_ms,
+            details: st.details,
+          })),
+          durationMs: Number(report.total_time_ms || 0),
+        });
+      } else if (frame.type === 'run_result' && frame.payload) {
+        const targetExerciseId = frame.payload.exercise_id || get().activeExerciseId;
         set({
+          isRunning: false,
           runResult: {
             mode: 'run',
-            exerciseId: get().activeExerciseId,
-            compileOk: true,
-            stdout: report.stdout || '',
-            visibleTests: report.visible_tests.map((t: any) => ({
+            exerciseId: targetExerciseId,
+            compileOk: frame.payload.compile_ok ?? true,
+            stdout: frame.payload.stdout || '',
+            visibleTests: (frame.payload.visible_tests || []).map((t: any) => ({
               callStr: t.call_str || t.callStr || '',
               expected: t.expected || '',
               actual: t.actual || '',
               passed: Boolean(t.passed),
               timeMs: t.time_ms ?? t.timeMs ?? 0,
             })),
-            totalDurationMs: report.total_time_ms || 0,
-            diagnostics: [],
+            totalDurationMs: frame.payload.total_duration_ms || 0,
+            diagnostics: frame.payload.diagnostics || [],
           },
         });
       }
-      if (report.beam_footprint || report.beamFootprint) {
-        set({ beamFootprint: report.beam_footprint || report.beamFootprint });
-      }
-      const isPassed = report.score === 100 && report.verdict === 'PASSED';
-      if (isPassed) {
-        get().onLevelCompleted(get().activeExerciseId);
-      }
-
-      // Record submission from WebSocket verification frame
-      const fileMap: Record<string, string> = {};
-      get().files.forEach((f) => { fileMap[f.path] = f.content; });
-
-      const hasCompileError = report.stages?.some((st: any) => (st.id === 'compile' || st.id === 'compile_and_export_audit') && st.status === 'failed') || (report.diagnostics && report.diagnostics.length > 0);
-      get().recordSubmission({
-        userId: get().currentUser?.id || 'user_alpha',
-        exerciseId: get().activeExerciseId,
-        status: isPassed ? 'passed' : hasCompileError ? 'compile_error' : 'failed',
-        score: Number(report.score ?? (isPassed ? 100 : 0)),
-        files: fileMap,
-        stagesSummary: report.stages?.map((st: any) => ({
-          id: st.id,
-          title: st.title,
-          status: st.status === 'passed' ? 'passed' : 'failed',
-          timeMs: st.time_ms,
-          details: st.details,
-        })),
-        durationMs: Number(report.total_time_ms || 0),
-      });
     }
   });
 
@@ -621,7 +646,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     setBeamFootprint: (footprint) => set({ beamFootprint: footprint }),
     isRunning: false,
     clearRunResult: () => set({ runResult: null }),
-    runCode: async (keepTab?: boolean) => {
+    runCode: async (keepTab?: boolean, overrideExerciseId?: string) => {
       set({ isRunning: true, isLessonOutputOpen: true, runResult: null });
       if (!keepTab) set({ lessonOutputTab: 'test_results' });
       get().addTerminalEntry({ type: 'output', text: '[BeamForge] Running visible test cases...' });
@@ -629,7 +654,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       const fileMap: Record<string, string> = {};
       get().files.forEach((f) => { fileMap[f.path] = f.content; });
 
-      const activeId = get().activeExerciseId;
+      const activeId = overrideExerciseId || get().activeExerciseId;
       const lesson = getLessonById(activeId);
       const visibleTestInputs = (lesson?.visibleTestCases || []).map((tc) => ({
         id: tc.id,
@@ -655,7 +680,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           const data = await res.json();
           const runResult: RunResult = {
             mode: 'run',
-            exerciseId: data.exercise_id || get().activeExerciseId,
+            exerciseId: data.exercise_id || activeId,
             compileOk: data.compile_ok ?? true,
             stdout: data.stdout || '',
             visibleTests: (data.visible_tests || []).map((t: any) => ({
@@ -693,7 +718,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           set({
             runResult: {
               mode: 'run',
-              exerciseId: get().activeExerciseId,
+              exerciseId: activeId,
               compileOk: false,
               stdout: `[Run Error] Backend responded with HTTP ${res.status}`,
               visibleTests: [],
@@ -709,7 +734,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           isBackendOnline: false,
           runResult: {
             mode: 'run',
-            exerciseId: get().activeExerciseId,
+            exerciseId: activeId,
             compileOk: false,
             stdout: `[BeamForge Offline Error]\n\nGo Orchestrator backend (${ORCHESTRATOR_HTTP_URL}) is OFFLINE.\n\nCode execution was NOT performed because the BEAM/OTP runtime is not reachable.\nTo run and compile Erlang code, start the Go Orchestrator:\n  1. Open a terminal in services/orchestrator\n  2. Run: .\\orchestrator.exe (or go run ./cmd/server)`,
             visibleTests: [],
@@ -863,6 +888,87 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     unlockedWorldIds: ['world-1-foundations'],
     devModeUnlockedAll: false,
     unlockedSolutionLessonIds: initialUser.unlockedSolutionLessonIds || [],
+    isHydrated: false,
+
+    hydrateFromStorageAndDb: async () => {
+      if (typeof window === 'undefined') return;
+      try {
+        // 1. Immediate client storage hydration
+        const currentUserId = localStorage.getItem('bf_current_user_id') || 'user_alpha';
+        let cachedUser: UserProfile | null = null;
+        const cachedRaw = localStorage.getItem(`beamforge_user_${currentUserId}`);
+        if (cachedRaw) {
+          try { cachedUser = JSON.parse(cachedRaw); } catch {}
+        }
+        if (!cachedUser) {
+          const legacyRaw = localStorage.getItem('beamforge_progress');
+          if (legacyRaw) {
+            try {
+              const parsed = JSON.parse(legacyRaw);
+              cachedUser = {
+                ...(DEFAULT_USERS[currentUserId] || DEFAULT_USERS['user_alpha']),
+                completedLevelIds: parsed.completedLevelIds || [],
+                totalXp: parsed.totalXp ?? 0,
+                unlockedSolutionLessonIds: parsed.unlockedSolutionLessonIds || [],
+              };
+            } catch {}
+          }
+        }
+        if (cachedUser) {
+          set((state) => ({
+            currentUser: cachedUser!,
+            completedLevelIds: Array.from(new Set([...state.completedLevelIds, ...(cachedUser!.completedLevelIds || [])])),
+            completedWithXpLevelIds: Array.from(new Set([...state.completedWithXpLevelIds, ...(cachedUser!.completedLevelIds || [])])),
+            totalXp: Math.max(state.totalXp, cachedUser!.totalXp || 0),
+            unlockedSolutionLessonIds: Array.from(new Set([...state.unlockedSolutionLessonIds, ...(cachedUser!.unlockedSolutionLessonIds || [])])),
+            isHydrated: true,
+          }));
+        }
+
+        // 2. Fetch progress from Neon DB backend
+        const res = await fetch(`/api/user-progress?userId=${currentUserId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            const dbUser: UserProfile = data.user;
+            set((state) => {
+              const mergedCompleted = Array.from(new Set([...state.completedLevelIds, ...(dbUser.completedLevelIds || [])]));
+              const mergedUnlockedSolutions = Array.from(new Set([...state.unlockedSolutionLessonIds, ...(dbUser.unlockedSolutionLessonIds || [])]));
+              const mergedXp = Math.max(state.totalXp, dbUser.totalXp || 0);
+              const mergedUser: UserProfile = {
+                ...state.currentUser,
+                ...dbUser,
+                completedLevelIds: mergedCompleted,
+                totalXp: mergedXp,
+                unlockedSolutionLessonIds: mergedUnlockedSolutions,
+              };
+              try {
+                localStorage.setItem(`beamforge_user_${currentUserId}`, JSON.stringify(mergedUser));
+                localStorage.setItem('beamforge_progress', JSON.stringify({
+                  completedLevelIds: mergedCompleted,
+                  totalXp: mergedXp,
+                  unlockedWorldIds: ['world-1-foundations'],
+                  devModeUnlockedAll: false,
+                  unlockedSolutionLessonIds: mergedUnlockedSolutions,
+                }));
+              } catch {}
+              return {
+                currentUser: mergedUser,
+                completedLevelIds: mergedCompleted,
+                completedWithXpLevelIds: mergedCompleted,
+                totalXp: mergedXp,
+                unlockedSolutionLessonIds: mergedUnlockedSolutions,
+                isHydrated: true,
+              };
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[Hydration] Notice:', err);
+      } finally {
+        set({ isHydrated: true });
+      }
+    },
 
     unlockSolutionForLesson: (lessonId: string) => {
       set((state) => {
@@ -1689,7 +1795,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     // Verification Pipeline
     isVerifying: false,
     verificationStages: [],
-    runVerificationSuite: async () => {
+    runVerificationSuite: async (overrideExerciseId?: string) => {
       set({
         isVerifying: true,
         runResult: null,
@@ -1704,7 +1810,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         text: '==> [bf_grader] Initializing verification pipeline...',
       });
 
-      const activeId = get().activeExerciseId;
+      const activeId = overrideExerciseId || get().activeExerciseId;
       const lesson = getLessonById(activeId);
       const visibleTestInputs = (lesson?.visibleTestCases || []).map((tc) => ({
         id: tc.id,
@@ -1755,7 +1861,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             set({
               runResult: {
                 mode: 'run',
-                exerciseId: get().activeExerciseId,
+                exerciseId: activeId,
                 compileOk: true,
                 stdout: report.stdout || '',
                 visibleTests: report.visible_tests.map((t: any) => ({

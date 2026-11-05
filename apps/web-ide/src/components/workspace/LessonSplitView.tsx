@@ -545,10 +545,10 @@ export interface LessonSplitViewProps {
 export function LessonSplitView({ lesson }: LessonSplitViewProps) {
   const {
     theme,
-    files, activeFilePath, openTabPaths,
+    files: storeFiles, activeFilePath: storeActiveFilePath, openTabPaths,
     updateFileContent, openFile, resetWorkspace,
-    runCode, isRunning, runResult, beamFootprint,
-    runVerificationSuite, isVerifying, verificationStages,
+    runCode, isRunning, runResult: rawRunResult, beamFootprint,
+    runVerificationSuite, isVerifying, verificationStages: rawVerificationStages,
     isBackendOnline, checkBackendHealth,
     lessonOutputTab, setLessonOutputTab,
     isLessonOutputOpen, setLessonOutputOpen,
@@ -566,10 +566,47 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
     canUndoRestore,
     undoRestore,
     clearUndoRestore,
+    activeExerciseId,
+    switchExercise,
+    currentUser,
   } = useWorkspaceStore();
 
   const isDark = theme === 'dark';
-  const activeFile = files.find((f) => f.path === activeFilePath);
+
+  // Strictly scope runResult and verificationStages to this lesson
+  const runResult = (rawRunResult && rawRunResult.exerciseId === lesson.id) ? rawRunResult : null;
+  const verificationStages = (activeExerciseId === lesson.id) ? rawVerificationStages : [];
+
+  // Synchronize store with lesson if activeExerciseId diverges
+  useEffect(() => {
+    if (activeExerciseId !== lesson.id) {
+      switchExercise(lesson.id);
+    }
+  }, [lesson.id, activeExerciseId, switchExercise]);
+
+  // Fallback files derived directly from lesson prop if store files have not updated yet
+  const files = React.useMemo(() => {
+    if (activeExerciseId === lesson.id && storeFiles.length > 0) {
+      return storeFiles;
+    }
+    let lessonFiles = lesson.files && lesson.files.length > 0 ? [...lesson.files] : [];
+    if (lessonFiles.length === 0 && (lesson.starterCode || lesson.solutionCode)) {
+      const modMatch = (lesson.starterCode || lesson.solutionCode || '').match(/-module\s*\(\s*([a-zA-Z0-9_]+)\s*\)\s*\./);
+      const modName = modMatch ? modMatch[1] : lesson.id.replace(/[^a-zA-Z0-9_]/g, '_');
+      const fileName = `${modName}.erl`;
+      lessonFiles = [{ path: `src/${fileName}`, name: fileName, content: lesson.starterCode || '' }];
+    }
+    return lessonFiles;
+  }, [lesson, activeExerciseId, storeFiles]);
+
+  const activeFilePath = React.useMemo(() => {
+    if (activeExerciseId === lesson.id && storeActiveFilePath && files.some((f) => f.path === storeActiveFilePath)) {
+      return storeActiveFilePath;
+    }
+    return files[0]?.path || '';
+  }, [activeExerciseId, lesson.id, storeActiveFilePath, files]);
+
+  const activeFile = files.find((f) => f.path === activeFilePath) || files[0];
   const [editorMounted, setEditorMounted] = useState(false);
   const monacoRef = useRef<any>(null);
   const [mobileTab, setMobileTab] = useState<'guide' | 'code' | 'results'>('guide');
@@ -591,8 +628,60 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
   const isLessonUnlocked = accessResult.isUnlocked;
 
   // Solution access: Free and immediate if already solved, otherwise gated via Option B modal
-  const isSolved = (completedLevelIds || []).includes(lesson.id);
-  const isUnlocked = isSolved || (unlockedSolutionLessonIds || []).includes(lesson.id);
+  // Fallbacks to currentUser and localStorage ensure refreshes/reloads never ask to forfeit XP for already solved lessons
+  const isSolved = React.useMemo(() => {
+    if ((completedLevelIds || []).includes(lesson.id)) return true;
+    if ((currentUser?.completedLevelIds || []).includes(lesson.id)) return true;
+    if (typeof window !== 'undefined') {
+      try {
+        const uid = currentUser?.id || localStorage.getItem('bf_current_user_id') || 'user_alpha';
+        const cached = localStorage.getItem(`beamforge_user_${uid}`);
+        if (cached) {
+          const u = JSON.parse(cached);
+          if (u.completedLevelIds?.includes(lesson.id)) return true;
+        }
+        const prog = localStorage.getItem('beamforge_progress');
+        if (prog) {
+          const p = JSON.parse(prog);
+          if (p.completedLevelIds?.includes(lesson.id)) return true;
+        }
+        const accepted = localStorage.getItem(`beamforge_accepted_${uid}_${lesson.id}`);
+        if (accepted) return true;
+      } catch {}
+    }
+    return false;
+  }, [completedLevelIds, currentUser, lesson.id]);
+
+  const isUnlocked = React.useMemo(() => {
+    if (isSolved) return true;
+    if ((unlockedSolutionLessonIds || []).includes(lesson.id)) return true;
+    if ((currentUser?.unlockedSolutionLessonIds || []).includes(lesson.id)) return true;
+    if (typeof window !== 'undefined') {
+      try {
+        const uid = currentUser?.id || localStorage.getItem('bf_current_user_id') || 'user_alpha';
+        const cached = localStorage.getItem(`beamforge_user_${uid}`);
+        if (cached) {
+          const u = JSON.parse(cached);
+          if (u.unlockedSolutionLessonIds?.includes(lesson.id)) return true;
+        }
+      } catch {}
+    }
+    return false;
+  }, [isSolved, unlockedSolutionLessonIds, currentUser, lesson.id]);
+
+  const handleRunCode = () => {
+    if (activeExerciseId !== lesson.id) {
+      switchExercise(lesson.id);
+    }
+    runCode(false, lesson.id);
+  };
+
+  const handleRunVerification = () => {
+    if (activeExerciseId !== lesson.id) {
+      switchExercise(lesson.id);
+    }
+    runVerificationSuite(lesson.id);
+  };
 
   const insertTokenAtCursor = (token: string) => {
     if (monacoRef.current?.editor) {
@@ -1243,7 +1332,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
               setLessonOutputOpen(true);
               setLessonOutputTab('test_results');
               if (typeof window !== 'undefined' && window.innerWidth < 768) setMobileTab('results');
-              runCode();
+              handleRunCode();
             }}
             disabled={!isLessonUnlocked || isRunning || isVerifying || !isBackendOnline}
             title={
@@ -1273,7 +1362,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
               setLessonOutputOpen(true);
               setLessonOutputTab('verification');
               if (typeof window !== 'undefined' && window.innerWidth < 768) setMobileTab('results');
-              runVerificationSuite();
+              handleRunVerification();
             }}
             disabled={!isLessonUnlocked || isVerifying || isRunning || !isBackendOnline}
             title={
@@ -1746,6 +1835,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                     (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles[activeFile.path.replace(/^src\//, '')]) ||
                     (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles['src/' + activeFile.path]) ||
                     lesson.solutionCode ||
+                    (lesson.solutionFiles ? Object.values(lesson.solutionFiles)[0] : '') ||
                     ''
                   }
                   solutionExplanation={lesson.solutionExplanation}
@@ -1946,7 +2036,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                   <button
                     onClick={() => {
                       if (!isLessonUnlocked) return;
-                      runCode();
+                      handleRunCode();
                     }}
                     disabled={!isLessonUnlocked || isRunning || isVerifying || !isBackendOnline}
                     className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -2054,7 +2144,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                   <button
                     onClick={() => {
                       if (!isLessonUnlocked) return;
-                      runVerificationSuite();
+                      handleRunVerification();
                     }}
                     disabled={!isLessonUnlocked || isVerifying || !isBackendOnline}
                     className="px-4 py-2 rounded-xl text-xs font-bold text-slate-900 shadow-md inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -2078,6 +2168,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                   (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles[activeFile.path.replace(/^src\//, '')]) ||
                   (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles['src/' + activeFile.path]) ||
                   lesson.solutionCode ||
+                  (lesson.solutionFiles ? Object.values(lesson.solutionFiles)[0] : '') ||
                   ''
                 }
                 solutionExplanation={lesson.solutionExplanation}
@@ -2113,7 +2204,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           <button
             onClick={() => {
               if (!isLessonUnlocked) return;
-              runCode();
+              handleRunCode();
             }}
             disabled={!isLessonUnlocked || isRunning || isVerifying || !isBackendOnline}
             className={`btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${!isLessonUnlocked || isRunning || isVerifying || !isBackendOnline ? 'pointer-events-none' : ''}`}
@@ -2131,7 +2222,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           <button
             onClick={() => {
               if (!isLessonUnlocked) return;
-              runVerificationSuite();
+              handleRunVerification();
             }}
             disabled={!isLessonUnlocked || isVerifying || isRunning || !isBackendOnline}
             className={`btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${!isLessonUnlocked || isVerifying || isRunning || !isBackendOnline ? 'pointer-events-none' : ''}`}

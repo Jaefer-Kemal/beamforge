@@ -1630,3 +1630,32 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Confirmed `wx` (wxWidgets / Observer GUI) is `non_existing` on the headless Alpine Docker container (BeamForge runs pure headless compiler/BEAM processes, so wxWidgets is not loaded or needed).
 - [x] **74.4: Vercel Production Frontend Deploy (`beamforge-eight.vercel.app`)**:
   - Auto-built and deployed to Vercel production under deployment `https://beamforge-nr15ha6ay-jaefer-kemals-projects.vercel.app` with status Ready (HTTP 200 OK).
+
+
+## Phase 75: Multi-Lecture Route & Progress Synchronization, Client Hydration & Solution Scoping
+- [x] **75.1: Backend Bridge & WebSocket Mux Exercise-ID Scoping**:
+  - Added `ExerciseID string` json tag to `VerificationReport` in `services/orchestrator/internal/bridge/erl_runner.go`.
+  - Propagated `req.ExerciseID` into both failure and success reports in `RunVerification` and `generateFailureReport`.
+  - Updated `services/orchestrator/internal/gateway/ws_mux.go` to include `"exercise_id": req.ExerciseID` in Channel 5 WebSocket payloads for both `report` and `run_result`.
+- [x] **75.2: Workspace Store Hydration & Parameterized Runners (`useWorkspaceStore.ts`)**:
+  - Added `isHydrated: boolean` and `hydrateFromStorageAndDb: () => Promise<void>` to `WorkspaceState`.
+  - Implemented multi-tier client hydration: immediate read from `localStorage` (`beamforge_user_${userId}` and `beamforge_progress`), followed by merge from Neon DB (`GET /api/user-progress?userId=${userId}`).
+  - Parameterized `runCode` with `overrideExerciseId?: string` and `runVerificationSuite` with `overrideExerciseId?: string`.
+  - Scoped Channel 5 WebSocket incoming messages (`report` and `run_result`) to `frame.payload.exercise_id`, preventing wrong-lesson completion records or result leaks.
+- [x] **75.3: Lesson Page Route & Progression Sync (`page.tsx`)**:
+  - Added `hydrateFromStorageAndDb` invocation on client mount inside `useEffect`.
+  - Added `activeExerciseId` to `useEffect` route synchronization dependency array, guaranteeing that navigating back/forward or changing lessons triggers `switchExercise(rawLessonId)`.
+  - Bound `Cmd+Enter` / `Ctrl+Enter` keyboard shortcut to `runVerificationSuite(rawLessonId)`.
+- [x] **75.4: Lesson Split View Scoping & Solution Forfeit Prevention (`LessonSplitView.tsx`)**:
+  - Aliased `runResult: rawRunResult` and `verificationStages: rawVerificationStages` from store, strictly scoping `runResult = (rawRunResult && rawRunResult.exerciseId === lesson.id) ? rawRunResult : null` and `verificationStages = (activeExerciseId === lesson.id) ? rawVerificationStages : []`.
+  - Derived `effectiveFiles` and `activeFile` directly for `lesson.id`, preventing any display of previous lecture files or misaligned modules in Monaco editor.
+  - Hardened `isSolved` and `isUnlocked` to check store, `currentUser`, and immediate `localStorage` fallbacks (`beamforge_user_${uid}`, `beamforge_progress`, `beamforge_accepted_${uid}_${lesson.id}`), ensuring refreshes and reloads never show the "Forfeit XP" modal for already solved lessons.
+  - Routed all Run and Submit buttons through `handleRunCode` and `handleRunVerification`, ensuring explicit passage of `lesson.id`.
+  - Added fallback `(lesson.solutionFiles ? Object.values(lesson.solutionFiles)[0] : '')` to `SolutionViewerTab` to guarantee that solutions always display for the active lesson.
+- [x] **75.5: Top Bar Chapter Selection Progression Preserving (`BootDevTopBar.tsx`)**:
+  - Updated `handleSelectChapter(chNum)` to find the learner's first uncompleted lesson in the selected chapter, rather than blindly resetting to Lesson 1.
+  - Synchronized `setActiveChapter`, `setActiveLesson`, `switchExercise`, and `router.push` atomically.
+- [x] **75.6: Compiler & Build Verification**:
+  - `npx tsc --noEmit`: Passed with 0 errors.
+  - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.

@@ -73,6 +73,7 @@ type RunResult struct {
 }
 
 type VerificationReport struct {
+	ExerciseID    string                  `json:"exercise_id,omitempty"`
 	Verdict       string                  `json:"verdict"` // "PASSED" | "FAILED"
 	Score         int                     `json:"score"`
 	TotalTimeMs   int                     `json:"total_time_ms"`
@@ -353,6 +354,7 @@ func (r *Runner) RunVerification(ctx context.Context, session *pool.Session, exe
 	}
 	if hasErrors {
 		return &VerificationReport{
+			ExerciseID:  exerciseID,
 			Score:       0,
 			Verdict:     "FAILED",
 			TotalTimeMs: 5,
@@ -433,6 +435,7 @@ end],
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
 			if err := json.Unmarshal([]byte(line), &report); err == nil {
+				report.ExerciseID = exerciseID
 				if runRes, errRun := r.runCodePrecompiledLocked(ctx, session, exerciseID, diags, rawCompileOut, nil, inputVisibleTests...); errRun == nil && runRes != nil {
 					report.VisibleTests = runRes.VisibleTests
 					report.Stdout = runRes.Stdout
@@ -1141,6 +1144,7 @@ func (r *Runner) generateFailureReport(exerciseID string, errMsg string) *Verifi
 		{ID: "execution_crash", Title: "BEAM Runtime Verification Execution", Status: "failed", TimeMs: 10, Details: errMsg},
 	}
 	return &VerificationReport{
+		ExerciseID:  exerciseID,
 		Verdict:     "FAILED",
 		Score:       0,
 		TotalTimeMs: 10,
