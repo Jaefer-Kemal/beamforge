@@ -53,13 +53,52 @@ export function checkLessonAccess(
   const targetLessonId = targetLesson?.id || `ch0${chapterNum}-l0${lessonNum}`;
   const targetLessonTitle = targetLesson?.title || `Lesson ${lessonNum}`;
 
+  // Combine passed completedLevelIds with immediate local storage cache
+  let effectiveCompleted = completedLevelIds || [];
+  if (typeof window !== 'undefined') {
+    try {
+      if (localStorage.getItem(`beamforge_completed_${targetLessonId}`) === 'true') {
+        return { isUnlocked: true };
+      }
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('beamforge_completed_')) {
+          const lid = k.replace('beamforge_completed_', '');
+          if (!effectiveCompleted.includes(lid)) {
+            effectiveCompleted.push(lid);
+          }
+        }
+      }
+      const uid = localStorage.getItem('bf_current_user_id') || 'user_alpha';
+      const cached = localStorage.getItem(`beamforge_user_${uid}`);
+      if (cached) {
+        const u = JSON.parse(cached);
+        if (u.completedLevelIds && Array.isArray(u.completedLevelIds)) {
+          effectiveCompleted = Array.from(new Set([...effectiveCompleted, ...u.completedLevelIds]));
+        }
+      }
+      const prog = localStorage.getItem('beamforge_progress');
+      if (prog) {
+        const p = JSON.parse(prog);
+        if (p.completedLevelIds && Array.isArray(p.completedLevelIds)) {
+          effectiveCompleted = Array.from(new Set([...effectiveCompleted, ...p.completedLevelIds]));
+        }
+      }
+    } catch {}
+  }
+
+  // If target lesson is already completed, it is ALWAYS unlocked
+  if (effectiveCompleted.includes(targetLessonId)) {
+    return { isUnlocked: true };
+  }
+
   // 1. Chapter-level gating check (for Chapter > 1)
   if (chapterNum > 1) {
     const prevChapterNum = chapterNum - 1;
     const prevChapterLessons = (ALL_CURRICULUM_CHAPTERS as any)[prevChapterNum] || [];
     const prevFinalLesson = prevChapterLessons.length > 0 ? prevChapterLessons[prevChapterLessons.length - 1] : null;
 
-    if (prevFinalLesson && !completedLevelIds.includes(prevFinalLesson.id)) {
+    if (prevFinalLesson && !effectiveCompleted.includes(prevFinalLesson.id)) {
       return {
         isUnlocked: false,
         prerequisite: {
@@ -84,9 +123,9 @@ export function checkLessonAccess(
   if (lessonNum > 1) {
     // Find the immediately preceding lesson in this chapter
     const prevLesson = currChapterLessons[lessonNum - 2];
-    if (prevLesson && !completedLevelIds.includes(prevLesson.id)) {
+    if (prevLesson && !effectiveCompleted.includes(prevLesson.id)) {
       // Find the first uncompleted lesson in this chapter so the learner is directed to where they left off
-      const firstIncomplete = currChapterLessons.find((l: any) => !completedLevelIds.includes(l.id)) || prevLesson;
+      const firstIncomplete = currChapterLessons.find((l: any) => !effectiveCompleted.includes(l.id)) || prevLesson;
 
       return {
         isUnlocked: false,
@@ -118,6 +157,32 @@ export function checkLessonAccessById(
   completedLevelIds: string[] = [],
   devModeUnlockedAll = false
 ): LessonAccessResult {
+  if (devModeUnlockedAll) return { isUnlocked: true };
+  if (completedLevelIds && completedLevelIds.includes(lessonId)) return { isUnlocked: true };
+  if (typeof window !== 'undefined') {
+    try {
+      if (localStorage.getItem(`beamforge_completed_${lessonId}`) === 'true') {
+        return { isUnlocked: true };
+      }
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('beamforge_accepted_') && k.endsWith(`_${lessonId}`)) {
+          return { isUnlocked: true };
+        }
+      }
+      const uid = localStorage.getItem('bf_current_user_id') || 'user_alpha';
+      const cached = localStorage.getItem(`beamforge_user_${uid}`);
+      if (cached) {
+        const u = JSON.parse(cached);
+        if (u.completedLevelIds?.includes(lessonId)) return { isUnlocked: true };
+      }
+      const prog = localStorage.getItem('beamforge_progress');
+      if (prog) {
+        const p = JSON.parse(prog);
+        if (p.completedLevelIds?.includes(lessonId)) return { isUnlocked: true };
+      }
+    } catch {}
+  }
   const lesson = getLessonById(lessonId);
   if (!lesson) {
     return { isUnlocked: true };

@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { BeamForgeLogo } from './BeamForgeLogo';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
-import { ALL_CURRICULUM_CHAPTERS } from '../../data/curriculumCatalog';
+import { ALL_CURRICULUM_CHAPTERS, getLessonById } from '../../data/curriculumCatalog';
 import { DEFAULT_USERS, UserProfile, xpToRole } from '../../types/user';
 import { LeaderboardDrawer } from '../workspace/LeaderboardDrawer';
 import { ResetAccountModal } from './ResetAccountModal';
@@ -196,14 +196,12 @@ export function BootDevTopBar() {
   const router = useRouter();
   const pathname = usePathname();
 
-  useEffect(() => {
-    if (activeExerciseId && pathname && pathname.startsWith('/learn/')) {
-      const expected = `/learn/${activeExerciseId}`;
-      if (pathname !== expected && typeof window !== 'undefined') {
-        window.history.replaceState(null, '', expected);
-      }
-    }
-  }, [activeExerciseId, pathname]);
+  // Robust route-level resolution of current chapter and lesson when on /learn/[lessonId]
+  const routeLessonId = (pathname && pathname.startsWith('/learn/')) ? pathname.replace('/learn/', '').split('/')[0] : null;
+  const routeLesson = routeLessonId ? getLessonById(routeLessonId) : null;
+
+  const currentChapterNum = routeLesson ? routeLesson.chapterNumber : activeChapter;
+  const currentLessonNum = routeLesson ? routeLesson.lessonNumber : activeLesson;
 
   const [mounted, setMounted] = useState(false);
   const [chapterOpen, setChapterOpen] = useState(false);
@@ -240,36 +238,51 @@ export function BootDevTopBar() {
   }, []);
 
   const { level, role } = xpToRole(totalXp);
-  const chapterLessons = ALL_CURRICULUM_CHAPTERS[activeChapter]
-    ? ALL_CURRICULUM_CHAPTERS[activeChapter].map((l) => l.title)
-    : (LESSONS_PER_CHAPTER[activeChapter] || []);
-  const currentChapter = CHAPTERS.find((c) => c.num === activeChapter)!;
+  const chapterLessons = ALL_CURRICULUM_CHAPTERS[currentChapterNum]
+    ? ALL_CURRICULUM_CHAPTERS[currentChapterNum].map((l) => l.title)
+    : (LESSONS_PER_CHAPTER[currentChapterNum] || []);
+  const currentChapter = CHAPTERS.find((c) => c.num === currentChapterNum) || CHAPTERS[0];
 
   const isDark = theme === 'dark';
 
+  // Fast-path helper checking both in-memory store and immediate local storage keys
+  const isLessonDone = (lid: string) => {
+    if (!lid) return false;
+    if (completedLevelIds.includes(lid)) return true;
+    if (typeof window !== 'undefined') {
+      try {
+        if (localStorage.getItem(`beamforge_completed_${lid}`) === 'true') return true;
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('beamforge_accepted_') && k.endsWith(`_${lid}`)) return true;
+        }
+      } catch {}
+    }
+    return false;
+  };
+
   // Check access using centralized curriculum access engine
   const handleSelectChapter = (chNum: number) => {
+    const targetLessons = (ALL_CURRICULUM_CHAPTERS as any)[chNum] || [];
+    if (targetLessons.length === 0) return;
+
     const access = checkLessonAccess(chNum, 1, completedLevelIds, devModeUnlockedAll);
-    if (access.isUnlocked) {
-      const targetLessons = (ALL_CURRICULUM_CHAPTERS as any)[chNum] || [];
-      // Find learner's first incomplete lesson in this chapter, or default to lesson 1
-      let targetLesson = targetLessons[0];
-      for (const l of targetLessons) {
-        if (!completedLevelIds.includes(l.id)) {
-          targetLesson = l;
-          break;
-        }
+    // Find learner's first incomplete lesson in this chapter, or default to lesson 1
+    let targetLesson = targetLessons[0];
+    for (const l of targetLessons) {
+      if (!isLessonDone(l.id)) {
+        targetLesson = l;
+        break;
       }
-      if (!targetLesson && targetLessons.length > 0) {
-        targetLesson = targetLessons[0];
-      }
-      const targetNum = targetLesson?.lessonNumber || 1;
+    }
+    const targetNum = targetLesson?.lessonNumber || 1;
+    const hasCompletedInChapter = targetLessons.some((l: any) => isLessonDone(l.id));
+
+    if (access.isUnlocked || hasCompletedInChapter) {
       setActiveChapter(chNum);
       setActiveLesson(targetNum);
-      if (targetLesson) {
-        switchExercise(targetLesson.id);
-        router.push(`/learn/${targetLesson.id}`);
-      }
+      switchExercise(targetLesson.id);
+      router.push(`/learn/${targetLesson.id}`);
       if (bootDevView !== 'lesson') setBootDevView('lesson');
       setChapterOpen(false);
     } else if (access.prerequisite) {
@@ -280,14 +293,17 @@ export function BootDevTopBar() {
   };
 
   const handleSelectLesson = (lessonNum: number) => {
-    const access = checkLessonAccess(activeChapter, lessonNum, completedLevelIds, devModeUnlockedAll);
-    if (access.isUnlocked) {
+    const targetLessons = (ALL_CURRICULUM_CHAPTERS as any)[currentChapterNum] || [];
+    const targetLesson = targetLessons[lessonNum - 1];
+    if (!targetLesson) return;
+
+    const isCompleted = isLessonDone(targetLesson.id);
+    const access = checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll);
+    if (access.isUnlocked || isCompleted) {
+      setActiveChapter(currentChapterNum);
       setActiveLesson(lessonNum);
-      const targetLessons = (ALL_CURRICULUM_CHAPTERS as any)[activeChapter] || [];
-      if (targetLessons[lessonNum - 1]) {
-        switchExercise(targetLessons[lessonNum - 1].id);
-        router.push(`/learn/${targetLessons[lessonNum - 1].id}`);
-      }
+      switchExercise(targetLesson.id);
+      router.push(`/learn/${targetLesson.id}`);
       if (bootDevView !== 'lesson') setBootDevView('lesson');
       setLessonOpen(false);
     } else if (access.prerequisite) {
@@ -298,47 +314,57 @@ export function BootDevTopBar() {
   };
 
   const handlePrevLesson = () => {
-    if (activeLesson > 1) {
-      handleSelectLesson(activeLesson - 1);
-    } else if (activeChapter > 1) {
-      const prevChNum = activeChapter - 1;
+    if (currentLessonNum > 1) {
+      handleSelectLesson(currentLessonNum - 1);
+    } else if (currentChapterNum > 1) {
+      const prevChNum = currentChapterNum - 1;
       const prevLessons = (ALL_CURRICULUM_CHAPTERS as any)[prevChNum] || [];
       const lastLessonNum = prevLessons.length || 8;
-      setActiveChapter(prevChNum);
-      setActiveLesson(lastLessonNum);
-      if (prevLessons[lastLessonNum - 1]) {
-        switchExercise(prevLessons[lastLessonNum - 1].id);
-        router.push(`/learn/${prevLessons[lastLessonNum - 1].id}`);
+      const prevTarget = prevLessons[lastLessonNum - 1];
+      if (prevTarget) {
+        setActiveChapter(prevChNum);
+        setActiveLesson(lastLessonNum);
+        switchExercise(prevTarget.id);
+        router.push(`/learn/${prevTarget.id}`);
       }
       if (bootDevView !== 'lesson') setBootDevView('lesson');
     }
   };
 
   const handleNextLesson = () => {
-    const currChapterLessons = (ALL_CURRICULUM_CHAPTERS as any)[activeChapter] || [];
+    const currChapterLessons = (ALL_CURRICULUM_CHAPTERS as any)[currentChapterNum] || [];
     const maxLesson = currChapterLessons.length || 6;
-    if (activeLesson < maxLesson) {
-      handleSelectLesson(activeLesson + 1);
-    } else if (activeChapter < 12) {
-      const nextChNum = activeChapter + 1;
-      const access = checkLessonAccess(nextChNum, 1, completedLevelIds, devModeUnlockedAll);
-      if (access.isUnlocked) {
-        handleSelectChapter(nextChNum);
-      } else if (access.prerequisite) {
-        setPrereqModalData(access.prerequisite);
-        setIsPrereqModalOpen(true);
+    if (currentLessonNum < maxLesson) {
+      handleSelectLesson(currentLessonNum + 1);
+    } else if (currentChapterNum < 12) {
+      const nextChNum = currentChapterNum + 1;
+      const nextLessons = (ALL_CURRICULUM_CHAPTERS as any)[nextChNum] || [];
+      if (nextLessons[0]) {
+        const isNextCompleted = isLessonDone(nextLessons[0].id);
+        const access = checkLessonAccess(nextChNum, 1, completedLevelIds, devModeUnlockedAll);
+        if (access.isUnlocked || isNextCompleted) {
+          handleSelectChapter(nextChNum);
+        } else if (access.prerequisite) {
+          setPrereqModalData(access.prerequisite);
+          setIsPrereqModalOpen(true);
+        }
       }
     }
   };
 
   // Next target calculation for UI lock state
-  const nextTarget = activeLesson < (chapterLessons.length || 6)
-    ? { ch: activeChapter, l: activeLesson + 1 }
-    : activeChapter < 12
-    ? { ch: activeChapter + 1, l: 1 }
+  const nextTarget = currentLessonNum < (chapterLessons.length || 6)
+    ? { ch: currentChapterNum, l: currentLessonNum + 1 }
+    : currentChapterNum < 12
+    ? { ch: currentChapterNum + 1, l: 1 }
     : null;
   const isNextLessonUnlocked = nextTarget
-    ? checkLessonAccess(nextTarget.ch, nextTarget.l, completedLevelIds, devModeUnlockedAll).isUnlocked
+    ? (
+        isLessonDone(
+          ((ALL_CURRICULUM_CHAPTERS as any)[nextTarget.ch] || [])[nextTarget.l - 1]?.id || ''
+        ) ||
+        checkLessonAccess(nextTarget.ch, nextTarget.l, completedLevelIds, devModeUnlockedAll).isUnlocked
+      )
     : false;
 
   return (
@@ -490,10 +516,10 @@ export function BootDevTopBar() {
         <div className="hidden lg:flex flex-1 items-center justify-center gap-1 min-w-0 px-2 max-w-sm">
           {chapterLessons.map((lessonTitle, idx) => {
             const lessonNum = idx + 1;
-            const lessonObj = (ALL_CURRICULUM_CHAPTERS as any)[activeChapter]?.[idx];
-            const isCompleted = lessonObj ? completedLevelIds.includes(lessonObj.id) : false;
-            const isActive = lessonNum === activeLesson;
-            const access = checkLessonAccess(activeChapter, lessonNum, completedLevelIds, devModeUnlockedAll);
+            const lessonObj = (ALL_CURRICULUM_CHAPTERS as any)[currentChapterNum]?.[idx];
+            const isCompleted = lessonObj ? isLessonDone(lessonObj.id) : false;
+            const isActive = lessonNum === currentLessonNum;
+            const access = checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll);
             const isUnlocked = access.isUnlocked || isCompleted;
             return (
               <React.Fragment key={lessonNum}>
@@ -564,7 +590,7 @@ export function BootDevTopBar() {
               }}
             >
               <span className="font-bold" style={{ color: isDark ? '#A78BFA' : '#7C3AED' }}>
-                CH{activeChapter}:
+                CH{currentChapterNum}:
               </span>
               <span className="hidden xl:inline max-w-24 truncate">{currentChapter?.title}</span>
               <ChevronDown className={`w-3 h-3 transition-transform ${chapterOpen ? 'rotate-180' : ''}`} />
@@ -592,7 +618,7 @@ export function BootDevTopBar() {
                 </div>
                 <div className="max-h-80 overflow-y-auto py-1">
                   {CHAPTERS.map((ch) => {
-                    const isSelected = ch.num === activeChapter;
+                    const isSelected = ch.num === currentChapterNum;
                     const isUnlocked = checkLessonAccess(ch.num, 1, completedLevelIds, devModeUnlockedAll).isUnlocked;
                     return (
                       <button
@@ -655,13 +681,13 @@ export function BootDevTopBar() {
               }}
             >
               <span className="font-bold" style={{ color: isDark ? '#34D399' : '#059669' }}>
-                L{activeLesson}:
+                L{currentLessonNum}:
               </span>
               <span className="hidden xl:inline max-w-28 truncate">
-                {ALL_CURRICULUM_CHAPTERS[activeChapter]?.[activeLesson - 1]?.lessonType === 'incident_triage' && (
+                {ALL_CURRICULUM_CHAPTERS[currentChapterNum]?.[currentLessonNum - 1]?.lessonType === 'incident_triage' && (
                   <AlertTriangle className="w-3 h-3 text-rose-500 inline mr-1 -mt-0.5 flex-shrink-0" />
                 )}
-                {chapterLessons[activeLesson - 1] || `Lesson ${activeLesson}`}
+                {chapterLessons[currentLessonNum - 1] || `Lesson ${currentLessonNum}`}
               </span>
               <ChevronDown className={`w-3 h-3 transition-transform ${lessonOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -681,15 +707,15 @@ export function BootDevTopBar() {
                   className="px-4 py-2.5 border-b text-xs font-bold uppercase tracking-widest"
                   style={{ color: isDark ? '#64748B' : '#94A3B8', borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)' }}
                 >
-                  CH{activeChapter} — {currentChapter?.title}
+                  CH{currentChapterNum} — {currentChapter?.title}
                 </div>
                 <div className="max-h-72 overflow-y-auto py-1">
                   {chapterLessons.map((lessonTitle, idx) => {
                     const lessonNum = idx + 1;
-                    const isSelected = lessonNum === activeLesson;
-                    const lessonObj = ALL_CURRICULUM_CHAPTERS[activeChapter]?.[idx];
-                    const isCompleted = lessonObj ? completedLevelIds.includes(lessonObj.id) : false;
-                    const isUnlocked = isCompleted || checkLessonAccess(activeChapter, lessonNum, completedLevelIds, devModeUnlockedAll).isUnlocked;
+                    const isSelected = lessonNum === currentLessonNum;
+                    const lessonObj = ALL_CURRICULUM_CHAPTERS[currentChapterNum]?.[idx];
+                    const isCompleted = lessonObj ? isLessonDone(lessonObj.id) : false;
+                    const isUnlocked = isCompleted || checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll).isUnlocked;
                     const isIncident = lessonObj?.lessonType === 'incident_triage' || !!lessonObj?.incidentAlert;
                     return (
                       <button
@@ -756,7 +782,7 @@ export function BootDevTopBar() {
               id="prev-lesson-btn"
               onClick={handlePrevLesson}
               title="Previous Lesson"
-              disabled={activeChapter === 1 && activeLesson === 1}
+              disabled={currentChapterNum === 1 && currentLessonNum === 1}
               className="w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               style={{
                 background: isDark ? 'rgba(30,41,59,0.70)' : 'rgba(255,255,255,0.75)',
@@ -770,13 +796,13 @@ export function BootDevTopBar() {
               id="next-lesson-btn"
               onClick={handleNextLesson}
               title={
-                activeChapter === 12 && activeLesson === (chapterLessons.length || 6)
+                currentChapterNum === 12 && currentLessonNum === (chapterLessons.length || 6)
                   ? 'Course Completed!'
                   : isNextLessonUnlocked
                   ? 'Next Lesson'
                   : 'Locked: Complete current lesson first'
               }
-              disabled={activeChapter === 12 && activeLesson === (chapterLessons.length || 6)}
+              disabled={currentChapterNum === 12 && currentLessonNum === (chapterLessons.length || 6)}
               className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
                 !isNextLessonUnlocked ? 'opacity-50 hover:opacity-100' : ''
               }`}
@@ -1100,7 +1126,7 @@ export function BootDevTopBar() {
             id="mobile-prev-lesson-btn"
             onClick={handlePrevLesson}
             title="Previous Lesson"
-            disabled={activeChapter === 1 && activeLesson === 1}
+            disabled={currentChapterNum === 1 && currentLessonNum === 1}
             className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
             style={{
               background: isDark ? 'rgba(30,41,59,0.70)' : 'rgba(255,255,255,0.75)',
@@ -1114,13 +1140,13 @@ export function BootDevTopBar() {
             id="mobile-next-lesson-btn"
             onClick={handleNextLesson}
             title={
-              activeChapter === 12 && activeLesson === (chapterLessons.length || 6)
+              currentChapterNum === 12 && currentLessonNum === (chapterLessons.length || 6)
                 ? 'Course Completed!'
                 : isNextLessonUnlocked
                 ? 'Next Lesson'
                 : 'Locked: Complete current lesson first'
             }
-            disabled={activeChapter === 12 && activeLesson === (chapterLessons.length || 6)}
+            disabled={currentChapterNum === 12 && currentLessonNum === (chapterLessons.length || 6)}
             className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
               !isNextLessonUnlocked ? 'opacity-50 hover:opacity-100' : ''
             }`}
@@ -1359,7 +1385,7 @@ export function BootDevTopBar() {
             </div>
             <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
               {CHAPTERS.map((ch) => {
-                const isSelected = ch.num === activeChapter;
+                const isSelected = ch.num === currentChapterNum;
                 const isUnlocked = checkLessonAccess(ch.num, 1, completedLevelIds, devModeUnlockedAll).isUnlocked;
                 return (
                   <button
@@ -1392,21 +1418,25 @@ export function BootDevTopBar() {
           {/* Chapter Lessons List */}
           <div className="p-3 flex-1 overflow-y-auto">
             <div className="text-[11px] font-bold uppercase tracking-wider mb-2" style={{ color: isDark ? '#64748B' : '#94A3B8' }}>
-              CH{activeChapter}: {currentChapter?.title} Lessons
+              CH{currentChapterNum}: {currentChapter?.title} Lessons
             </div>
             <div className="space-y-1">
               {chapterLessons.map((lessonTitle, idx) => {
                 const lessonNum = idx + 1;
-                const isSelected = lessonNum === activeLesson;
-                const isCompleted = lessonNum < activeLesson;
+                const isSelected = lessonNum === currentLessonNum;
+                const lessonObj = ALL_CURRICULUM_CHAPTERS[currentChapterNum]?.[idx];
+                const isCompleted = lessonObj ? isLessonDone(lessonObj.id) : false;
+                const isUnlocked = isCompleted || checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll).isUnlocked;
                 return (
                   <button
                     key={lessonNum}
                     onClick={() => {
+                      if (!isUnlocked) return;
                       setMobileMenuOpen(false);
                       handleSelectLesson(lessonNum);
                     }}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all cursor-pointer"
+                    disabled={!isUnlocked}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                     style={{
                       background: isSelected
                         ? (isDark ? 'rgba(16,185,129,0.18)' : 'rgba(16,185,129,0.10)')
@@ -1435,6 +1465,7 @@ export function BootDevTopBar() {
                     >
                       {lessonTitle}
                     </span>
+                    {!isUnlocked && <Lock className="w-3 h-3 text-slate-500 flex-shrink-0" />}
                   </button>
                 );
               })}

@@ -169,7 +169,7 @@ interface WorkspaceState {
   beamFootprint: BeamFootprint | null;
   setBeamFootprint: (footprint: BeamFootprint | null) => void;
   isRunning: boolean;
-  runCode: (keepTab?: boolean, overrideExerciseId?: string) => Promise<void>;
+  runCode: (keepTab?: boolean, overrideExerciseId?: string, overrideFiles?: Record<string, string>) => Promise<void>;
   clearRunResult: () => void;
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -241,7 +241,7 @@ interface WorkspaceState {
   // Chaos Grader Pipeline
   isVerifying: boolean;
   verificationStages: VerificationStage[];
-  runVerificationSuite: (overrideExerciseId?: string) => Promise<void>;
+  runVerificationSuite: (overrideExerciseId?: string, overrideFiles?: Record<string, string>) => Promise<void>;
 
   // XMPP Inspector
   xmppState: XmppC2SState;
@@ -646,13 +646,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     setBeamFootprint: (footprint) => set({ beamFootprint: footprint }),
     isRunning: false,
     clearRunResult: () => set({ runResult: null }),
-    runCode: async (keepTab?: boolean, overrideExerciseId?: string) => {
+    runCode: async (keepTab?: boolean, overrideExerciseId?: string, overrideFiles?: Record<string, string>) => {
       set({ isRunning: true, isLessonOutputOpen: true, runResult: null });
       if (!keepTab) set({ lessonOutputTab: 'test_results' });
       get().addTerminalEntry({ type: 'output', text: '[BeamForge] Running visible test cases...' });
 
-      const fileMap: Record<string, string> = {};
-      get().files.forEach((f) => { fileMap[f.path] = f.content; });
+      const fileMap: Record<string, string> = overrideFiles && Object.keys(overrideFiles).length > 0 ? overrideFiles : {};
+      if (Object.keys(fileMap).length === 0) {
+        get().files.forEach((f) => { fileMap[f.path] = f.content; });
+      }
 
       const activeId = overrideExerciseId || get().activeExerciseId;
       const lesson = getLessonById(activeId);
@@ -914,13 +916,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             } catch {}
           }
         }
-        if (cachedUser) {
+
+        // Direct scan of all beamforge_completed_* keys
+        const directCompleted: string[] = [];
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('beamforge_completed_')) {
+              directCompleted.push(k.replace('beamforge_completed_', ''));
+            }
+          }
+        } catch {}
+
+        if (cachedUser || directCompleted.length > 0) {
+          const baseUser = cachedUser || DEFAULT_USERS[currentUserId] || DEFAULT_USERS['user_alpha'];
+          const mergedInitialCompleted = Array.from(new Set([...(baseUser.completedLevelIds || []), ...directCompleted]));
+          const fullUser: UserProfile = { ...baseUser, completedLevelIds: mergedInitialCompleted };
           set((state) => ({
-            currentUser: cachedUser!,
-            completedLevelIds: Array.from(new Set([...state.completedLevelIds, ...(cachedUser!.completedLevelIds || [])])),
-            completedWithXpLevelIds: Array.from(new Set([...state.completedWithXpLevelIds, ...(cachedUser!.completedLevelIds || [])])),
-            totalXp: Math.max(state.totalXp, cachedUser!.totalXp || 0),
-            unlockedSolutionLessonIds: Array.from(new Set([...state.unlockedSolutionLessonIds, ...(cachedUser!.unlockedSolutionLessonIds || [])])),
+            currentUser: fullUser,
+            completedLevelIds: Array.from(new Set([...state.completedLevelIds, ...mergedInitialCompleted])),
+            completedWithXpLevelIds: Array.from(new Set([...state.completedWithXpLevelIds, ...mergedInitialCompleted])),
+            totalXp: Math.max(state.totalXp, fullUser.totalXp || 0),
+            unlockedSolutionLessonIds: Array.from(new Set([...state.unlockedSolutionLessonIds, ...(fullUser.unlockedSolutionLessonIds || [])])),
             isHydrated: true,
           }));
         }
@@ -1216,6 +1233,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         lastActivityDate: todayStr,
       };
       syncUserToStorageAndDb(updatedUser);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(`beamforge_completed_${levelId}`, 'true');
+        } catch {}
+      }
 
       // Snapshot badges AFTER updating
       const badgesAfter = BADGE_CATALOG.filter((b) => isBadgeUnlocked(b, updatedUser, finalCompleted));
@@ -1795,7 +1817,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     // Verification Pipeline
     isVerifying: false,
     verificationStages: [],
-    runVerificationSuite: async (overrideExerciseId?: string) => {
+    runVerificationSuite: async (overrideExerciseId?: string, overrideFiles?: Record<string, string>) => {
       set({
         isVerifying: true,
         runResult: null,
@@ -1819,10 +1841,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         title: tc.title || '',
       }));
 
-      const fileMap: Record<string, string> = {};
-      get().files.forEach((f) => {
-        fileMap[f.path] = f.content;
-      });
+      const fileMap: Record<string, string> = overrideFiles && Object.keys(overrideFiles).length > 0 ? overrideFiles : {};
+      if (Object.keys(fileMap).length === 0) {
+        get().files.forEach((f) => {
+          fileMap[f.path] = f.content;
+        });
+      }
 
       // If connected to Go Orchestrator, trigger live OTP verification over WebSocket
       if (wsMux.isConnected()) {

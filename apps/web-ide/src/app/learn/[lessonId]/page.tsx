@@ -55,18 +55,16 @@ export default function LessonPage() {
     return checkLessonAccessById(rawLessonId, completedLevelIds, devModeUnlockedAll);
   }, [rawLessonId, completedLevelIds, devModeUnlockedAll]);
 
-  // Sync route params with store state
+  // Sync route params with store state (responds strictly to URL changes, preventing bounce loops)
   useEffect(() => {
     if (rawLessonId) {
-      if (activeExerciseId !== rawLessonId) {
-        switchExercise(rawLessonId);
-      }
+      switchExercise(rawLessonId);
       setBootDevView('lesson');
       try {
         localStorage.setItem('beamforge_active_exercise', rawLessonId);
       } catch {}
     }
-  }, [rawLessonId, activeExerciseId, switchExercise, setBootDevView]);
+  }, [rawLessonId, switchExercise, setBootDevView]);
 
   // Connect WebSocket & keyboard shortcuts
   useEffect(() => {

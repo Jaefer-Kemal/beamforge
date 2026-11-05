@@ -1659,3 +1659,27 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npx tsc --noEmit`: Passed with 0 errors.
   - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+
+## Phase 76: Elimination of Page Rubber-Banding, Isolated Lecture State & Persistent Solution Status
+- [x] **76.1: Elimination of Forced History Rewriting & Route Bounces (`BootDevTopBar.tsx` & `page.tsx`)**:
+  - Completely removed the rogue `window.history.replaceState` `useEffect` in `BootDevTopBar.tsx` that actively overwrote browser URLs and forced the user back to the starting lesson.
+  - Derived `currentChapterNum` and `currentLessonNum` directly from route `pathname` (`/learn/[lessonId]`) with `routeLessonId` resolution, ensuring the top bar always matches the loaded URL.
+  - In `page.tsx`, stripped `activeExerciseId` from the route-sync `useEffect` dependency array, restricting triggers strictly to URL parameter changes (`rawLessonId`) and eliminating feedback bounce loops.
+- [x] **76.2: Isolated Component-Local Drawer State & Fresh Multi-Lecture Navigation (`LessonSplitView.tsx`)**:
+  - Decoupled `isLessonOutputOpen` and `lessonOutputTab` from global Zustand store into local `useState` within `LessonSplitView`.
+  - Because `<LessonSplitView key={currentLesson.id} lesson={currentLesson} />` is keyed by unique lesson ID, every lecture switch or chapter navigation mounts a 100% clean, closed output drawer with default `'test_results'` tab.
+  - Added reactive auto-open `useEffect`s listening to `isVerifying` and `isRunning` scoped strictly to `activeExerciseId === lesson.id`.
+  - Removed redundant `switchExercise` effect in `LessonSplitView`, letting `page.tsx` own route-level workspace switching.
+- [x] **76.3: Unambiguous Persistent Completion & Solution Forfeit Prevention (`useWorkspaceStore.ts`, `curriculumAccess.ts`, `LessonSplitView.tsx`)**:
+  - Introduced direct key persistence: `localStorage.setItem('beamforge_completed_' + levelId, 'true')` inside `onLevelCompleted`.
+  - Updated `isSolved` in `LessonSplitView.tsx` to check `beamforge_completed_${lesson.id}` and scan `beamforge_accepted_*_${lesson.id}`, ensuring reload, refresh, or cross-chapter navigation never asks to forfeit XP for already completed lessons.
+  - Hardened `checkLessonAccess` and `checkLessonAccessById` in `curriculumAccess.ts` to immediately unlock any completed lesson from localStorage.
+  - Added `isLessonDone` helper in `BootDevTopBar.tsx`, ensuring progress dots, dropdown lists, and prev/next navigation accurately reflect completed status without waiting for async fetch hydration.
+- [x] **76.4: Direct Active File Transmission & Stale Workspace Cache Prevention (`useWorkspaceStore.ts` & `LessonSplitView.tsx`)**:
+  - Enhanced `files` memo in `LessonSplitView` to check `loadUserDraft` and `beamforge_accepted` synchronously on first render.
+  - Parameterized `runCode` and `runVerificationSuite` in `useWorkspaceStore.ts` to accept `overrideFiles?: Record<string, string>`.
+  - Updated `handleRunCode` and `handleRunVerification` in `LessonSplitView` to package and transmit the active `files` directly to the backend, guaranteeing that evaluated code always matches the code displayed in Monaco editor.
+- [x] **76.5: Compiler & Production Build Verification**:
+  - `npx tsc --noEmit`: Passed with 0 errors.
+  - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.

@@ -27,7 +27,7 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
-import { useWorkspaceStore } from '../../state/useWorkspaceStore';
+import { useWorkspaceStore, loadUserDraft } from '../../state/useWorkspaceStore';
 import type {
   OtpDocSignatureCard,
   AstRuleSpec,
@@ -550,8 +550,6 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
     runCode, isRunning, runResult: rawRunResult, beamFootprint,
     runVerificationSuite, isVerifying, verificationStages: rawVerificationStages,
     isBackendOnline, checkBackendHealth,
-    lessonOutputTab, setLessonOutputTab,
-    isLessonOutputOpen, setLessonOutputOpen,
     isSolutionVisible, setSolutionVisible,
     loadSolutionForActiveExercise,
     completedLevelIds,
@@ -573,22 +571,59 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
 
   const isDark = theme === 'dark';
 
+  // Component-local drawer and tab state: guaranteed 100% fresh, closed, and isolated per lecture
+  const [isLessonOutputOpen, setLessonOutputOpen] = useState(false);
+  const [lessonOutputTab, setLessonOutputTab] = useState<'test_results' | 'console' | 'verification' | 'solution'>('test_results');
+
   // Strictly scope runResult and verificationStages to this lesson
   const runResult = (rawRunResult && rawRunResult.exerciseId === lesson.id) ? rawRunResult : null;
   const verificationStages = (activeExerciseId === lesson.id) ? rawVerificationStages : [];
 
-  // Synchronize store with lesson if activeExerciseId diverges
+  // Automatically reveal drawer when run or verification begins for this lesson
   useEffect(() => {
-    if (activeExerciseId !== lesson.id) {
-      switchExercise(lesson.id);
+    if (isVerifying && activeExerciseId === lesson.id) {
+      setLessonOutputOpen(true);
+      setLessonOutputTab('verification');
     }
-  }, [lesson.id, activeExerciseId, switchExercise]);
+  }, [isVerifying, activeExerciseId, lesson.id]);
 
-  // Fallback files derived directly from lesson prop if store files have not updated yet
+  useEffect(() => {
+    if (isRunning && activeExerciseId === lesson.id) {
+      setLessonOutputOpen(true);
+      setLessonOutputTab('test_results');
+    }
+  }, [isRunning, activeExerciseId, lesson.id]);
+
+  // Initial files derived from user draft, accepted solution, or lesson starter templates
   const files = React.useMemo(() => {
     if (activeExerciseId === lesson.id && storeFiles.length > 0) {
       return storeFiles;
     }
+    const uid = currentUser?.id || (typeof window !== 'undefined' ? localStorage.getItem('bf_current_user_id') || 'user_alpha' : 'user_alpha');
+    const userDraft = loadUserDraft(uid, lesson.id);
+    if (userDraft && userDraft.length > 0) {
+      return userDraft;
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const acceptedRaw = localStorage.getItem(`beamforge_accepted_${uid}_${lesson.id}`);
+        if (acceptedRaw) {
+          const acceptedMap = JSON.parse(acceptedRaw);
+          let baseFiles = lesson.files && lesson.files.length > 0 ? [...lesson.files] : [];
+          if (baseFiles.length === 0 && (lesson.starterCode || lesson.solutionCode)) {
+            const modMatch = (lesson.starterCode || lesson.solutionCode || '').match(/-module\s*\(\s*([a-zA-Z0-9_]+)\s*\)\s*\./);
+            const modName = modMatch ? modMatch[1] : lesson.id.replace(/[^a-zA-Z0-9_]/g, '_');
+            const fileName = `${modName}.erl`;
+            baseFiles = [{ path: `src/${fileName}`, name: fileName, content: lesson.starterCode || '' }];
+          }
+          return baseFiles.map((f) => ({
+            ...f,
+            content: acceptedMap[f.path] || f.content,
+          }));
+        }
+      } catch {}
+    }
+
     let lessonFiles = lesson.files && lesson.files.length > 0 ? [...lesson.files] : [];
     if (lessonFiles.length === 0 && (lesson.starterCode || lesson.solutionCode)) {
       const modMatch = (lesson.starterCode || lesson.solutionCode || '').match(/-module\s*\(\s*([a-zA-Z0-9_]+)\s*\)\s*\./);
@@ -597,7 +632,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
       lessonFiles = [{ path: `src/${fileName}`, name: fileName, content: lesson.starterCode || '' }];
     }
     return lessonFiles;
-  }, [lesson, activeExerciseId, storeFiles]);
+  }, [lesson, activeExerciseId, storeFiles, currentUser]);
 
   const activeFilePath = React.useMemo(() => {
     if (activeExerciseId === lesson.id && storeActiveFilePath && files.some((f) => f.path === storeActiveFilePath)) {
@@ -634,6 +669,13 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
     if ((currentUser?.completedLevelIds || []).includes(lesson.id)) return true;
     if (typeof window !== 'undefined') {
       try {
+        if (localStorage.getItem(`beamforge_completed_${lesson.id}`) === 'true') return true;
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('beamforge_accepted_') && k.endsWith(`_${lesson.id}`)) {
+            return true;
+          }
+        }
         const uid = currentUser?.id || localStorage.getItem('bf_current_user_id') || 'user_alpha';
         const cached = localStorage.getItem(`beamforge_user_${uid}`);
         if (cached) {
@@ -670,17 +712,25 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
   }, [isSolved, unlockedSolutionLessonIds, currentUser, lesson.id]);
 
   const handleRunCode = () => {
+    setLessonOutputOpen(true);
+    setLessonOutputTab('test_results');
     if (activeExerciseId !== lesson.id) {
       switchExercise(lesson.id);
     }
-    runCode(false, lesson.id);
+    const fileMap: Record<string, string> = {};
+    files.forEach((f) => { fileMap[f.path] = f.content; });
+    runCode(false, lesson.id, fileMap);
   };
 
   const handleRunVerification = () => {
+    setLessonOutputOpen(true);
+    setLessonOutputTab('verification');
     if (activeExerciseId !== lesson.id) {
       switchExercise(lesson.id);
     }
-    runVerificationSuite(lesson.id);
+    const fileMap: Record<string, string> = {};
+    files.forEach((f) => { fileMap[f.path] = f.content; });
+    runVerificationSuite(lesson.id, fileMap);
   };
 
   const insertTokenAtCursor = (token: string) => {
@@ -1237,6 +1287,9 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
               }}
               onChange={(val: string) => {
                 const newContent = val ?? '';
+                if (activeExerciseId !== lesson.id) {
+                  switchExercise(lesson.id);
+                }
                 if (activeFile) updateFileContent(activeFile.path, newContent);
                 runLint(newContent, activeFile?.path || 'src/module.erl');
               }}
