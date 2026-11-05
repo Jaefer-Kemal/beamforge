@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import {
   Zap,
   BookOpen,
@@ -188,8 +189,21 @@ export function BootDevTopBar() {
     devModeUnlockedAll,
     toggleDevModeUnlockedAll,
     completedLevelIds,
+    activeExerciseId,
     switchExercise,
   } = useWorkspaceStore();
+
+  const router = useRouter();
+  const pathname = usePathname();
+
+  useEffect(() => {
+    if (activeExerciseId && pathname && pathname.startsWith('/learn/')) {
+      const expected = `/learn/${activeExerciseId}`;
+      if (pathname !== expected && typeof window !== 'undefined') {
+        window.history.replaceState(null, '', expected);
+      }
+    }
+  }, [activeExerciseId, pathname]);
 
   const [mounted, setMounted] = useState(false);
   const [chapterOpen, setChapterOpen] = useState(false);
@@ -328,8 +342,8 @@ export function BootDevTopBar() {
           {/* Logo */}
           <div
             className="flex items-center gap-2 cursor-pointer group flex-shrink-0"
-            onClick={() => setBootDevView('syllabus')}
-            title="BeamForge — Return to Curriculum Syllabus"
+            onClick={() => router.push('/')}
+            title="BeamForge — Return to Home"
           >
             <BeamForgeLogo size={26} />
             <span
@@ -424,7 +438,14 @@ export function BootDevTopBar() {
               <button
                 key={key}
                 id={`view-switcher-${key}`}
-                onClick={() => setBootDevView(key)}
+                onClick={() => {
+                  setBootDevView(key);
+                  if (key === 'syllabus') {
+                    router.push('/syllabus');
+                  } else {
+                    router.push(`/learn/${activeExerciseId || 'ch01-l01'}`);
+                  }
+                }}
                 className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer"
                 style={{
                   background: bootDevView === key
@@ -1185,6 +1206,7 @@ export function BootDevTopBar() {
               onClick={() => {
                 setBootDevView('lesson');
                 setMobileMenuOpen(false);
+                router.push(`/learn/${activeExerciseId || 'ch01-l01'}`);
               }}
               className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               style={{
@@ -1201,6 +1223,7 @@ export function BootDevTopBar() {
               onClick={() => {
                 setBootDevView('syllabus');
                 setMobileMenuOpen(false);
+                router.push('/syllabus');
               }}
               className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               style={{

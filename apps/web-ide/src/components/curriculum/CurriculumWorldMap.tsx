@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Binary, 
@@ -255,6 +256,7 @@ export function CurriculumWorldMap() {
     devModeUnlockedAll,
   } = useWorkspaceStore();
 
+  const router = useRouter();
   const isDark = theme === 'dark';
 
   // Build a lookup map of lessons per chapter
@@ -332,6 +334,7 @@ export function CurriculumWorldMap() {
     setActiveLesson(lessonNum);
     switchExercise(lessonId);
     setBootDevView('lesson');
+    router.push(`/learn/${lessonId}`);
   };
 
   return (
@@ -850,12 +853,14 @@ export function CurriculumWorldMap() {
             setActiveLesson(prevLessons.length || 8);
             switchExercise(lessonId);
             setBootDevView('lesson');
+            router.push(`/learn/${lessonId}`);
           }}
           onJumpInAnyway={() => {
             setActiveChapter(prereqModalData.targetChapterNum);
             setActiveLesson(prereqModalData.targetLessonNum);
             switchExercise(prereqModalData.targetLessonId);
             setBootDevView('lesson');
+            router.push(`/learn/${prereqModalData.targetLessonId}`);
           }}
         />
       )}

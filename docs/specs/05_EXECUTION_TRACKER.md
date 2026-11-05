@@ -1522,3 +1522,25 @@ We execute the platform overhaul incrementally so every single piece is built to
 - [x] **68.5: Verification**:
   - `go build` compiled cleanly.
   - `npx tsc --noEmit` passed with 0 errors.
+
+## Phase 69: Apple-Glassmorphic Landing Page & Next.js App Router Architecture
+- [x] **69.1: Dedicated Apple-Glassmorphic Landing Page (`apps/web-ide/src/app/page.tsx`)**:
+  - Engineered public landing page with dual-theme frosted glass aesthetics (Daylight `#E8ECF2` vs Midnight `#060810`).
+  - Implemented `LandingNavbar.tsx`: Floating frosted glass header with brand logo, syllabus/worlds/features links, returning learner resume pill (`Resume [Ch X: L Y] ▶`), light/dark toggle, and primary CTA.
+  - Implemented `InteractiveHeroPreview.tsx`: Interactive 3-tab live developer anchor (Bytecode Disassembler demonstrating `beam_disasm` $O(1)$ TCO `call_last` opcode, Visual Token Term Diff, and live OTP 29 process telemetry).
+  - Implemented `LandingHero.tsx`: High-impact typography, OTP 29 Live VM badge, value proposition, and primary/secondary CTAs.
+  - Implemented `LandingMetricsStrip.tsx`: 6 key proof points (12 Chapters, 68 Lessons, 5 Worlds, $O(1)$ TCO Grader, 5-Module XMPP Server, 99.9999999% Telecom Uptime).
+  - Implemented `LandingBentoFeatures.tsx`: Linear/Aceternity style Bento Grid showcasing the Anti-Trivia Creed, Native Bytecode & AST Verifier, Token Term Diffs, Incident Triage Labs, and Capstone Studio.
+  - Implemented `LandingWorldsSection.tsx`: The 5 Thematic Worlds interactive showcase with concept checklists and direct world jump-in buttons.
+  - Implemented `LandingArchitectureComparison.tsx`: Deep systems comparison matrix between the BEAM VM (isolated private heaps, 4,000 reductions preemption, Let It Crash supervision, per-process $O(1)$ GC) vs traditional multi-threaded runtimes.
+  - Implemented `LandingFooterCTA.tsx`: Frosted glass closing banner and footer with documentation and repository links.
+- [x] **69.2: Next.js 14 App Router Routing Architecture**:
+  - Created `/` (`apps/web-ide/src/app/page.tsx`) as the public landing page.
+  - Created `/syllabus` (`apps/web-ide/src/app/syllabus/page.tsx`) rendering the full-screen interactive `CurriculumWorldMap` with `BootDevTopBar`.
+  - Created `/learn/[lessonId]` (`apps/web-ide/src/app/learn/[lessonId]/page.tsx`) rendering the full Monaco dual-pane IDE (`LessonSplitView` for Ch 1–11, `CapstoneStudioView` for Ch 12) with automatic parameter syncing.
+  - Created `/learn` (`apps/web-ide/src/app/learn/page.tsx`) dynamically redirecting to the learner's last active exercise or `ch01-l01`.
+  - Updated `BootDevTopBar.tsx` and `CurriculumWorldMap.tsx` with `next/navigation` router pushes for clean deep-linking and browser history synchronization.
+- [x] **69.3: Compiler & Build Verification**:
+  - `npx tsc --noEmit -p apps/web-ide`: Passed with 0 errors.
+  - `npm run build --prefix apps/web-ide`: Next.js 14 production build passed with 0 errors, successfully generating static routes for `/`, `/syllabus`, `/learn`, and dynamic SSR route for `/learn/[lessonId]`.
+  - `go build -C services/orchestrator -o orchestrator.exe ./cmd/server`: Passed with 0 errors.
