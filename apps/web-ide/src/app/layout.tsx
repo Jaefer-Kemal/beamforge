@@ -38,7 +38,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full w-full">
+    <html lang="en" className="min-h-full w-full">
       {/* Inline script: apply theme-dark class before first paint to avoid flash */}
       <head>
         <script
@@ -48,7 +48,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased min-h-dvh w-full overflow-x-hidden`}
+        className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased min-h-screen w-full overflow-x-hidden`}
       >
         {children}
       </body>
