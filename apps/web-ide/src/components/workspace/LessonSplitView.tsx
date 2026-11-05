@@ -36,7 +36,8 @@ import type {
   VisualSceneId,
 } from '../../types/workspace';
 import { configureMonacoErlang, ErlangCodeBlock } from '../../lib/monacoErlang';
-import { ORCHESTRATOR_HTTP_URL } from '../../lib/orchestratorConfig';
+import { ORCHESTRATOR_HTTP_URL, getOrchestratorHttpUrl } from '../../lib/orchestratorConfig';
+import { checkLessonAccessById } from '../../lib/curriculumAccess';
 import { BeamConceptVisualizer } from '../pedagogy/BeamConceptVisualizer';
 import { MentalModelCheckCard } from '../pedagogy/MentalModelCheckCard';
 import { ErlangTermDiffCard } from '../pedagogy/ErlangTermDiffCard';
@@ -583,6 +584,12 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
 
+  // Strict Sequential Progression check: is this lesson unlocked?
+  const accessResult = React.useMemo(() => {
+    return checkLessonAccessById(lesson.id, completedLevelIds, false);
+  }, [lesson.id, completedLevelIds]);
+  const isLessonUnlocked = accessResult.isUnlocked;
+
   // Solution access: Free and immediate if already solved, otherwise gated via Option B modal
   const isSolved = (completedLevelIds || []).includes(lesson.id);
   const isUnlocked = isSolved || (unlockedSolutionLessonIds || []).includes(lesson.id);
@@ -635,7 +642,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
       if (!model) return;
 
       try {
-        const res = await fetch(`${ORCHESTRATOR_HTTP_URL}/api/v1/lint`, {
+        const res = await fetch(`${getOrchestratorHttpUrl()}/api/v1/lint`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -801,6 +808,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           LEFT PANE — Interactive Textbook, Doc Cards & Assignment Spec
           ════════════════════════════════════════════════════════════════════ */}
       <div
+        key={`left-pane-${lesson.id}`}
         className={`${mobileTab === 'guide' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-col border-r overflow-hidden`}
         style={{
           background: isDark ? 'rgba(11, 17, 30, 0.58)' : 'rgba(255, 255, 255, 0.72)',
@@ -939,19 +947,19 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
 
         {/* Left Scrollable Content */}
         {leftTab === 'guide' ? (
-          <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div key={`guide-${lesson.id}`} className="flex-1 overflow-y-auto px-5 py-4">
             {/* Slot 1: Incident Alert Banner (only on incident_triage or when incidentAlert is defined) */}
             {lesson.incidentAlert && (
-              <IncidentAlertBanner alert={lesson.incidentAlert} isDark={isDark} />
+              <IncidentAlertBanner key={`alert-${lesson.id}-${lesson.incidentAlert.id || 'banner'}`} alert={lesson.incidentAlert} isDark={isDark} />
             )}
 
             {/* Slot 2: Concept Markdown */}
-            <MarkdownRenderer md={lesson.conceptMarkdown} isDark={isDark} />
+            <MarkdownRenderer key={`concept-${lesson.id}`} md={lesson.conceptMarkdown} isDark={isDark} />
 
             {/* Slot 3: Interactive Step-Diagram (Collapsible) */}
             {resolveVisualScene(lesson) && (
-              <div className="mt-4">
-                <BeamConceptVisualizer scene={resolveVisualScene(lesson)!} />
+              <div key={`visual-wrap-${lesson.id}-${resolveVisualScene(lesson)!}`} className="mt-4">
+                <BeamConceptVisualizer key={`visual-${lesson.id}-${resolveVisualScene(lesson)!}`} scene={resolveVisualScene(lesson)!} />
               </div>
             )}
 
@@ -964,13 +972,14 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                   <span>Official Erlang Docs &amp; Function Reference</span>
                 </div>
                 {lesson.otpDocCards.map((card) => (
-                  <OtpDocCard key={`${card.module}:${card.functionName}`} card={card} isDark={isDark} />
+                  <OtpDocCard key={`doc-${lesson.id}-${card.module}:${card.functionName}`} card={card} isDark={isDark} />
                 ))}
               </div>
             )}
 
             {/* Slot 5: Quick Mental Model Check (Collapsible) */}
             <MentalModelCheckCard
+              key={`mental-${lesson.id}-${lesson.mentalModelCheck?.id || 'default'}`}
               check={lesson.mentalModelCheck}
               lessonId={lesson.id}
               chapterNumber={lesson.chapterNumber}
@@ -980,7 +989,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             />
 
             {/* Slot 6: Strict Rules & Verification Constraints Card */}
-            {lesson.astRules && <AstRulesCard rules={lesson.astRules} isDark={isDark} />}
+            {lesson.astRules && <AstRulesCard key={`ast-${lesson.id}`} rules={lesson.astRules} isDark={isDark} />}
 
             {/* Mobile Quick-Jump to Code Editor */}
             <div className="flex md:hidden pt-4 pb-2">
@@ -1001,6 +1010,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           </div>
         ) : activeSubmissionDetail ? (
           <LessonSubmissionDetail
+            key={`sub-detail-${activeSubmissionDetail.id}`}
             submission={activeSubmissionDetail}
             isDark={isDark}
             onBack={() => setActiveSubmissionDetail(null)}
@@ -1013,6 +1023,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           />
         ) : (
           <LessonSubmissionsList
+            key={`sub-list-${lesson.id}`}
             submissions={submissions}
             isLoading={isLoadingSubmissions}
             isDark={isDark}
@@ -1024,8 +1035,11 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
       {/* ════════════════════════════════════════════════════════════════════
           RIGHT PANE — Code Editor, Action Bar & Output Drawer (Responsive)
           ════════════════════════════════════════════════════════════════════ */}
-      <div className={`${mobileTab === 'code' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-col flex-1 min-h-0 overflow-hidden relative`}
-        style={{ background: isDark ? '#0B0F17' : '#FFFFFF' }}>
+      <div
+        key={`right-pane-${lesson.id}`}
+        className={`${mobileTab === 'code' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-col flex-1 min-h-0 overflow-hidden relative`}
+        style={{ background: isDark ? '#0B0F17' : '#FFFFFF' }}
+      >
 
         {/* File Tabs Header */}
         <div
@@ -1124,6 +1138,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
         <div className="flex-1 w-full min-h-0 overflow-hidden relative">
           {editorMounted && MonacoEditor ? (
             <MonacoEditor
+              key={`monaco-${lesson.id}-${activeFile?.path || 'workspace'}`}
               language="erlang"
               path={activeFile?.path || 'workspace.erl'}
               value={activeFile?.content ?? ''}
@@ -1224,14 +1239,21 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           <button
             id="run-btn"
             onClick={() => {
+              if (!isLessonUnlocked) return;
               setLessonOutputOpen(true);
               setLessonOutputTab('test_results');
               if (typeof window !== 'undefined' && window.innerWidth < 768) setMobileTab('results');
               runCode();
             }}
-            disabled={isRunning || isVerifying || !isBackendOnline}
-            title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to run code.' : 'Run visible test cases'}
-            className={`btn-run flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${isRunning || isVerifying || !isBackendOnline ? 'pointer-events-none' : ''}`}
+            disabled={!isLessonUnlocked || isRunning || isVerifying || !isBackendOnline}
+            title={
+              !isLessonUnlocked
+                ? 'Lesson locked: Complete prerequisite lesson first to run code'
+                : !isBackendOnline
+                ? 'Go Orchestrator backend is offline. Connect to runtime to run code.'
+                : 'Run visible test cases'
+            }
+            className={`btn-run flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${!isLessonUnlocked || isRunning || isVerifying || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
             {isRunning ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
@@ -1247,14 +1269,21 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           <button
             id="submit-btn"
             onClick={() => {
+              if (!isLessonUnlocked) return;
               setLessonOutputOpen(true);
               setLessonOutputTab('verification');
               if (typeof window !== 'undefined' && window.innerWidth < 768) setMobileTab('results');
               runVerificationSuite();
             }}
-            disabled={isVerifying || isRunning || !isBackendOnline}
-            title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to submit.' : 'Submit code for full verification suite'}
-            className={`btn-submit flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-bold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${isVerifying || isRunning || !isBackendOnline ? 'pointer-events-none' : ''}`}
+            disabled={!isLessonUnlocked || isVerifying || isRunning || !isBackendOnline}
+            title={
+              !isLessonUnlocked
+                ? 'Lesson locked: Complete prerequisite lesson first to submit code'
+                : !isBackendOnline
+                ? 'Go Orchestrator backend is offline. Connect to runtime to submit.'
+                : 'Submit code for full verification suite'
+            }
+            className={`btn-submit flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-bold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${!isLessonUnlocked || isVerifying || isRunning || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
             {isVerifying ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
@@ -1269,7 +1298,9 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           {/* Solution */}
           <button
             id="solution-btn"
+            disabled={!isLessonUnlocked}
             onClick={() => {
+              if (!isLessonUnlocked) return;
               if (isUnlocked) {
                 if (isLessonOutputOpen && lessonOutputTab === 'solution') {
                   setLessonOutputOpen(false);
@@ -1282,7 +1313,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                 setIsUnlockModalOpen(true);
               }
             }}
-            className="glass-pill flex items-center justify-center gap-1.5 px-3 h-10 text-xs font-medium rounded-xl cursor-pointer"
+            className={`glass-pill flex items-center justify-center gap-1.5 px-3 h-10 text-xs font-medium rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${!isLessonUnlocked ? 'pointer-events-none' : ''}`}
             style={{
               background: isLessonOutputOpen && lessonOutputTab === 'solution'
                 ? (isDark ? 'rgba(245,158,11,0.20)' : 'rgba(245,158,11,0.12)')
@@ -1292,7 +1323,11 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                 : (isDark ? '#94A3B8' : '#64748B'),
               border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
             }}
-            title={`Inspect reference solution for ${activeFile?.name || 'active file'}`}
+            title={
+              !isLessonUnlocked
+                ? 'Lesson locked: Complete prerequisite lesson first'
+                : `Inspect reference solution for ${activeFile?.name || 'active file'}`
+            }
           >
             <Eye className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Solution</span>
@@ -1480,12 +1515,13 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
 
           {/* Drawer Content */}
           {isLessonOutputOpen && (
-            <div className="overflow-y-auto" style={{ height: `${outputDrawerHeight - 44}px`, background: isDark ? 'rgba(11,15,23,0.95)' : 'rgba(248,250,252,0.95)' }}>
+            <div key={`drawer-content-${lesson.id}-${lessonOutputTab}`} className="overflow-y-auto" style={{ height: `${outputDrawerHeight - 44}px`, background: isDark ? 'rgba(11,15,23,0.95)' : 'rgba(248,250,252,0.95)' }}>
               {lessonOutputTab === 'test_results' && (
                 <div className="p-4 space-y-3">
                   {/* Compilation Failure Terminal Card if erlc failed */}
                   {runResult && !runResult.compileOk && (
                     <CompilationErrorCard
+                      key={`comp-err-${lesson.id}`}
                       stdout={runResult.stdout}
                       diagnostics={runResult.diagnostics}
                       onJumpTo={jumpToPosition}
@@ -1513,7 +1549,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
 
                     return (
                       <UnifiedTestCaseCard
-                        key={tc.id || idx}
+                        key={`tc-${lesson.id}-${tc.id || idx}`}
                         testCase={tc}
                         runTest={matchedTest}
                         isDark={isDark}
@@ -1528,7 +1564,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                         Additional Dynamic Test Results
                       </div>
                       {runResult.visibleTests.slice(lesson.visibleTestCases.length).map((extra, i) => (
-                        <ErlangTermDiffCard key={i} test={extra} isDark={isDark} />
+                        <ErlangTermDiffCard key={`diff-${lesson.id}-${extra.callStr || i}`} test={extra} isDark={isDark} />
                       ))}
                     </div>
                   )}
@@ -1703,6 +1739,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
               {/* Solution Tab Content */}
               {lessonOutputTab === 'solution' && (
                 <SolutionViewerTab
+                  key={`sol-viewer-${lesson.id}-${activeFile?.path || 'main'}`}
                   fileName={activeFile?.name || 'solution.erl'}
                   solutionCode={
                     (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles[activeFile.path]) ||
@@ -1889,7 +1926,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
 
                     return (
                       <UnifiedTestCaseCard
-                        key={tc.id || idx}
+                        key={`tc-m-${lesson.id}-${tc.id || idx}`}
                         testCase={tc}
                         runTest={matchedTest}
                         isDark={isDark}
@@ -1907,8 +1944,12 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                     Tap <strong>Run Tests</strong> below to compile your code and inspect Erlang term diffs.
                   </p>
                   <button
-                    onClick={() => runCode()}
-                    className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md inline-flex items-center gap-1.5"
+                    onClick={() => {
+                      if (!isLessonUnlocked) return;
+                      runCode();
+                    }}
+                    disabled={!isLessonUnlocked || isRunning || isVerifying || !isBackendOnline}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{ background: '#007AFF' }}
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
@@ -2011,8 +2052,12 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                     Tap <strong>Submit for Grading</strong> to run compiler checks, AST rules, and hidden test suites.
                   </p>
                   <button
-                    onClick={() => runVerificationSuite()}
-                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-900 shadow-md inline-flex items-center gap-1.5"
+                    onClick={() => {
+                      if (!isLessonUnlocked) return;
+                      runVerificationSuite();
+                    }}
+                    disabled={!isLessonUnlocked || isVerifying || !isBackendOnline}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-900 shadow-md inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{ background: '#F59E0B' }}
                   >
                     <ShieldCheck className="w-3.5 h-3.5" />
@@ -2026,6 +2071,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           {lessonOutputTab === 'solution' && (
             <div className="flex-1 min-h-0" style={{ height: 'calc(100dvh - 14rem)' }}>
               <SolutionViewerTab
+                key={`sol-viewer-m-${lesson.id}-${activeFile?.path || 'main'}`}
                 fileName={activeFile?.name || 'solution.erl'}
                 solutionCode={
                   (activeFile?.path && lesson.solutionFiles && lesson.solutionFiles[activeFile.path]) ||
@@ -2065,9 +2111,12 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           </button>
 
           <button
-            onClick={() => runCode()}
-            disabled={isRunning || isVerifying || !isBackendOnline}
-            className={`btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${isRunning || isVerifying || !isBackendOnline ? 'pointer-events-none' : ''}`}
+            onClick={() => {
+              if (!isLessonUnlocked) return;
+              runCode();
+            }}
+            disabled={!isLessonUnlocked || isRunning || isVerifying || !isBackendOnline}
+            className={`btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${!isLessonUnlocked || isRunning || isVerifying || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
             {isRunning ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
@@ -2080,9 +2129,12 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           </button>
 
           <button
-            onClick={() => runVerificationSuite()}
-            disabled={isVerifying || isRunning || !isBackendOnline}
-            className={`btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${isVerifying || isRunning || !isBackendOnline ? 'pointer-events-none' : ''}`}
+            onClick={() => {
+              if (!isLessonUnlocked) return;
+              runVerificationSuite();
+            }}
+            disabled={!isLessonUnlocked || isVerifying || isRunning || !isBackendOnline}
+            className={`btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${!isLessonUnlocked || isVerifying || isRunning || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
             {isVerifying ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
@@ -2098,6 +2150,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
 
       {/* Confirmation & Solution Unlock Modals */}
       <SolutionUnlockModal
+        key={`unlock-modal-${lesson.id}-${activeFile?.name || 'file'}`}
         isOpen={isUnlockModalOpen}
         fileName={activeFile?.name || 'solution.erl'}
         isDark={isDark}
@@ -2116,6 +2169,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
       />
 
       <ResetConfirmModal
+        key={`reset-modal-${lesson.id}-${activeFile?.name || 'workspace'}`}
         isOpen={isResetModalOpen}
         fileName={activeFile?.name || 'workspace'}
         isDark={isDark}

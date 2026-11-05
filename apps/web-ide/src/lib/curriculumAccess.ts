@@ -124,3 +124,4 @@ export function checkLessonAccessById(
   }
   return checkLessonAccess(lesson.chapterNumber, lesson.lessonNumber, completedLevelIds, devModeUnlockedAll);
 }
+

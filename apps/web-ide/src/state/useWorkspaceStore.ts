@@ -25,7 +25,7 @@ import {
   ALL_LESSONS_FLAT,
 } from '../data/curriculumCatalog';
 import { wsMux, WSConnectionStatus, WSResponseFrame } from '../lib/ws-multiplexer';
-import { ORCHESTRATOR_HTTP_URL } from '../lib/orchestratorConfig';
+import { ORCHESTRATOR_HTTP_URL, getOrchestratorHttpUrl } from '../lib/orchestratorConfig';
 import { UserProfile, DEFAULT_USERS, xpToRole } from '../types/user';
 import { triggerCelebrationConfetti } from '../lib/confetti';
 import { Badge, BADGE_CATALOG, isBadgeUnlocked } from '../types/badges';
@@ -639,7 +639,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       }));
 
       try {
-        const res = await fetch(`${ORCHESTRATOR_HTTP_URL}/api/v1/run`, {
+        const res = await fetch(`${getOrchestratorHttpUrl()}/api/v1/run`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -861,7 +861,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     closeSuccessToast: () => set({ isSuccessToastOpen: false, successToastData: null }),
     totalXp: initialUser.totalXp,
     unlockedWorldIds: ['world-1-foundations'],
-    devModeUnlockedAll: typeof window !== 'undefined' ? localStorage.getItem('beamforge_dev_tester') === 'true' : false,
+    devModeUnlockedAll: false,
     unlockedSolutionLessonIds: initialUser.unlockedSolutionLessonIds || [],
 
     unlockSolutionForLesson: (lessonId: string) => {
@@ -881,27 +881,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     },
 
     toggleDevModeUnlockedAll: () => {
-      const next = !get().devModeUnlockedAll;
-      const allWorlds = CURRICULUM_WORLDS.map((w) => w.id);
-      const newUnlocked = next ? allWorlds : get().unlockedWorldIds;
-      set({ devModeUnlockedAll: next, unlockedWorldIds: newUnlocked });
+      // Explorer bypass permanently disabled
+      set({ devModeUnlockedAll: false });
       if (typeof window !== 'undefined') {
         try {
-          localStorage.setItem('beamforge_dev_tester', String(next));
-          localStorage.setItem('beamforge_progress', JSON.stringify({
-            completedLevelIds: get().completedLevelIds,
-            totalXp: get().totalXp,
-            unlockedWorldIds: newUnlocked,
-            devModeUnlockedAll: next,
-            unlockedSolutionLessonIds: get().unlockedSolutionLessonIds,
-          }));
+          localStorage.removeItem('beamforge_dev_tester');
         } catch {}
       }
       get().addTerminalEntry({
         type: 'output',
-        text: next 
-          ? '[Tester Mode] Unlocked all Chapters & Lessons for unrestricted testing. Note: XP is frozen (0 XP) while Tester Mode is active.'
-          : '[Tester Mode] Standard progressive curriculum and normal XP earning restored.',
+        text: '[Curriculum Security] Progressive unlocking enforced. Complete each lesson in sequence to advance.',
       });
     },
 
@@ -1209,7 +1198,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 8000); // 8s timeout handles cloud latency / cold start
-        const res = await fetch(`${ORCHESTRATOR_HTTP_URL}/health`, {
+        const res = await fetch(`${getOrchestratorHttpUrl()}/health`, {
           signal: controller.signal,
           cache: 'no-store',
         });
@@ -1399,7 +1388,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
     updateFileContent: (path: string, content: string) => {
       const nextFiles = get().files.map((f) => (f.path === path ? { ...f, content, isModified: true } : f));
-      set({ files: nextFiles });
+      // Invalidate stale test and verification results on code change
+      set({
+        files: nextFiles,
+        runResult: null,
+        verificationStages: [],
+      });
 
       const user = get().currentUser;
       const exId = get().activeExerciseId;
@@ -1698,6 +1692,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     runVerificationSuite: async () => {
       set({
         isVerifying: true,
+        runResult: null,
+        verificationStages: [],
         lessonOutputTab: 'verification',
         isLessonOutputOpen: true,
         isSuccessToastOpen: false,
@@ -1730,7 +1726,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
       // If WebSocket is not connected, try HTTP REST verification endpoint
       try {
-        const res = await fetch(`${ORCHESTRATOR_HTTP_URL}/api/v1/verify`, {
+        const res = await fetch(`${getOrchestratorHttpUrl()}/api/v1/verify`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1826,7 +1822,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               title: '1. Backend Runtime Connection',
               status: 'failed',
               timeMs: 0,
-              assertionDetails: `Cannot connect to Go Orchestrator at ${ORCHESTRATOR_HTTP_URL}. The BEAM/OTP 29 runtime is offline.`,
+              assertionDetails: `Cannot connect to Go Orchestrator at ${getOrchestratorHttpUrl()}. The BEAM/OTP 29 runtime is offline.`,
               hintOnFail: 'Start the Go Orchestrator with .\\orchestrator.exe or go run ./cmd/server in services/orchestrator to verify and grade code.',
             },
           ],
@@ -1834,7 +1830,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         });
         get().addTerminalEntry({
           type: 'error',
-          text: `==> [bf_grader] VERIFICATION ABORTED: Go Orchestrator is OFFLINE (${ORCHESTRATOR_HTTP_URL}). Start backend service to verify code.`,
+          text: `==> [bf_grader] VERIFICATION ABORTED: Go Orchestrator is OFFLINE (${getOrchestratorHttpUrl()}). Start backend service to verify code.`,
         });
         return;
       }

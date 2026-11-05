@@ -523,7 +523,7 @@ export function MentalModelCheckCard({
 
               return (
                 <button
-                  key={option.id}
+                  key={`mm-opt-${lessonId || 'check'}-${option.id}`}
                   onClick={() => setSelectedOptionId(option.id)}
                   className="w-full text-left p-3 rounded-xl border transition-all duration-200 flex items-start gap-3 group relative cursor-pointer"
                   style={{

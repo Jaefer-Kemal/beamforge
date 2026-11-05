@@ -1582,3 +1582,23 @@ We execute the platform overhaul incrementally so every single piece is built to
 - [x] **71.5: Compiler & Build Verification**:
   - `npx tsc --noEmit`: Passed with 0 errors.
   - `npm run build`: Next.js 14 production build passed with 0 errors across all routes.
+
+## Phase 72: Exploration Bypass Elimination, Go Orchestrator HTTPS Resolution, Stale Test Suite & Subcomponent Key Boundaries
+- [x] **72.1: Complete Elimination of Explorer Mode Bypass & Lock Enforcement**:
+  - Removed "Preview Lesson Anyway (Explorer Mode)" button and `onJumpInAnyway` prop completely from `PrerequisiteModal.tsx`, `BootDevTopBar.tsx`, and `CurriculumWorldMap.tsx`.
+  - In `useWorkspaceStore.ts`, removed auto-loading of `beamforge_dev_tester` from `localStorage` and purged the key, resetting learners to strict sequential progression.
+  - In `LessonSplitView.tsx`, guarded all execution actions (`▷ Run`, `▶ Submit`, and `👁 Solution`) with `disabled={!isLessonUnlocked}` so that navigating to locked lessons prevents execution and solution snooping.
+- [x] **72.2: Live Go Orchestrator Production HTTPS Mixed Content Resolution**:
+  - In `orchestratorConfig.ts`, engineered runtime protocol detection: when running on HTTPS cloud domains (such as Vercel), defaults to the live Render cloud orchestrator (`https://beamforge-orchestrator.onrender.com` for REST, `wss://beamforge-orchestrator.onrender.com/ws` for WebSocket), while preserving `http://localhost:8080` for local dev.
+  - In `ws-multiplexer.ts`, dynamic WebSocket URL re-resolution on every connection attempt.
+  - In `useWorkspaceStore.ts` and `CapstoneStudioView.tsx`, updated health checks, run, and verify endpoints to call `getOrchestratorHttpUrl()`.
+- [x] **72.3: Stale Run vs Submit Result & Test Suite Synchronization**:
+  - In `useWorkspaceStore.ts:runVerificationSuite`, cleared `runResult: null` and `verificationStages: []` at the start of submission to prevent past passing runs from lingering when submissions fail.
+  - In `useWorkspaceStore.ts:updateFileContent`, invalidated stale test results (`runResult: null`, `verificationStages: []`) whenever editor code is edited.
+- [x] **72.4: Deterministic Component Key Boundaries Across Left/Right Panes & Pedagogical Cards**:
+  - Added `key={currentLesson.id}` to `<LessonSplitView key={currentLesson.id} lesson={currentLesson} />` and `<CapstoneStudioView key={currentLesson.id} />` in `apps/web-ide/src/app/learn/[lessonId]/page.tsx`.
+  - Added granular unique `key` props to all dynamic subcomponents across `LessonSplitView.tsx` (Left Pane, Right Pane, Guide, IncidentAlertBanner, MarkdownRenderer, BeamConceptVisualizer, OtpDocCard, MentalModelCheckCard, AstRulesCard, Submissions, MonacoEditor, Output Drawer, TestCaseCards, TermDiffCards, SolutionViewerTab, and Modals).
+- [x] **72.5: Compiler & Build Verification**:
+  - `npx tsc --noEmit`: Passed with 0 errors.
+  - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
+

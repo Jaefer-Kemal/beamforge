@@ -92,6 +92,7 @@ class WSMultiplexer {
 
     try {
       this.updateStatus('connecting');
+      this.url = getOrchestratorWsUrl();
       this.ws = new WebSocket(this.url);
 
       this.ws.onopen = () => {

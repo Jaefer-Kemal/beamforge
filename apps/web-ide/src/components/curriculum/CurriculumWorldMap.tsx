@@ -844,15 +844,6 @@ export function CurriculumWorldMap() {
             setIsPrereqModalOpen(false);
             router.push(`/learn/${lessonId}`);
           }}
-          onJumpInAnyway={() => {
-            toggleDevModeUnlockedAll();
-            setActiveChapter(prereqModalData.targetChapterNum);
-            setActiveLesson(prereqModalData.targetLessonNum);
-            switchExercise(prereqModalData.targetLessonId);
-            setBootDevView('lesson');
-            setIsPrereqModalOpen(false);
-            router.push(`/learn/${prereqModalData.targetLessonId}`);
-          }}
         />
       )}
     </div>

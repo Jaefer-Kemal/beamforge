@@ -11,7 +11,7 @@ import {
   CHAPTER_12_LESSONS,
 } from '../../data/chapters/ch12';
 import { configureMonacoErlang, ErlangCodeBlock } from '../../lib/monacoErlang';
-import { ORCHESTRATOR_HTTP_URL } from '../../lib/orchestratorConfig';
+import { ORCHESTRATOR_HTTP_URL, getOrchestratorHttpUrl } from '../../lib/orchestratorConfig';
 import {
   Play,
   CheckCircle2,
@@ -282,7 +282,7 @@ export function CapstoneStudioView() {
       if (!model) return;
 
       try {
-        const res = await fetch(`${ORCHESTRATOR_HTTP_URL}/api/v1/lint`, {
+        const res = await fetch(`${getOrchestratorHttpUrl()}/api/v1/lint`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code, filename: filepath || 'src/module.erl' }),

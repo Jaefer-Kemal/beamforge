@@ -18,7 +18,6 @@ export interface PrerequisiteModalProps {
   isDark: boolean;
   onClose: () => void;
   onGoToPrerequisite: (lessonId: string) => void;
-  onJumpInAnyway: () => void;
 }
 
 export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
@@ -36,7 +35,6 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
   isDark,
   onClose,
   onGoToPrerequisite,
-  onJumpInAnyway,
 }) => {
   if (!isOpen) return null;
 
@@ -136,23 +134,6 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
               </span>
             </div>
             <ArrowRight className="w-3.5 h-3.5 flex-shrink-0" />
-          </button>
-
-          {/* Jump In Anyway (Tester Mode) */}
-          <button
-            onClick={() => {
-              onJumpInAnyway();
-              onClose();
-            }}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold cursor-pointer transition-all hover:bg-slate-500/10"
-            style={{
-              background: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.05)',
-              color: isDark ? '#94A3B8' : '#64748B',
-              border: isDark ? '1px solid rgba(255, 255, 255, 0.10)' : '1px solid rgba(15, 23, 42, 0.10)',
-            }}
-          >
-            <Eye className="w-3.5 h-3.5 opacity-70" />
-            <span>Preview Lesson Anyway (Explorer Mode)</span>
           </button>
         </div>
       </div>

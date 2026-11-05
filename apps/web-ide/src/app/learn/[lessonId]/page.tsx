@@ -105,9 +105,9 @@ export default function LessonPage() {
       return <ReferencesVaultView />;
     }
     if (activeChapter === 12 || rawLessonId?.startsWith('ch12-')) {
-      return <CapstoneStudioView />;
+      return <CapstoneStudioView key={currentLesson.id} />;
     }
-    return <LessonSplitView lesson={currentLesson} />;
+    return <LessonSplitView key={currentLesson.id} lesson={currentLesson} />;
   };
 
   return (
