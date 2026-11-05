@@ -1616,3 +1616,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc`: All Erlang grader and AST modules in `runtimes/erl-harness/apps/bf_grader/src` compiled with 0 errors.
+
+## Phase 74: Production Deployment to Render & Vercel, WebSocket & wx Verification
+- [x] **74.1: Render Production Backend Deploy (`srv-dblioqjbc2fs73ed02qg`)**:
+  - Pushed commit `d2c13fc` to `origin main`.
+  - Created and completed deploy `dep-dbm6gfc9v7es739136ig` on Render with status Live.
+  - Queried `https://beamforge-orchestrator.onrender.com/health`: status `ok`, `otp_release: 29`, `mode: native_beam_bridge`.
+- [x] **74.2: WebSocket (ws / wss) Live Gateway Verification**:
+  - Connected to `wss://beamforge-orchestrator.onrender.com/ws` from external client.
+  - Verified bidirectional frame handshake: channel 1 frame received with banner `"Connected to BeamForge Live OTP 29 Gateway"`, valid guest `session_id`, and status `ok`.
+- [x] **74.3: Erlang wx Module Analysis & Verification**:
+  - Audited `code:which(wx)` on the Render BEAM runtime via `/api/v1/run`.
+  - Confirmed `wx` (wxWidgets / Observer GUI) is `non_existing` on the headless Alpine Docker container (BeamForge runs pure headless compiler/BEAM processes, so wxWidgets is not loaded or needed).
+- [x] **74.4: Vercel Production Frontend Deploy (`beamforge-eight.vercel.app`)**:
+  - Auto-built and deployed to Vercel production under deployment `https://beamforge-nr15ha6ay-jaefer-kemals-projects.vercel.app` with status Ready (HTTP 200 OK).
