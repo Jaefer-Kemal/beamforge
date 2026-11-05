@@ -35,14 +35,6 @@ export function LandingHero() {
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] sm:w-[900px] sm:h-[450px] bg-gradient-to-tr from-amber-400/15 via-sky-400/20 to-violet-500/15 blur-[120px] rounded-full pointer-events-none -z-10" />
 
       <div className="text-center max-w-4xl mx-auto">
-        {/* Dynamic Top Badge */}
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white/70 dark:bg-slate-900/80 backdrop-blur-xl border border-white/80 dark:border-white/10 shadow-[0_4px_16px_rgba(15,23,42,0.06)] dark:shadow-[0_4px_16px_rgba(0,0,0,0.4)] mb-6 text-slate-700 dark:text-slate-200">
-          <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span>Interactive OTP 29 Live Sandbox</span>
-          <span className="text-slate-300 dark:text-slate-700">|</span>
-          <span className="text-amber-600 dark:text-amber-400 font-bold">Zero Trivia Quizzes</span>
-        </div>
-
         {/* Main Headline */}
         <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-[1.1] mb-6">
           Master High-Throughput{' '}
@@ -98,3 +90,4 @@ export function LandingHero() {
     </section>
   );
 }
+

@@ -535,6 +535,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       set({ theme: next });
       if (typeof window !== 'undefined') {
         localStorage.setItem('bf_theme', next);
+        document.documentElement.classList.toggle('dark', next === 'dark');
         document.documentElement.classList.toggle('theme-dark', next === 'dark');
       }
     },

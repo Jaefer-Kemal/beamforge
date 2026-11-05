@@ -42,8 +42,8 @@ const METRICS = [
   {
     icon: Flame,
     color: 'text-amber-600',
-    value: '99.9999999%',
-    label: 'Telecom "Nine Nines"',
+    value: '99.9%',
+    label: 'Uptime Reliability',
     desc: 'Fault-isolated actor supervision',
   },
 ];
@@ -78,3 +78,4 @@ export function LandingMetricsStrip() {
     </section>
   );
 }
+
