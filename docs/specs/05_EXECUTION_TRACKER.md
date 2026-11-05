@@ -1602,3 +1602,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npx tsc --noEmit`: Passed with 0 errors.
   - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
 
+
+## Phase 73: Settings Popover Clean-up & Go Orchestrator Status Removal
+- [x] **73.1: Spec & Skills Comprehensive Pre-Flight Audit**:
+  - Thoroughly inspected all skills (`.agent/skills`: `beamforge-architect`, `neon`, `neon-postgres`, `render-blueprints`, `render-cli`, `render-deploy`, `render-docker`, `render-mcp`) and all specifications (`docs/specs/01` through `08`).
+  - Confirmed that backend connectivity handling, cloud execution failover, and offline warnings remain intact in core execution points (`LessonSplitView.tsx`, `CapstoneStudioView.tsx`, `useWorkspaceStore.ts`) while unneeded status noise is pruned from user preferences.
+- [x] **73.2: Removal of Go Orchestrator Offline Element from Settings Popover (`BootDevTopBar.tsx`)**:
+  - Removed Go Orchestrator connection status card (`Go Orchestrator • OTP 29 Live / Offline`) from `#settings-popover-menu`.
+  - Cleaned up unused `wsStatus` extraction from `useWorkspaceStore` in `BootDevTopBar.tsx`.
+  - Streamlined Settings popover to focus strictly on learner preferences: Learner Role & Badges Shelf navigation, Appearance Theme (Daylight/Midnight Glass), Tester Mode switch, and Reset Account & Progress.
+- [x] **73.3: Compiler & Build Verification**:
+  - `npx tsc --noEmit`: Passed with 0 errors.
+  - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc`: All Erlang grader and AST modules in `runtimes/erl-harness/apps/bf_grader/src` compiled with 0 errors.

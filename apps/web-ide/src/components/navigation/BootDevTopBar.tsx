@@ -183,7 +183,6 @@ export function BootDevTopBar() {
     goToPrevLesson,
     goToNextLesson,
     totalXp,
-    wsStatus,
     currentUser,
     switchUser,
     resetUserProgress,
@@ -996,31 +995,6 @@ export function BootDevTopBar() {
                       <span>Midnight Glass</span>
                     </button>
                   </div>
-                </div>
-
-                {/* Go Orchestrator Status */}
-                <div
-                  className="p-3 rounded-xl flex items-center justify-between"
-                  style={{
-                    background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)',
-                    border: isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(15,23,42,0.06)',
-                  }}
-                >
-                  <div className="flex items-center gap-2 text-xs">
-                    <div
-                      className="w-2 h-2 rounded-full"
-                      style={{
-                        background: wsStatus === 'connected' ? '#10B981' : '#64748B',
-                        boxShadow: wsStatus === 'connected' ? '0 0 8px rgba(16,185,129,0.80)' : 'none',
-                      }}
-                    />
-                    <span className="font-semibold" style={{ color: isDark ? '#E2E8F0' : '#1E293B' }}>
-                      Go Orchestrator
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-mono font-medium" style={{ color: wsStatus === 'connected' ? '#10B981' : '#64748B' }}>
-                    {wsStatus === 'connected' ? 'OTP 29 Live (Port 8080)' : 'Offline'}
-                  </span>
                 </div>
 
                 {/* Developer / Tester Mode Toggle */}
