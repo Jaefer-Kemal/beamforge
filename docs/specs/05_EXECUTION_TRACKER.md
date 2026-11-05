@@ -1563,3 +1563,22 @@ We execute the platform overhaul incrementally so every single piece is built to
 - [x] **70.5: Compiler & Build Verification**:
   - `npx tsc --noEmit`: Passed with 0 errors.
   - `npm run build`: Next.js 14 production build passed with 0 errors.
+
+## Phase 71: Granular Lesson-Level Access Engine, "Chapter 0" Illusion Elimination & Locked Direct Route Guarding
+- [x] **71.1: Granular Curriculum Access Engine (`curriculumAccess.ts`)**:
+  - Created `apps/web-ide/src/lib/curriculumAccess.ts` providing pure `checkLessonAccess` and `checkLessonAccessById`.
+  - Differentiates intra-chapter lesson gating (`same_chapter`) from inter-chapter gating (`previous_chapter`).
+  - Completely eliminates phantom "Chapter 0" by enforcing that lesson locks in Chapter 1 require earlier Chapter 1 lessons (e.g. Lesson 7), never subtracting chapter number to 0.
+- [x] **71.2: Next Arrow (`→`) Locking & Access Guard**:
+  - In `apps/web-ide/src/components/navigation/BootDevTopBar.tsx`, wired `isNextLessonUnlocked` to the Next arrow button.
+  - If the current lesson is not completed, the `→` button is guarded with lock opacity and tooltip.
+  - Clicking `→` triggers `handleNextLesson()`, which runs `checkLessonAccess` and opens `PrerequisiteModal` explaining why the next lesson is locked and how to unlock it, completely eliminating silent bypass.
+- [x] **71.3: Dual-Mode Prerequisite Modal Overhaul (`PrerequisiteModal.tsx`)**:
+  - Updated `PrerequisiteModal.tsx` to handle both `same_chapter` ("Lesson K is Locked: Complete Lesson K-1 first") and `previous_chapter` ("Chapter N is Locked: Complete Chapter N-1 Problem Set first").
+  - Raised z-index to `z-[99999]` for guaranteed top layering above Monaco editor and sidebars.
+- [x] **71.4: Direct App Router URL Route Guarding (`/learn/[lessonId]`)**:
+  - In `apps/web-ide/src/app/learn/[lessonId]/page.tsx`, integrated `checkLessonAccessById`.
+  - If a learner accesses a locked lesson URL directly (via browser URL bar or bookmark), renders a prominent, floating Apple-glass warning banner: `🔒 Locked Lesson Preview: You haven't completed the prerequisite (Prerequisite Title) yet. [Go to Prerequisite ➔]`.
+- [x] **71.5: Compiler & Build Verification**:
+  - `npx tsc --noEmit`: Passed with 0 errors.
+  - `npm run build`: Next.js 14 production build passed with 0 errors across all routes.

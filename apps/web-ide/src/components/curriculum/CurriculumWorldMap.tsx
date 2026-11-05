@@ -28,6 +28,7 @@ import { ALL_CURRICULUM_CHAPTERS } from '../../data/chapters';
 import { CHAPTERS } from '../navigation/BootDevTopBar';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import { PrerequisiteModal } from '../workspace/PrerequisiteModal';
+import { checkLessonAccess, LessonPrerequisiteInfo } from '../../lib/curriculumAccess';
 
 // Icon map for the 5 Thematic Worlds
 const WORLD_ICON_MAP: Record<string, React.ElementType> = {
@@ -254,6 +255,7 @@ export function CurriculumWorldMap() {
     setBootDevView,
     totalXp,
     devModeUnlockedAll,
+    toggleDevModeUnlockedAll,
   } = useWorkspaceStore();
 
   const router = useRouter();
@@ -300,32 +302,14 @@ export function CurriculumWorldMap() {
   else if (completedCount >= 10) currentRank = 'Concurrent BEAM Practitioner';
   else if (completedCount >= 3) currentRank = 'Functional Craftsman';
 
-  const [prereqModalData, setPrereqModalData] = useState<{
-    targetChapterNum: number;
-    targetChapterTitle: string;
-    prerequisiteChapterNum: number;
-    prerequisiteLessonId: string;
-    targetLessonNum: number;
-    targetLessonId: string;
-  } | null>(null);
+  const [prereqModalData, setPrereqModalData] = useState<LessonPrerequisiteInfo | null>(null);
   const [isPrereqModalOpen, setIsPrereqModalOpen] = useState(false);
 
   // Navigate directly to selected lesson
-  const handleSelectLesson = (chNum: number, lessonNum: number, lessonId: string, isAccessible = true) => {
-    if (!isAccessible) {
-      const prevChNum = chNum - 1;
-      const prevLessons = (ALL_CURRICULUM_CHAPTERS as any)[prevChNum] || [];
-      const prevFinalLessonId = prevLessons.length > 0 ? prevLessons[prevLessons.length - 1].id : `ch0${prevChNum}-l08`;
-      const chMeta = CHAPTERS.find((c) => c.num === chNum);
-
-      setPrereqModalData({
-        targetChapterNum: chNum,
-        targetChapterTitle: chMeta?.title || `Chapter ${chNum}`,
-        prerequisiteChapterNum: prevChNum,
-        prerequisiteLessonId: prevFinalLessonId,
-        targetLessonNum: lessonNum,
-        targetLessonId: lessonId,
-      });
+  const handleSelectLesson = (chNum: number, lessonNum: number, lessonId: string) => {
+    const access = checkLessonAccess(chNum, lessonNum, completedLevelIds, devModeUnlockedAll);
+    if (!access.isUnlocked && access.prerequisite) {
+      setPrereqModalData(access.prerequisite);
       setIsPrereqModalOpen(true);
       return;
     }
@@ -695,21 +679,18 @@ export function CurriculumWorldMap() {
 
                             {/* Lesson Cards Grid */}
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                              {lessons.map((lesson: any, lessonIdx: number) => {
+                              {lessons.map((lesson: any) => {
                                 const isCompleted = completedLevelIds.includes(lesson.id);
                                 const isCurrent = activeChapter === chNum && activeLesson === lesson.lessonNumber;
-                                const isAccessible =
-                                  devModeUnlockedAll ||
-                                  isCompleted ||
-                                  isCurrent ||
-                                  (isChapterUnlocked && (lessonIdx === 0 || completedLevelIds.includes(lessons[lessonIdx - 1]?.id)));
+                                const access = checkLessonAccess(chNum, lesson.lessonNumber, completedLevelIds, devModeUnlockedAll);
+                                const isAccessible = access.isUnlocked || isCompleted || isCurrent;
 
                                 return (
                                   <div
                                     key={lesson.id}
                                     id={`syllabus-lesson-${lesson.id}`}
                                     data-world={String(world.worldNumber)}
-                                    onClick={() => handleSelectLesson(chNum, lesson.lessonNumber, lesson.id, isAccessible)}
+                                    onClick={() => handleSelectLesson(chNum, lesson.lessonNumber, lesson.id)}
                                     className={`lesson-card flex flex-col justify-between border ${
                                       isCurrent ? 'lesson-card-active' : ''
                                     }`}
@@ -840,26 +821,36 @@ export function CurriculumWorldMap() {
       {prereqModalData && (
         <PrerequisiteModal
           isOpen={isPrereqModalOpen}
+          type={prereqModalData.type}
           targetChapterNum={prereqModalData.targetChapterNum}
           targetChapterTitle={prereqModalData.targetChapterTitle}
-          prerequisiteChapterNum={prereqModalData.prerequisiteChapterNum}
-          prerequisiteLessonId={prereqModalData.prerequisiteLessonId}
+          targetLessonNum={prereqModalData.targetLessonNum}
+          targetLessonTitle={prereqModalData.targetLessonTitle}
+          prerequisiteChapterNum={prereqModalData.prereqChapterNum}
+          prerequisiteLessonId={prereqModalData.prereqLessonId}
+          prerequisiteLessonTitle={prereqModalData.prereqLessonTitle}
+          prerequisiteLessonNum={prereqModalData.prereqLessonNum}
+          message={prereqModalData.message}
           isDark={isDark}
           onClose={() => setIsPrereqModalOpen(false)}
           onGoToPrerequisite={(lessonId) => {
-            const prevChNum = prereqModalData.prerequisiteChapterNum;
-            const prevLessons = (ALL_CURRICULUM_CHAPTERS as any)[prevChNum] || [];
-            setActiveChapter(prevChNum);
-            setActiveLesson(prevLessons.length || 8);
+            const targetChNum = prereqModalData.prereqChapterNum;
+            const targetLessons = (ALL_CURRICULUM_CHAPTERS as any)[targetChNum] || [];
+            const targetLesson = targetLessons.find((l: any) => l.id === lessonId);
+            setActiveChapter(targetChNum);
+            setActiveLesson(targetLesson ? targetLesson.lessonNumber : (prereqModalData.prereqLessonNum || 1));
             switchExercise(lessonId);
             setBootDevView('lesson');
+            setIsPrereqModalOpen(false);
             router.push(`/learn/${lessonId}`);
           }}
           onJumpInAnyway={() => {
+            toggleDevModeUnlockedAll();
             setActiveChapter(prereqModalData.targetChapterNum);
             setActiveLesson(prereqModalData.targetLessonNum);
             switchExercise(prereqModalData.targetLessonId);
             setBootDevView('lesson');
+            setIsPrereqModalOpen(false);
             router.push(`/learn/${prereqModalData.targetLessonId}`);
           }}
         />

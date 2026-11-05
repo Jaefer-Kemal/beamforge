@@ -1,14 +1,20 @@
 'use client';
 
 import React from 'react';
-import { Lock, X, ArrowRight, Eye, ShieldAlert } from 'lucide-react';
+import { Lock, X, ArrowRight, Eye, ShieldAlert, BookOpen } from 'lucide-react';
 
-interface PrerequisiteModalProps {
+export interface PrerequisiteModalProps {
   isOpen: boolean;
+  type?: 'same_chapter' | 'previous_chapter';
   targetChapterNum: number;
   targetChapterTitle: string;
+  targetLessonNum?: number;
+  targetLessonTitle?: string;
   prerequisiteChapterNum: number;
   prerequisiteLessonId: string;
+  prerequisiteLessonTitle?: string;
+  prerequisiteLessonNum?: number;
+  message?: string;
   isDark: boolean;
   onClose: () => void;
   onGoToPrerequisite: (lessonId: string) => void;
@@ -17,10 +23,16 @@ interface PrerequisiteModalProps {
 
 export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
   isOpen,
+  type = 'previous_chapter',
   targetChapterNum,
   targetChapterTitle,
+  targetLessonNum,
+  targetLessonTitle,
   prerequisiteChapterNum,
   prerequisiteLessonId,
+  prerequisiteLessonTitle,
+  prerequisiteLessonNum,
+  message,
   isDark,
   onClose,
   onGoToPrerequisite,
@@ -28,16 +40,18 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  const isSameChapter = type === 'same_chapter' || prerequisiteChapterNum === targetChapterNum;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in">
       <div
-        className="w-full max-w-md rounded-2xl p-6 shadow-2xl relative overflow-hidden"
+        className="w-full max-w-md rounded-2xl p-6 shadow-2xl relative overflow-hidden animate-scale-up"
         style={{
           background: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.98)',
           border: isDark ? '1px solid rgba(139, 92, 246, 0.35)' : '1px solid rgba(124, 58, 237, 0.30)',
           boxShadow: isDark
-            ? '0 20px 50px rgba(0, 0, 0, 0.7), 0 0 30px rgba(139, 92, 246, 0.15)'
-            : '0 20px 50px rgba(0, 0, 0, 0.12), 0 0 30px rgba(139, 92, 246, 0.10)',
+            ? '0 24px 60px rgba(0, 0, 0, 0.8), 0 0 35px rgba(139, 92, 246, 0.20)'
+            : '0 20px 50px rgba(0, 0, 0, 0.12), 0 0 30px rgba(139, 92, 246, 0.12)',
         }}
       >
         {/* Close Button */}
@@ -52,27 +66,30 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
         {/* Modal Icon & Header */}
         <div className="flex items-start gap-3.5 mb-4">
           <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+            className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-inner"
             style={{
               background: 'rgba(139, 92, 246, 0.15)',
               border: '1px solid rgba(139, 92, 246, 0.35)',
               color: '#A78BFA',
             }}
           >
-            <Lock className="w-5 h-5" />
+            <Lock className="w-5 h-5 text-purple-400" />
           </div>
-          <div>
+          <div className="pr-6">
             <h3
-              className="text-base font-bold tracking-tight"
-              style={{ color: isDark ? '#F1F5F9' : '#0F172A' }}
+              className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-100"
             >
-              Chapter {targetChapterNum} Prerequisite
+              {isSameChapter
+                ? `Lesson ${targetLessonNum || 1} is Locked`
+                : `Chapter ${targetChapterNum} Prerequisite`}
             </h3>
             <p
               className="text-xs font-medium mt-0.5"
               style={{ color: isDark ? '#C4B5FD' : '#7C3AED' }}
             >
-              {targetChapterTitle}
+              {isSameChapter
+                ? targetLessonTitle || `Chapter ${targetChapterNum} • ${targetChapterTitle}`
+                : `Chapter ${targetChapterNum}: ${targetChapterTitle}`}
             </p>
           </div>
         </div>
@@ -86,30 +103,39 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
             color: isDark ? '#E2E8F0' : '#334155',
           }}
         >
-          Chapter {targetChapterNum} builds directly upon concepts from Chapter {prerequisiteChapterNum}.
-          We strongly recommend mastering the Chapter {prerequisiteChapterNum} Problem Set before advancing.
+          {message ||
+            (isSameChapter
+              ? `This lesson requires mastering the concepts introduced in Lesson ${prerequisiteLessonNum || 1} first. Complete the earlier lessons in Chapter ${targetChapterNum} to unlock it.`
+              : `Chapter ${targetChapterNum} builds directly upon concepts from Chapter ${prerequisiteChapterNum}. Complete the Chapter ${prerequisiteChapterNum} Problem Set before advancing.`)}
         </div>
 
         {/* Action Choices */}
-        <div className="flex flex-col gap-2">
-          {/* Fast-Track Button */}
+        <div className="flex flex-col gap-2.5">
+          {/* Prerequisite Jump Button */}
           <button
             onClick={() => {
               onGoToPrerequisite(prerequisiteLessonId);
               onClose();
             }}
-            className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all hover:brightness-110 shadow-md"
+            className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all hover:brightness-110 shadow-md text-white"
             style={{
               background: 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
-              color: '#FFFFFF',
               boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
             }}
           >
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-blue-200" />
-              <span>Fast-Track to CH{prerequisiteChapterNum} Problem Set</span>
+            <div className="flex items-center gap-2 truncate pr-2">
+              {isSameChapter ? (
+                <BookOpen className="w-4 h-4 text-blue-200 flex-shrink-0" />
+              ) : (
+                <ShieldAlert className="w-4 h-4 text-blue-200 flex-shrink-0" />
+              )}
+              <span className="truncate">
+                {isSameChapter
+                  ? `Go to Lesson ${prerequisiteLessonNum || 1}: ${prerequisiteLessonTitle || 'Prerequisite'}`
+                  : `Complete CH${prerequisiteChapterNum} Problem Set`}
+              </span>
             </div>
-            <ArrowRight className="w-3.5 h-3.5" />
+            <ArrowRight className="w-3.5 h-3.5 flex-shrink-0" />
           </button>
 
           {/* Jump In Anyway (Tester Mode) */}
@@ -126,11 +152,10 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
             }}
           >
             <Eye className="w-3.5 h-3.5 opacity-70" />
-            <span>Jump In Anyway (Preview / Tester Mode)</span>
+            <span>Preview Lesson Anyway (Explorer Mode)</span>
           </button>
         </div>
       </div>
     </div>
   );
 };
-
