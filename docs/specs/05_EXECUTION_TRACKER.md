@@ -2156,6 +2156,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
 
+## Phase 110: Pedagogical Despoiling of Chapter 3 Lecture 7 Problem Set (`ch03-l07`)
+- [x] **110.1: Audit & Eliminate Exercise Code Spoilers in Chapter 3 Capstone (`ch03-l07`)**:
+  - Neutralized concept breakdown: eliminated verbatim code leaks of `total_inventory_valuation` and `apply_orders_with_keylists`, replacing them with neutral cargo container weight reductions and computing resource pool allocation examples.
+  - Replaced `telemetry_engine.erl` with an authentic satellite communication pipeline `satellite_billing.erl` (`total_bandwidth_capacity/1`, `degraded_link_alarms/2`, `apply_quota_usage/2`, `aggregate_uplink_telemetry/1`), achieving domain disjunction across all 4 higher-order functions.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `total_inventory_valuation/1`, `critical_stock_alerts/2`, `apply_orders_with_keylists/2`, and `aggregate_sla_logs/1`, eliminating formula dictation.
+  - Refactored starter code doc comments: removed in-body comments and calculation hints across all 4 functions in `files[0].content` and `starterCode`.
+- [x] **110.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+
+
 
 
 
