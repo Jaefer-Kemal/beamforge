@@ -584,13 +584,13 @@ In Erlang, inline branching is handled with \`case...of\` and \`if...end\`. Unde
 The \`case...of\` construct evaluates an arbitrary expression, and then pattern-matches the resulting value against one or more branches:
 
 \`\`\`erlang
-case http_client:get(Url) of
-    {ok, 200, Body} ->
-        {ok, process_body(Body)};
-    {ok, 404, _} ->
-        {error, not_found};
-    {error, Reason} ->
-        {error, {network_failure, Reason}}
+case disk_storage:read(SectorId) of
+    {ok, data, Block} ->
+        {ok, parse_block(Block)};
+    {error, checksum_mismatch} ->
+        {retry, SectorId};
+    {error, unreadable} ->
+        {quarantine, SectorId}
 end
 \`\`\`
 
@@ -600,11 +600,11 @@ Clauses inside \`case...of\` support all features of function heads: nested patt
 Unlike \`if\` in languages like C, Java, or JavaScript, **Erlang's \`if\` statement does NOT evaluate truthy/falsy booleans**. It evaluates **Guard Expressions**!
 
 \`\`\`erlang
-grade_score(Score) ->
+assess_battery_level(Percent) ->
     if
-        Score >= 90 -> 'A';
-        Score >= 80 -> 'B';
-        true -> 'F'   %% Mandatory catch-all!
+        Percent >= 80 -> battery_high;
+        Percent >= 20 -> battery_medium;
+        true -> battery_critical
     end.
 \`\`\`
 
@@ -618,33 +618,37 @@ To prevent this, Erlang programs using \`if\` must always include a final **\`tr
 
 ## Parallel Worked Example
 
-Managing database transaction states:
+Consider an industrial robotics arm controller inspecting optical sensor payloads and joint calibration angles:
 
 \`\`\`erlang
--module(db_status).
--export([audit_response/1, classify_latency/1]).
+-module(robot_controller).
+-export([eval_sensor_reading/1, calibrate_joint_angle/1]).
 
-audit_response(DbResult) ->
-    case DbResult of
-        {ok, rows, Rows} when length(Rows) > 0 ->
-            {ok, {populated, Rows}};
-        {ok, rows, []} ->
-            {ok, empty_result};
-        {error, timeout} ->
-            {retry, transient_timeout};
-        {error, Reason} ->
-            {fatal, Reason};
+eval_sensor_reading(SensorPacket) ->
+    case SensorPacket of
+        {optical_probe, ready, Intensity} when Intensity >= 95 ->
+            {engaged, focused, Intensity};
+        {optical_probe, calibrating, _} ->
+            {hold, sensor_warmup};
+        {optical_probe, fault, ErrorCode} ->
+            {quarantine, {hardware_fault, ErrorCode}};
+        {optical_probe, UnknownStatus, _} ->
+            {error, {unsupported_probe_state, UnknownStatus}};
         _ ->
-            {error, invalid_db_response}
+            {error, unrecognized_sensor_packet}
     end.
 
-classify_latency(Ms) ->
+calibrate_joint_angle(Degrees) ->
     if
-        Ms < 20 -> fast;
-        Ms >= 20, Ms =< 100 -> standard;
-        true -> slow
+        Degrees >= -15, Degrees =< 15 -> aligned;
+        Degrees < -15; Degrees > 180 -> out_of_bounds;
+        true -> manual_trim_required
     end.
 \`\`\`
+
+Notice:
+- \`eval_sensor_reading/1\` demonstrates \`case...of\` branching on a tuple, combining pattern matching with integer guards (\`when Intensity >= 95\`), specific error tuples, and a wildcard fallback.
+- \`calibrate_joint_angle/1\` demonstrates \`if...end\` guard chains using compound comma AND, semicolon OR, and the mandatory \`true ->\` catch-all branch.
 
 ## Official Erlang Docs & Function Reference
 
@@ -668,19 +672,34 @@ end.
 
 Implement two flow control functions in \`flow_control.erl\`:
 
-1. \`handle_http_response(Response)\`:
-   - Uses \`case Response of\` to inspect incoming 3-tuples: \`{http_response, StatusCode, Body}\`.
-   - If \`StatusCode =:= 200\`, returns \`{ok, Body}\`.
-   - If \`StatusCode =:= 401\` or \`StatusCode =:= 403\`, returns \`{error, unauthorized}\`.
-   - If \`StatusCode >= 500\` and \`StatusCode =< 599\`, returns \`{error, server_error}\`.
-   - Any other status code returns \`{error, {unexpected_status, StatusCode}}\`.
-   - Any other malformed input returns \`{error, invalid_response}\`.
+### 1. \`handle_http_response(Response)\`
+- **Input**: Any term \`Response\`. Well-formed responses are 3-element tuples containing the atom tag \`http_response\`, an integer \`StatusCode\`, and a payload \`Body\`.
+- **Behavior**: Inspect the response inside the function body using a \`case...of\` expression:
+  - Status code \`200\`: Returns \`{ok, Body}\`.
+  - Status code \`401\` or \`403\`: Returns \`{error, unauthorized}\`.
+  - Status codes in the \`500\` through \`599\` range (inclusive): Returns \`{error, server_error}\`.
+  - Any other integer status code: Returns \`{error, {unexpected_status, StatusCode}}\`.
+  - Any term that does not match the 3-element \`http_response\` tuple structure: Returns \`{error, invalid_response}\`.
+- **Examples**:
+  - \`flow_control:handle_http_response({http_response, 200, "{\\"status\\":\\"healthy\\"}"})\` returns \`{ok, "{\\"status\\":\\"healthy\\"}"}\`.
+  - \`flow_control:handle_http_response({http_response, 401, []})\` returns \`{error, unauthorized}\`.
+  - \`flow_control:handle_http_response({http_response, 403, []})\` returns \`{error, unauthorized}\`.
+  - \`flow_control:handle_http_response({http_response, 503, "Unavailable"})\` returns \`{error, server_error}\`.
+  - \`flow_control:handle_http_response({http_response, 301, "Redirect"})\` returns \`{error, {unexpected_status, 301}}\`.
+  - \`flow_control:handle_http_response(corrupt_payload)\` returns \`{error, invalid_response}\`.
 
-2. \`grade_latency(LatencyMs)\`:
-   - Uses \`if...end\` to classify integer millisecond latency:
-     - \`LatencyMs < 50\` -> returns atom \`optimal\`
-     - \`LatencyMs >= 50\` and \`LatencyMs =< 200\` -> returns atom \`acceptable\`
-     - \`true\` -> returns atom \`sla_breach\`
+### 2. \`grade_latency(LatencyMs)\`
+- **Input**: An integer \`LatencyMs\` representing network round-trip time in milliseconds.
+- **Behavior**: Classify latency using an \`if...end\` expression with guard conditions:
+  - Latency strictly less than \`50\` ms: Returns the atom \`optimal\`.
+  - Latency between \`50\` ms and \`200\` ms (inclusive): Returns the atom \`acceptable\`.
+  - Any latency greater than \`200\` ms (handled via the mandatory \`true\` fallback branch): Returns the atom \`sla_breach\`.
+- **Examples**:
+  - \`flow_control:grade_latency(30)\` returns \`optimal\`.
+  - \`flow_control:grade_latency(50)\` returns \`acceptable\`.
+  - \`flow_control:grade_latency(150)\` returns \`acceptable\`.
+  - \`flow_control:grade_latency(200)\` returns \`acceptable\`.
+  - \`flow_control:grade_latency(500)\` returns \`sla_breach\`.
 
 ## Rules & Verification Constraints
 
@@ -761,19 +780,12 @@ Implement two flow control functions in \`flow_control.erl\`:
         content: `-module(flow_control).
 -export([handle_http_response/1, grade_latency/1]).
 
-%% @doc Inspects HTTP response tuples using case...of branching.
-%% See lesson guide for expected response codes and normalized return tuples.
-handle_http_response(_Response) ->
-    %% % TODO: Branch on the incoming HTTP response tuple using case...of.
-    %% % Handle success (200), client errors (401/403), server error ranges (500-599),
-    %% % unexpected status codes, and malformed responses.
+%% @doc Parse and normalize HTTP response tuples into success and error tagged envelopes.
+handle_http_response(Response) ->
     ok.
 
-%% @doc Classifies network latency using an if...end expression.
-%% See lesson guide for latency thresholds and return atoms.
-grade_latency(_LatencyMs) ->
-    %% % TODO: Evaluate latency thresholds using if...end guard expressions
-    %% % with a mandatory true catch-all fallback.
+%% @doc Classify round-trip latency into optimal, acceptable, or sla_breach status atoms.
+grade_latency(LatencyMs) ->
     ok.`,
       },
     ],
@@ -805,19 +817,12 @@ grade_latency(LatencyMs) ->
     starterCode: `-module(flow_control).
 -export([handle_http_response/1, grade_latency/1]).
 
-%% @doc Inspects HTTP response tuples using case...of branching.
-%% See lesson guide for expected response codes and normalized return tuples.
-handle_http_response(_Response) ->
-    %% % TODO: Branch on the incoming HTTP response tuple using case...of.
-    %% % Handle success (200), client errors (401/403), server error ranges (500-599),
-    %% % unexpected status codes, and malformed responses.
+%% @doc Parse and normalize HTTP response tuples into success and error tagged envelopes.
+handle_http_response(Response) ->
     ok.
 
-%% @doc Classifies network latency using an if...end expression.
-%% See lesson guide for latency thresholds and return atoms.
-grade_latency(_LatencyMs) ->
-    %% % TODO: Evaluate latency thresholds using if...end guard expressions
-    %% % with a mandatory true catch-all fallback.
+%% @doc Classify round-trip latency into optimal, acceptable, or sla_breach status atoms.
+grade_latency(LatencyMs) ->
     ok.`,
     solutionCode: `-module(flow_control).
 -export([handle_http_response/1, grade_latency/1]).

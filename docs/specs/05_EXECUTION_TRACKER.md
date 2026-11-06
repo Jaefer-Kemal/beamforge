@@ -2018,6 +2018,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go test`: `TestDynamicVisibleTestsCurriculum` passed all 4 visible tests for `ch02-l02` cleanly on OTP 29.
   - `erlc.exe`: Starter module compiled cleanly with 0 errors.
 
+## Phase 98: Pedagogical Despoiling of Chapter 2 Lecture 3 (`ch02-l03`)
+- [x] **98.1: Audit & Eliminate Exercise Code Spoilers in Lecture 2.3 (`ch02-l03`)**:
+  - Neutralized concept breakdown `case...of` and `if...end` examples: replaced HTTP client request and score grading with disk sector block parsing (`disk_storage:read/1`) and battery level assessment (`assess_battery_level/1`).
+  - Replaced `db_status.erl` parallel example (which had mirrored `grade_latency` 1-to-1 with identical latency thresholds and structure) with a distinct `robot_controller.erl` industrial robotics module demonstrating sensor reading inspection (`eval_sensor_reading/1`) and joint calibration angle grading (`calibrate_joint_angle/1`).
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks, removing raw Erlang code syntax lines (`StatusCode =:= 200`, `StatusCode =:= 401`, `StatusCode >= 500 and StatusCode =< 599`, `LatencyMs < 50`, `true ->`).
+  - Refactored starter code doc comments from `% TODO` hint comments to clean, standard `@doc` contracts in both `files[0].content` and `starterCode`.
+- [x] **98.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `go test`: `TestDynamicVisibleTestsCurriculum` passed all 4 visible tests for `ch02-l03` cleanly on OTP 29.
+  - `erlc.exe`: Starter module compiled cleanly with 0 errors.
+
 
 
 
