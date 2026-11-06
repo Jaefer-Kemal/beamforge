@@ -1385,10 +1385,10 @@ Your accumulator ends up in **reverse order (LIFO - Last In, First Out)**!
 Beginners often attempt to keep elements in order by appending to the end of the accumulator:
 \`\`\`erlang
 %% DISASTROUS ANTI-PATTERN: DO NOT DO THIS!
-filter_bad([H | T], Acc) ->
-    filter_bad(T, Acc ++ [H]).
+filter_bad([Head | Tail], Acc) ->
+    filter_bad(Tail, Acc ++ [Head]).
 \`\`\`
-In Erlang, \`Acc ++ [H]\` must copy the entire left list \`Acc\` on every single iteration!
+In Erlang, \`Acc ++ [Head]\` must copy the entire left list \`Acc\` on every single iteration!
 For a list of 10,000 items, appending copies $50,000,000$ elements, bringing your server to a grinding halt with $O(N^2)$ complexity.
 
 ### 4. The Idiomatic Erlang Solution: Prepend in $O(1)$, Reverse at Base Case
@@ -1402,10 +1402,10 @@ keep_evens(List) ->
 
 keep_evens([], Acc) ->
     lists:reverse(Acc);   %% Reverses once in O(N) using fast C BIF
-keep_evens([H | T], Acc) when H rem 2 =:= 0 ->
-    keep_evens(T, [H | Acc]);
-keep_evens([_ | T], Acc) ->
-    keep_evens(T, Acc).
+keep_evens([Head | Tail], Acc) when Head rem 2 =:= 0 ->
+    keep_evens(Tail, [Head | Acc]);
+keep_evens([_ | Tail], Acc) ->
+    keep_evens(Tail, Acc).
 \`\`\`
 
 This guarantees strict $O(N)$ total execution time and minimal memory churn.
@@ -1415,21 +1415,22 @@ This guarantees strict $O(N)$ total execution time and minimal memory churn.
 
 ## Parallel Worked Example
 
-Filtering active user IDs from user profile tuples:
+Filtering and formatting critical incidents from gateway event logs:
 
 \`\`\`erlang
--module(user_filter).
--export([active_user_ids/1]).
+-module(gateway_inspector).
+-export([format_critical_alerts/1]).
 
-active_user_ids(Users) ->
-    active_user_ids_loop(Users, []).
+format_critical_alerts(Events) ->
+    alert_loop(Events, []).
 
-active_user_ids_loop([], Acc) ->
+alert_loop([], Acc) ->
     lists:reverse(Acc);
-active_user_ids_loop([{user, Id, _Name, active} | Rest], Acc) ->
-    active_user_ids_loop(Rest, [Id | Acc]);
-active_user_ids_loop([{user, _Id, _Name, _OtherStatus} | Rest], Acc) ->
-    active_user_ids_loop(Rest, Acc).
+alert_loop([{event, Service, critical, Details} | Rest], Acc) ->
+    AlertNotice = {critical_alert, Service, Details},
+    alert_loop(Rest, [AlertNotice | Acc]);
+alert_loop([{event, _Service, _Priority, _Details} | Rest], Acc) ->
+    alert_loop(Rest, Acc).
 \`\`\`
 
 ## Official Erlang Docs & Function Reference
@@ -1444,14 +1445,18 @@ lists:reverse(List1) -> List2
 
 ## Assignment Specification
 
-Implement order filtering in \`acc_filter.erl\`:
+Implement order filtering in \`acc_filter.erl\` to process incoming customer order batches:
 
-1. \`keep_valid_orders(Orders)\`:
-   - Input is a list of 4-tuples: \`[{order, Id, Qty, Status}, ...]\`.
-   - An order is valid if \`Qty > 0\` AND \`Status =:= confirmed\`.
-   - Extracts only the \`Id\` integers of valid orders.
-   - Must preserve the exact relative order of the input.
-   - Implemented using a private tail-recursive accumulator helper and \`lists:reverse/1\`.
+### \`keep_valid_orders/1\`
+- **Input**: \`Orders\` — A list of zero or more 4-element tuples of the format \`{order, Id, Qty, Status}\`, where \`Id\` is an integer, \`Qty\` is an integer count, and \`Status\` is an atom (such as \`confirmed\` or \`pending\`).
+- **Behavior**: Filters the list and extracts the \`Id\` values of all orders that meet two criteria:
+  1. The quantity \`Qty\` is strictly greater than \`0\`.
+  2. The status \`Status\` is equal to the atom \`confirmed\`.
+  The returned list must preserve the exact relative order of the original input. The solution must execute in linear $O(N)$ time using the tail-recursive accumulator pattern with \`lists:reverse/1\` invoked at the base case. Returns \`[]\` if no matching orders exist or the input list is empty.
+- **Examples**:
+  - \`acc_filter:keep_valid_orders([{order, 1, 5, confirmed}, {order, 2, 0, confirmed}, {order, 3, 10, pending}, {order, 4, 8, confirmed}])\` returns \`[1, 4]\`.
+  - \`acc_filter:keep_valid_orders([{order, 5, 0, confirmed}, {order, 6, 12, canceled}])\` returns \`[]\`.
+  - \`acc_filter:keep_valid_orders([])\` returns \`[]\`.
 
 ## Rules & Verification Constraints
 
@@ -1470,11 +1475,11 @@ Implement order filtering in \`acc_filter.erl\`:
       },
     ],
     mentalModelCheck: {
-      question: 'Why is prepending with [H | Acc] and reversing once with lists:reverse(Acc) vastly superior to Acc ++ [H]?',
+      question: 'Why is prepending with [Item | Acc] and reversing once with lists:reverse(Acc) vastly superior to Acc ++ [Item]?',
       options: [
         {
           id: 'A',
-          label: 'Acc ++ [H] copies the accumulator on every step resulting in O(N^2) time, while prepend + reverse is strictly O(N)',
+          label: 'Acc ++ [Item] copies the accumulator on every step resulting in O(N^2) time, while prepend + reverse is strictly O(N)',
           isCorrect: true,
           explanation: 'In singly-linked lists, appending requires walking and copying the entire left list. Prepending takes 1 pointer allocation.',
         },
@@ -1514,12 +1519,8 @@ Implement order filtering in \`acc_filter.erl\`:
         content: `-module(acc_filter).
 -export([keep_valid_orders/1]).
 
-%% @doc Filter confirmed orders with Qty > 0 and extract their IDs in original order.
+%% @doc Filter confirmed orders with quantity greater than zero and extract their IDs.
 keep_valid_orders(Orders) ->
-    %% 1. Delegate to keep_valid_orders(Orders, []).
-    %% 2. In base case [], return lists:reverse(Acc).
-    %% 3. When Qty > 0 and Status =:= confirmed, accumulate [Id | Acc].
-    %% 4. Otherwise, skip the order.
     ok.`,
       },
     ],
@@ -1540,12 +1541,8 @@ keep_valid_orders([_InvalidOrder | Rest], Acc) ->
     starterCode: `-module(acc_filter).
 -export([keep_valid_orders/1]).
 
-%% @doc Filter confirmed orders with Qty > 0 and extract their IDs in original order.
+%% @doc Filter confirmed orders with quantity greater than zero and extract their IDs.
 keep_valid_orders(Orders) ->
-    %% 1. Delegate to keep_valid_orders(Orders, []).
-    %% 2. In base case [], return lists:reverse(Acc).
-    %% 3. When Qty > 0 and Status =:= confirmed, accumulate [Id | Acc].
-    %% 4. Otherwise, skip the order.
     ok.`,
     solutionCode: `-module(acc_filter).
 -export([keep_valid_orders/1]).

@@ -2054,6 +2054,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Reference solution compiled cleanly and passed test assertions on OTP 29.
 
+## Phase 101: Pedagogical Despoiling of Chapter 2 Lecture 6 (`ch02-l06`)
+- [x] **101.1: Audit & Eliminate Exercise Code Spoilers in Lecture 2.6 (`ch02-l06`)**:
+  - Neutralized concept explanation variables in `filter_bad` and `keep_evens` (`[Head | Tail]`).
+  - Replaced `user_filter.erl` parallel example (which mirrored `keep_valid_orders` 1-to-1 by extracting an `Id` from a 4-tuple on status `active`) with `gateway_inspector.erl` demonstrating incident alert transformation (`{critical_alert, Service, Details}`).
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks, eliminating private helper step-by-step instructions.
+  - Refactored starter code doc comments from in-body step-by-step numbered pseudo-code comments to clean standard `@doc` contracts in both `files[0].content` and `starterCode`.
+  - Neutralized variable names in `mentalModelCheck` question (`[Item | Acc]`).
+- [x] **101.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Reference solution compiled cleanly and passed test assertions on OTP 29.
+
+
 
 
 
