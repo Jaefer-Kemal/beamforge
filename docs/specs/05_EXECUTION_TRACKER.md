@@ -2090,6 +2090,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Reference solution and test runner compiled cleanly and passed all assertions on OTP 29 (`INVENTORY_ALL_PASS`).
 
+## Phase 104: Pedagogical Despoiling of Chapter 3 Lecture 1 (`ch03-l01`)
+- [x] **104.1: Audit & Eliminate Exercise Code Spoilers in Lecture 3.1 (`ch03-l01`)**:
+  - Neutralized concept breakdown: replaced `make_scaler(Factor)` (which directly gave away `make_multiplier`) with an offset adder `make_offset(Offset)`. Replaced remote capture example with `fun erlang:round/1`.
+  - Replaced `rule_engine.erl` parallel example (which had cloned `math_capture` and `choose_pricing_strategy`) with an authentic audio DSP equalization module `audio_filter.erl` (`make_gain_stage/1`, `apply_stereo/3`, `get_trunc_ref/0`, `select_compression_profile/1`).
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for all 4 functions, eliminating formula backtick code leaks.
+  - Refactored starter code doc comments: removed all in-body `% TODO` and discount formula hints across `make_multiplier`, `apply_twice`, `math_capture`, and `choose_pricing_strategy`.
+- [x] **104.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Reference solution and test assertions passed cleanly on OTP 29 (`HOF_ALL_PASS`).
+
+
 
 
 
