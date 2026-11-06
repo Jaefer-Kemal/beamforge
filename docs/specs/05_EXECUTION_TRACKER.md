@@ -2236,6 +2236,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
 
+## Phase 118: Pedagogical Despoiling of Chapter 4 Problem Set (`ch04-l08`)
+- [x] **118.1: Audit & Eliminate Exercise Code Spoilers in Chapter 4 Capstone (`ch04-l08`)**:
+  - Replaced ASCII box art diagram (`+-+-+-+`) with a clean GFM markdown table in concept breakdown, adhering strictly to the `AGENTS.md` visual pedagogy guidelines.
+  - Neutralized concept breakdown: eliminated verbatim code leaks of `-record(tlv_frame, ...)` and `<<Version:4, Type:4, Length:16/big...>>` in official doc references.
+  - Replaced parallel worked example with an authentic industrial telemetry parser `telemetry_stream.erl` (`-record(metric_item, {channel_id, status_flag, data_len, readings})`, `parse_metric_item/1`, `parse_metric_stream/1`), achieving domain disjunction from protocol frame opcodes and payload structures.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for record schema `tlv_frame`, `parse_frame/1`, `parse_tlv_stream/1`, and `encode_frame/1`, eliminating Erlang bit syntax pattern and formula dictation.
+  - Refactored starter code doc comments: removed all in-body comments and hints from function bodies in `files[0].content` and `starterCode`.
+- [x] **118.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+
+
 
 
 
