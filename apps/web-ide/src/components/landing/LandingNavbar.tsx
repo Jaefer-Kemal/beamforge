@@ -68,10 +68,10 @@ export function LandingNavbar() {
   return (
     <header className="fixed top-3 sm:top-5 left-0 right-0 z-50 flex justify-center px-3 sm:px-6 pointer-events-none">
       <div
-        className={`pointer-events-auto w-full max-w-6xl transition-all duration-300 rounded-2xl ${
+        className={`pointer-events-auto w-full max-w-6xl transition-all duration-300 rounded-2xl glass-specular-rim ${
           scrolled
-            ? 'bg-white/85 dark:bg-slate-900/85 backdrop-blur-2xl shadow-[0_12px_40px_rgba(15,23,42,0.12)] dark:shadow-[0_16px_50px_rgba(0,0,0,0.6)] border border-white/90 dark:border-white/15 py-2.5 px-4 sm:px-6'
-            : 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl shadow-[0_8px_32px_rgba(15,23,42,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.45)] border border-white/80 dark:border-white/10 py-3 px-4 sm:px-6'
+            ? 'bg-white/50 dark:bg-slate-900/45 backdrop-blur-2xl shadow-[0_12px_40px_rgba(15,23,42,0.12),inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-[0_16px_50px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.22)] border border-white/60 dark:border-white/15 py-2.5 px-4 sm:px-6'
+            : 'bg-white/35 dark:bg-slate-900/35 backdrop-blur-xl shadow-[0_8px_32px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.6)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.18)] border border-white/50 dark:border-white/12 py-3 px-4 sm:px-6'
         }`}
       >
         <div className="flex items-center justify-between">

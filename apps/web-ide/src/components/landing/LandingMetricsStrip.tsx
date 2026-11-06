@@ -57,7 +57,7 @@ export function LandingMetricsStrip() {
           return (
             <div
               key={idx}
-              className="p-5 sm:p-6 rounded-2xl backdrop-blur-xl bg-white/70 dark:bg-slate-900/70 border border-white/80 dark:border-white/10 shadow-[0_4px_20px_rgba(15,23,42,0.04)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] hover:scale-[1.015] transition-all duration-200 flex flex-col justify-between"
+              className="p-5 sm:p-6 rounded-2xl backdrop-blur-2xl glass-specular-rim glass-sweep-hover bg-white/45 dark:bg-slate-900/40 border border-white/60 dark:border-white/12 shadow-[0_8px_30px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.6)] dark:shadow-[0_12px_36px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.18)] hover:scale-[1.02] transition-all duration-200 flex flex-col justify-between"
             >
               <div>
                 <div className="flex items-center justify-between mb-3">

@@ -1824,6 +1824,34 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: All Erlang grader, tracer, and simulation modules compiled cleanly with 0 errors.
 
+## Phase 85: True 2026 Apple Liquid Glassmorphism Overhaul
+- [x] **85.1: The 4-Ingredient Glass Engine (`globals.css`)**:
+  - Replaced opaque acrylic fills (`0.60–0.95`) with authentic translucent glass alphas (`0.25–0.45` in light, `0.30–0.45` in dark mode).
+  - Implemented `.glass-chrome` (`blur(20px) saturate(190%)`), `.glass-floating` (`blur(36px) saturate(210%)`), and `.glass-specular-rim` (directional 1px hairline top reflection with lit center).
+  - Added `.glass-sweep-hover` with skewed specular sheen loop on interactive glass surfaces.
+  - Implemented non-negotiable accessibility fallbacks for `@media (prefers-reduced-transparency: reduce)` and `@media (prefers-reduced-motion: reduce)`.
+- [x] **85.2: Liquid Glass Hero Showcase & Dynamic Aurora Mesh (`LandingHero.tsx`, `InteractiveHeroPreview.tsx`)**:
+  - Embedded SVG `<filter id="beam-liquid-glass">` with breathing `feTurbulence` + `feDisplacementMap` (`scale="8"` subtle optic refraction).
+  - Enriched ambient backing with multi-source luminous aurora mesh orbs (BEAM cyan, OTP amber, deep violet) directly behind the hero preview card.
+  - Upgraded `InteractiveHeroPreview` container and title bar to `.glass-floating .glass-specular-rim` with dual-layer inset shadows (`inset 0 1px 0` top highlight, `inset 0 -1px 0` bottom shade).
+- [x] **85.3: World Cards & Metrics Strip Glassmorphism (`LandingWorldsSection.tsx`, `LandingMetricsStrip.tsx`, `LandingNavbar.tsx`)**:
+  - World 1–5 cards transformed to translucent glass (`dark:bg-slate-900/35 backdrop-blur-2xl`) with specular rim reflection and hover sweep.
+  - Selected world detail banner upgraded to `.glass-floating .glass-specular-rim`.
+  - Metrics cards and floating landing navbar updated to `.glass-chrome` with lit top hairline borders.
+- [x] **85.4: Floating UI Chrome & Modals (`BootDevTopBar.tsx`, `LessonSuccessToast.tsx`, Modals)**:
+  - `BootDevTopBar`: Converted to true floating frosted glass (`0.42` alpha, `blur(28px) saturate(190%)`, lit specular rim).
+  - `LessonSuccessToast`: Elevated to `.glass-floating .glass-specular-rim` with `blur(36px) saturate(210%)` and dual inset shadows.
+  - Modals (`RestoreConfirmModal`, `ResetConfirmModal`, `SolutionUnlockModal`): Transformed into visionOS-style floating frosted glass dialogs.
+- [x] **85.5: IDE Workspace Balance (`LessonSplitView.tsx`)**:
+  - Left textbook pane shell upgraded to `.glass-panel` with lit specular edge.
+  - Boot.dev Action Bar updated with frosted glass and top/bottom inset highlights.
+  - Monaco code canvas kept opaque for zero-jank 60fps typing and maximum readability.
+- [x] **85.6: Multi-Compiler & Production Build Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: All Erlang grader, tracer, and simulation modules compiled cleanly with 0 errors.
+
+
 
 
 

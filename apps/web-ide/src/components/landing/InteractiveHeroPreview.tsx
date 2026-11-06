@@ -107,15 +107,15 @@ export function InteractiveHeroPreview() {
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto rounded-3xl overflow-hidden backdrop-blur-2xl bg-white/70 dark:bg-slate-900/75 border border-white/80 dark:border-white/10 shadow-[0_20px_60px_rgba(15,23,42,0.08)] dark:shadow-[0_24px_70px_rgba(0,0,0,0.55)] transition-all duration-300">
+    <div className="w-full max-w-4xl mx-auto rounded-3xl overflow-hidden glass-floating glass-specular-rim backdrop-blur-3xl bg-white/45 dark:bg-slate-900/40 border border-white/60 dark:border-white/15 shadow-[0_28px_80px_rgba(15,23,42,0.12)] dark:shadow-[0_32px_100px_rgba(0,0,0,0.70)] transition-all duration-300">
       {/* Title Bar */}
-      <div className="flex flex-wrap items-center justify-between px-4 sm:px-6 py-3 border-b border-slate-200/70 dark:border-slate-800/80 bg-slate-50/70 dark:bg-slate-950/50 gap-2">
+      <div className="flex flex-wrap items-center justify-between px-4 sm:px-6 py-3 border-b border-white/40 dark:border-white/10 bg-white/30 dark:bg-slate-950/40 backdrop-blur-xl gap-2">
         {/* Left: Window Dots & File Info */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-full bg-rose-500/80" />
-            <div className="w-3 h-3 rounded-full bg-amber-500/80" />
-            <div className="w-3 h-3 rounded-full bg-emerald-500/80" />
+            <div className="w-3 h-3 rounded-full bg-rose-500/80 shadow-[0_0_8px_rgba(244,63,94,0.4)]" />
+            <div className="w-3 h-3 rounded-full bg-amber-500/80 shadow-[0_0_8px_rgba(245,158,11,0.4)]" />
+            <div className="w-3 h-3 rounded-full bg-emerald-500/80 shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
           </div>
 
           <div className="h-4 w-[1px] bg-slate-300 dark:bg-slate-800 hidden sm:block mx-1" />
@@ -178,7 +178,7 @@ export function InteractiveHeroPreview() {
       </div>
 
       {/* Code Editor Pane */}
-      <div className="relative p-4 sm:p-6 font-mono text-xs leading-relaxed bg-white/40 dark:bg-slate-950/40 border-b border-slate-200/60 dark:border-slate-800/60 overflow-x-auto">
+      <div className="relative p-4 sm:p-6 font-mono text-xs leading-relaxed bg-white/20 dark:bg-slate-950/40 backdrop-blur-md border-b border-white/30 dark:border-white/10 overflow-x-auto">
         <button
           onClick={handleCopy}
           className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -227,7 +227,7 @@ export function InteractiveHeroPreview() {
       </div>
 
       {/* Terminal Output Strip: Sequential Step-by-Step Execution Feed */}
-      <div className="p-4 sm:p-5 font-mono text-xs bg-slate-50/80 dark:bg-slate-950/70 border-t border-slate-200/60 dark:border-slate-800/60">
+      <div className="p-4 sm:p-5 font-mono text-xs bg-white/25 dark:bg-slate-950/50 backdrop-blur-xl border-t border-white/30 dark:border-white/10">
         <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span>Execution Pipeline</span>

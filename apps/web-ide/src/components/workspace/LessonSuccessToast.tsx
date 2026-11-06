@@ -71,14 +71,15 @@ export const LessonSuccessToast: React.FC = () => {
   return (
     <div
       id="lesson-success-toast"
-      className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3 rounded-2xl max-w-xl w-[92vw] sm:w-auto shadow-2xl animate-slide-up transition-all duration-300"
+      className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3 rounded-2xl max-w-xl w-[92vw] sm:w-auto glass-floating glass-specular-rim animate-slide-up transition-all duration-300"
       style={{
-        background: isDark ? 'rgba(15, 23, 42, 0.94)' : 'rgba(255, 255, 255, 0.96)',
-        border: isDark ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.85)',
-        backdropFilter: 'blur(32px)',
+        background: isDark ? 'rgba(12, 18, 35, 0.65)' : 'rgba(255, 255, 255, 0.70)',
+        border: isDark ? '1px solid rgba(255, 255, 255, 0.16)' : '1px solid rgba(255, 255, 255, 0.75)',
+        backdropFilter: 'blur(36px) saturate(210%)',
+        WebkitBackdropFilter: 'blur(36px) saturate(210%)',
         boxShadow: isDark
-          ? '0 20px 50px rgba(0, 0, 0, 0.65), 0 0 25px rgba(16, 185, 129, 0.20)'
-          : '0 16px 40px rgba(15, 23, 42, 0.12), 0 0 20px rgba(16, 185, 129, 0.15)',
+          ? '0 24px 60px rgba(0, 0, 0, 0.70), 0 0 30px rgba(16, 185, 129, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.30), inset 0 -1px 0 rgba(0, 0, 0, 0.40)'
+          : '0 20px 50px rgba(15, 23, 42, 0.14), 0 0 25px rgba(16, 185, 129, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(15, 23, 42, 0.05)',
       }}
     >
       <div className="flex items-center justify-between gap-3 flex-1 min-w-0">

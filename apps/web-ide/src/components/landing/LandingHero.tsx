@@ -31,8 +31,20 @@ export function LandingHero() {
 
   return (
     <section className="relative pt-28 sm:pt-36 pb-16 sm:pb-24 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto overflow-hidden">
-      {/* Ambient Aurora Glow Background Elements */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] sm:w-[900px] sm:h-[450px] bg-gradient-to-tr from-amber-400/15 via-sky-400/20 to-violet-500/15 blur-[120px] rounded-full pointer-events-none -z-10" />
+      {/* 2026 Liquid Glass Refraction SVG Filter Definition */}
+      <svg width="0" height="0" className="absolute pointer-events-none opacity-0" aria-hidden="true">
+        <filter id="beam-liquid-glass">
+          <feTurbulence type="fractalNoise" baseFrequency="0.008 0.012" numOctaves="2" seed="5" result="noise">
+            <animate attributeName="baseFrequency" dur="20s" values="0.008 0.012;0.012 0.008;0.008 0.012" repeatCount="indefinite" />
+          </feTurbulence>
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="8" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </svg>
+
+      {/* Dynamic Luminous Ambient Aurora Backing */}
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[400px] sm:w-[1000px] sm:h-[500px] bg-gradient-to-tr from-amber-500/20 via-sky-400/25 to-violet-600/20 blur-[130px] rounded-full pointer-events-none -z-10 animate-pulse" style={{ animationDuration: '8s' }} />
+      <div className="absolute top-2/3 left-1/4 -translate-x-1/2 w-[450px] h-[300px] bg-emerald-500/15 blur-[110px] rounded-full pointer-events-none -z-10" />
+      <div className="absolute top-2/3 right-1/4 translate-x-1/2 w-[450px] h-[300px] bg-pink-500/12 blur-[110px] rounded-full pointer-events-none -z-10" />
 
       <div className="text-center max-w-4xl mx-auto">
         {/* Main Headline */}

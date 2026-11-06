@@ -950,15 +950,15 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           ════════════════════════════════════════════════════════════════════ */}
       <div
         key={`left-pane-${lesson.id}`}
-        className={`${mobileTab === 'guide' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-col border-r overflow-hidden`}
+        className={`${mobileTab === 'guide' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-col border-r overflow-hidden glass-specular-rim`}
         style={{
-          background: isDark ? 'rgba(11, 17, 30, 0.58)' : 'rgba(255, 255, 255, 0.72)',
+          background: isDark ? 'rgba(10, 15, 28, 0.40)' : 'rgba(255, 255, 255, 0.45)',
           backdropFilter: 'blur(28px) saturate(190%)',
           WebkitBackdropFilter: 'blur(28px) saturate(190%)',
           borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.08)',
           boxShadow: isDark
-            ? 'inset 0 1px 0 0 rgba(255, 255, 255, 0.16)'
-            : 'inset 0 1px 0 0 rgba(255, 255, 255, 0.90)',
+            ? 'inset 0 1px 0 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 0 rgba(0, 0, 0, 0.35)'
+            : 'inset 0 1px 0 0 rgba(255, 255, 255, 0.90), inset 0 -1px 0 0 rgba(15, 23, 42, 0.05)',
         }}
       >
         {/* Left Header */}
@@ -1406,15 +1406,17 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
         {/* ── Boot.dev Action Bar ── */}
         <div
           id="lesson-action-bar"
-          className="flex items-center gap-2 px-3 py-1.5 flex-shrink-0 pb-safe"
+          className="flex items-center gap-2 px-3 py-1.5 flex-shrink-0 pb-safe glass-specular-rim"
           style={{
             minHeight: '48px',
-            background: isDark ? 'rgba(11,15,23,0.55)' : 'rgba(241,245,249,0.70)',
-            backdropFilter: 'blur(20px) saturate(180%)',
-            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-            borderTop: isDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(15,23,42,0.08)',
+            background: isDark ? 'rgba(10,15,28,0.40)' : 'rgba(241,245,249,0.55)',
+            backdropFilter: 'blur(24px) saturate(190%)',
+            WebkitBackdropFilter: 'blur(24px) saturate(190%)',
+            borderTop: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(15,23,42,0.08)',
             borderBottom: isDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(15,23,42,0.08)',
-            boxShadow: isDark ? 'inset 0 1px 0 0 rgba(255,255,255,0.12)' : 'inset 0 1px 0 0 rgba(255,255,255,0.80)',
+            boxShadow: isDark
+              ? 'inset 0 1px 0 0 rgba(255,255,255,0.22), inset 0 -1px 0 0 rgba(0,0,0,0.35)'
+              : 'inset 0 1px 0 0 rgba(255,255,255,0.90), inset 0 -1px 0 0 rgba(15,23,42,0.05)',
           }}
         >
           {/* ▷ Run */}

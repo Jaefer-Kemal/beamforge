@@ -23,13 +23,15 @@ export const ResetConfirmModal: React.FC<ResetConfirmModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
       <div
-        className="w-full max-w-md rounded-2xl p-6 shadow-2xl relative overflow-hidden"
+        className="w-full max-w-md rounded-2xl p-4 sm:p-6 shadow-2xl relative overflow-hidden glass-floating glass-specular-rim"
         style={{
-          background: isDark ? 'rgba(15, 23, 42, 0.92)' : 'rgba(255, 255, 255, 0.96)',
-          border: isDark ? '1px solid rgba(239, 68, 68, 0.30)' : '1px solid rgba(239, 68, 68, 0.35)',
+          background: isDark ? 'rgba(12, 18, 35, 0.70)' : 'rgba(255, 255, 255, 0.75)',
+          backdropFilter: 'blur(36px) saturate(210%)',
+          WebkitBackdropFilter: 'blur(36px) saturate(210%)',
+          border: isDark ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid rgba(239, 68, 68, 0.40)',
           boxShadow: isDark
-            ? '0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(239, 68, 68, 0.15)'
-            : '0 20px 50px rgba(0, 0, 0, 0.15), 0 0 30px rgba(239, 68, 68, 0.10)',
+            ? '0 24px 60px rgba(0, 0, 0, 0.75), 0 0 30px rgba(239, 68, 68, 0.20), inset 0 1px 0 rgba(255, 255, 255, 0.30), inset 0 -1px 0 rgba(0, 0, 0, 0.50)'
+            : '0 20px 50px rgba(15, 23, 42, 0.15), 0 0 30px rgba(239, 68, 68, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(15, 23, 42, 0.05)',
         }}
       >
         {/* Close Button */}

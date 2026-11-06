@@ -178,10 +178,10 @@ export function LandingWorldsSection() {
             <div
               key={world.id}
               onClick={() => setSelectedWorld(world)}
-              className={`cursor-pointer rounded-3xl p-5 sm:p-6 backdrop-blur-2xl transition-all duration-300 flex flex-col justify-between ${
+              className={`cursor-pointer rounded-3xl p-5 sm:p-6 backdrop-blur-2xl glass-specular-rim glass-sweep-hover transition-all duration-300 flex flex-col justify-between ${
                 isSelected
-                  ? 'bg-white/90 dark:bg-slate-900/95 shadow-[0_12px_36px_rgba(15,23,42,0.1)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.5)] border-2 border-amber-400/60 dark:border-amber-400/50 scale-[1.02]'
-                  : 'bg-white/65 dark:bg-slate-900/65 hover:bg-white/80 dark:hover:bg-slate-800/80 border border-white/80 dark:border-white/10 shadow-[0_4px_20px_rgba(15,23,42,0.04)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)]'
+                  ? 'bg-white/60 dark:bg-slate-900/55 shadow-[0_16px_48px_rgba(245,158,11,0.22),inset_0_1px_0_rgba(255,255,255,0.6)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.22)] border-2 border-amber-400/80 dark:border-amber-400/70 scale-[1.02]'
+                  : 'bg-white/40 dark:bg-slate-900/35 hover:bg-white/60 dark:hover:bg-slate-900/50 border border-white/60 dark:border-white/10 shadow-[0_8px_32px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.5),inset_0_-1px_0_rgba(15,23,42,0.04)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.16),inset_0_-1px_0_rgba(0,0,0,0.35)]'
               }`}
             >
               <div>
@@ -227,7 +227,7 @@ export function LandingWorldsSection() {
       </div>
 
       {/* Selected World Focus Detail Banner */}
-      <div className="mt-8 p-6 sm:p-8 rounded-3xl backdrop-blur-2xl bg-white/75 dark:bg-slate-900/75 border border-white/80 dark:border-white/10 shadow-[0_8px_32px_rgba(15,23,42,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.45)]">
+      <div className="mt-8 p-6 sm:p-8 rounded-3xl backdrop-blur-2xl glass-specular-rim bg-white/55 dark:bg-slate-900/50 border border-white/70 dark:border-white/15 shadow-[0_16px_48px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)]">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
           <div className="max-w-2xl">
             <div className="text-xs font-bold text-amber-500 uppercase tracking-wider mb-1">
