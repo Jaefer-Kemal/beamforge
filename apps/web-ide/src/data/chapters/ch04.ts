@@ -1773,7 +1773,7 @@ This is one of the most infamous production bugs in Erlang and Elixir engineerin
 
 In high-concurrency systems, developers often see the BEAM VM process consuming gigabytes of system RAM even though application metrics show only a few small 16-byte session tokens stored in memory. The VM crashes with an Out-Of-Memory (OOM) kernel panic, but heap profilers report nearly empty process heaps!
 
-Understanding how the BEAM allocates binaries and how to sever sub-binary pointers with **\`binary:copy/1\`** is essential for any production engineer.
+Understanding how the BEAM allocates binaries and how to sever sub-binary pointers with **\`binary:copy/1\`** is essential for any production backend engineer.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -1783,7 +1783,7 @@ The BEAM manages binaries under two radically different memory strategies based 
 1. **Heap Binaries (=< 64 bytes):**
    - Stored directly on the local process heap.
    - When passed between processes, their payload bytes are copied into the recipient's heap.
-   - When the process performs garbage collection, heap binaries are reclaimed immediately.
+   - Reclaimed immediately during ordinary process garbage collection.
 2. **Refc Binaries / \`ProcBin\` (> 64 bytes):**
    - Allocated once in a global **off-heap shared binary memory pool**.
    - The process heap holds only a tiny 24-byte descriptor struct called a **\`ProcBin\`**, containing a pointer to the global buffer and an atomic reference count.
@@ -1793,46 +1793,52 @@ The BEAM manages binaries under two radically different memory strategies based 
 When you slice a binary:
 
 \`\`\`erlang
-<<Token:16/binary, _Rest/binary>> = Large64MBPacket.
+<<HeaderId:8/binary, _Rest/binary>> = Large48MBBuffer.
 \`\`\`
 
-The BEAM does NOT allocate a new 16-byte binary. Instead, it creates a **Sub-Binary descriptor** that points directly into the original **64 MB buffer** with an offset and length!
+The BEAM does NOT allocate a new 8-byte binary. Instead, it creates a **Sub-Binary descriptor** that points directly into the original **48 MB buffer** with an offset and length!
 
-Now consider what happens if you store \`Token\` inside a long-lived \`gen_server\` state or an ETS table:
-- Even though your application only needs 16 bytes, the sub-binary holds a reference to the **entire 64 MB buffer**!
-- The reference count on the 64 MB buffer cannot reach zero.
-- **The entire 64 MB buffer remains pinned in RAM indefinitely!**
-If you slice 1,000 such tokens from consecutive network packets, your node pins **64 Gigabytes of RAM** for just 16 Kilobytes of actual data!
+Now consider what happens if you store \`HeaderId\` inside a long-lived \`gen_server\` state or an ETS table:
+- Even though your application only needs 8 bytes, the sub-binary holds a reference to the **entire 48 MB buffer**!
+- The reference count on the 48 MB buffer cannot reach zero.
+- **The entire 48 MB buffer remains pinned in RAM indefinitely!**
+If you slice 1,000 such IDs from consecutive network packets, your node pins **48 Gigabytes of RAM** for just 8 Kilobytes of actual data!
 
 ### 3. The Production Fix: \`binary:copy/1\`
 \`\`\`erlang
-SafeToken = binary:copy(Token).
+SafeHeaderId = binary:copy(HeaderId).
 \`\`\`
-\`binary:copy/1\` forces the BEAM to allocate a fresh, independent **Heap Binary** on the process heap containing only those 16 bytes.
-The pointer to the massive 64 MB off-heap buffer is completely severed! The reference count drops to 0, and the BEAM's binary garbage collector immediately frees the 64 MB buffer.
+\`binary:copy/1\` forces the BEAM to allocate a fresh, independent **Heap Binary** on the process heap containing only those 8 bytes.
+
+The pointer to the massive 48 MB off-heap buffer is completely severed! The reference count drops to 0, and the BEAM's binary garbage collector immediately frees the 48 MB buffer.
 
 ### 4. Inspecting Pinned Buffers: \`binary:referenced_byte_size/1\`
 OTP provides a diagnostic BIF:
-- \`byte_size(SubBin)\`: Returns the logical size of the slice (e.g. \`16\` bytes).
-- \`binary:referenced_byte_size(SubBin)\`: Returns the size of the underlying off-heap buffer pinned by this reference (e.g. \`65536\` bytes)!
+- \`byte_size(SubBin)\`: Returns the logical size of the slice (e.g. \`8\` bytes).
+- \`binary:referenced_byte_size(SubBin)\`: Returns the size of the underlying off-heap buffer pinned by this reference (e.g. \`50331648\` bytes)!
 
-## Parallel Worked Example
+## Parallel Worked Example: WAV Audio Chunk Extractor
 
-Consider a packet ingestion gateway:
+The following module demonstrates safely extracting a 4-byte chunk identifier from a multi-megabyte audio file without pinning the parent recording:
 
 \`\`\`erlang
--module(auth_unpinner).
--export([harvest_session_token/1]).
+-module(wav_header_parser).
+-export([extract_format_chunk/1, inspect_memory_footprint/1]).
 
-harvest_session_token(RawTlsPacket) ->
-    case RawTlsPacket of
-        <<Token:16/binary, _Rest/binary>> ->
-            %% Unpin Token to release the multi-megabyte TLS buffer!
-            SafeToken = binary:copy(Token),
-            {ok, SafeToken};
+%% Extracts 4-byte chunk identifier from a multi-megabyte audio recording
+extract_format_chunk(RawWavBinary) ->
+    case RawWavBinary of
+        <<ChunkId:4/binary, _RemainingAudio/binary>> ->
+            %% Sever the sub-binary reference to free the parent recording buffer
+            SafeChunk = binary:copy(ChunkId),
+            {ok, SafeChunk};
         _ ->
-            {error, truncated_packet}
+            {error, invalid_wav_header}
     end.
+
+%% Returns logical size and pinned off-heap buffer size
+inspect_memory_footprint(Bin) ->
+    {byte_size(Bin), binary:referenced_byte_size(Bin)}.
 \`\`\`
 
 ## Official Erlang Docs & Function Reference
@@ -1845,18 +1851,33 @@ byte_size(Bitstring) -> non_neg_integer()
 
 ## Assignment Specification
 
-Implement safe memory slicing in \`src/binary_unpinner.erl\`:
+Implement safe memory slicing in \`src/binary_unpinner.erl\`.
 
-1. \`extract_token_safe(LargePacket)\`:
-   - Matches \`<<Token:16/binary, _Rest/binary>> = LargePacket\`.
-   - Calls \`binary:copy/1\` on \`Token\` and returns \`{ok, SafeToken}\`.
-   - If \`LargePacket\` is less than 16 bytes, returns \`{error, insufficient_data}\`.
-2. \`slice_packet_safe(Packet, Length)\`:
-   - Guards \`when is_binary(Packet), is_integer(Length), byte_size(Packet) >= Length\`.
-   - Extracts \`Length\` bytes: \`<<Slice:Length/binary, _Rest/binary>>\`.
-   - Returns \`binary:copy(Slice)\`.
-3. \`inspect_refc_ratio(Bin)\`:
-   - Returns a 2-tuple \`{byte_size(Bin), binary:referenced_byte_size(Bin)}\`.
+### Functions to Implement
+
+#### \`extract_token_safe/1\`
+- **Input**:
+  - \`LargePacket\`: a binary network buffer
+- **Behavior**: Extracts the first 16 bytes as a token and decouples it from the underlying off-heap refc binary using \`binary:copy/1\`, returning \`{ok, SafeToken}\`. If \`LargePacket\` contains fewer than 16 bytes, returns \`{error, insufficient_data}\`.
+- **Examples**:
+  - \`extract_token_safe(<<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16, "REST">>)\` $\\rightarrow$
+    \`{ok, <<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16>>}\`
+  - \`extract_token_safe(<<1, 2, 3>>)\` $\\rightarrow$ \`{error, insufficient_data}\`
+
+#### \`slice_packet_safe/2\`
+- **Input**:
+  - \`Packet\`: binary buffer
+  - \`Length\`: non-negative integer byte count
+- **Behavior**: Extracts a prefix of \`Length\` bytes from \`Packet\` and returns a standalone, unpinned binary decoupled from any parent off-heap buffer. Guarded to ensure \`Packet\` is a binary, \`Length\` is an integer, and \`Packet\` contains at least \`Length\` bytes.
+- **Examples**:
+  - \`slice_packet_safe(<<"ABCDEFGHIJ">>, 4)\` $\\rightarrow$ \`<<"ABCD">>\`
+
+#### \`inspect_refc_ratio/1\`
+- **Input**:
+  - \`Bin\`: a binary
+- **Behavior**: Queries and returns a 2-tuple \`{LogicalSize, ReferencedBufferSize}\` containing the logical byte size of \`Bin\` and the size of the underlying off-heap binary buffer pinned by its reference.
+- **Examples**:
+  - \`inspect_refc_ratio(binary:copy(<<"TEST">>))\` $\\rightarrow$ \`{4, 4}\`
 
 ## Rules & Verification Constraints
 
@@ -1883,13 +1904,13 @@ Implement safe memory slicing in \`src/binary_unpinner.erl\`:
       },
     ],
     mentalModelCheck: {
-      question: 'When pattern matching <<Header:16/binary, _Rest/binary>> from a 64 MB video packet, why does calling binary:copy(Header) resolve the memory leak?',
+      question: 'When extracting an 8-byte session identifier <<SessionId:8/binary, _Rest/binary>> from a 32 MB inbound network stream, why does calling binary:copy(SessionId) resolve the memory retention leak?',
       options: [
         {
           id: 'A',
-          label: 'binary:copy/1 forces the 16 bytes into a fresh Heap Binary (< 64 bytes), allowing the 64 MB ProcBin reference count to drop to 0 and get freed',
+          label: 'binary:copy/1 forces the 8 bytes into a fresh independent Heap Binary (<= 64 bytes), allowing the 32 MB ProcBin reference count to drop to 0 and get reclaimed by GC',
           isCorrect: true,
-          explanation: 'By copying the 16-byte slice, you allocate a private heap binary. The original 64 MB off-heap ProcBin no longer has any references pinning it, allowing immediate GC reclamation.',
+          explanation: 'By copying the 8-byte slice, you allocate a private heap binary. The original 32 MB off-heap ProcBin no longer has any references pinning it, allowing immediate GC reclamation.',
         },
         {
           id: 'B',
@@ -1947,19 +1968,15 @@ Implement safe memory slicing in \`src/binary_unpinner.erl\`:
 -export([extract_token_safe/1, slice_packet_safe/2, inspect_refc_ratio/1]).
 
 %% @doc Safely extract the first 16 bytes of LargePacket without holding the refc binary pinned in memory.
-%% Return {ok, SafeToken} on success or {error, insufficient_data} if shorter than 16 bytes.
 extract_token_safe(_LargePacket) ->
-    %% Match the 16-byte token, unpin it to decouple from parent buffer, and return {ok, Token}
     {error, insufficient_data}.
 
 %% @doc Extract a prefix slice of Length bytes and detach it from the parent refc binary.
 slice_packet_safe(_Packet, _Length) ->
-    %% Extract Length bytes and create an independent unpinned binary
     <<>>.
 
 %% @doc Return {LogicalSize, ReferencedBufferSize} comparing byte_size to its underlying refc allocation.
 inspect_refc_ratio(_Bin) ->
-    %% Query byte size and underlying referenced allocation size
     {0, 0}.`,
       },
     ],
@@ -1983,19 +2000,15 @@ inspect_refc_ratio(Bin) ->
 -export([extract_token_safe/1, slice_packet_safe/2, inspect_refc_ratio/1]).
 
 %% @doc Safely extract the first 16 bytes of LargePacket without holding the refc binary pinned in memory.
-%% Return {ok, SafeToken} on success or {error, insufficient_data} if shorter than 16 bytes.
 extract_token_safe(_LargePacket) ->
-    %% Match the 16-byte token, unpin it to decouple from parent buffer, and return {ok, Token}
     {error, insufficient_data}.
 
 %% @doc Extract a prefix slice of Length bytes and detach it from the parent refc binary.
 slice_packet_safe(_Packet, _Length) ->
-    %% Extract Length bytes and create an independent unpinned binary
     <<>>.
 
 %% @doc Return {LogicalSize, ReferencedBufferSize} comparing byte_size to its underlying refc allocation.
 inspect_refc_ratio(_Bin) ->
-    %% Query byte size and underlying referenced allocation size
     {0, 0}.`,
     solutionCode: `-module(binary_unpinner).
 -export([extract_token_safe/1, slice_packet_safe/2, inspect_refc_ratio/1]).

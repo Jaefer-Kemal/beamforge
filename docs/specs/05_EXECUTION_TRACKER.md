@@ -2224,6 +2224,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
 
+## Phase 117: Pedagogical Despoiling of Chapter 4 Lecture 7 (`ch04-l07`)
+- [x] **117.1: Audit & Eliminate Exercise Code Spoilers in Lecture 4.7 (`ch04-l07`)**:
+  - Neutralized concept breakdown: replaced verbatim code leaks in sub-binary token slicing (`<<Token:16/binary, _Rest/binary>> = Large64MBPacket`) with neutral audio recording stream slicing (`<<HeaderId:8/binary, _Rest/binary>> = Large48MBBuffer`), explaining off-heap ProcBin retention and `binary:copy/1` decoupling.
+  - Replaced cloned parallel worked example `auth_unpinner.erl` with an authentic audio format parser `wav_header_parser.erl` (`extract_format_chunk/1` extracting 4-byte chunk ID unpinned, and `inspect_memory_footprint/1`), achieving complete domain disjunction from 16-byte tokens and packet slicing.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `extract_token_safe/1`, `slice_packet_safe/2`, and `inspect_refc_ratio/1`, eliminating Erlang code pattern and guard syntax dictation.
+  - Neutralized mental model check question to test 8-byte session token unpinning on 32 MB inbound streams.
+  - Refactored starter code doc comments: removed all in-body comments from function bodies in `files[0].content` and `starterCode`.
+- [x] **117.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+
+
 
 
 
