@@ -963,16 +963,16 @@ find_frame_by_seq(FrameList, TargetSeq) ->
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-In Chapter 1 Lesson 1.5, you learned that string literals like \`"hello"\` are actually singly linked lists of integer Unicode codepoints (\`[104, 101, 108, 108, 111]\`). On a 64-bit BEAM VM, each linked list cons cell requires two machine words (16 bytes). A simple 5-character string \`"hello"\` takes **80 bytes of RAM**!
+In Chapter 1 Lesson 1.5, you learned that string literals like \`"hello"\` are singly linked lists of integer Unicode codepoints (\`[104, 101, 108, 108, 111]\`). On a 64-bit BEAM VM, each linked list cons cell requires two machine words (16 bytes). A simple 5-character string \`"hello"\` consumes **80 bytes of RAM**!
 
-In high-throughput network applications (HTTP/2, WebSocket, XMPP, and distributed telemetry), transferring gigabytes of textual payloads using character lists causes extreme memory bloat and garbage collection pressure.
+In high-throughput network applications (HTTP/2, WebSocket, XMPP, and distributed telemetry), transferring gigabytes of textual payloads using character lists creates severe memory bloat and relentless garbage collection pressure.
 
-Erlang solves this with **Binaries (\`<<"...">>\`)** and **IOLists (\`iolist()\`)**—the backbone of telecom-grade network efficiency.
+Erlang solves this with **Binaries (\`<<"...">>\`)** and **IOLists (\`iolist()\`)**—the foundation of telecom-grade network throughput and low latency.
 
 ## Deep Concept Breakdown & Under the Hood
 
 ### 1. Binaries: 16x Memory Reduction
-A binary is a contiguous chunk of raw 8-bit bytes bounded by \`<<\` and \`>>\`:
+A binary is a contiguous array of raw 8-bit bytes bounded by \`<<\` and \`>>\`:
 
 \`\`\`erlang
 TextBin = <<"hello">>.  %% Equivalent to <<104, 101, 108, 108, 111>>
@@ -980,47 +980,52 @@ TextBin = <<"hello">>.  %% Equivalent to <<104, 101, 108, 108, 111>>
 
 - \`"hello"\` (Character List) = $5 \\times 16 = \\mathbf{80\\text{ bytes}}$ on the process heap.
 - \`<<"hello">>\` (Binary) = $\\mathbf{5\\text{ bytes}}$ of contiguous payload!
-That is a **16x reduction in memory consumption** for all network text, JSON payloads, and XML stanzas!
+
+That represents a **16x reduction in memory consumption** for all network text, JSON payloads, and XML stanzas.
 
 Essential BIFs for binary handling:
-- \`byte_size(Bin) -> integer()\`: Returns number of bytes.
-- \`is_binary(Term) -> boolean()\`: Guard BIF checking if term is a binary.
-- \`list_to_binary(CharList) -> binary()\`: Converts character list to binary.
-- \`binary_to_list(Bin) -> list()\`: Converts binary to integer codepoint list.
-- \`integer_to_binary(Int) -> binary()\`: Formats integer as ASCII digits binary (e.g. \`123\` $\\rightarrow$ \`<<"123">>\`).
+- \`byte_size(Bin) -> integer()\`: Returns the byte count of a binary in O(1).
+- \`is_binary(Term) -> boolean()\`: Guard BIF checking whether a term is a binary.
+- \`list_to_binary(CharList) -> binary()\`: Converts a character list to a binary.
+- \`binary_to_list(Bin) -> list()\`: Converts a binary back to an integer codepoint list.
+- \`integer_to_binary(Int) -> binary()\`: Formats an integer as ASCII decimal digits (e.g. \`123\` $\\rightarrow$ \`<<"123">>\`).
 
 ### 2. The Zero-Copy IOList Pattern (\`iolist()\` / \`iodata()\`)
-In typical languages (Node.js, Python, Java), assembling an HTTP response requires allocating a new buffer and concatenating strings:
+In typical language runtimes (Node.js, Python, Java), assembling a network packet requires allocating a new buffer and concatenating strings:
 \`Header + Body + Footer\` $\\rightarrow$ **Buffer Copying Penalty**.
 
-In Erlang, the network socket drivers (\`gen_tcp:send/2\`) and file writers (\`file:write/2\`) do not require a flat binary! They accept an **IOList**—a deeply nested list of binaries, character lists, and single byte integers:
+In Erlang, the network socket drivers (\`gen_tcp:send/2\`) and file writers (\`file:write/2\`) do not require a flat contiguous buffer! They natively accept an **IOList**—a deeply nested list of binaries, character lists, and single-byte integers:
 
 \`\`\`erlang
-ResponseIoList = [
-    <<"HTTP/1.1 200 OK\r\n">>,
-    <<"Content-Length: ">>, integer_to_binary(byte_size(BodyBin)), <<"\r\n\r\n">>,
-    BodyBin
+CommandIoList = [
+    <<"*3\\r\\n">>,
+    <<"$3\\r\\nSET\\r\n">>,
+    <<"$4\\r\\nuser\\r\n">>,
+    <<"$">>, integer_to_binary(byte_size(PayloadBin)), <<"\\r\\n">>,
+    PayloadBin, <<"\\r\\n">>
 ].
 \`\`\`
 
-#### How the BEAM Kernel Driver Sends IOLists with Zero Copies:
-When \`gen_tcp:send(Socket, ResponseIoList)\` is called, the BEAM VM does NOT flatten the list in RAM.
-Instead, ERTS traverses the nested list and converts the pointers directly into an array of \`iovec\` structs passed to the operating system's scatter-gather **\`writev()\` system call**!
-The OS network stack gathers the disjoint memory segments directly from the process heap and streams them onto the network wire with **ZERO intermediate memory copies**.
+#### How the BEAM Kernel Driver Streams IOLists with Zero Copies
+When \`gen_tcp:send(Socket, CommandIoList)\` is called, the BEAM VM does **not** flatten the list in RAM.
 
-If you ever need to flatten an IOList into a single binary for testing or hashing, the standard library provides:
+Instead, ERTS traverses the nested list and translates the pointers directly into an array of \`iovec\` descriptors passed to the operating system's scatter-gather **\`writev()\` system call**.
+
+The OS network stack gathers the disjoint memory segments directly from the BEAM process heap and streams them onto the network wire with **zero intermediate memory copies**.
+
+If you need to measure or flatten an IOList for debugging or hashing, the standard library provides:
 - \`iolist_to_binary(IoList) -> binary()\` (flattens in C speed).
-- \`iolist_size(IoList) -> integer()\` (calculates total byte count without flattening!).
+- \`iolist_size(IoList) -> integer()\` (calculates total byte count in O(N) traversal without allocating a new buffer!).
 
-## Parallel Worked Example
+## Parallel Worked Example: XMPP Presence Wire Framer
 
-Consider building an XMPP presence broadcast frame:
+The following module demonstrates nested IOList construction, byte sizing, and flattening for an XMPP presence broadcast packet:
 
 \`\`\`erlang
 -module(xmpp_frame_builder).
 -export([make_presence_frame/2, render_wire_binary/1]).
 
-%% Assembles nested IOList without copying BodyBin
+%% Assembles nested IOList without copying StatusTextBin
 make_presence_frame(FromJid, StatusTextBin) ->
     [
         <<"<presence from='">>, FromJid, <<"'>">>,
@@ -1028,7 +1033,7 @@ make_presence_frame(FromJid, StatusTextBin) ->
         <<"</presence>">>
     ].
 
-%% Flattens to binary and computes wire size
+%% Computes total wire size and flattens to binary
 render_wire_binary(IoList) ->
     TotalBytes = iolist_size(IoList),
     FlatBin = iolist_to_binary(IoList),
@@ -1047,18 +1052,38 @@ integer_to_binary(Integer) -> binary()
 
 ## Assignment Specification
 
-Implement binary memory comparisons and HTTP framing in \`src/iolist_builder.erl\`:
+Implement binary memory comparisons and HTTP framing in \`src/iolist_builder.erl\`.
 
-1. \`string_vs_binary_bytes(CharList)\`:
-   - Takes a character list (e.g. \`"hello"\`).
-   - Converts it to a binary \`Bin = list_to_binary(CharList)\`.
-   - Returns a 4-tuple: \`{size_comparison, length(CharList) * 16, byte_size(Bin), Bin}\`.
-2. \`build_http_response_iolist(StatusCodeInt, BodyBin)\`:
-   - Returns a nested IOList matching the exact HTTP response wire format:
-     \`[<<"HTTP/1.1 ">>, integer_to_binary(StatusCodeInt), <<" OK\r\nContent-Length: ">>, integer_to_binary(byte_size(BodyBin)), <<"\r\n\r\n">>, BodyBin]\`.
-3. \`flatten_iolist(IoList)\`:
-   - Uses \`iolist_size/1\` and \`iolist_to_binary/1\` to return a 2-tuple:
-     \`{iolist_size(IoList), iolist_to_binary(IoList)}\`.
+### Functions to Implement
+
+#### \`string_vs_binary_bytes/1\`
+- **Input**:
+  - \`CharList\`: a character list / string (e.g. \`"hello"\`)
+- **Behavior**: Converts the character list into a compact binary representation, then returns a 4-element tagged tuple:
+  \`{size_comparison, EstimatedListBytes, BinaryBytes, Binary}\`
+  where:
+  - \`EstimatedListBytes\` is the estimated 64-bit BEAM heap footprint of the linked list (each character cell occupies 16 bytes: \`length(CharList) * 16\`).
+  - \`BinaryBytes\` is the exact byte count of the converted binary.
+  - \`Binary\` is the resulting binary value.
+- **Examples**:
+  - \`string_vs_binary_bytes("hello")\` $\\rightarrow$ \`{size_comparison, 80, 5, <<"hello">>}\`
+  - \`string_vs_binary_bytes("beamforge")\` $\\rightarrow$ \`{size_comparison, 144, 9, <<"beamforge">>}\`
+
+#### \`build_http_response_iolist/2\`
+- **Input**:
+  - \`StatusCodeInt\`: integer HTTP status code (e.g. \`200\`)
+  - \`BodyBin\`: binary payload body
+- **Behavior**: Constructs and returns a nested IOList representing an HTTP/1.1 response without copying or flattening the body. The response begins with the HTTP status line (\`HTTP/1.1 <StatusCode> OK\\r\\n\`), followed by the \`Content-Length: <ByteLength>\\r\\n\\r\\n\` header matching the byte length of \`BodyBin\`, followed by \`BodyBin\`.
+- **Examples**:
+  - \`build_http_response_iolist(200, <<"{\\"status\\":\\"ok\\"}">>)\` $\\rightarrow$
+    \`[<<"HTTP/1.1 ">>, <<"200">>, <<" OK\\r\\nContent-Length: ">>, <<"15">>, <<"\\r\\n\\r\\n">>, <<"{\\"status\\":\\"ok\\"}">>]\`
+
+#### \`flatten_iolist/1\`
+- **Input**:
+  - \`IoList\`: an IOList or nested list of binaries
+- **Behavior**: Calculates the total byte size of \`IoList\` and flattens it into a contiguous binary, returning a 2-tuple \`{TotalBytes, FlatBinary}\`.
+- **Examples**:
+  - \`flatten_iolist([<<"PING">>, [<<"-">>, <<"PONG">>]])\` $\\rightarrow$ \`{9, <<"PING-PONG">>}\`
 
 ## Rules & Verification Constraints
 
@@ -1144,18 +1169,15 @@ Implement binary memory comparisons and HTTP framing in \`src/iolist_builder.erl
 %% @doc Return {size_comparison, EstimatedListBytes, BinaryBytes, Binary}
 %% comparing 64-bit list overhead (16 bytes per character) against compact binary size.
 string_vs_binary_bytes(_CharList) ->
-    %% Convert CharList to binary, calculate word overhead (length * 16), and binary byte size
     {size_comparison, 0, 0, <<>>}.
 
 %% @doc Return nested IOList for an HTTP/1.1 response without flattening.
 build_http_response_iolist(_StatusCodeInt, _BodyBin) ->
-    %% Construct nested IOList with status code and Content-Length header
     [].
 
 %% @doc Measure the total size of IoList in O(1) and flatten it into a continuous binary.
 %% Return {TotalBytes, FlatBinary}.
 flatten_iolist(_IoList) ->
-    %% Return {Size, FlatBinary}
     {0, <<>>}.`,
       },
     ],
@@ -1184,18 +1206,15 @@ flatten_iolist(IoList) ->
 %% @doc Return {size_comparison, EstimatedListBytes, BinaryBytes, Binary}
 %% comparing 64-bit list overhead (16 bytes per character) against compact binary size.
 string_vs_binary_bytes(_CharList) ->
-    %% Convert CharList to binary, calculate word overhead (length * 16), and binary byte size
     {size_comparison, 0, 0, <<>>}.
 
 %% @doc Return nested IOList for an HTTP/1.1 response without flattening.
 build_http_response_iolist(_StatusCodeInt, _BodyBin) ->
-    %% Construct nested IOList with status code and Content-Length header
     [].
 
 %% @doc Measure the total size of IoList in O(1) and flatten it into a continuous binary.
 %% Return {TotalBytes, FlatBinary}.
 flatten_iolist(_IoList) ->
-    %% Return {Size, FlatBinary}
     {0, <<>>}.`,
     solutionCode: `-module(iolist_builder).
 -export([string_vs_binary_bytes/1, build_http_response_iolist/2, flatten_iolist/1]).

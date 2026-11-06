@@ -2190,6 +2190,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
 
+## Phase 114: Pedagogical Despoiling of Chapter 4 Lecture 4 (`ch04-l04`)
+- [x] **114.1: Audit & Eliminate Exercise Code Spoilers in Lecture 4.4 (`ch04-l04`)**:
+  - Neutralized concept breakdown: replaced verbatim code leaks in HTTP response nesting (`ResponseIoList = [<<"HTTP/1.1 200 OK\r\n">>, ...]`) with neutral Redis Serialization Protocol (RESP) command construction (`CommandIoList = [<<"*3\r\n">>, ...]`), preserving zero-copy `writev()` explanations without spoiling HTTP response wire layout.
+  - Audited parallel worked example `xmpp_frame_builder.erl` (`make_presence_frame/2`, `render_wire_binary/1`), confirming domain disjunction in the XMPP presence broadcast domain.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `string_vs_binary_bytes/1`, `build_http_response_iolist/2`, and `flatten_iolist/1`, eliminating raw Erlang list syntax dictation.
+  - Refactored starter code doc comments: removed in-body comments and calculation hints from function bodies in `files[0].content` and `starterCode`.
+- [x] **114.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+
+
 
 
 
