@@ -1920,6 +1920,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: All Erlang grader modules compiled cleanly with 0 errors.
 
+## Phase 89: Pedagogical Despoiling of Chapter 1 Lecture 5 (`ch01-l05`)
+- [x] **89.1: Audit & Eliminate Exercise Code Spoilers in Concept Markdown (`apps/web-ide/src/data/chapters/ch01.ts`)**:
+  - Replaced `queue_buffer.erl` parallel example (which had mirrored `prepend_item`, `swap_first_two`, and `ascii_initial` 1-to-1) with a realistic `telemetry_stream.erl` sensor pipeline demonstrating cons prepending (`record_reading/2`), multi-head pattern destructuring without reordering (`extract_lead_window/1`), and string byte comparison (`has_valid_prefix/1`).
+  - Audited and de-spoiled the Assignment Specification bullets: removed literal syntax strings (`[Item | List]`, `[First, Second | Rest] = List`, `[Second, First | Rest]`, and `[FirstCharCode | _Rest] = NameString`) in favor of clear inputs, domain rules, and expected outputs.
+  - Refactored starter code doc comments from spoon-fed implementations to standard developer specifications.
+  - Updated Deep Concept Breakdown destructuring example to use neutral variable names (`[A, B | Tail] = [10, 20, 30, 40]`).
+- [x] **89.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go test -v -run TestDynamicVisibleTestsCurriculum`: Passed `ch01-l05` dynamic compilation and all 3 visible tests cleanly on OTP 29 with zero errors.
+
+
 
 
 
