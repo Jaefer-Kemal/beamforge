@@ -2042,6 +2042,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go test`: `TestDynamicVisibleTestsCurriculum` passed all 4 visible tests for `ch02-l04` cleanly on OTP 29.
   - `erlc.exe`: Starter module compiled cleanly with 0 errors.
 
+## Phase 100: Pedagogical Despoiling of Chapter 2 Lecture 5 (`ch02-l05`)
+- [x] **100.1: Audit & Eliminate Exercise Code Spoilers in Lecture 2.5 (`ch02-l05`)**:
+  - Neutralized concept explanation: replaced `sum_naive` and `sum_tco` (which had mirrored the assignment task directly) with conceptual `factorial_naive`/`factorial_tco` and a generic `process_items` list fold pattern with abstract variables.
+  - Replaced `metrics_tco.erl` parallel example (which had mirrored `sum_packets` and `count_packets` 1-to-1 with `total_bytes` and `sample_count`) with a distinct `telemetry_pipeline.erl` satellite domain module demonstrating multiplicative attenuation (`compound_decay/1`) and threshold-guarded anomaly counting (`count_spikes/2`).
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks, eliminating explicit helper delegation dictation and raw syntax spoilers.
+  - Refactored starter code doc comments from `% TODO` hint comments to clean, standard `@doc` contracts in both `files[0].content` and `starterCode`.
+  - Neutralized variable names in `mentalModelCheck` question.
+- [x] **100.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Reference solution compiled cleanly and passed test assertions on OTP 29.
+
+
 
 
 

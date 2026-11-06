@@ -1112,110 +1112,118 @@ contains_item([_Other | Rest], Target) ->
 
 In production BEAM applications processing millions of network packets, sensor readings, or ledger entries, how you write recursive functions directly determines whether your server runs smoothly or crashes with an **Out Of Memory (OOM)** error.
 
-The BEAM VM allocates a execution stack frame for every active function call. If a recursive function is written poorly, the stack frame cannot be released until the entire list has been traversed. For a list of 1,000,000 items, this consumes gigabytes of RAM.
+The BEAM VM allocates an execution stack frame for every active function call. If a recursive function is written poorly, the stack frame cannot be released until the entire list has been traversed. For a list of 1,000,000 items, this consumes hundreds of megabytes of RAM.
 
-When a function is **Tail-Call Optimized (TCO)**, the BEAM VM reuses the exact same stack frame indefinitely. A TCO function can process 1,000,000,000 items in constant **$O(1)$ memory** (less than 64 words of stack)!
+When a function is **Tail-Call Optimized (TCO)**, the BEAM VM reuses the exact same stack frame indefinitely. A TCO function can process 1,000,000,000 items in constant **$O(1)$ stack memory** (less than 64 words of stack)!
 
 ## Deep Concept Breakdown & Under the Hood
 
 ### 1. Body Recursion (The Stack-Hungry Trap)
-Consider this common naive approach to summing a list of numbers:
+Consider computing factorial naively:
 
 \`\`\`erlang
 %% Body-recursive:
-sum_naive([]) -> 0;
-sum_naive([H | T]) -> H + sum_naive(T).
+factorial_naive(0) -> 1;
+factorial_naive(N) when N > 0 -> N * factorial_naive(N - 1).
 \`\`\`
 
 Why is this called "Body Recursion"?
-Notice the expression \`H + sum_naive(T)\`. Before addition (\`+\`) can occur, the BEAM VM **must wait** for \`sum_naive(T)\` to complete.
-Because the addition is suspended waiting for the recursive call to return, the current stack frame cannot be discarded. The BEAM pushes a new stack frame for each element:
+Notice the expression \`N * factorial_naive(N - 1)\`. Before multiplication (\`*\`) can occur, the BEAM VM **must wait** for \`factorial_naive(N - 1)\` to return a value.
+Because the multiplication is suspended waiting for the recursive call to return, the current stack frame cannot be discarded. The BEAM pushes a new stack frame for each call:
 
 \`\`\`
-[Frame 1: 10 + (waiting)]
-  [Frame 2: 20 + (waiting)]
-    [Frame 3: 30 + (waiting)]  <-- Stack grows linearly O(N)!
+[Frame 1: 5 * (waiting)]
+  [Frame 2: 4 * (waiting)]
+    [Frame 3: 3 * (waiting)]  <-- Stack grows linearly O(N)!
 \`\`\`
 
 ### 2. Tail-Call Optimization & The Accumulator Pattern
 A function is **Tail-Recursive** if the recursive call is the **absolute last operation** executed in the clause. Nothing is suspended or waiting.
 
-To make an aggregation tail-recursive, we introduce a private helper with an extra parameter called an **Accumulator (\`Acc\`)**:
+To make an aggregation tail-recursive, we introduce a private auxiliary helper with an extra parameter called an **Accumulator (\`Acc\`)**:
 
 \`\`\`erlang
-%% Public interface initializes accumulator to 0:
-sum_tco(List) ->
-    sum_tco(List, 0).
+%% Public interface initializes accumulator to 1:
+factorial_tco(N) ->
+    factorial_loop(N, 1).
 
 %% Private tail-recursive loop:
-sum_tco([], Acc) ->
+factorial_loop(0, Acc) ->
     Acc;
-sum_tco([H | T], Acc) ->
-    sum_tco(T, Acc + H).   %% Acc + H is evaluated BEFORE the call!
+factorial_loop(N, Acc) when N > 0 ->
+    factorial_loop(N - 1, Acc * N).   %% Acc * N is evaluated BEFORE the call!
 \`\`\`
 
 Notice:
-1. \`Acc + H\` is calculated **before** \`sum_tco/2\` is entered.
-2. The recursive call \`sum_tco(T, ...)\` is the final instruction.
+1. \`Acc * N\` is evaluated **before** \`factorial_loop/2\` is called.
+2. The recursive call \`factorial_loop(N - 1, ...)\` is the final instruction.
 3. The BEAM compiler detects this pattern and emits the \`call_last\` bytecode opcode. Instead of pushing a new frame, it overwrites the existing stack frame in place. Stack space remains constant $O(1)$!
 
 > [!warning] Common Beginner Syntax Trap: Pseudo-TCO
-> Writing \`H + sum_tco(T, Acc)\` is NOT tail-recursive!
-> Even though you passed an accumulator, the \`H +\` operation is still outside the call, forcing the BEAM to hold the stack frame open. Always move the calculation inside the function call argument.
+> Writing \`N * factorial_loop(N - 1, Acc)\` is NOT tail-recursive!
+> Even though an accumulator was passed, the \`N *\` operation is still outside the call, forcing the BEAM to hold the stack frame open. Always perform the update calculation inside the function call argument.
+
+### 3. Folding Lists with Tail Recursion
+The same accumulator principle applies when iterating across lists:
+
+\`\`\`erlang
+%% The Standard List Accumulator Pattern:
+process_items(List) ->
+    process_loop(List, InitialAcc).
+
+process_loop([], Acc) ->
+    Acc;
+process_loop([Head | Tail], Acc) ->
+    NewAcc = update(Acc, Head),
+    process_loop(Tail, NewAcc).
+\`\`\`
 
 ## Parallel Worked Example
 
-Counting and aggregating network metric bytes:
+Aggregating satellite telemetry signal decay and detecting anomalies:
 
 \`\`\`erlang
--module(metrics_tco).
--export([total_bytes/1, sample_count/1]).
+-module(telemetry_pipeline).
+-export([compound_decay/1, count_spikes/2]).
 
-%% Sum bytes with TCO
-total_bytes(ByteList) ->
-    total_bytes_loop(ByteList, 0).
+%% Calculate compound decay factor over atmospheric layers:
+compound_decay(Coefficients) ->
+    decay_loop(Coefficients, 1.0).
 
-total_bytes_loop([], Acc) ->
-    Acc;
-total_bytes_loop([Bytes | Rest], Acc) ->
-    total_bytes_loop(Rest, Acc + Bytes).
+decay_loop([], TotalDecay) ->
+    TotalDecay;
+decay_loop([Rate | Rest], TotalDecay) ->
+    decay_loop(Rest, TotalDecay * Rate).
 
-%% Count items with TCO
-sample_count(List) ->
-    sample_count_loop(List, 0).
+%% Count reading spikes that exceed a critical decibel threshold:
+count_spikes(Readings, Threshold) ->
+    spikes_loop(Readings, Threshold, 0).
 
-sample_count_loop([], CountAcc) ->
-    CountAcc;
-sample_count_loop([_Item | Rest], CountAcc) ->
-    sample_count_loop(Rest, CountAcc + 1).
-\`\`\`
-
-## Official Erlang Docs & Function Reference
-
-\`\`\`erlang
-%% The Standard TCO Accumulator Pattern:
-ExportedFunc(List) ->
-    PrivateHelper(List, InitialAcc).
-
-PrivateHelper([], Acc) ->
-    Acc;
-PrivateHelper([H | T], Acc) ->
-    PrivateHelper(T, UpdateAcc(Acc, H)).
+spikes_loop([], _Threshold, SpikeCount) ->
+    SpikeCount;
+spikes_loop([Reading | Rest], Threshold, SpikeCount) when Reading > Threshold ->
+    spikes_loop(Rest, Threshold, SpikeCount + 1);
+spikes_loop([_Reading | Rest], Threshold, SpikeCount) ->
+    spikes_loop(Rest, Threshold, SpikeCount).
 \`\`\`
 
 ## Assignment Specification
 
-Implement two tail-recursive accumulator functions in \`tco_counter.erl\`:
+Implement tail-recursive accumulator functions in \`tco_counter.erl\` to process network packet batches in constant stack space:
 
-1. \`sum_packets(List)\`:
-   - Takes a list of integer packet sizes, e.g. \`[10, 20, 30, 40]\`.
-   - Delegates to a private helper \`sum_packets(List, 0)\`.
-   - Returns the integer sum in $O(1)$ stack space.
+### \`sum_packets/1\`
+- **Input**: \`List\` — A list of zero or more integers representing packet byte sizes.
+- **Behavior**: Sums all integers in the list. The aggregation must be strictly tail-recursive using an auxiliary accumulator function, executing in constant $O(1)$ stack memory. Returns \`0\` for an empty list.
+- **Examples**:
+  - \`tco_counter:sum_packets([10, 20, 30, 40])\` returns \`100\`.
+  - \`tco_counter:sum_packets([])\` returns \`0\`.
 
-2. \`count_packets(List)\`:
-   - Takes a list of arbitrary packet items, e.g. \`[a, b, c, d, e]\`.
-   - Delegates to a private helper \`count_packets(List, 0)\`.
-   - Returns the integer count in $O(1)$ stack space.
+### \`count_packets/1\`
+- **Input**: \`List\` — A list of zero or more arbitrary Erlang terms representing received packet descriptors.
+- **Behavior**: Counts the total number of elements in the list. Must be strictly tail-recursive using an auxiliary accumulator function, executing in constant $O(1)$ stack memory. Returns \`0\` for an empty list.
+- **Examples**:
+  - \`tco_counter:count_packets([a, b, c, d, e])\` returns \`5\`.
+  - \`tco_counter:count_packets([])\` returns \`0\`.
 
 ## Rules & Verification Constraints
 
@@ -1234,7 +1242,7 @@ Implement two tail-recursive accumulator functions in \`tco_counter.erl\`:
       },
     ],
     mentalModelCheck: {
-      question: 'Why does sum([H|T], Acc) -> sum(T, Acc + H) execute in O(1) stack space while sum([H|T]) -> H + sum(T) consumes O(N) stack frames?',
+      question: 'Why does a tail-recursive function execute in O(1) stack space while a body-recursive function consumes O(N) stack frames?',
       options: [
         {
           id: 'A',
@@ -1284,16 +1292,12 @@ Implement two tail-recursive accumulator functions in \`tco_counter.erl\`:
         content: `-module(tco_counter).
 -export([sum_packets/1, count_packets/1]).
 
-%% @doc Sum integer packet sizes using a tail-recursive accumulator loop.
+%% @doc Calculate the total sum of integer packet sizes in O(1) stack space.
 sum_packets(List) ->
-    %% Delegate to a private helper sum_packets(List, 0).
-    % TODO: Implement sum_packets/1 and sum_packets/2
     ok.
 
-%% @doc Count items in list using a tail-recursive accumulator loop.
+%% @doc Count the number of packet descriptors in O(1) stack space.
 count_packets(List) ->
-    %% Delegate to a private helper count_packets(List, 0).
-    % TODO: Implement count_packets/1 and count_packets/2
     ok.`,
       },
     ],
@@ -1320,16 +1324,12 @@ count_packets([_ | T], Acc) ->
     starterCode: `-module(tco_counter).
 -export([sum_packets/1, count_packets/1]).
 
-%% @doc Sum integer packet sizes using a tail-recursive accumulator loop.
+%% @doc Calculate the total sum of integer packet sizes in O(1) stack space.
 sum_packets(List) ->
-    %% Delegate to a private helper sum_packets(List, 0).
-    % TODO: Implement sum_packets/1 and sum_packets/2
     ok.
 
-%% @doc Count items in list using a tail-recursive accumulator loop.
+%% @doc Count the number of packet descriptors in O(1) stack space.
 count_packets(List) ->
-    %% Delegate to a private helper count_packets(List, 0).
-    % TODO: Implement count_packets/1 and count_packets/2
     ok.`,
     solutionCode: `-module(tco_counter).
 -export([sum_packets/1, count_packets/1]).
