@@ -1771,6 +1771,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Erlang modules compiled cleanly with 0 errors.
 
+## Phase 82: Consecutive Callout Boundary Isolation & Separate Warning Rendering (`BeamMarkdownRenderer.tsx`)
+- [x] **82.1: Callout Header Detection & Blockquote Separation (`BeamMarkdownRenderer.tsx`)**:
+  - Identified root cause of nested warning cards in Chapter 1 Lesson 2 (`/learn/ch01-l02`): `BeamMarkdownRenderer`'s blockquote parser previously swallowed all subsequent `>` lines separated by empty lines into a single `bqLines` array. When two warnings appeared back-to-back (e.g. `> [!warning] The =< Comparison Operator` followed by `> [!warning] Exact Equality (=:=) vs. Loose Numeric Equality (==)`), the second warning header was treated as plain text inside the body of the first warning card.
+  - Implemented `isCalloutHeader()` guard checking for `^>\s*\[!(warning|caution|important|danger|tip|note|abstract|info)\]/i`.
+  - Added boundary checks in the blockquote accumulation loop to break immediately upon encountering a new callout header, even across empty spacer lines or contiguous `>` lines.
+  - Both warnings in `ch01-l02` and across the curriculum now render as independent, beautiful Apple glassmorphic callout cards.
+- [x] **82.2: Compiler & Production Build Verification**:
+  - `npx tsc --noEmit`: Passed with 0 errors.
+  - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Erlang modules compiled cleanly with 0 errors.
+
+
 
 
 

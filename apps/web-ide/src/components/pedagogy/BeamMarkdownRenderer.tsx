@@ -410,6 +410,12 @@ interface CalloutConfig {
   iconColorDark: string;
 }
 
+// ── Callout Header Guard ─────────────────────────────────────────────────────
+export function isCalloutHeader(lineStr?: string | null): boolean {
+  if (!lineStr) return false;
+  return /^>\s*\[!(warning|caution|important|danger|tip|note|abstract|info)\]/i.test(lineStr.trim());
+}
+
 function getCalloutConfig(type: string, isDark: boolean): CalloutConfig {
   switch (type.toLowerCase()) {
     case 'warning':
@@ -888,11 +894,31 @@ export function BeamMarkdownRenderer({ md, isDark: explicitDark }: { md: string;
     // 4. Blockquotes & Callouts (> [!warning], etc.)
     if (line.trim().startsWith('>')) {
       const bqLines: string[] = [];
-      while (
-        i < lines.length &&
-        (lines[i].trim().startsWith('>') || (bqLines.length > 0 && lines[i].trim() === ''))
-      ) {
-        if (lines[i].trim() === '') {
+      while (i < lines.length) {
+        const currentTrim = lines[i].trim();
+
+        // If a callout is already accumulating lines and we encounter a new callout header, break immediately
+        if (bqLines.length > 0 && isCalloutHeader(currentTrim)) {
+          break;
+        }
+
+        if (currentTrim.startsWith('>')) {
+          // If this is an empty '>' line and the next line starts a new callout header, don't swallow
+          if (currentTrim === '>' && i + 1 < lines.length && isCalloutHeader(lines[i + 1])) {
+            i++;
+            break;
+          }
+          bqLines.push(lines[i].replace(/^\s*>\s?/, ''));
+          i++;
+          continue;
+        }
+
+        if (currentTrim === '') {
+          // If the next line starts a new callout header, terminate current callout
+          if (i + 1 < lines.length && isCalloutHeader(lines[i + 1])) {
+            break;
+          }
+          // If the next line continues standard blockquote text
           if (i + 1 < lines.length && lines[i + 1].trim().startsWith('>')) {
             bqLines.push('');
             i++;
@@ -901,8 +927,9 @@ export function BeamMarkdownRenderer({ md, isDark: explicitDark }: { md: string;
             break;
           }
         }
-        bqLines.push(lines[i].replace(/^\s*>\s?/, ''));
-        i++;
+
+        // Neither '>' nor empty line inside blockquote
+        break;
       }
 
       const firstLine = (bqLines[0] || '').trim();
