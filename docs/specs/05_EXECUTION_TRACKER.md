@@ -1783,6 +1783,22 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Erlang modules compiled cleanly with 0 errors.
 
+## Phase 83: Chapter 1 Lesson 3 Pedagogical De-Spoilering & Mental Model Check Quiz Option Shuffling
+- [x] **83.1: Parallel Worked Example & Assignment De-Spoilering (`ch01.ts`, `guide.md`, consolidated blueprints)**:
+  - Eliminated the 1:1 carbon-copy spoiler in Chapter 1 Lesson 3 (`ch01-l03`): replaced `invoice_calculator:get_second_item` with `packet_calculator:extract_payload`, teaching tuple unpacking and `_` wildcard discarding on a realistic network packet domain (`{_, _, PayloadData} = NetworkPacket`).
+  - Removed the direct literal code giveaway `{_, Middle, _} = TripleTuple` from the assignment instructions; replaced with conceptual problem requirements so the student applies the concept independently.
+  - Synchronized `guide.md`, `ALL_CHAPTERS_CONSOLIDATED.md`, and `ALL_CHAPTERS_CONSOLIDATED.txt`.
+- [x] **83.2: Dynamic Option Shuffling with Hydration Safety (`MentalModelCheckCard.tsx`)**:
+  - Engineered client-safe Fisher-Yates randomization in `MentalModelCheckCard.tsx`: options are shuffled on client mount, lesson switches, and when clicking "Reset".
+  - Kept SSR and initial client state identical to avoid Next.js hydration mismatches.
+  - Re-mapped visual option badges so badges always display in clean alphabetical order (`A`, `B`, `C`) while randomizing which answer is in which position on every visit/reload.
+- [x] **83.3: Compiler & Production Build Verification**:
+  - `npx tsc --noEmit`: Passed with 0 errors.
+  - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Erlang modules compiled cleanly with 0 errors.
+
+
 
 
 

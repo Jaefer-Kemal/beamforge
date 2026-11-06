@@ -538,26 +538,28 @@ If you need to match a value in a pattern but do not intend to use it, use the s
 
 ## Parallel Worked Example
 
-Here is a function that calculates tax and shipping sequentially while tracking intermediate stages:
+Here is a module demonstrating how sequential calculations progress state through new variable names, and how pattern matching with wildcards extracts payload data from network packets:
 
 \`\`\`erlang
--module(invoice_calculator).
--export([calc_final/2, get_second_item/1]).
+-module(packet_calculator).
+-export([calc_packet_fee/2, extract_payload/1]).
 
-calc_final(Subtotal, ShippingRate) ->
-    Stage1 = Subtotal,
-    Stage2 = Stage1 + 15,            %% Add flat handling
-    Stage3 = Stage2 + ShippingRate,   %% Add shipping
-    Stage3.
+calc_packet_fee(BaseFee, PerByteRate) ->
+    InitialCharge = BaseFee,
+    HandlingFee   = InitialCharge + 5,             %% Add handling charge
+    TotalCost     = HandlingFee + (PerByteRate * 4), %% Add byte usage charge
+    TotalCost.
 
-get_second_item(Triple) ->
-    {_, Second, _} = Triple,
-    Second.
+extract_payload(NetworkPacket) ->
+    %% NetworkPacket has the format: {packet, SeqNumber, PayloadData}
+    %% The wildcard '_' discards the tag and sequence number without binding them
+    {_, _, PayloadData} = NetworkPacket,
+    PayloadData.
 \`\`\`
 
 Notice:
-- In \`calc_final\`, variables \`Stage1\`, \`Stage2\`, and \`Stage3\` progress the calculation without mutation.
-- In \`get_second_item\`, \`{_, Second, _} = Triple\` discards the first and third elements using the \`_\` wildcard and extracts \`Second\`.
+- In \`calc_packet_fee\`, variables \`InitialCharge\`, \`HandlingFee\`, and \`TotalCost\` progress the calculation sequentially without mutation.
+- In \`extract_payload\`, \`{_, _, PayloadData} = NetworkPacket\` discards the first two elements using \`_\` and extracts \`PayloadData\`.
 
 ## Official Erlang Docs & Function Reference
 
@@ -574,16 +576,15 @@ Pattern = Expression
 Implement two functions in \`pattern_vars.erl\`:
 
 1. \`rebind_update(Base, Increment)\`:
-   - Bind variable \`V1 = Base\`.
-   - Bind variable \`V2 = V1 + Increment\`.
-   - Bind variable \`V3 = V2 * 2\`.
+   - Bind variable \`V1\` to \`Base\`.
+   - Bind variable \`V2\` to \`V1 + Increment\`.
+   - Bind variable \`V3\` to \`V2 * 2\`.
    - Return \`V3\`.
 
 2. \`extract_middle(TripleTuple)\`:
-   - Given a 3-element tuple passed as \`TripleTuple\` (e.g., \`{first, target, last}\`).
-   - Use the pattern matching operator \`=\` with the wildcard \`_\` in the function body to extract the middle element:
-     \`{_, Middle, _} = TripleTuple\`.
-   - Return \`Middle\`.
+   - Given a 3-element tuple passed as \`TripleTuple\` (e.g., \`{alpha, target_val, omega}\`).
+   - Use the pattern matching operator \`=\` with the wildcard \`_\` to discard the first and third elements, extracting only the middle value.
+   - Return the extracted middle value.
 
 ## Rules & Verification Constraints
 

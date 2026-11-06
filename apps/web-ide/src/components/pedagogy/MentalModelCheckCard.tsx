@@ -10,7 +10,7 @@ import {
   ChevronUp,
   Sparkles,
 } from 'lucide-react';
-import type { MentalModelCheckSpec } from '../../types/workspace';
+import type { MentalModelCheckSpec, MentalModelOption } from '../../types/workspace';
 import { renderInlineContent } from './BeamMarkdownRenderer';
 
 export interface MentalModelCheckCardProps {
@@ -366,13 +366,38 @@ export function MentalModelCheckCard({
 
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
+  const [displayOptions, setDisplayOptions] = useState<Array<MentalModelOption & { displayLetter: string }>>(() =>
+    resolvedCheck.options.map((opt, idx) => ({
+      ...opt,
+      displayLetter: ['A', 'B', 'C', 'D', 'E'][idx] || String.fromCharCode(65 + idx),
+    }))
+  );
 
-  // Reset answer when lesson changes
+  // Helper to randomize option order and assign clean, sequential letters (A, B, C...)
+  const shuffleOptions = (options: MentalModelOption[]) => {
+    const copy = [...options];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy.map((opt, idx) => ({
+      ...opt,
+      displayLetter: ['A', 'B', 'C', 'D', 'E'][idx] || String.fromCharCode(65 + idx),
+    }));
+  };
+
+  // Client-side shuffle on mount or when switching lessons to prevent SSR hydration mismatches
   useEffect(() => {
     setSelectedOptionId(null);
-  }, [lessonId]);
+    setDisplayOptions(shuffleOptions(resolvedCheck.options));
+  }, [lessonId, resolvedCheck]);
 
-  const selectedOption = resolvedCheck.options.find((opt) => opt.id === selectedOptionId);
+  const handleReset = () => {
+    setSelectedOptionId(null);
+    setDisplayOptions(shuffleOptions(resolvedCheck.options));
+  };
+
+  const selectedOption = displayOptions.find((opt) => opt.id === selectedOptionId);
   const hasAnswered = selectedOptionId !== null;
 
   return (
@@ -432,7 +457,7 @@ export function MentalModelCheckCard({
         <div className="flex items-center gap-1.5">
           {hasAnswered && (
             <button
-              onClick={() => setSelectedOptionId(null)}
+              onClick={handleReset}
               className="p-1 rounded-md text-[11px] font-medium flex items-center gap-1 transition-colors px-2 py-0.5"
               style={{
                 color: isDark ? '#94A3B8' : '#64748B',
@@ -486,7 +511,7 @@ export function MentalModelCheckCard({
 
           {/* Clickable Options (A, B, C) */}
           <div className="space-y-2 pt-1">
-            {resolvedCheck.options.map((option) => {
+            {displayOptions.map((option) => {
               const isSelected = selectedOptionId === option.id;
               const isCorrect = option.isCorrect;
 
@@ -539,7 +564,7 @@ export function MentalModelCheckCard({
                       color: badgeColor,
                     }}
                   >
-                    {option.id}
+                    {option.displayLetter}
                   </span>
 
                   {/* Option Text */}
