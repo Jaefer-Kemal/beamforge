@@ -642,84 +642,92 @@ sanitize_metrics(RawMetrics) ->
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-Before performing a critical transaction—such as placing a batch order, executing a database migration, or taking a node offline for maintenance—systems need to evaluate collection-wide invariants:
-- *Are all items currently in stock?*
-- *Has any worker thread logged a critical fatal error?*
-- *Can we separate high-priority traffic from standard traffic in a single scan?*
+Before committing high-impact operations—such as initiating a multi-node cluster failover, dispatching batched background jobs, or applying configuration changes—production BEAM systems verify global invariants across collections:
+- *Are all dependent worker processes responding and healthy?*
+- *Has any node recorded an out-of-memory or high-severity alarm?*
+- *Can we bifurcate incoming workloads into standard versus priority queues without multiple expensive scans?*
 
-In imperative languages, developers write nested loops with boolean flags (\`bool allValid = true; for (...) { if (!v) { allValid = false; break; } }\`).
+In imperative languages, evaluating these conditions requires manual loops with mutable boolean flags (\`bool allValid = true; for (...) { if (!cond) { allValid = false; break; } }\`).
 
-In Erlang, the standard library provides optimized, short-circuiting predicate functions (\`lists:all/2\`, \`lists:any/2\`) and single-pass collection splitters (\`lists:partition/2\`).
+In Erlang, the standard library provides optimized, short-circuiting boolean predicates (\`lists:all/2\`, \`lists:any/2\`) and a single-pass partitioner (\`lists:partition/2\`).
 
 ## Deep Concept Breakdown & Under the Hood
 
-### 1. Universal Validation with \`lists:all/2\`
-\`lists:all(Pred, List) -> boolean()\` checks whether **every element** in a list satisfies the predicate function:
+### 1. Universal Invariants with \`lists:all/2\`
+
+\`lists:all(Pred, List) -> boolean()\` checks whether **every single element** in \`List\` satisfies the predicate function \`Pred\`:
 
 \`\`\`erlang
 AllPositive = lists:all(fun(X) -> X > 0 end, [10, 20, 30]).  %% => true
-HasZero = lists:all(fun(X) -> X > 0 end, [10, 0, 30]).       %% => false
+HasZero     = lists:all(fun(X) -> X > 0 end, [10, 0, 30]).   %% => false
 \`\`\`
 
-**Short-Circuit Evaluation:**
-\`lists:all/2\` does not blindly scan the entire list. The moment \`Pred(Elem)\` returns \`false\`, \`lists:all/2\` immediately terminates its traversal and returns \`false\`, saving millions of CPU cycles on large datasets.
+**Short-Circuit Optimization:**
+\`lists:all/2\` evaluates elements lazily from head to tail. The instant \`Pred(Elem)\` returns \`false\`, traversal terminates immediately without evaluating the remainder of the list. On large collections, this short-circuit behavior avoids unnecessary CPU consumption and memory allocations.
 
-> [!important] Vacuous Truth on Empty Lists
-> In accordance with formal logic, \`lists:all(Pred, [])\` **always returns \`true\`** regardless of \`Pred\`!
-> If there are zero elements, no element violates the condition. Keep this edge case in mind when validating user input!
+> [!important] Vacuous Truth on Empty Collections
+> In formal predicate logic, universal quantification over an empty set evaluates to \`true\`.
+> Consequently, \`lists:all(Pred, [])\` **always returns \`true\`** regardless of what \`Pred\` does. Because no element exists to violate the rule, the condition holds vacuously.
 
-### 2. Existential Validation with \`lists:any/2\`
-\`lists:any(Pred, List) -> boolean()\` checks whether **at least one element** satisfies the predicate:
+### 2. Existential Invariants with \`lists:any/2\`
+
+\`lists:any(Pred, List) -> boolean()\` verifies whether **at least one element** satisfies \`Pred\`:
 
 \`\`\`erlang
-HasCritical = lists:any(fun({log, Lvl, _}) -> Lvl =:= critical end, Logs).
+HasNegative = lists:any(fun(X) -> X < 0 end, [15, -3, 42]).  %% => true
+AllClean    = lists:any(fun(X) -> X < 0 end, [15, 20, 42]).  %% => false
 \`\`\`
 
-Just like \`all/2\`, \`lists:any/2\` short-circuits: the moment \`Pred(Elem)\` evaluates to \`true\`, scanning stops immediately and \`true\` is returned.
-For an empty list \`[]\`, \`lists:any(Pred, [])\` **always returns \`false\`**.
+Like \`lists:all/2\`, \`lists:any/2\` short-circuits: the moment any element yields \`true\`, evaluation halts immediately and returns \`true\`.
+For an empty collection \`[]\`, \`lists:any(Pred, [])\` **always returns \`false\`** because no matching element can be found.
 
 ### 3. Single-Pass Partitioning with \`lists:partition/2\`
-In Chapter 2 Lesson 2.7, you implemented a custom dual-accumulator loop (\`partition_orders/2\`) to split orders into valid and rejected buckets.
 
-In production Erlang, you use **\`lists:partition/2\`**:
+When processing batches, you frequently need to divide items into two mutually exclusive sets—such as valid vs. invalid payloads or lightweight vs. heavy workloads.
+
+A naive approach runs two separate \`lists:filter/2\` passes with inverted predicates, traversing the list twice. \`lists:partition/2\` performs this segregation in a **single pass** using dual internal accumulators:
 
 \`\`\`erlang
-lists:partition(Pred, List) -> {SatisfyingList, NonSatisfyingList}
+lists:partition(Pred, List) -> {Satisfying, NonSatisfying}
 \`\`\`
 
 \`\`\`erlang
-Orders = [{order, 1, 10}, {order, 2, 2}, {order, 3, 50}],
-{Bulk, Standard} = lists:partition(fun({order, _, Qty}) -> Qty >= 10 end, Orders).
-%% Bulk     => [{order, 1, 10}, {order, 3, 50}]
-%% Standard => [{order, 2, 2}]
+Packets = [{pkt, 1, 64}, {pkt, 2, 1500}, {pkt, 3, 128}],
+{Jumbo, Standard} = lists:partition(fun({pkt, _, Bytes}) -> Bytes > 1000 end, Packets).
+%% Jumbo    => [{pkt, 2, 1500}]
+%% Standard => [{pkt, 1, 64}, {pkt, 3, 128}]
 \`\`\`
 
-\`lists:partition/2\` evaluates the predicate on each element in a single tail-recursive pass, appending matching items into one accumulator and non-matching items into another, returning both in their original relative order.
+Both resulting lists preserve the relative ordering of the original collection while scanning each element exactly once.
 
-## Parallel Worked Example
+## Parallel Worked Example: Cluster Node Health Telemetry
 
-Consider a telecommunication gateway auditing active channel metrics:
+The following module evaluates telemetry records from server cluster instances. Notice how \`lists:all/2\`, \`lists:any/2\`, and \`lists:partition/2\` express clean, declarative health assertions without custom recursive loops:
 
 \`\`\`erlang
--module(channel_auditor).
--export([channels_healthy/1, alert_present/1, segregate_channels/2]).
+-module(cluster_monitor).
+-export([all_nodes_online/1, any_node_throttled/2, segregate_by_memory/2]).
 
-%% Verify all channels have positive signal-to-noise ratio:
-channels_healthy(Channels) ->
-    lists:all(fun({channel, _Id, Snr}) -> Snr > 15 end, Channels).
+%% @doc Verifies that every node in the cluster reports an online state.
+all_nodes_online(Nodes) ->
+    lists:all(fun({node, _Id, Status}) ->
+        Status =:= online
+    end, Nodes).
 
-%% Check if any channel has dropped below critical threshold:
-alert_present(Channels) ->
-    lists:any(fun({channel, _Id, Snr}) -> Snr =< 0 end, Channels).
+%% @doc Checks if at least one node latency exceeds the specified millisecond ceiling.
+any_node_throttled(Nodes, MaxLatencyMs) ->
+    lists:any(fun({node, _Id, _Status, LatencyMs}) ->
+        LatencyMs > MaxLatencyMs
+    end, Nodes).
 
-%% Segregate into high-bandwidth vs standard channels:
-segregate_channels(Channels, MinBandwidth) ->
-    lists:partition(fun({channel, _Id, _Snr, Bw}) ->
-        Bw >= MinBandwidth
-    end, Channels).
+%% @doc Segregates nodes into standard memory usage vs oversized allocations in a single scan.
+segregate_by_memory(Nodes, MaxRamMb) ->
+    lists:partition(fun({node, _Id, _Status, _Latency, RamMb}) ->
+        RamMb > 0 andalso RamMb =< MaxRamMb
+    end, Nodes).
 \`\`\`
 
-## Official Erlang Docs & Function Reference
+## Standard Library Function Reference
 
 \`\`\`erlang
 lists:all(Pred, List) -> boolean()
@@ -729,24 +737,44 @@ lists:partition(Pred, List) -> {Satisfying, NotSatisfying}
 
 ## Assignment Specification
 
-Implement three validation and segregation functions in \`src/hof_predicates.erl\`:
+Implement three collection validation and segregation functions in \`src/hof_predicates.erl\`:
 
-1. \`all_in_stock(Inventory)\`:
-   - Input: \`[{product, Id, Name, Price, Stock}, ...]\`.
-   - Uses \`lists:all/2\` to return \`true\` if every product has \`Stock > 0\`, else \`false\`.
-2. \`has_critical_error(Logs)\`:
-   - Input: \`[{log, Level, Msg}, ...]\`.
-   - Uses \`lists:any/2\` to return \`true\` if at least one log entry has \`Level =:= critical\`, else \`false\`.
-3. \`split_orders_by_stock(Orders, MaxSingleOrderQty)\`:
-   - Input: \`[{order, Id, Qty}, ...]\`.
-   - Uses \`lists:partition/2\` to return a 2-tuple \`{StandardOrders, BulkOrders}\`.
-   - \`StandardOrders\` are those where \`Qty > 0 andalso Qty =< MaxSingleOrderQty\`.
-   - All other orders belong in \`BulkOrders\`.
+### 1. \`all_in_stock/1\`
+- **Input**: A list of catalog records: \`[{product, Id, Name, Price, Stock}, ...]\`, where \`Stock\` is an integer count.
+- **Behavior**: Inspect the inventory list using \`lists:all/2\`. Return \`true\` if every product possesses available stock (strictly greater than zero). If any product has zero or negative stock, return \`false\`. An empty inventory list must return \`true\`.
+- **Examples**:
+  \`\`\`erlang
+  hof_predicates:all_in_stock([{product, 1, "A", 10, 5}, {product, 2, "B", 20, 1}]) -> true
+  hof_predicates:all_in_stock([{product, 1, "A", 10, 5}, {product, 2, "B", 20, 0}]) -> false
+  hof_predicates:all_in_stock([]) -> true
+  \`\`\`
 
-## Rules & Verification Constraints
+### 2. \`has_critical_error/1\`
+- **Input**: A list of log records: \`[{log, Level, Message}, ...]\`, where \`Level\` is an atom (such as \`info\`, \`warn\`, or \`critical\`) and \`Message\` is a string.
+- **Behavior**: Scan the collection using \`lists:any/2\`. Return \`true\` if at least one entry has a severity level matching the atom \`critical\`. Return \`false\` otherwise, including when the input list is empty.
+- **Examples**:
+  \`\`\`erlang
+  hof_predicates:has_critical_error([{log, info, "boot"}, {log, critical, "disk full"}]) -> true
+  hof_predicates:has_critical_error([{log, info, "boot"}, {log, warn, "high load"}]) -> false
+  hof_predicates:has_critical_error([]) -> false
+  \`\`\`
 
-- Must use \`lists:all/2\`, \`lists:any/2\`, and \`lists:partition/2\`.
-- Strictly no Maps (\`#{}\`) or Bit-Syntax Binaries (\`<<...>>\`). Use tuples, atoms, and integers only.`,
+### 3. \`split_orders_by_stock/2\`
+- **Input**: A list of order entries \`[{order, Id, Quantity}, ...]\` and an integer limit \`MaxSingleOrderQty\`.
+- **Behavior**: Segregate incoming orders into standard and bulk buckets in a single traversal using \`lists:partition/2\`, returning a 2-tuple \`{StandardOrders, BulkOrders}\`.
+  - An order qualifies for \`StandardOrders\` if its requested quantity is strictly positive and does not exceed \`MaxSingleOrderQty\` (inclusive).
+  - All other orders (orders whose quantity strictly exceeds \`MaxSingleOrderQty\`, as well as entries with zero or non-positive quantities) belong in \`BulkOrders\`.
+  - Elements in both resulting lists must preserve their original relative order.
+- **Examples**:
+  \`\`\`erlang
+  hof_predicates:split_orders_by_stock([{order, 1, 5}, {order, 2, 20}, {order, 3, 2}], 10)
+  %% => {[{order, 1, 5}, {order, 3, 2}], [{order, 2, 20}]}
+  \`\`\`
+
+## Verification Constraints
+
+- You must employ \`lists:all/2\`, \`lists:any/2\`, and \`lists:partition/2\`.
+- Strictly no Maps (\`#{}\`) or Bit-Syntax Binaries (\`<<...>>\`). Pure tuples, lists, and numbers only.`,
     otpDocCards: [
       {
         functionName: 'lists:all/2',
@@ -831,19 +859,16 @@ Implement three validation and segregation functions in \`src/hof_predicates.erl
         content: `-module(hof_predicates).
 -export([all_in_stock/1, has_critical_error/1, split_orders_by_stock/2]).
 
-%% @doc Return true if every product in Inventory has Stock > 0, else false.
+%% @doc Returns true if every catalog item possesses available stock.
 all_in_stock(_Inventory) ->
-    %% Verify all items satisfy the stock condition
     ok.
 
-%% @doc Return true if any log in Logs has Level =:= critical, else false.
+%% @doc Returns true if any log entry records a critical incident.
 has_critical_error(_Logs) ->
-    %% Check if any log entry matches critical severity
     ok.
 
-%% @doc Partition Orders into {StandardOrders, BulkOrders} where Standard has Qty > 0 andalso Qty =< MaxQty.
+%% @doc Partitions orders into standard and bulk batches based on quantity threshold.
 split_orders_by_stock(_Orders, _MaxSingleOrderQty) ->
-    %% Split orders into standard and bulk buckets
     ok.`,
       },
     ],
@@ -869,19 +894,16 @@ split_orders_by_stock(Orders, MaxSingleOrderQty) ->
     starterCode: `-module(hof_predicates).
 -export([all_in_stock/1, has_critical_error/1, split_orders_by_stock/2]).
 
-%% @doc Return true if every product in Inventory has Stock > 0, else false.
+%% @doc Returns true if every catalog item possesses available stock.
 all_in_stock(_Inventory) ->
-    %% Verify all items satisfy the stock condition
     ok.
 
-%% @doc Return true if any log in Logs has Level =:= critical, else false.
+%% @doc Returns true if any log entry records a critical incident.
 has_critical_error(_Logs) ->
-    %% Check if any log entry matches critical severity
     ok.
 
-%% @doc Partition Orders into {StandardOrders, BulkOrders} where Standard has Qty > 0 andalso Qty =< MaxQty.
+%% @doc Partitions orders into standard and bulk batches based on quantity threshold.
 split_orders_by_stock(_Orders, _MaxSingleOrderQty) ->
-    %% Split orders into standard and bulk buckets
     ok.`,
     solutionCode: `-module(hof_predicates).
 -export([all_in_stock/1, has_critical_error/1, split_orders_by_stock/2]).
