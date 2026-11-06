@@ -2101,6 +2101,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Reference solution and test assertions passed cleanly on OTP 29 (`HOF_ALL_PASS`).
 
+## Phase 105: Pedagogical Despoiling of Chapter 3 Lecture 2 (`ch03-l02`)
+- [x] **105.1: Audit & Eliminate Exercise Code Spoilers in Lecture 3.2 (`ch03-l02`)**:
+  - Neutralized concept breakdown: replaced verbatim code leaks in `lists:filter` (`Sessions` with `Status =:= active`) and `lists:filtermap` (`RawMetrics` with `round(Val)`) with neutral temperature filtering (`Temps`, `T > 0`) and service port extraction (`Configs`, `is_integer(Port)`).
+  - Replaced `logistics_pipeline.erl` parallel example (which had cloned `discount_prices`, `active_sessions`, and `sanitize_metrics`) with an authentic drone flight avionics module `drone_avionics.erl` (`calibrate_altitudes/2`, `operational_rotors/1`, `normalize_flight_vectors/1`).
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `discount_prices/2`, `active_sessions/1`, and `sanitize_metrics/1`, eliminating backtick code formula dictation.
+  - Refactored starter code doc comments: removed in-body code comments and calculation hints across all three functions in `files[0].content` and `starterCode`.
+- [x] **105.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Reference solution and test runner compiled cleanly and passed all assertions on OTP 29 (`TRANSFORM_ALL_PASS`).
+
+
 
 
 
