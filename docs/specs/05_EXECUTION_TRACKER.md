@@ -2213,6 +2213,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
 
+## Phase 116: Pedagogical Despoiling of Chapter 4 Lecture 6 (`ch04-l06`)
+- [x] **116.1: Audit & Eliminate Exercise Code Spoilers in Lecture 4.6 (`ch04-l06`)**:
+  - Neutralized concept breakdown: replaced verbatim code leaks in key-value splitting (`Authorization: Bearer ...`) and XOR masking (`(Byte bxor 16#FF):8`) with neutral config string splitting (`binary:split(<<"cache_ttl=3600">>, <<"=">>)`) and byte inversion with binary comprehension (`Inverted = << <<(bnot Byte):8>> || <<Byte:8>> <= OriginalData >>`).
+  - Replaced parallel worked example with an authentic pipe-delimited log parser `pipe_parser.erl` (`split_entry/1` on `<<"|">>`, `extract_csv_fields/1` on `<<",">>`, and `invert_bytes/1`), achieving domain disjunction from HTTP headers, CRLF lines, and XOR masking.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `split_key_value/1`, `extract_lines/1`, and `xor_mask_payload/2`, eliminating raw Erlang expression dictation.
+  - Refactored starter code doc comments: removed in-body comments and calculation hints from function bodies in `files[0].content` and `starterCode`.
+- [x] **116.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+
+
 
 
 

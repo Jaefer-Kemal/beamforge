@@ -1509,20 +1509,21 @@ encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
     conceptMarkdown: `## Why This Matters in Production
 
 When parsing HTTP headers, MIME multipart streams, or raw TCP line protocols, developers in other languages often convert raw bytes into character strings before splitting on \`\\r\\n\`.
+
 In Erlang, converting a 10 MB binary into a character list allocates **160 MB of RAM** just to perform string splits!
 
 The Erlang standard library includes the **\`binary\`** module, which executes compiled **Boyer-Moore and Aho-Corasick algorithms in optimized C** directly on binary memory buffers.
 
-Furthermore, Erlang includes **Binary Comprehensions** for lightning-fast byte transformation (e.g. WebSocket masking, XOR ciphering, and pixel manipulation).
+Furthermore, Erlang includes **Binary Comprehensions** for lightning-fast byte transformation (such as WebSocket masking, XOR ciphering, and protocol checksums) without creating intermediate linked lists.
 
 ## Deep Concept Breakdown & Under the Hood
 
 ### 1. High-Speed Splitting: \`binary:split/2\` vs \`binary:split/3\`
 - **\`binary:split(Subject, Pattern) -> [Part1, Remainder]\`:**
-  Splits \`Subject\` on the **first occurrence** of \`Pattern\`. This is ideal for parsing HTTP headers (\`Key: Value\`), where the value itself might contain colons:
+  Splits \`Subject\` on the **first occurrence** of \`Pattern\`. This is ideal for parsing key-value pairs (such as config options or headers), where the value itself might contain additional delimiters:
   \`\`\`erlang
-  binary:split(<<"Authorization: Bearer abc:123">>, <<": ">>)
-  %% => [<<"Authorization">>, <<"Bearer abc:123">>]
+  binary:split(<<"cache_ttl=3600">>, <<"=">>)
+  %% => [<<"cache_ttl">>, <<"3600">>]
   \`\`\`
 - **\`binary:split(Subject, Pattern, [global, trim_all]) -> [binary()]\`:**
   - \`global\`: Splits on **all occurrences** across the entire buffer.
@@ -1536,7 +1537,7 @@ binary:match(<<"GET /api/v1/health HTTP/1.1">>, <<"HTTP">>)
 \`\`\`
 
 ### 3. Binary Comprehensions and the \`<=\` Generator
-In Chapter 1 Lesson 1.2, you learned that the less-than-or-equal comparison operator in Erlang is \`=<\` (not \`<=\`).
+In Chapter 1 Lesson 1.2, you learned that the numeric less-than-or-equal comparison operator in Erlang is \`=<\` (not \`<=\`).
 Here is what **\`<=\`** actually is in Erlang: the **Binary Comprehension Generator Arrow**!
 
 A binary comprehension creates a new binary by streaming bytes or bit-groups out of an input binary:
@@ -1544,39 +1545,34 @@ A binary comprehension creates a new binary by streaming bytes or bit-groups out
 << <<OutExpression>> || <<Pattern>> <= InputBinary, FilterPredicate >>
 \`\`\`
 
-#### Example: WebSocket XOR Masking
-The RFC 6455 WebSocket protocol specifies that all client-to-server frames must have their payload masked by XOR-ing every byte with a mask byte:
+#### Example: Byte Inversion
 \`\`\`erlang
-Masked = << <<(Byte bxor 16#FF):8>> || <<Byte:8>> <= OriginalPayload >>.
+Inverted = << <<(bnot Byte):8>> || <<Byte:8>> <= OriginalData >>.
 \`\`\`
-The BEAM VM compiles this comprehension into an ultra-tight, non-allocating C loop that executes in hardware registers!
+The BEAM VM compiles this comprehension into an ultra-tight, non-allocating C loop that executes in hardware CPU registers.
 
-## Parallel Worked Example
+## Parallel Worked Example: Pipe-Delimited Log Processor
 
-Consider a line-oriented protocol parser for an SMTP/IMAP mail gateway:
+The following module demonstrates binary splitting and byte transformation on pipe-delimited log records:
 
 \`\`\`erlang
--module(mail_stream).
--export([parse_command/1, split_mail_lines/1, rot13_cipher/1]).
+-module(pipe_parser).
+-export([split_entry/1, extract_csv_fields/1, invert_bytes/1]).
 
-%% 1. Split first command word
-parse_command(InputBin) ->
-    case binary:split(InputBin, <<" ">>) of
-        [Cmd, Arg] -> {ok, Cmd, Arg};
-        [Cmd] -> {ok, Cmd, <<>>}
+%% 1. Split first entry delimiter
+split_entry(RecordBin) ->
+    case binary:split(RecordBin, <<"|">>) of
+        [Prefix, Remainder] -> {ok, Prefix, Remainder};
+        [Prefix] -> {ok, Prefix, <<>>}
     end.
 
-%% 2. Split all non-empty lines on CRLF
-split_mail_lines(RawMessageBin) ->
-    binary:split(RawMessageBin, <<"\r\n">>, [global, trim_all]).
+%% 2. Split all non-empty fields on comma
+extract_csv_fields(CsvRowBin) ->
+    binary:split(CsvRowBin, <<",">>, [global, trim_all]).
 
 %% 3. Byte transformation using binary comprehension
-rot13_cipher(Bin) ->
-    << <<(case B of
-        Char when Char >= $A andalso Char =< $Z -> ((Char - $A + 13) rem 26) + $A;
-        Char when Char >= $a andalso Char =< $z -> ((Char - $a + 13) rem 26) + $a;
-        Other -> Other
-    end):8>> || <<B:8>> <= Bin >>.
+invert_bytes(Bin) ->
+    << <<(bnot B):8>> || <<B:8>> <= Bin >>.
 \`\`\`
 
 ## Official Erlang Docs & Function Reference
@@ -1590,23 +1586,38 @@ binary:match(Subject, Pattern) -> {byte_offset(), length()} | nomatch
 
 ## Assignment Specification
 
-Implement binary scanning and masking in \`src/binary_scanner.erl\`:
+Implement binary scanning and masking in \`src/binary_scanner.erl\`.
 
-1. \`split_key_value(HeaderBin)\`:
-   - Uses \`binary:split(HeaderBin, <<": ">>)\`.
-   - If \`<<": ">>\` is found, returns \`{ok, KeyBin, ValueBin}\`.
-   - If absent, returns \`{error, malformed_header}\`.
-2. \`extract_lines(MultiLineBin)\`:
-   - Uses \`binary:split(MultiLineBin, <<"\r\n">>, [global, trim_all])\`.
-   - Returns a list of all non-empty line binaries.
-3. \`xor_mask_payload(PayloadBin, MaskByte)\`:
-   - Uses a binary comprehension \`<< <<(B bxor MaskByte):8>> || <<B:8>> <= PayloadBin >>\`.
-   - Returns the masked binary.
+### Functions to Implement
+
+#### \`split_key_value/1\`
+- **Input**:
+  - \`HeaderBin\`: a binary HTTP header line (e.g. \`<<"Content-Type: application/json">>\`)
+- **Behavior**: Splits the header on the first occurrence of the separator \`<<": ">>\`. If the separator is found, returns \`{ok, KeyBin, ValueBin}\`. If the separator is absent, returns \`{error, malformed_header}\`.
+- **Examples**:
+  - \`split_key_value(<<"Content-Type: application/json">>)\` $\\rightarrow$ \`{ok, <<"Content-Type">>, <<"application/json">>}\`
+  - \`split_key_value(<<"BadHeaderWithoutSeparator">>)\` $\\rightarrow$ \`{error, malformed_header}\`
+
+#### \`extract_lines/1\`
+- **Input**:
+  - \`MultiLineBin\`: a binary containing multiple CRLF-delimited lines
+- **Behavior**: Splits the binary across all CRLF (\`<<"\\r\\n">>\`) boundaries and discards any empty tokens or trailing blanks, returning a list of all non-empty line binaries.
+- **Examples**:
+  - \`extract_lines(<<"line1\\r\\n\\r\\nline2\\r\\nline3\\r\\n">>)\` $\\rightarrow$ \`[<<"line1">>, <<"line2">>, <<"line3">>]\`
+
+#### \`xor_mask_payload/2\`
+- **Input**:
+  - \`PayloadBin\`: binary payload bytes
+  - \`MaskByte\`: an 8-bit integer mask (\`0..255\`)
+- **Behavior**: Transforms each byte of \`PayloadBin\` by applying bitwise XOR (\`bxor\`) with \`MaskByte\` using a binary comprehension, returning the resulting masked binary.
+- **Examples**:
+  - \`xor_mask_payload(<<16#AA, 16#55>>, 16#FF)\` $\\rightarrow$ \`<<85, 170>>\`
+  - \`xor_mask_payload(<<"super_secret">>, 16#AA)\` $\\rightarrow$ masked binary
 
 ## Rules & Verification Constraints
 
 - Must use \`binary:split/2\` and \`binary:split/3\`.
-- Must use binary comprehension with \`<=\`.`,
+- Must use binary comprehension with the \`<=\` generator arrow.`,
     otpDocCards: [
       {
         functionName: 'binary:split/3',
@@ -1683,19 +1694,16 @@ Implement binary scanning and masking in \`src/binary_scanner.erl\`:
         content: `-module(binary_scanner).
 -export([split_key_value/1, extract_lines/1, xor_mask_payload/2]).
 
-%% @doc Split on first separator <<": ">> into {ok, Key, Value} or {error, malformed_header}.
+%% @doc Split binary header on first separator into {ok, Key, Value} or error.
 split_key_value(_HeaderBin) ->
-    %% Split binary on header delimiter and return {ok, Key, Value} or error
     {error, malformed_header}.
 
-%% @doc Split MultiLineBin on <<"\r\n">> discarding empty tokens.
+%% @doc Split multi-line binary on CRLF, trimming empty tokens.
 extract_lines(_MultiLineBin) ->
-    %% Split into lines using binary:split/3 and trim empty items
     [].
 
-%% @doc XOR every byte in PayloadBin with MaskByte using a binary comprehension.
+%% @doc Apply bitwise XOR mask to each byte in payload using binary comprehension.
 xor_mask_payload(_PayloadBin, _MaskByte) ->
-    %% Transform each byte with MaskByte using binary comprehension syntax
     <<>>.`,
       },
     ],
@@ -1720,19 +1728,16 @@ xor_mask_payload(PayloadBin, MaskByte) ->
     starterCode: `-module(binary_scanner).
 -export([split_key_value/1, extract_lines/1, xor_mask_payload/2]).
 
-%% @doc Split on first separator <<": ">> into {ok, Key, Value} or {error, malformed_header}.
+%% @doc Split binary header on first separator into {ok, Key, Value} or error.
 split_key_value(_HeaderBin) ->
-    %% Split binary on header delimiter and return {ok, Key, Value} or error
     {error, malformed_header}.
 
-%% @doc Split MultiLineBin on <<"\r\n">> discarding empty tokens.
+%% @doc Split multi-line binary on CRLF, trimming empty tokens.
 extract_lines(_MultiLineBin) ->
-    %% Split into lines using binary:split/3 and trim empty items
     [].
 
-%% @doc XOR every byte in PayloadBin with MaskByte using a binary comprehension.
+%% @doc Apply bitwise XOR mask to each byte in payload using binary comprehension.
 xor_mask_payload(_PayloadBin, _MaskByte) ->
-    %% Transform each byte with MaskByte using binary comprehension syntax
     <<>>.`,
     solutionCode: `-module(binary_scanner).
 -export([split_key_value/1, extract_lines/1, xor_mask_payload/2]).
