@@ -2247,6 +2247,11 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+- [x] **118.3: Batched Chapter 4 Production Vercel Deployment**:
+  - Deployed entire Chapter 4 (Lessons 4.1 – 4.8) to Vercel production: `https://beamforge-3dmbw5thq-jaefer-kemals-projects.vercel.app` aliased to `https://beamforge-eight.vercel.app`.
+  - Verified live deployment: `https://beamforge-eight.vercel.app/learn/ch04-l08` returned `HTTP/1.1 200 OK`.
+  - Verified live deployment: `https://beamforge-eight.vercel.app/syllabus` returned `HTTP/1.1 200 OK`.
+
 
 
 
