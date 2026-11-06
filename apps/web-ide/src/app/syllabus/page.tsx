@@ -16,12 +16,14 @@ export default function SyllabusPage() {
     celebrationBadge,
     isBadgeCelebrationOpen,
     closeBadgeCelebration,
+    hydrateFromStorageAndDb,
   } = useWorkspaceStore();
 
   useEffect(() => {
     setBootDevView('syllabus');
     wsMux.connect();
-  }, [setBootDevView]);
+    hydrateFromStorageAndDb();
+  }, [setBootDevView, hydrateFromStorageAndDb]);
 
   return (
     <main className="flex h-screen h-dvh w-screen overflow-hidden relative bg-[#E8ECF2] dark:bg-[#060810] text-[#0A0F1E] dark:text-[#F0F4FC] transition-colors duration-300">

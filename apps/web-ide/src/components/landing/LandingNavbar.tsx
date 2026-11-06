@@ -21,10 +21,14 @@ import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 
 export function LandingNavbar() {
   const router = useRouter();
-  const { theme, toggleTheme, currentUser, activeExerciseId } = useWorkspaceStore();
+  const { theme, toggleTheme, currentUser, activeExerciseId, hydrateFromStorageAndDb } = useWorkspaceStore();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [lastLessonId, setLastLessonId] = useState<string | null>(null);
+
+  useEffect(() => {
+    hydrateFromStorageAndDb();
+  }, [hydrateFromStorageAndDb]);
 
   useEffect(() => {
     try {
@@ -52,13 +56,12 @@ export function LandingNavbar() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem('beamforge_active_exercise');
-      if (stored && stored !== 'ch01-l01') {
-        setLastLessonId(stored);
-      } else if (activeExerciseId && activeExerciseId !== 'ch01-l01') {
-        setLastLessonId(activeExerciseId);
+      const active = currentUser?.lastActiveExercise || stored || activeExerciseId;
+      if (active && active !== 'ch01-l01') {
+        setLastLessonId(active);
       }
     } catch {}
-  }, [activeExerciseId]);
+  }, [currentUser?.lastActiveExercise, activeExerciseId]);
 
   const isDark = theme === 'dark';
 

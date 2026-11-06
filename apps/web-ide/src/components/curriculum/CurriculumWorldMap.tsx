@@ -256,6 +256,7 @@ export function CurriculumWorldMap() {
     totalXp,
     devModeUnlockedAll,
     toggleDevModeUnlockedAll,
+    isHydrated,
   } = useWorkspaceStore();
 
   const router = useRouter();
@@ -308,7 +309,7 @@ export function CurriculumWorldMap() {
   // Navigate directly to selected lesson
   const handleSelectLesson = (chNum: number, lessonNum: number, lessonId: string) => {
     const access = checkLessonAccess(chNum, lessonNum, completedLevelIds, devModeUnlockedAll);
-    if (!access.isUnlocked && access.prerequisite) {
+    if (isHydrated && !access.isUnlocked && access.prerequisite) {
       setPrereqModalData(access.prerequisite);
       setIsPrereqModalOpen(true);
       return;
@@ -683,7 +684,7 @@ export function CurriculumWorldMap() {
                                 const isCompleted = completedLevelIds.includes(lesson.id);
                                 const isCurrent = activeChapter === chNum && activeLesson === lesson.lessonNumber;
                                 const access = checkLessonAccess(chNum, lesson.lessonNumber, completedLevelIds, devModeUnlockedAll);
-                                const isAccessible = access.isUnlocked || isCompleted || isCurrent;
+                                const isAccessible = !isHydrated || access.isUnlocked || isCompleted || isCurrent;
 
                                 return (
                                   <div
@@ -737,7 +738,12 @@ export function CurriculumWorldMap() {
 
                                         {/* Status Indicator */}
                                         <div>
-                                          {isCompleted ? (
+                                          {!isHydrated ? (
+                                            <span className="flex items-center gap-1 text-[10px] font-medium text-slate-400 bg-slate-400/10 px-2 py-0.5 rounded-full border border-slate-400/20 animate-pulse">
+                                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                                              <span>Syncing...</span>
+                                            </span>
+                                          ) : isCompleted ? (
                                             <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                                               <CheckCircle2 className="w-3 h-3" />
                                               <span>Passed</span>

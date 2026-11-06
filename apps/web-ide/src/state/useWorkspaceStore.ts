@@ -45,10 +45,35 @@ export const loadUserDraft = (userId: string, exerciseId: string): WorkspaceFile
   return null;
 };
 
+let cloudDraftTimer: any = null;
+export const syncDraftToCloud = (userId: string, exerciseId: string, files: WorkspaceFile[]) => {
+  if (typeof window === 'undefined') return;
+  if (cloudDraftTimer) clearTimeout(cloudDraftTimer);
+  cloudDraftTimer = setTimeout(() => {
+    try {
+      const filesMap: Record<string, string> = {};
+      files.forEach((f) => {
+        filesMap[f.path] = f.content;
+      });
+      fetch('/api/user-progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save_draft',
+          userId,
+          exerciseId,
+          files: filesMap,
+        }),
+      }).catch(() => {});
+    } catch {}
+  }, 1200);
+};
+
 export const saveUserDraft = (userId: string, exerciseId: string, files: WorkspaceFile[]) => {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(getUserDraftKey(userId, exerciseId), JSON.stringify(files));
+    syncDraftToCloud(userId, exerciseId, files);
   } catch {}
 };
 
@@ -837,12 +862,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         localStorage.removeItem('beamforge_user_profile_v2');
         localStorage.removeItem(`beamforge_user_${activeUser.id}`);
         localStorage.removeItem('beamforge_progress');
-        // Clear all drafts and submissions cache for this user
+        // Clear all drafts, accepted files, completions and submissions cache for this user
         Object.keys(localStorage).forEach((k) => {
           if (
             k.startsWith(`beamforge_draft_${activeUser.id}`) ||
             k.startsWith(`beamforge_submissions_${activeUser.id}`) ||
-            k.startsWith(`beamforge_accepted_${activeUser.id}`)
+            k.startsWith(`beamforge_accepted_${activeUser.id}`) ||
+            k.startsWith('beamforge_completed_')
           ) {
             localStorage.removeItem(k);
           }
@@ -853,6 +879,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'reset_submissions', userId: activeUser.id }),
+        }).catch(() => {});
+        fetch('/api/user-progress', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'reset_drafts', userId: activeUser.id }),
         }).catch(() => {});
       } catch {}
       syncUserToStorageAndDb(freshUser);
@@ -950,6 +981,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             const dbUser: UserProfile = data.user;
             const authoritativeCompleted: string[] = data.completedLevelIds || dbUser.completedLevelIds || [];
             const acceptedFiles: Record<string, Record<string, string>> = data.acceptedFiles || {};
+            const cloudDrafts: Record<string, Record<string, string>> = data.drafts || {};
 
             // Immediate cross-device sync into localStorage
             authoritativeCompleted.forEach((lid: string) => {
@@ -959,6 +991,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             Object.entries(acceptedFiles).forEach(([exId, filesMap]) => {
               try {
                 localStorage.setItem(`beamforge_accepted_${currentUserId}_${exId}`, JSON.stringify(filesMap));
+              } catch {}
+            });
+
+            // Sync in-progress cloud drafts to localStorage if not locally present
+            Object.entries(cloudDrafts).forEach(([exId, filesMap]) => {
+              const draftKey = getUserDraftKey(currentUserId, exId);
+              try {
+                if (!localStorage.getItem(draftKey)) {
+                  const draftList: WorkspaceFile[] = Object.entries(filesMap).map(([p, c]) => ({
+                    path: p,
+                    content: c,
+                    name: p.split('/').pop() || p,
+                    language: p.endsWith('.erl') ? 'erlang' : p.endsWith('.hrl') ? 'erlang' : 'plaintext',
+                  }));
+                  localStorage.setItem(draftKey, JSON.stringify(draftList));
+                }
               } catch {}
             });
 
@@ -981,6 +1029,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
                 currentFiles = currentFiles.map((f) => ({
                   ...f,
                   content: acceptedMap[f.path] || f.content,
+                }));
+              } else if (cloudDrafts[state.activeExerciseId]) {
+                // If not completed yet, but learner has a cloud draft from mobile/desktop, hydrate it!
+                const draftMap = cloudDrafts[state.activeExerciseId];
+                currentFiles = currentFiles.map((f) => ({
+                  ...f,
+                  content: draftMap[f.path] || f.content,
                 }));
               }
 
@@ -2266,4 +2321,27 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
 if (typeof window !== 'undefined') {
   (window as any).useWorkspaceStore = useWorkspaceStore;
+
+  // Mobile screen wake-up & browser tab focus auto-sync
+  let lastAutoSyncTimestamp = 0;
+  const triggerAutoSync = () => {
+    const now = Date.now();
+    // Throttle to at most once every 5 seconds
+    if (now - lastAutoSyncTimestamp > 5000) {
+      lastAutoSyncTimestamp = now;
+      try {
+        useWorkspaceStore.getState().hydrateFromStorageAndDb();
+      } catch {}
+    }
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      triggerAutoSync();
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    triggerAutoSync();
+  });
 }

@@ -6,8 +6,22 @@ const dbUrl = env.match(/DATABASE_URL=(.+)/)[1].trim();
 const sql = neon(dbUrl);
 
 async function check() {
+  await sql`
+    CREATE TABLE IF NOT EXISTS beamforge_drafts (
+      user_id VARCHAR(64) NOT NULL,
+      exercise_id VARCHAR(128) NOT NULL,
+      files JSONB NOT NULL,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      PRIMARY KEY (user_id, exercise_id)
+    );
+  `;
+  try {
+    await sql`CREATE INDEX IF NOT EXISTS idx_submissions_user_status_ex ON beamforge_submissions(user_id, status, exercise_id, created_at DESC);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_drafts_user_ex ON beamforge_drafts(user_id, exercise_id);`;
+  } catch {}
+
   const tables = await sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`;
-  console.log('Tables in Neon:', tables);
+  console.log('Tables in Neon:', tables.map(t => t.table_name));
   const rows = await sql`SELECT id, name, role, total_xp, streak_days, completed_level_ids, last_active_exercise FROM beamforge_users`;
   console.log(`\nTable beamforge_users (${rows.length} rows):`);
   console.log(JSON.stringify(rows, null, 2));

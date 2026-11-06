@@ -1707,3 +1707,25 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Erlang AST verifier and grader modules compiled cleanly with 0 errors.
 
+## Phase 78: Backend-Authoritative Syllabus World Map, Cloud Drafts & Mobile Visibility Auto-Sync
+- [x] **78.1: Backend-Authoritative Syllabus World Map (`SyllabusPage` & `CurriculumWorldMap`)**:
+  - In `apps/web-ide/src/app/syllabus/page.tsx`, integrated `hydrateFromStorageAndDb()` on mount, guaranteeing that loading the Syllabus on any device queries the Neon DB backend.
+  - In `apps/web-ide/src/components/curriculum/CurriculumWorldMap.tsx`, destructured `isHydrated`, guarded card lock accessibility (`!isHydrated || access.isUnlocked || isCompleted || isCurrent`), rendered animated glass `Syncing...` badges during hydration, and prevented premature prerequisite lock popups while backend data resolves.
+- [x] **78.2: Database-Driven Landing Page Resume Link (`LandingNavbar`)**:
+  - In `apps/web-ide/src/components/landing/LandingNavbar.tsx`, added `hydrateFromStorageAndDb` on mount and prioritized `currentUser?.lastActiveExercise` so "Resume Training" points to where the learner left off regardless of device.
+- [x] **78.3: Cross-Device In-Progress Cloud Drafts Auto-Save (`route.ts` & `useWorkspaceStore`)**:
+  - In `apps/web-ide/src/app/api/user-progress/route.ts`, created `beamforge_drafts` table schema and indices, returned `drafts` in `GET /api/user-progress`, and handled `action: 'save_draft'` and `action: 'reset_drafts'`.
+  - In `apps/web-ide/src/state/useWorkspaceStore.ts`, added debounced `syncDraftToCloud(userId, exerciseId, files)` to `saveUserDraft`, and synchronized cloud drafts into `localStorage` and editor state during hydration.
+- [x] **78.4: Complete Account Reset Storage Purge (`useWorkspaceStore`)**:
+  - In `resetUserProgress`, purged all keys starting with `beamforge_completed_` in addition to drafts, submissions, and profile caches, and fired backend resets for both submissions and drafts.
+- [x] **78.5: Mobile Screen Wakeup & Visibility Auto-Sync (`useWorkspaceStore`)**:
+  - Added global `document.addEventListener('visibilitychange')` and `window.addEventListener('focus')` listeners with 5-second throttling to automatically invoke `hydrateFromStorageAndDb()` whenever a learner unlocks their phone or returns to the browser tab.
+- [x] **78.6: Database Index Optimization**:
+  - Added composite index `idx_submissions_user_status_ex ON beamforge_submissions(user_id, status, exercise_id, created_at DESC)` and `idx_drafts_user_ex ON beamforge_drafts(user_id, exercise_id)`.
+- [x] **78.7: Compilers & Production Build Verification**:
+  - `npx tsc --noEmit`: Passed with 0 errors.
+  - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Erlang AST verifier and grader modules compiled cleanly with 0 errors.
+
+

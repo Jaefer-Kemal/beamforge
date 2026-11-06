@@ -37,8 +37,21 @@ async function ensureTable(sql: any) {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS beamforge_drafts (
+        user_id VARCHAR(64) NOT NULL,
+        exercise_id VARCHAR(128) NOT NULL,
+        files JSONB NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        PRIMARY KEY (user_id, exercise_id)
+      );
+    `;
+
     try {
       await sql`CREATE INDEX IF NOT EXISTS idx_submissions_user_exercise ON beamforge_submissions(user_id, exercise_id, created_at DESC);`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_submissions_user_status_ex ON beamforge_submissions(user_id, status, exercise_id, created_at DESC);`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_drafts_user_ex ON beamforge_drafts(user_id, exercise_id);`;
     } catch {}
   } catch (err) {
     console.warn('[Neon DB] Table check/creation warning:', err);
@@ -178,6 +191,19 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Query in-progress cloud drafts for this user
+    const draftRows = await sql`
+      SELECT exercise_id, files
+      FROM beamforge_drafts
+      WHERE user_id = ${userId}
+    `;
+    const cloudDrafts: Record<string, Record<string, string>> = {};
+    for (const d of draftRows || []) {
+      if (d.files && typeof d.files === 'object') {
+        cloudDrafts[d.exercise_id] = d.files;
+      }
+    }
+
     const rows = await sql`
       SELECT id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, last_activity_date
       FROM beamforge_users
@@ -233,6 +259,7 @@ export async function GET(req: NextRequest) {
         user,
         completedLevelIds: mergedCompleted,
         acceptedFiles,
+        drafts: cloudDrafts,
         dbConnected: true,
       });
     }
@@ -267,6 +294,7 @@ export async function GET(req: NextRequest) {
       user: seededUser,
       completedLevelIds: initialCompleted,
       acceptedFiles,
+      drafts: cloudDrafts,
       dbConnected: true,
     });
   } catch (error: any) {
@@ -375,15 +403,38 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Action: Reset Submissions
-    if (body.action === 'reset_submissions') {
+    // Action: Save Work-in-Progress Code Draft
+    if (body.action === 'save_draft') {
+      const { userId: draftUserId, exerciseId: draftExId, files: draftFiles } = body;
+      if (!sql) {
+        return NextResponse.json({ status: 'ok', source: 'offline', dbConnected: false });
+      }
+      if (!draftUserId || !draftExId || !draftFiles) {
+        return NextResponse.json({ error: 'Missing draft payload' }, { status: 400 });
+      }
+      await ensureTable(sql);
+      await sql`
+        INSERT INTO beamforge_drafts (user_id, exercise_id, files, updated_at)
+        VALUES (${draftUserId}, ${draftExId}, ${JSON.stringify(draftFiles)}, NOW())
+        ON CONFLICT (user_id, exercise_id) DO UPDATE SET
+          files = EXCLUDED.files,
+          updated_at = NOW()
+      `;
+      return NextResponse.json({ status: 'ok', saved: true, dbConnected: true });
+    }
+
+    // Action: Reset Submissions & Drafts
+    if (body.action === 'reset_submissions' || body.action === 'reset_drafts') {
       const resetUserId = body.userId;
       if (!sql) {
         return NextResponse.json({ status: 'ok', source: 'offline', dbConnected: false });
       }
       await ensureTable(sql);
       if (resetUserId) {
-        await sql`DELETE FROM beamforge_submissions WHERE user_id = ${resetUserId}`;
+        if (body.action === 'reset_submissions') {
+          await sql`DELETE FROM beamforge_submissions WHERE user_id = ${resetUserId}`;
+        }
+        await sql`DELETE FROM beamforge_drafts WHERE user_id = ${resetUserId}`;
       }
       return NextResponse.json({ status: 'ok', dbConnected: true });
     }
