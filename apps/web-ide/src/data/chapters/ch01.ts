@@ -460,16 +460,22 @@ In Erlang, variable names **must begin with an Uppercase letter** or an undersco
 - If you start a variable name with a lowercase letter, the compiler treats it as a constant atom, causing confusion.
 
 ### The "=" Operator is a Pattern Matcher
+
 When Erlang evaluates \`Pattern = Expression\`:
+
 1. If the variable on the left is **unbound** (has no value yet), Erlang binds it to the value on the right:
-   \`\`\`erlang
-   X = 10.  %% X is now bound to integer 10
-   \`\`\`
+
+\`\`\`erlang
+X = 10.  %% X is now bound to integer 10
+\`\`\`
+
 2. If the variable is **already bound**, Erlang does not reassign it. Instead, it asserts that both sides are identical:
-   \`\`\`erlang
-   X = 10.  %% Succeeds: 10 matches 10
-   X = 20.  %% CRASHES with {badmatch, 20}!
-   \`\`\`
+
+\`\`\`erlang
+X = 10.  %% Succeeds: 10 matches 10
+X = 20.  %% CRASHES with {badmatch, 20}!
+\`\`\`
+
 Because \`X\` is already \`10\`, evaluating \`X = 20\` asserts that \`10 = 20\`. Since that is false, the BEAM throws a runtime \`badmatch\` error!
 
 ### The Anonymous Wildcard Variable ("_")

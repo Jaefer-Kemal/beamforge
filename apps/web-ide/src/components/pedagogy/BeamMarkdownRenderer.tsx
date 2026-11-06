@@ -493,27 +493,48 @@ function renderSubContent(subLines: string[], isDark: boolean): React.ReactNode[
       );
       k++; // Skip the closing ```
       continue;
-    } else if (sLine.startsWith('- ') || sLine.startsWith('* ')) {
+    } else if (/^\s*[-*]\s+/.test(sLine)) {
+      const items: string[] = [];
+      while (k < subLines.length && /^\s*[-*]\s+/.test(subLines[k])) {
+        items.push(subLines[k].replace(/^\s*[-*]\s+/, ''));
+        k++;
+      }
       result.push(
-        <li
-          key={`sub-li-${k}`}
-          className="ml-4 text-xs mb-1 list-disc leading-relaxed font-normal"
+        <ul
+          key={`sub-ul-${k}`}
+          className="ml-4 text-xs mb-1.5 list-disc leading-relaxed font-normal space-y-1"
           style={{ color: isDark ? '#E2E8F0' : '#1E293B' }}
         >
-          {renderInlineContent(sLine.slice(2), isDark)}
-        </li>
+          {items.map((it, idx) => (
+            <li key={`sub-li-${k}-${idx}`}>{renderInlineContent(it, isDark)}</li>
+          ))}
+        </ul>
       );
-    } else if (/^\d+\.\s+/.test(sLine)) {
-      const numMatch = sLine.match(/^(\d+\.)\s+(.*)$/);
+      continue;
+    } else if (/^\s*\d+\.\s+/.test(sLine)) {
+      const firstM = sLine.match(/^\s*(\d+)\.\s+(.*)$/);
+      const startNum = firstM ? parseInt(firstM[1], 10) : 1;
+      const items: { num: number; text: string }[] = [];
+      while (k < subLines.length && /^\s*\d+\.\s+/.test(subLines[k])) {
+        const m = subLines[k].match(/^\s*(\d+)\.\s+(.*)$/);
+        if (m) items.push({ num: parseInt(m[1], 10), text: m[2] });
+        k++;
+      }
       result.push(
-        <li
-          key={`sub-oli-${k}`}
-          className="ml-4 text-xs mb-1 list-decimal leading-relaxed font-medium"
+        <ol
+          key={`sub-ol-${k}`}
+          start={startNum}
+          className="ml-4 text-xs mb-1.5 list-decimal leading-relaxed font-medium space-y-1"
           style={{ color: isDark ? '#E2E8F0' : '#1E293B' }}
         >
-          {renderInlineContent(numMatch ? numMatch[2] : sLine, isDark)}
-        </li>
+          {items.map((it, idx) => (
+            <li key={`sub-oli-${k}-${idx}`} value={it.num}>
+              {renderInlineContent(it.text, isDark)}
+            </li>
+          ))}
+        </ol>
       );
+      continue;
     } else if (sLine.trim() === '') {
       result.push(<div key={`sub-sp-${k}`} className="h-1.5" />);
     } else {
@@ -722,16 +743,31 @@ export function BeamMarkdownRenderer({ md, isDark: explicitDark }: { md: string;
   while (i < lines.length) {
     const line = lines[i];
 
-    // 1. Top-Level Code Blocks (```erlang or ```)
-    if (line.startsWith('```erlang') || line.startsWith('```')) {
+    // 1. Code Blocks (```erlang, ```xml, ``` or indented ```)
+    const trimmedForCode = line.trim();
+    if (trimmedForCode.startsWith('```')) {
       const codeLines: string[] = [];
       i++;
-      while (i < lines.length && !lines[i].startsWith('```')) {
+      while (i < lines.length && !lines[i].trim().startsWith('```')) {
         codeLines.push(lines[i]);
         i++;
       }
+      // Calculate min indentation for non-empty lines to dedent cleanly
+      const minIndent = codeLines
+        .filter((l) => l.trim().length > 0)
+        .reduce((min, l) => {
+          const match = l.match(/^(\s*)/);
+          const len = match ? match[1].length : 0;
+          return Math.min(min, len);
+        }, Infinity);
+
+      const dedentedCode =
+        minIndent < Infinity && minIndent > 0
+          ? codeLines.map((l) => (l.length >= minIndent ? l.slice(minIndent) : l)).join('\n')
+          : codeLines.join('\n');
+
       elements.push(
-        <ErlangCodeBlock key={`code-${i}`} code={codeLines.join('\n')} isDark={isDark} />
+        <ErlangCodeBlock key={`code-${i}`} code={dedentedCode} isDark={isDark} />
       );
       i++;
       continue;
@@ -907,33 +943,56 @@ export function BeamMarkdownRenderer({ md, isDark: explicitDark }: { md: string;
     }
 
     // 5. Unordered Lists
-    if (line.startsWith('- ') || line.startsWith('* ')) {
+    if (/^\s*[-*]\s+/.test(line)) {
+      const listItems: string[] = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        listItems.push(lines[i].replace(/^\s*[-*]\s+/, ''));
+        i++;
+      }
       elements.push(
-        <li
-          key={`li-${i}`}
-          className="ml-5 text-sm mb-1.5 list-disc leading-relaxed font-normal"
+        <ul
+          key={`ul-${i}`}
+          className="ml-5 text-sm mb-2 list-disc leading-relaxed font-normal space-y-1.5"
           style={{ color: isDark ? '#E2E8F0' : '#0F172A' }}
         >
-          {renderInlineContent(line.slice(2), isDark)}
-        </li>
+          {listItems.map((item, idx) => (
+            <li key={`uli-${i}-${idx}`}>
+              {renderInlineContent(item, isDark)}
+            </li>
+          ))}
+        </ul>
       );
-      i++;
       continue;
     }
 
     // 6. Ordered Lists
-    if (/^\d+\.\s+/.test(line)) {
-      const numMatch = line.match(/^(\d+\.)\s+(.*)$/);
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const firstMatch = line.match(/^\s*(\d+)\.\s+(.*)$/);
+      const startNum = firstMatch ? parseInt(firstMatch[1], 10) : 1;
+      const listItems: { num: number; text: string }[] = [];
+
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        const m = lines[i].match(/^\s*(\d+)\.\s+(.*)$/);
+        if (m) {
+          listItems.push({ num: parseInt(m[1], 10), text: m[2] });
+        }
+        i++;
+      }
+
       elements.push(
-        <li
-          key={`oli-${i}`}
-          className="ml-5 text-sm mb-1.5 list-decimal leading-relaxed font-medium"
+        <ol
+          key={`ol-${i}`}
+          start={startNum}
+          className="ml-5 text-sm mb-2 list-decimal leading-relaxed font-medium space-y-1.5"
           style={{ color: isDark ? '#E2E8F0' : '#0F172A' }}
         >
-          {renderInlineContent(numMatch ? numMatch[2] : line, isDark)}
-        </li>
+          {listItems.map((item, idx) => (
+            <li key={`oli-${i}-${idx}`} value={item.num}>
+              {renderInlineContent(item.text, isDark)}
+            </li>
+          ))}
+        </ol>
       );
-      i++;
       continue;
     }
 

@@ -1751,6 +1751,27 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Erlang AST verifier and grader modules compiled cleanly with 0 errors.
 
+## Phase 81: Markdown Code Block Rendering, Indented Fence Dedenting & Ordered List Isolation in Left Pane
+- [x] **81.1: Markdown Code Fence Recognition & Indentation Stripping (`BeamMarkdownRenderer.tsx`)**:
+  - Identified root cause of unrendered code blocks in Chapter 1 Lesson 3 (`/learn/ch01-l03`): `line.startsWith('```erlang')` failed when code blocks were indented with leading spaces under list items (`   ```erlang`), causing markdown parsers to fall through to plain text paragraphs.
+  - Upgraded code block parsing in `BeamMarkdownRenderer.tsx` using `line.trim().startsWith('```')`, scanning until the matching closing fence `line.trim().startsWith('```')`.
+  - Added automatic common indentation detection and dedenting (`minIndent` calculation) so indented code blocks render with clean, aligned formatting.
+- [x] **81.2: Ordered List Counter Isolation & Erroneous Number "8" Elimination (`BeamMarkdownRenderer.tsx`)**:
+  - Identified root cause of the "number 8" glitch following `When Erlang evaluates Pattern = Expression:`: in `BeamMarkdownRenderer.tsx`, list items were previously emitted as bare `<li>` elements directly into the parent container `<div>`. Because CSS counters are parent-scoped, the 7 preceding unordered bullet items (`list-disc`) incremented the browser's internal `list-item` counter to 7. When the next ordered item `1.` appeared, the browser rendered it with the cumulative counter value **`8.`**.
+  - Grouped consecutive ordered list items into an `<ol className="list-decimal ml-5 mb-2 ...">` container with explicit `start={startNum}` and `<li value={item.num}>` attributes, strictly guaranteeing that the rendered numbers match the exact numbers in the curriculum markdown (starting at `1.`, never `8.`).
+  - Grouped consecutive unordered list items into `<ul className="list-disc ml-5 mb-2 ...">` containers, fully isolating bullet points from interfering with any ordered list counters.
+  - Mirrored the same container grouping and counter isolation in `renderSubContent` for callout and blockquote sub-elements.
+- [x] **81.3: Clean Curriculum Markdown Formatting (`ch01.ts`, `guide.md`, consolidated blueprints)**:
+  - Formatted the `The "=" Operator is a Pattern Matcher` section in `apps/web-ide/src/data/chapters/ch01.ts` with top-level flush code blocks and clear line breaks.
+  - Synchronized `apps/web-ide/src/data/curriculum/chapter_01_functional_foundations_sequential_erlang/lecture_03_variables_single_assignment_the_pattern_/guide.md`.
+  - Synchronized `ALL_CHAPTERS_CONSOLIDATED.md` and `ALL_CHAPTERS_CONSOLIDATED.txt`.
+- [x] **81.4: Compilers & Production Build Verification**:
+  - `npx tsc --noEmit`: Passed with 0 errors.
+  - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Erlang modules compiled cleanly with 0 errors.
+
+
 
 
 
