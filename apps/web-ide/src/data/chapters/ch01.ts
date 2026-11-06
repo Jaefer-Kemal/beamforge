@@ -1754,48 +1754,69 @@ Packets arrive as 4-element tagged tuples containing a network protocol tag (\`i
 {ipv4, "10.0.0.1", "10.0.0.2", [packet_data, 100, ok]}
 \`\`\`
 Your classifier must:
-- Match IPv4 and IPv6 packets that contain **at least one payload item** using \`[FirstItem | _Rest]\`.
-- Return \`{ok, Protocol, Src, Dst, FirstItem}\`.
-- If the payload list is completely empty (\`[]\`), return \`{error, empty_payload}\`.
-- If the tuple does not match a valid packet format, catch-all return \`{error, invalid_packet}\`.
+- Extract the protocol tag, source host, destination host, and the leading payload element from valid packets that contain at least one payload item.
+- Return a tagged success 5-tuple: \`{ok, Protocol, SourceHost, DestinationHost, FirstItem}\`.
+- If the payload list is empty (\`[]\`), return \`{error, empty_payload}\`.
+- If the input does not conform to the expected packet structure, catch-all return \`{error, invalid_packet}\`.
 
 ### 2. Cascading Billing Engine (\`bill_call/2\` and \`bill_call/3\`)
 Telecom subscribers are billed based on their call duration in seconds and their subscription plan (\`standard\`, \`premium\`, or \`internal\`):
-- Lower-arity \`bill_call/2\` delegates to \`bill_call/3\` with a default connection fee of **10 cents**.
-- \`bill_call/3\` matches on the plan atom:
-  - \`standard\`: Connection fee + (\`DurationSec * 5\`) cents.
-  - \`premium\`: Connection fee + (\`DurationSec * 3\`) cents.
-  - \`internal\`: Completely free—always returns \`{ok, 0}\`.
+- Lower-arity \`bill_call/2\` provides default argument cascading by delegating to \`bill_call/3\` with a standard connection fee of 10 cents.
+- \`bill_call/3\` determines call charges using multi-clause pattern matching on the plan atom:
+  - \`standard\`: Base connection fee + 5 cents per second of duration.
+  - \`premium\`: Base connection fee + 3 cents per second of duration.
+  - \`internal\`: Internal company traffic—completely free (0 cents).
   - Any unknown plan: Returns \`{error, unknown_plan}\`.
 
 ## Parallel Worked Example
 
-Consider a logistics shipping rate engine structured identically:
+Consider a cloud streaming media ingestion and rate-limiting router:
 
 \`\`\`erlang
--module(freight_engine).
--export([route_cargo/1, calculate_freight/2, calculate_freight/3]).
+-module(media_router).
+-export([route_stream/1, compute_reservation/2, compute_reservation/3]).
 
-route_cargo({air, Origin, Destination, [ManifestHead | _]}) ->
-    {ok, air, Origin, Destination, ManifestHead};
-route_cargo({sea, Origin, Destination, [ManifestHead | _]}) ->
-    {ok, sea, Origin, Destination, ManifestHead};
-route_cargo({_Type, _Origin, _Dest, []}) ->
-    {error, empty_manifest};
-route_cargo(_) ->
-    {error, invalid_cargo_tuple}.
+%% Multi-clause packet router inspecting streaming container tuples
+route_stream({audio_frame, ChannelId, [LeadSample | _History]}) ->
+    {ingest, audio, ChannelId, LeadSample};
+route_stream({video_frame, ChannelId, [LeadSample | _History]}) ->
+    {ingest, video, ChannelId, LeadSample};
+route_stream({_FrameType, _ChannelId, []}) ->
+    {drop, empty_sample_buffer};
+route_stream(_) ->
+    {drop, malformed_stream_packet}.
 
-calculate_freight(WeightKg, Tier) ->
-    calculate_freight(WeightKg, Tier, 25).  %% Default $25 dock handling
+%% Cascading arity providing default memory reservation (default 64MB buffer)
+compute_reservation(MegaBytes, ServiceTier) ->
+    compute_reservation(MegaBytes, ServiceTier, 64).
 
-calculate_freight(WeightKg, standard, DockFee) ->
-    {ok, DockFee + (WeightKg * 4)};
-calculate_freight(WeightKg, express, DockFee) ->
-    {ok, DockFee + (WeightKg * 8)};
-calculate_freight(_WeightKg, humanitarian, _DockFee) ->
+%% Multi-clause tier calculation
+compute_reservation(MegaBytes, enterprise, BaseReserveMb) ->
+    {ok, BaseReserveMb + (MegaBytes * 4)};
+compute_reservation(MegaBytes, developer, BaseReserveMb) ->
+    {ok, BaseReserveMb + (MegaBytes * 2)};
+compute_reservation(_MegaBytes, diagnostic_probe, _BaseReserveMb) ->
     {ok, 0};
-calculate_freight(_WeightKg, _OtherTier, _DockFee) ->
-    {error, unknown_tier}.
+compute_reservation(_MegaBytes, _UnknownTier, _BaseReserveMb) ->
+    {error, unsupported_tier}.
+\`\`\`
+
+Notice:
+- \`route_stream/1\` handles 3-element stream tuples, destructuring the lead sample from non-empty buffers, handling empty buffers with \`{drop, empty_sample_buffer}\`, and catching malformed input.
+- \`compute_reservation/2\` cascades to \`compute_reservation/3\` with a default constant parameter.
+- \`compute_reservation/3\` matches on plan atoms (\`enterprise\`, \`developer\`, \`diagnostic_probe\`) to perform integer calculations or return errors without \`if\` or \`case\`.
+
+## Official Erlang Docs & Function Reference
+
+\`\`\`erlang
+%% Erlang Reference Manual (Function Definition Syntax)
+Name(Patterns1) -> Body1;
+Name(Patterns2) -> Body2;
+...
+Name(PatternsN) -> BodyN.
+  Clauses are evaluated sequentially from top to bottom.
+  First matching pattern executes.
+  If no pattern matches, a function_clause run-time exception occurs.
 \`\`\`
 
 ## Assignment Specification
@@ -1808,19 +1829,35 @@ Implement \`src/telecom_foundations.erl\` with the following exports:
 \`\`\`
 
 ### 1. \`classify_packet(Packet)\`
-- Clause 1: Matches \`{ipv4, SrcHost, DstHost, [FirstItem | _Rest]}\` -> returns \`{ok, ipv4, SrcHost, DstHost, FirstItem}\`.
-- Clause 2: Matches \`{ipv6, SrcHost, DstHost, [FirstItem | _Rest]}\` -> returns \`{ok, ipv6, SrcHost, DstHost, FirstItem}\`.
-- Clause 3: Matches \`{Tag, _Src, _Dst, []}\` -> returns \`{error, empty_payload}\`.
-- Clause 4: Wildcard catch-all \`_\` -> returns \`{error, invalid_packet}\`.
+- **Input**: A term \`Packet\`. Valid packets are 4-element tuples consisting of a protocol atom (\`ipv4\` or \`ipv6\`), a source host string, a destination host string, and a payload list.
+- **Behavior**:
+  - Valid packets with non-empty payloads: Extract the protocol, source host, destination host, and the first payload element. Return \`{ok, Protocol, SourceHost, DestinationHost, FirstPayloadItem}\`.
+  - Valid packet structure with empty payload list (\`[]\`): Return \`{error, empty_payload}\`.
+  - Any other term or malformed tuple: Return \`{error, invalid_packet}\`.
+- **Examples**:
+  - \`telecom_foundations:classify_packet({ipv4, "10.0.0.1", "10.0.0.2", [ping, 100]})\` returns \`{ok, ipv4, "10.0.0.1", "10.0.0.2", ping}\`.
+  - \`telecom_foundations:classify_packet({ipv6, "fe80::1", "fe80::2", [data]})\` returns \`{ok, ipv6, "fe80::1", "fe80::2", data}\`.
+  - \`telecom_foundations:classify_packet({ipv4, "10.0.0.1", "10.0.0.2", []})\` returns \`{error, empty_payload}\`.
+  - \`telecom_foundations:classify_packet(bad_packet)\` returns \`{error, invalid_packet}\`.
 
 ### 2. \`bill_call(DurationSec, PlanType)\`
-- Delegates directly to \`bill_call(DurationSec, PlanType, 10)\` (default connection fee is 10 cents).
+- **Input**: An integer call duration \`DurationSec\` in seconds and a subscription plan atom \`PlanType\`.
+- **Behavior**: Delegate to \`bill_call/3\` supplying a default connection fee of \`10\` cents.
+- **Example**:
+  - \`telecom_foundations:bill_call(60, standard)\` delegates to \`bill_call(60, standard, 10)\`.
 
 ### 3. \`bill_call(DurationSec, PlanType, ConnectionFeeCents)\`
-- Clause 1: Matches \`PlanType = standard\` -> returns \`{ok, ConnectionFeeCents + (DurationSec * 5)}\`.
-- Clause 2: Matches \`PlanType = premium\` -> returns \`{ok, ConnectionFeeCents + (DurationSec * 3)}\`.
-- Clause 3: Matches \`PlanType = internal\` -> returns \`{ok, 0}\`.
-- Clause 4: Wildcard catch-all for any other plan -> returns \`{error, unknown_plan}\`.
+- **Input**: Integer \`DurationSec\`, plan atom \`PlanType\`, and integer \`ConnectionFeeCents\`.
+- **Behavior**: Calculate the total call cost in cents using multi-clause pattern matching on \`PlanType\`:
+  - \`standard\`: Returns \`{ok, Total}\` where total is \`ConnectionFeeCents + (DurationSec * 5)\`.
+  - \`premium\`: Returns \`{ok, Total}\` where total is \`ConnectionFeeCents + (DurationSec * 3)\`.
+  - \`internal\`: Internal company calls are free. Returns \`{ok, 0}\` regardless of duration or fee.
+  - Any other plan: Returns \`{error, unknown_plan}\`.
+- **Examples**:
+  - \`telecom_foundations:bill_call(60, standard, 10)\` returns \`{ok, 310}\`.
+  - \`telecom_foundations:bill_call(100, premium, 25)\` returns \`{ok, 325}\`.
+  - \`telecom_foundations:bill_call(3600, internal, 10)\` returns \`{ok, 0}\`.
+  - \`telecom_foundations:bill_call(60, custom_plan, 10)\` returns \`{error, unknown_plan}\`.
 
 ## Rules & Verification Constraints
 
@@ -1903,23 +1940,16 @@ Implement \`src/telecom_foundations.erl\` with the following exports:
         content: `-module(telecom_foundations).
 -export([classify_packet/1, bill_call/2, bill_call/3]).
 
-%% @doc Classify packet tuples into {ok, Protocol, Src, Dst, FirstPayloadItem}.
-%% Return {error, empty_payload} if the payload list is [].
-%% Return {error, invalid_packet} for any other input.
-classify_packet(_Packet) ->
-    %% Implement multi-clause packet pattern matching for ipv4 and ipv6 tuples,
-    %% guarding against empty payload lists and handling malformed input.
+%% @doc Classify network packet tuple and extract protocol, endpoints, and lead payload.
+classify_packet(Packet) ->
     ok.
 
-%% @doc Bill call with default 10 cent connection fee. Delegates to bill_call/3.
+%% @doc Calculate call charge using the default connection fee of 10 cents.
 bill_call(DurationSec, PlanType) ->
-    %% Delegate to bill_call/3 with default 10 cent connection fee.
     ok.
 
-%% @doc Bill call with explicit connection fee.
-%% Rates: standard = 5c/sec, premium = 3c/sec, internal = 0c, other = {error, unknown_plan}.
-bill_call(_DurationSec, _PlanType, _ConnectionFeeCents) ->
-    %% Calculate total bill based on duration and plan rate, or return {error, unknown_plan}.
+%% @doc Calculate total call charge in cents given duration, plan tier, and connection fee.
+bill_call(DurationSec, PlanType, ConnectionFeeCents) ->
     ok.`,
       },
     ],
@@ -1951,23 +1981,16 @@ bill_call(_DurationSec, _OtherPlan, _ConnectionFeeCents) ->
     starterCode: `-module(telecom_foundations).
 -export([classify_packet/1, bill_call/2, bill_call/3]).
 
-%% @doc Classify packet tuples into {ok, Protocol, Src, Dst, FirstPayloadItem}.
-%% Return {error, empty_payload} if the payload list is [].
-%% Return {error, invalid_packet} for any other input.
-classify_packet(_Packet) ->
-    %% Implement multi-clause packet pattern matching for ipv4 and ipv6 tuples,
-    %% guarding against empty payload lists and handling malformed input.
+%% @doc Classify network packet tuple and extract protocol, endpoints, and lead payload.
+classify_packet(Packet) ->
     ok.
 
-%% @doc Bill call with default 10 cent connection fee. Delegates to bill_call/3.
+%% @doc Calculate call charge using the default connection fee of 10 cents.
 bill_call(DurationSec, PlanType) ->
-    %% Delegate to bill_call/3 with default 10 cent connection fee.
     ok.
 
-%% @doc Bill call with explicit connection fee.
-%% Rates: standard = 5c/sec, premium = 3c/sec, internal = 0c, other = {error, unknown_plan}.
-bill_call(_DurationSec, _PlanType, _ConnectionFeeCents) ->
-    %% Calculate total bill based on duration and plan rate, or return {error, unknown_plan}.
+%% @doc Calculate total call charge in cents given duration, plan tier, and connection fee.
+bill_call(DurationSec, PlanType, ConnectionFeeCents) ->
     ok.`,
     solutionCode: `-module(telecom_foundations).
 -export([classify_packet/1, bill_call/2, bill_call/3]).

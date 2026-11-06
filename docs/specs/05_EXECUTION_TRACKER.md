@@ -1983,6 +1983,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module compiled cleanly with 0 errors.
 
+## Phase 95: Pedagogical Despoiling of Chapter 1 Lecture 8 (`ch01-l08`)
+- [x] **95.1: Audit & Eliminate Exercise Code Spoilers in Lecture 1.8 Problem Set (`ch01-l08`)**:
+  - Replaced `freight_engine.erl` parallel example (which had mirrored `classify_packet` and `bill_call` 1-to-1 with identical clause counts and structure) with a distinct `media_router.erl` streaming chunk module demonstrating multi-clause container inspection (`route_stream/1`), buffer reservation cascading (`compute_reservation/2`), and tier-based reservation mathematics (`compute_reservation/3`).
+  - Audited and de-spoiled Assignment Specification: converted all clause descriptions into clean `Input`, `Behavior`, and `Examples` blocks without Erlang expression spoilers or syntax spoon-feeding.
+  - Upgraded starter code comments from spoon-fed lines to clean, standard `@doc` contracts in both `files[0].content` and `starterCode`.
+- [x] **95.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `go test`: `TestDynamicVisibleTestsCurriculum` passed all visible tests for `ch01-l06`, `ch01-l07`, and `ch01-l08` cleanly on OTP 29.
+  - `erlc.exe`: Starter module compiled cleanly with 0 errors.
+
 
 
 
