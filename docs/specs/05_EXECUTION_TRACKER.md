@@ -1930,6 +1930,16 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
   - `go test -v -run TestDynamicVisibleTestsCurriculum`: Passed `ch01-l05` dynamic compilation and all 3 visible tests cleanly on OTP 29 with zero errors.
 
+## Phase 90: Pedagogical Despoiling of Chapter 1 Lecture 2 (`ch01-l02`)
+- [x] **90.1: Audit & Eliminate Exercise Code Spoilers in Concept Markdown (`apps/web-ide/src/data/chapters/ch01.ts`)**:
+  - Replaced `thermal_monitor.erl` parallel example (which had mirrored `is_within_quota`'s exact boolean logic `Override =:= true orelse (CurrentTemp >= 0 andalso CurrentTemp =< MaxSafe)` and `is_exact_match`'s 1-liner 1-to-1) with a distinct `player_meter.erl` resource module demonstrating division & remainder (`split_elapsed_time/1`), strict equality on tier atoms (`is_same_tier/2`), and compound bonus qualifications (`is_reward_eligible/3`).
+  - Audited and de-spoiled the Assignment Specification bullets: removed literal formula strings (`(Bytes * 8) div Seconds`, `=:=`, and `IsAdmin =:= true orelse (UsedMb >= 0 andalso UsedMb =< LimitMb)`) in favor of clean mathematical/functional definitions with `Input`, `Behavior`, and `Examples`.
+  - Upgraded starter code comments from spoon-fed lines to standard developer `@doc` contracts.
+- [x] **90.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+
+
 
 
 
