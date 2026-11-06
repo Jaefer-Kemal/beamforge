@@ -942,14 +942,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           }));
         }
 
-        // 2. Fetch progress from Neon DB backend
+        // 2. Fetch authoritative progress directly from Neon DB backend
         const res = await fetch(`/api/user-progress?userId=${currentUserId}`);
         if (res.ok) {
           const data = await res.json();
           if (data.user) {
             const dbUser: UserProfile = data.user;
+            const authoritativeCompleted: string[] = data.completedLevelIds || dbUser.completedLevelIds || [];
+            const acceptedFiles: Record<string, Record<string, string>> = data.acceptedFiles || {};
+
+            // Immediate cross-device sync into localStorage
+            authoritativeCompleted.forEach((lid: string) => {
+              try { localStorage.setItem(`beamforge_completed_${lid}`, 'true'); } catch {}
+            });
+
+            Object.entries(acceptedFiles).forEach(([exId, filesMap]) => {
+              try {
+                localStorage.setItem(`beamforge_accepted_${currentUserId}_${exId}`, JSON.stringify(filesMap));
+              } catch {}
+            });
+
             set((state) => {
-              const mergedCompleted = Array.from(new Set([...state.completedLevelIds, ...(dbUser.completedLevelIds || [])]));
+              const mergedCompleted = Array.from(new Set([...state.completedLevelIds, ...authoritativeCompleted]));
               const mergedUnlockedSolutions = Array.from(new Set([...state.unlockedSolutionLessonIds, ...(dbUser.unlockedSolutionLessonIds || [])]));
               const mergedXp = Math.max(state.totalXp, dbUser.totalXp || 0);
               const mergedUser: UserProfile = {
@@ -959,6 +973,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
                 totalXp: mergedXp,
                 unlockedSolutionLessonIds: mergedUnlockedSolutions,
               };
+
+              // If the currently open exercise has accepted files in DB and current files are just unmodified starter code, hydrate them!
+              let currentFiles = state.files;
+              if (acceptedFiles[state.activeExerciseId]) {
+                const acceptedMap = acceptedFiles[state.activeExerciseId];
+                currentFiles = currentFiles.map((f) => ({
+                  ...f,
+                  content: acceptedMap[f.path] || f.content,
+                }));
+              }
+
               try {
                 localStorage.setItem(`beamforge_user_${currentUserId}`, JSON.stringify(mergedUser));
                 localStorage.setItem('beamforge_progress', JSON.stringify({
@@ -975,6 +1000,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
                 completedWithXpLevelIds: mergedCompleted,
                 totalXp: mergedXp,
                 unlockedSolutionLessonIds: mergedUnlockedSolutions,
+                files: currentFiles,
                 isHydrated: true,
               };
             });
@@ -1630,9 +1656,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         } catch {}
       }
 
-      // Persist to Neon DB
+      // Persist to Neon DB with immediate authoritative reconciliation
       try {
-        await fetch('/api/user-progress', {
+        const res = await fetch('/api/user-progress', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1640,6 +1666,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             submission: newRecord,
           }),
         });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.completedLevelIds && Array.isArray(data.completedLevelIds)) {
+            set((state) => ({
+              completedLevelIds: Array.from(new Set([...state.completedLevelIds, ...data.completedLevelIds])),
+              totalXp: data.totalXp ? Math.max(state.totalXp, data.totalXp) : state.totalXp,
+              currentUser: data.user ? { ...state.currentUser, ...data.user } : state.currentUser,
+            }));
+            data.completedLevelIds.forEach((lid: string) => {
+              try { localStorage.setItem(`beamforge_completed_${lid}`, 'true'); } catch {}
+            });
+          }
+        }
       } catch (err) {
         console.warn('[Submissions] Neon DB sync notice:', err);
       }

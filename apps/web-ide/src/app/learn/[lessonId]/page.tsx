@@ -39,6 +39,7 @@ export default function LessonPage() {
     celebrationBadge,
     isBadgeCelebrationOpen,
     closeBadgeCelebration,
+    isHydrated,
     hydrateFromStorageAndDb,
   } = useWorkspaceStore();
 
@@ -119,8 +120,8 @@ export default function LessonPage() {
       {/* Top Floating Glass Bar */}
       <BootDevTopBar />
 
-      {/* Locked Lesson Warning Banner for direct URL navigation */}
-      {!currentAccess.isUnlocked && currentAccess.prerequisite && (
+      {/* Locked Lesson Warning Banner for direct URL navigation (only after authoritative backend hydration) */}
+      {isHydrated && !currentAccess.isUnlocked && currentAccess.prerequisite && (
         <div
           id="locked-lesson-banner"
           className="fixed top-16 left-1/2 -translate-x-1/2 z-40 flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl shadow-xl animate-slide-down border transition-all duration-300 max-w-2xl w-[92vw] sm:w-auto"

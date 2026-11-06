@@ -1683,3 +1683,27 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npx tsc --noEmit`: Passed with 0 errors.
   - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+
+## Phase 77: Authoritative Backend-Ledger Progression & Cross-Device Synchronization
+- [x] **77.1: Authoritative Backend-Ledger Reconciliation (`route.ts`)**:
+  - In `apps/web-ide/src/app/api/user-progress/route.ts`, upgraded the `GET` endpoint to query `beamforge_submissions` for distinct passed submissions (`WHERE user_id = $userId AND status = 'passed'`), extracting `dbPassedIds` and authoritative `acceptedFiles`.
+  - Automatically reconciles `beamforge_users.completed_level_ids` with `mergedCompleted = Array.from(new Set([...completedLevelIds, ...dbPassedIds]))` and issues an atomic `UPDATE` if drift is detected.
+  - Upgraded the `POST` endpoint (`action: 'record_submission'`): upon recording a passed submission (`sub.status === 'passed'`), atomically queries all passed submissions for the learner, updates `beamforge_users` (`completed_level_ids`, `total_xp`, `level`, `role`, `last_active_exercise`, `updated_at`), and returns `{ status: 'ok', isPassed: true, completedLevelIds, totalXp, user, dbConnected: true }`.
+- [x] **77.2: Cross-Device State Hydration & Accepted Code Sync (`useWorkspaceStore.ts`)**:
+  - In `apps/web-ide/src/state/useWorkspaceStore.ts`:
+    - Upgraded `hydrateFromStorageAndDb`: parses authoritative `completedLevelIds` and `acceptedFiles` returned by `GET /api/user-progress`.
+    - Synchronizes `beamforge_completed_${lid}` and `beamforge_accepted_${uid}_${exId}` directly into device `localStorage`.
+    - Automatically hydrates the active workspace files with accepted code if currently displaying unmodified starter code, ensuring learners switching devices (e.g. mobile to desktop) see their accepted solution code.
+    - Upgraded `recordSubmission`: immediately consumes the updated `completedLevelIds` and `totalXp` returned from the backend, setting Zustand state and writing `beamforge_completed_${lid}` to `localStorage`.
+- [x] **77.3: Hydration-Guarded Route Access & False Lockout Elimination (`page.tsx`)**:
+  - In `apps/web-ide/src/app/learn/[lessonId]/page.tsx`:
+    - Destructured `isHydrated` from `useWorkspaceStore()`.
+    - Guarded the locked warning banner with `isHydrated && !currentAccess.isUnlocked && currentAccess.prerequisite`, eliminating the false initial lockout flash when opening a lesson on a new device before backend hydration completes.
+- [x] **77.4: Live Neon Database Reconciled**:
+  - Inspected and verified the live Neon PostgreSQL database (`beamforge_users` and `beamforge_submissions`), reconciling `user_alpha` to include both `ch01-l01` and `ch01-l02` with 150 total XP.
+- [x] **77.5: Compiler & Production Build Verification**:
+  - `npx tsc --noEmit`: Passed with 0 errors.
+  - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Erlang AST verifier and grader modules compiled cleanly with 0 errors.
+

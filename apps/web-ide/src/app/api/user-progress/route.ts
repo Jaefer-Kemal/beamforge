@@ -161,6 +161,23 @@ export async function GET(req: NextRequest) {
 
   try {
     await ensureTable(sql);
+
+    // Query all passed submissions for this user — the authoritative backend source of truth
+    const passedSubmissions = await sql`
+      SELECT DISTINCT ON (exercise_id) exercise_id, status, score, created_at, files
+      FROM beamforge_submissions
+      WHERE user_id = ${userId} AND status = 'passed'
+      ORDER BY exercise_id, created_at DESC
+    `;
+
+    const dbPassedIds: string[] = (passedSubmissions || []).map((s: any) => s.exercise_id);
+    const acceptedFiles: Record<string, Record<string, string>> = {};
+    for (const s of passedSubmissions || []) {
+      if (s.files && typeof s.files === 'object') {
+        acceptedFiles[s.exercise_id] = s.files;
+      }
+    }
+
     const rows = await sql`
       SELECT id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, last_activity_date
       FROM beamforge_users
@@ -176,6 +193,9 @@ export async function GET(req: NextRequest) {
       }
       if (!Array.isArray(completedLevelIds)) completedLevelIds = [];
 
+      // Reconcile user profile completed list with authoritative passed submissions
+      const mergedCompleted = Array.from(new Set([...completedLevelIds, ...dbPassedIds]));
+
       let unlockedSolutionLessonIds = r.unlocked_solution_lesson_ids;
       if (typeof unlockedSolutionLessonIds === 'string') {
         try { unlockedSolutionLessonIds = JSON.parse(unlockedSolutionLessonIds); } catch { unlockedSolutionLessonIds = []; }
@@ -184,6 +204,16 @@ export async function GET(req: NextRequest) {
 
       const totalXp = Number(r.total_xp || 0);
       const derived = xpToRole(totalXp);
+
+      if (mergedCompleted.length > completedLevelIds.length) {
+        await sql`
+          UPDATE beamforge_users
+          SET completed_level_ids = ${JSON.stringify(mergedCompleted)},
+              updated_at = NOW()
+          WHERE id = ${userId}
+        `;
+      }
+
       const user: UserProfile = {
         id: r.id,
         name: r.name,
@@ -192,16 +222,23 @@ export async function GET(req: NextRequest) {
         avatarColor: preset.avatarColor,
         bio: preset.bio,
         totalXp,
-        completedLevelIds,
+        completedLevelIds: mergedCompleted,
         unlockedSolutionLessonIds,
         lastActiveExercise: r.last_active_exercise || preset.lastActiveExercise,
         streakDays: Number(r.streak_days || preset.streakDays || 1),
         lastActivityDate: r.last_activity_date || preset.lastActivityDate,
       };
-      return NextResponse.json({ source: 'neon', user, dbConnected: true });
+      return NextResponse.json({
+        source: 'neon',
+        user,
+        completedLevelIds: mergedCompleted,
+        acceptedFiles,
+        dbConnected: true,
+      });
     }
 
-    // Seed preset user if not in database yet
+    // Seed preset user if not in database yet, seeded with any existing passed submissions
+    const initialCompleted = Array.from(new Set([...preset.completedLevelIds, ...dbPassedIds]));
     await sql`
       INSERT INTO beamforge_users (
         id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, last_activity_date
@@ -211,7 +248,7 @@ export async function GET(req: NextRequest) {
         ${preset.role},
         ${preset.level},
         ${preset.totalXp},
-        ${JSON.stringify(preset.completedLevelIds)},
+        ${JSON.stringify(initialCompleted)},
         ${JSON.stringify(preset.unlockedSolutionLessonIds)},
         ${preset.lastActiveExercise},
         ${preset.streakDays || 1},
@@ -220,7 +257,18 @@ export async function GET(req: NextRequest) {
       ON CONFLICT (id) DO NOTHING
     `;
 
-    return NextResponse.json({ source: 'neon_seeded', user: preset, dbConnected: true });
+    const seededUser: UserProfile = {
+      ...preset,
+      completedLevelIds: initialCompleted,
+    };
+
+    return NextResponse.json({
+      source: 'neon_seeded',
+      user: seededUser,
+      completedLevelIds: initialCompleted,
+      acceptedFiles,
+      dbConnected: true,
+    });
   } catch (error: any) {
     console.error('[Neon DB] GET user error:', error);
     return NextResponse.json({
@@ -263,7 +311,68 @@ export async function POST(req: NextRequest) {
           NOW()
         )
       `;
-      return NextResponse.json({ status: 'ok', submissionId: subId, dbConnected: true });
+
+      let updatedCompletedIds: string[] = [];
+      let updatedXp = 0;
+      let updatedUser: UserProfile | null = null;
+
+      if (sub.status === 'passed') {
+        const passedRows = await sql`
+          SELECT DISTINCT exercise_id FROM beamforge_submissions WHERE user_id = ${sub.userId} AND status = 'passed'
+        `;
+        updatedCompletedIds = (passedRows || []).map((r: any) => r.exercise_id);
+
+        const userRows = await sql`SELECT * FROM beamforge_users WHERE id = ${sub.userId} LIMIT 1`;
+        if (userRows && userRows.length > 0) {
+          const u = userRows[0];
+          let prevCompleted = u.completed_level_ids;
+          if (typeof prevCompleted === 'string') {
+            try { prevCompleted = JSON.parse(prevCompleted); } catch { prevCompleted = []; }
+          }
+          if (!Array.isArray(prevCompleted)) prevCompleted = [];
+
+          const isNewlyCompleted = !prevCompleted.includes(sub.exerciseId);
+          const xpToAdd = isNewlyCompleted ? (sub.xpReward || 100) : 0;
+          updatedXp = Number(u.total_xp || 0) + xpToAdd;
+          const { level, role } = xpToRole(updatedXp);
+
+          await sql`
+            UPDATE beamforge_users
+            SET completed_level_ids = ${JSON.stringify(updatedCompletedIds)},
+                total_xp = ${updatedXp},
+                level = ${level},
+                role = ${role},
+                last_active_exercise = ${sub.exerciseId},
+                updated_at = NOW()
+            WHERE id = ${sub.userId}
+          `;
+
+          updatedUser = {
+            id: u.id,
+            name: u.name,
+            role,
+            level,
+            avatarColor: '#3B82F6',
+            bio: '',
+            totalXp: updatedXp,
+            completedLevelIds: updatedCompletedIds,
+            unlockedSolutionLessonIds: u.unlocked_solution_lesson_ids || [],
+            lastActiveExercise: sub.exerciseId,
+            streakDays: Number(u.streak_days || 1),
+            lastActivityDate: u.last_activity_date,
+          };
+        }
+      }
+
+      return NextResponse.json({
+        status: 'ok',
+        submissionId: subId,
+        isPassed: sub.status === 'passed',
+        completedLevelIds: updatedCompletedIds,
+        totalXp: updatedXp,
+        user: updatedUser,
+        dbConnected: true,
+      });
     }
 
     // Action: Reset Submissions
