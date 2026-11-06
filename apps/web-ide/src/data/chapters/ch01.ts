@@ -1201,14 +1201,14 @@ They can have different logic, different return types, and different implementat
 
 In idiomatic Erlang, functions with lower arity are used to provide **Default Arguments** by calling higher-arity versions:
 \`\`\`erlang
-connect(Host) ->
-    connect(Host, ?DEFAULT_PORT).
+query_cache(Key) ->
+    query_cache(Key, ?DEFAULT_TTL).
 
-connect(Host, Port) ->
-    connect(Host, Port, ?DEFAULT_TIMEOUT).
+query_cache(Key, TtlSeconds) ->
+    query_cache(Key, TtlSeconds, ?DEFAULT_REGION).
 
-connect(Host, Port, Timeout) ->
-    {connection, Host, Port, Timeout}.
+query_cache(Key, TtlSeconds, Region) ->
+    {cache_query, Key, TtlSeconds, Region}.
 \`\`\`
 
 ### Compile-Time Macros (\`-define\`)
@@ -1230,28 +1230,32 @@ To invoke a macro in code, prepend a question mark (\`?\`):
 
 ## Parallel Worked Example
 
-Here is a database connection client providing cascading default parameters:
+Consider a distributed telemetry metrics emitter:
 
 \`\`\`erlang
--module(db_client).
--export([open/1, open/2, open/3]).
+-module(metrics_emitter).
+-export([emit/1, emit/2, emit/3]).
 
--define(DB_PORT, 5432).
--define(DB_POOL, 10).
+-define(DEFAULT_SEVERITY, info).
+-define(BUFFER_CAPACITY, 100).
 
-open(Host) ->
-    open(Host, ?DB_PORT).
+%% Emit an event metric using the default severity level
+emit(MetricName) ->
+    emit(MetricName, ?DEFAULT_SEVERITY).
 
-open(Host, Port) ->
-    open(Host, Port, ?DB_POOL).
+%% Emit an event metric with custom severity, cascading to full payload configuration
+emit(MetricName, Severity) ->
+    emit(MetricName, Severity, ?BUFFER_CAPACITY).
 
-open(Host, Port, PoolSize) ->
-    {db_conn, ?MODULE, Host, Port, PoolSize}.
+%% Construct a 5-element telemetry packet embedding the origin module via ?MODULE
+emit(MetricName, Severity, BufferLimit) ->
+    {metric_packet, ?MODULE, MetricName, Severity, BufferLimit}.
 \`\`\`
 
 Notice:
-- \`open/1\` delegates to \`open/2\`, which delegates to \`open/3\`.
-- The built-in macro \`?MODULE\` embeds the module atom \`db_client\` into the returned tuple.
+- \`emit/1\` delegates to \`emit/2\`, which in turn delegates to \`emit/3\`, demonstrating idiomatic arity cascading.
+- Compile-time constants (\`?DEFAULT_SEVERITY\` and \`?BUFFER_CAPACITY\`) supply default arguments cleanly.
+- The built-in macro \`?MODULE\` automatically embeds the current module's atom name into the returned record tuple.
 
 ## Official Erlang Docs & Function Reference
 
@@ -1265,20 +1269,28 @@ Notice:
 
 ## Assignment Specification
 
-Implement the network connection module \`arity_calc.erl\`:
+In \`arity_calc.erl\`, implement compile-time constants and a cascading network connection interface:
 
-1. Define two compile-time macros:
-   - \`-define(DEFAULT_PORT, 80).\`
-   - \`-define(DEFAULT_TIMEOUT, 5000).\`
+1. **Compile-Time Macros**:
+   - Define a macro \`DEFAULT_PORT\` with the integer value \`80\`.
+   - Define a macro \`DEFAULT_TIMEOUT\` with the integer value \`5000\` (milliseconds).
 
-2. Implement the three cascading arity functions:
+2. **Cascading Functions**:
    - \`connect(Host)\`:
-     - Delegates to \`connect(Host, ?DEFAULT_PORT)\`.
+     - **Input**: A host identifier \`Host\` (atom or string, e.g., \`localhost\`).
+     - **Behavior**: Delegate to the arity-2 version of \`connect\`, supplying the default port defined by your \`DEFAULT_PORT\` macro.
+     - **Example**: \`arity_calc:connect(localhost)\` delegates to \`connect(localhost, 80)\`.
    - \`connect(Host, Port)\`:
-     - Delegates to \`connect(Host, Port, ?DEFAULT_TIMEOUT)\`.
+     - **Input**: A host identifier \`Host\` and integer \`Port\`.
+     - **Behavior**: Delegate to the arity-3 version of \`connect\`, supplying the default timeout defined by your \`DEFAULT_TIMEOUT\` macro.
+     - **Example**: \`arity_calc:connect(localhost, 8080)\` delegates to \`connect(localhost, 8080, 5000)\`.
    - \`connect(Host, Port, Timeout)\`:
-     - Returns a 5-element tagged tuple:
-       \`{connection, ?MODULE, Host, Port, Timeout}\`.
+     - **Input**: A host identifier \`Host\`, integer \`Port\`, and integer \`Timeout\`.
+     - **Behavior**: Construct and return a 5-element tagged tuple. The tuple must start with the tag atom \`connection\`, followed by the current module name (using the built-in \`?MODULE\` macro), \`Host\`, \`Port\`, and \`Timeout\`.
+     - **Examples**:
+       - \`arity_calc:connect(localhost)\` returns \`{connection, arity_calc, localhost, 80, 5000}\`.
+       - \`arity_calc:connect(localhost, 8080)\` returns \`{connection, arity_calc, localhost, 8080, 5000}\`.
+       - \`arity_calc:connect(localhost, 8080, 2500)\` returns \`{connection, arity_calc, localhost, 8080, 2500}\`.
 
 ## Rules & Verification Constraints
 
@@ -1354,24 +1366,19 @@ Implement the network connection module \`arity_calc.erl\`:
         content: `-module(arity_calc).
 -export([connect/1, connect/2, connect/3]).
 
-%% Define DEFAULT_PORT as 80 and DEFAULT_TIMEOUT as 5000 using -define.
 -define(DEFAULT_PORT, 80).
 -define(DEFAULT_TIMEOUT, 5000).
 
-%% @doc Connect with default port and timeout.
+%% @doc Connect using default port (80) and default timeout (5000ms).
 connect(Host) ->
-    %% Delegate to connect/2 using ?DEFAULT_PORT.
     ok.
 
-%% @doc Connect with explicit port and default timeout.
+%% @doc Connect with explicit port and default timeout (5000ms).
 connect(Host, Port) ->
-    %% Delegate to connect/3 using ?DEFAULT_TIMEOUT.
     ok.
 
-%% @doc Connect with full parameters. Returns tagged 5-tuple.
+%% @doc Connect with explicit port and timeout. Returns a 5-element tagged connection tuple.
 connect(Host, Port, Timeout) ->
-    %% Construct and return a 5-element tagged tuple starting with 'connection',
-    %% the current module macro, Host, Port, and Timeout.
     ok.`,
       },
     ],
@@ -1394,24 +1401,19 @@ connect(Host, Port, Timeout) ->
     starterCode: `-module(arity_calc).
 -export([connect/1, connect/2, connect/3]).
 
-%% Define DEFAULT_PORT as 80 and DEFAULT_TIMEOUT as 5000 using -define.
 -define(DEFAULT_PORT, 80).
 -define(DEFAULT_TIMEOUT, 5000).
 
-%% @doc Connect with default port and timeout.
+%% @doc Connect using default port (80) and default timeout (5000ms).
 connect(Host) ->
-    %% Delegate to connect/2 using ?DEFAULT_PORT.
     ok.
 
-%% @doc Connect with explicit port and default timeout.
+%% @doc Connect with explicit port and default timeout (5000ms).
 connect(Host, Port) ->
-    %% Delegate to connect/3 using ?DEFAULT_TIMEOUT.
     ok.
 
-%% @doc Connect with full parameters. Returns tagged 5-tuple.
+%% @doc Connect with explicit port and timeout. Returns a 5-element tagged connection tuple.
 connect(Host, Port, Timeout) ->
-    %% Construct and return a 5-element tagged tuple starting with 'connection',
-    %% the current module macro, Host, Port, and Timeout.
     ok.`,
     solutionCode: `-module(arity_calc).
 -export([connect/1, connect/2, connect/3]).

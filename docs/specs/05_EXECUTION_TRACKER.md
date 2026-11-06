@@ -1962,6 +1962,16 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
 
+## Phase 93: Pedagogical Despoiling of Chapter 1 Lecture 6 (`ch01-l06`)
+- [x] **93.1: Audit & Eliminate Exercise Code Spoilers in Lecture 1.6 (`ch01-l06`)**:
+  - Neutralized concept notes arity cascading explanation: replaced `connect(Host) -> connect(Host, ?DEFAULT_PORT)` with `query_cache(Key) -> query_cache(Key, ?DEFAULT_TTL)`.
+  - Replaced `db_client.erl` parallel example with `metrics_emitter.erl` demonstrating telemetry severity cascading (`emit/1`, `emit/2`, `emit/3`) with compile-time macros `?DEFAULT_SEVERITY` and `?BUFFER_CAPACITY` and embedding `?MODULE`.
+  - Audited and de-spoiled Assignment Specification: transformed cascading arity descriptions into clean `Input`, `Behavior`, and `Examples` blocks without syntax spoilers.
+  - Refactored starter code doc comments from spoon-fed implementation steps to clean `@doc` contracts in both `files[0].content` and `starterCode`.
+- [x] **93.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+
 
 
 
