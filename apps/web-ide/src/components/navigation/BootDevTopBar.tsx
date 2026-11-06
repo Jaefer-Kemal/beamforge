@@ -419,7 +419,7 @@ export function BootDevTopBar() {
             <span suppressHydrationWarning>{mounted ? totalXp.toLocaleString() : '0'} XP</span>
           </div>
 
-          {/* Leaderboard Trophy Button */}
+          {/* Leaderboard Trophy Button — Desktop only */}
           <button
             id="leaderboard-btn"
             onClick={() => {
@@ -427,7 +427,7 @@ export function BootDevTopBar() {
               setIsLeaderboardOpen(true);
             }}
             title="Global Leaderboard (Neon Cloud)"
-            className="flex items-center justify-center w-7 h-7 rounded-full transition-all cursor-pointer hover:scale-105"
+            className="hidden md:flex items-center justify-center w-7 h-7 rounded-full transition-all cursor-pointer hover:scale-105"
             style={{
               background: isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.12)',
               border: '1px solid rgba(245, 158, 11, 0.35)',
@@ -437,12 +437,12 @@ export function BootDevTopBar() {
             <Trophy className="w-3.5 h-3.5 fill-amber-500/20" />
           </button>
 
-          {/* Streak Badge */}
+          {/* Streak Badge — Desktop only (accessible via mobile hamburger menu) */}
           <div
             id="streak-badge"
             suppressHydrationWarning
             title={`${currentUser?.streakDays || 1} day active streak! Complete a lesson daily to keep your flame lit.`}
-            className="flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold transition-all"
+            className="hidden md:flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold transition-all"
             style={{
               background: 'linear-gradient(135deg, rgba(239,68,68,0.18) 0%, rgba(249,115,22,0.12) 100%)',
               border: '1px solid rgba(239,68,68,0.35)',
@@ -1101,25 +1101,8 @@ export function BootDevTopBar() {
           </div>
         </div>
 
-        {/* ── MOBILE RIGHT ZONE: Compact Nav + Menu Toggle ─────────────────────── */}
+        {/* ── MOBILE RIGHT ZONE: Compact Lesson Arrows + Menu Toggle ─────────────────────── */}
         <div className="flex md:hidden items-center gap-1.5 flex-shrink-0">
-          <button
-            id="mobile-leaderboard-btn"
-            onClick={() => {
-              setDrawerTab('rankings');
-              setIsLeaderboardOpen(true);
-            }}
-            title="Global Leaderboard"
-            className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer"
-            style={{
-              background: isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.12)',
-              border: '1px solid rgba(245, 158, 11, 0.35)',
-              color: '#F59E0B',
-            }}
-          >
-            <Trophy className="w-4 h-4 fill-amber-500/20" />
-          </button>
-
           <button
             id="mobile-prev-lesson-btn"
             onClick={handlePrevLesson}
@@ -1186,23 +1169,26 @@ export function BootDevTopBar() {
             WebkitBackdropFilter: 'blur(32px)',
           }}
         >
-          {/* Drawer Profile & XP Bar */}
+          {/* Drawer Profile & Gamified Stats (No duplicate XP, single close control) */}
           <div
             className="p-4 border-b flex items-center justify-between"
             style={{ borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)' }}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Streak Badge */}
               <div
-                className="xp-badge-glow flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold"
                 style={{
-                  background: 'linear-gradient(135deg, rgba(245,158,11,0.18) 0%, rgba(217,119,6,0.12) 100%)',
-                  border: '1px solid rgba(245,158,11,0.35)',
-                  color: '#F59E0B',
+                  background: 'linear-gradient(135deg, rgba(239,68,68,0.18) 0%, rgba(249,115,22,0.12) 100%)',
+                  border: '1px solid rgba(239,68,68,0.35)',
+                  color: '#F97316',
                 }}
               >
-                <Zap className="w-3.5 h-3.5 fill-amber-500" />
-                <span>{mounted ? totalXp.toLocaleString() : '0'} XP</span>
+                <Flame className="w-3.5 h-3.5 fill-orange-500" />
+                <span>{currentUser?.streakDays || 1}d Streak</span>
               </div>
+
+              {/* Level & Role Pill */}
               <button
                 onClick={() => {
                   setMobileMenuOpen(false);
@@ -1218,26 +1204,25 @@ export function BootDevTopBar() {
               >
                 Lv{mounted ? level : 1} · {mounted ? role : 'Apprentice'}
               </button>
-              <div
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold"
+
+              {/* Global Leaderboard Button */}
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setDrawerTab('rankings');
+                  setIsLeaderboardOpen(true);
+                }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold cursor-pointer transition-all"
                 style={{
-                  background: 'linear-gradient(135deg, rgba(239,68,68,0.18) 0%, rgba(249,115,22,0.12) 100%)',
-                  border: '1px solid rgba(239,68,68,0.35)',
-                  color: '#F97316',
+                  background: isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.12)',
+                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                  color: '#F59E0B',
                 }}
               >
-                <Flame className="w-3.5 h-3.5 fill-orange-500" />
-                <span>{currentUser?.streakDays || 1}d</span>
-              </div>
+                <Trophy className="w-3 h-3 fill-amber-500/20" />
+                <span>Leaderboard</span>
+              </button>
             </div>
-
-            <button
-              onClick={() => setMobileMenuOpen(false)}
-              className="p-2 rounded-xl text-xs font-semibold cursor-pointer"
-              style={{ color: isDark ? '#94A3B8' : '#64748B' }}
-            >
-              <X className="w-5 h-5" />
-            </button>
           </div>
 
           {/* View Switcher Links */}

@@ -139,11 +139,11 @@ export function LandingNavbar() {
               </Link>
             )}
 
-            {/* Light / Dark Mode Glass Toggle */}
+            {/* Light / Dark Mode Glass Toggle — Desktop only */}
             <button
               onClick={toggleTheme}
               aria-label={isDark ? 'Switch to Daylight Light Mode' : 'Switch to Midnight Dark Mode'}
-              className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100/60 dark:bg-slate-800/60 hover:bg-slate-200/60 dark:hover:bg-slate-700/60 border border-white/60 dark:border-white/10 transition-all focus:outline-none"
+              className="hidden md:inline-flex p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100/60 dark:bg-slate-800/60 hover:bg-slate-200/60 dark:hover:bg-slate-700/60 border border-white/60 dark:border-white/10 transition-all focus:outline-none"
             >
               {isDark ? (
                 <Sun className="w-4 h-4 text-amber-400" />
@@ -152,10 +152,10 @@ export function LandingNavbar() {
               )}
             </button>
 
-            {/* Primary Action Button */}
+            {/* Primary Action Button — Desktop only */}
             <Link
               href="/learn/ch01-l01"
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-[0_4px_16px_rgba(245,158,11,0.35)] transition-all hover:scale-[1.02] active:scale-[0.98] border border-amber-300/30"
+              className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-[0_4px_16px_rgba(245,158,11,0.35)] transition-all hover:scale-[1.02] active:scale-[0.98] border border-amber-300/30"
             >
               <span>Start Free</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -174,7 +174,7 @@ export function LandingNavbar() {
 
         {/* Mobile Dropdown Panel */}
         {mobileMenuOpen && (
-          <div className="md:hidden mt-3 pt-3 border-t border-slate-200/60 dark:border-slate-800/60 flex flex-col gap-1.5">
+          <div className="md:hidden mt-3 pt-3 border-t border-slate-200/60 dark:border-slate-800/60 flex flex-col gap-2">
             <Link
               href="/syllabus"
               onClick={() => setMobileMenuOpen(false)}
@@ -207,16 +207,53 @@ export function LandingNavbar() {
               <ShieldCheck className="w-4 h-4 text-amber-500" />
               XMPP Capstone Studio
             </a>
-            {lastLessonId && (
+
+            {/* Appearance Theme Selector (Settings Style) */}
+            <div className="pt-2 pb-1 border-t border-slate-200/60 dark:border-slate-800/60">
+              <div className="text-[11px] font-semibold mb-2 px-1 text-slate-500 dark:text-slate-400">
+                Appearance Theme
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  id="mobile-landing-theme-daylight-btn"
+                  onClick={() => { if (isDark) toggleTheme(); }}
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${!isDark ? 'border shadow-xs' : 'opacity-60 hover:opacity-100'}`}
+                  style={{
+                    background: !isDark ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255,255,255,0.05)',
+                    borderColor: !isDark ? 'rgba(245, 158, 11, 0.40)' : 'transparent',
+                    color: !isDark ? '#D97706' : '#94A3B8',
+                  }}
+                >
+                  <Sun className="w-4 h-4 text-amber-500" />
+                  <span>Daylight Glass</span>
+                </button>
+                <button
+                  id="mobile-landing-theme-midnight-btn"
+                  onClick={() => { if (!isDark) toggleTheme(); }}
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${isDark ? 'border shadow-xs' : 'opacity-60 hover:opacity-100'}`}
+                  style={{
+                    background: isDark ? 'rgba(139, 92, 246, 0.20)' : 'rgba(15,23,42,0.05)',
+                    borderColor: isDark ? 'rgba(139, 92, 246, 0.40)' : 'transparent',
+                    color: isDark ? '#C4B5FD' : '#64748B',
+                  }}
+                >
+                  <Moon className="w-4 h-4 text-purple-400" />
+                  <span>Midnight Glass</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Mobile Start Free CTA */}
+            <div className="pt-2">
               <Link
-                href={`/learn/${lastLessonId}`}
+                href={lastLessonId ? `/learn/${lastLessonId}` : '/learn/ch01-l01'}
                 onClick={() => setMobileMenuOpen(false)}
-                className="mt-1 px-3 py-2 rounded-xl text-sm font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center gap-2 border border-emerald-500/20"
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-[0_4px_16px_rgba(245,158,11,0.35)] active:scale-[0.98] transition-all"
               >
-                <Zap className="w-4 h-4 text-emerald-500" />
-                Resume Last Lesson ({lastLessonId})
+                <span>{lastLessonId ? `Resume Last Lesson (${lastLessonId})` : 'Start Free'}</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </Link>
-            )}
+            </div>
           </div>
         )}
       </div>

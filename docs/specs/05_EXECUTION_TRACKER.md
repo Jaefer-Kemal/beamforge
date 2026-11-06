@@ -1872,6 +1872,30 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: All Erlang grader modules compiled cleanly with 0 errors.
 
+## Phase 87: Mobile Responsive Refinements, Syllabus Layout De-clutter & Submissions Full-Scroll Engine
+- [x] **87.1: Landing Page Mobile Navbar Optimization (`LandingNavbar.tsx`)**:
+  - Hid Light/Dark toggle and "Start Free" CTA button on mobile viewports (`hidden md:inline-flex`), decluttering the 360–390px mobile header down to only the BeamForge brand logo and hamburger toggle.
+  - Relocated Light/Dark theme selection inside the hamburger dropdown panel using the glass settings style (Daylight Glass / Midnight Glass segmented buttons).
+  - Added full-width "Start Free" / "Resume Last Lesson" gradient CTA button at the bottom of the hamburger dropdown.
+- [x] **87.2: Syllabus Mobile Header Fix & Official Brand Icon Integration (`CurriculumWorldMap.tsx`)**:
+  - Replaced the generic blue ribbon `Award` icon in the syllabus hero banner with the official `BeamForgeLogo` inside a frosted glass gradient container.
+  - Resolved the chapter text "swallowed" bug: eliminated `.chapter-divider` (which had `height: 1px`) from the chapter header wrapper, preventing the lecture cards grid from overlapping and obscuring the 3-line chapter title, prerequisite badge, and "0/8 Passed" counter.
+  - Formatted the chapter header with responsive flex-wrap layout (`flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-200/60 dark:border-white/10`).
+- [x] **87.3: TopBar Mobile De-clutter & Single-Close Architecture (`BootDevTopBar.tsx`)**:
+  - Eliminated the duplicate leaderboard trophy button (`#mobile-leaderboard-btn`) and hid desktop trophies/streak badge on mobile (`hidden md:flex`). Mobile top bar now cleanly presents `[Logo] [XP Badge] ----------- [<] [>] [☰]`.
+  - Removed duplicate XP badge from inside the mobile menu drawer.
+  - Removed the redundant second `X` close button from inside the drawer header, establishing the topbar hamburger toggle as the single authoritative close control.
+- [x] **87.4: Mobile Label Abbreviations (`LessonSplitView.tsx`)**:
+  - Abbreviated "Concept & Code" to "Concept" on mobile screens (`<span>Concept<span className="hidden md:inline"> &amp; Code</span></span>`), saving ~50px horizontal space.
+  - Abbreviated "Back to Editor" to "Editor" on mobile results action bar (`<span><span className="hidden sm:inline">Back to </span>Editor</span>`), allowing all 3 action buttons to fit comfortably.
+- [x] **87.5: Submissions Full Scroll & Height Constraint Engine (`LessonSplitView.tsx`, `LessonSubmissionDetail.tsx`, `LessonSubmissionsList.tsx`)**:
+  - Added `h-full min-h-0` to the left textbook pane shell in `LessonSplitView.tsx`, solving the CSS Flexbox `min-height: auto` expansion bug.
+  - Upgraded `LessonSubmissionDetail.tsx` and `LessonSubmissionsList.tsx` root containers to `flex-1 min-h-0 flex flex-col h-full overflow-y-auto pb-24`, allowing complete vertical scrolling through multi-line submission code without any cut-offs or clipping.
+- [x] **87.6: Multi-Compiler & Production Build Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: All Erlang grader modules compiled cleanly with 0 errors.
+
 
 
 

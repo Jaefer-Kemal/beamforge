@@ -950,7 +950,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           ════════════════════════════════════════════════════════════════════ */}
       <div
         key={`left-pane-${lesson.id}`}
-        className={`${mobileTab === 'guide' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-col border-r overflow-hidden glass-specular-rim`}
+        className={`${mobileTab === 'guide' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-col h-full min-h-0 border-r overflow-hidden glass-specular-rim`}
         style={{
           background: isDark ? 'rgba(10, 15, 28, 0.40)' : 'rgba(255, 255, 255, 0.45)',
           backdropFilter: 'blur(28px) saturate(190%)',
@@ -1009,7 +1009,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
               ) : (
                 <>
                   <BookOpen className="w-3 h-3" />
-                  <span>Concept &amp; Code</span>
+                  <span>Concept<span className="hidden md:inline"> &amp; Code</span></span>
                 </>
               )}
             </span>
@@ -2311,7 +2311,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             }}
           >
             <Code2 className="w-3.5 h-3.5" />
-            <span>Back to Editor</span>
+            <span><span className="hidden sm:inline">Back to </span>Editor</span>
           </button>
 
           <button

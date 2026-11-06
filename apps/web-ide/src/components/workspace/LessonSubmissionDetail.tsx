@@ -65,7 +65,7 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
   });
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-y-auto px-5 py-4">
+    <div className="flex-1 min-h-0 flex flex-col h-full overflow-y-auto px-4 sm:px-5 py-4 pb-24">
       {/* Top Navigation & Timestamp */}
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <button

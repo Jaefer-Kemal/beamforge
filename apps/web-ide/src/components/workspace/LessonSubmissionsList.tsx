@@ -47,7 +47,7 @@ export const LessonSubmissionsList: React.FC<LessonSubmissionsListProps> = ({
   const passedCount = submissions.filter((s) => s.status === 'passed').length;
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-y-auto px-5 py-4">
+    <div className="flex-1 min-h-0 flex flex-col h-full overflow-y-auto px-4 sm:px-5 py-4 pb-24">
       {/* Submissions Header Stats Bar */}
       <div
         className="flex items-center justify-between p-3.5 rounded-xl mb-4"

@@ -26,6 +26,7 @@ import {
 import { COURSE_WORLDS } from '../../data/courseWorlds';
 import { ALL_CURRICULUM_CHAPTERS } from '../../data/chapters';
 import { CHAPTERS } from '../navigation/BootDevTopBar';
+import { BeamForgeLogo } from '../navigation/BeamForgeLogo';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import { PrerequisiteModal } from '../workspace/PrerequisiteModal';
 import { checkLessonAccess, LessonPrerequisiteInfo } from '../../lib/curriculumAccess';
@@ -360,18 +361,18 @@ export function CurriculumWorldMap() {
             }}
           />
           {/* Left: Branding & Course Title */}
-          <div className="flex items-center gap-5 z-10">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5 z-10">
             <div
-              className="w-16 h-16 rounded-2xl p-0.5 shadow-md flex items-center justify-center flex-shrink-0"
+              className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl p-0.5 shadow-md flex items-center justify-center flex-shrink-0"
               style={{
                 background: 'linear-gradient(135deg, #007AFF 0%, #8B5CF6 50%, #EC4899 100%)',
               }}
             >
               <div
-                className="w-full h-full rounded-[14px] flex items-center justify-center"
+                className="w-full h-full rounded-[14px] flex items-center justify-center shadow-inner"
                 style={{ background: isDark ? '#0B0F17' : '#FFFFFF' }}
               >
-                <Award className="w-8 h-8 text-blue-500" />
+                <BeamForgeLogo size={32} />
               </div>
             </div>
             <div>
@@ -634,11 +635,11 @@ export function CurriculumWorldMap() {
 
                         return (
                           <div key={chNum} className="space-y-3.5">
-                            {/* Chapter Header Line */}
-                            <div className="flex items-center justify-between pb-2 chapter-divider">
-                              <div className="flex items-center gap-2">
+                            {/* Chapter Header Line — Fully responsive, no height constraint clipping */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-200/60 dark:border-white/10">
+                              <div className="flex items-center gap-2 flex-wrap min-w-0">
                                 <span
-                                  className="text-xs font-extrabold px-2 py-0.5 rounded-md"
+                                  className="text-xs font-extrabold px-2 py-0.5 rounded-md shrink-0"
                                   style={{
                                     background: isDark ? 'rgba(139,92,246,0.20)' : 'rgba(124,58,237,0.12)',
                                     color: isDark ? '#C4B5FD' : '#7C3AED',
@@ -653,7 +654,7 @@ export function CurriculumWorldMap() {
                                   {chapterInfo?.title || `Chapter ${chNum}`}
                                 </h3>
                                 {!isChapterUnlocked && !devModeUnlockedAll && (
-                                  <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border opacity-70"
+                                  <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border opacity-70 shrink-0"
                                     style={{
                                       background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)',
                                       borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.10)',
@@ -665,13 +666,13 @@ export function CurriculumWorldMap() {
                                   </span>
                                 )}
                                 {isCurrentChapter && (
-                                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20 shrink-0">
                                     Current Chapter
                                   </span>
                                 )}
                               </div>
                               <span
-                                className="text-xs font-mono font-medium"
+                                className="text-xs font-mono font-medium self-end sm:self-auto shrink-0"
                                 style={{ color: isDark ? '#64748B' : '#94A3B8' }}
                               >
                                 {lessons.filter((l: any) => completedLevelIds.includes(l.id)).length}/{lessons.length} Passed
