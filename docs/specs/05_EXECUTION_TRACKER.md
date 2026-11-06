@@ -2078,6 +2078,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Reference solution and test assertions passed cleanly on OTP 29.
 
+## Phase 103: Pedagogical Despoiling of Chapter 2 Lecture 8 Problem Set (`ch02-l08`)
+- [x] **103.1: Audit & Eliminate Exercise Code Spoilers in Chapter 2 Capstone (`ch02-l08`)**:
+  - Eliminated the direct code leak in the concept guide (`process_orders_loop(Inventory, ...)`).
+  - Replaced concept breakdown code leaks with a generic abstract `process_batch/2` outer-inner pipeline diagram.
+  - Created a domain-disjoint Parallel Worked Example `quota_engine.erl` in the mobile subscriber / telecommunications data quota and billing domain (`deduct_usage/2`, `audit_billable_total/3`, `top_up_data/2`).
+  - Audited and de-spoiled Assignment Specification: converted prompt into comprehensive `Input`, `Behavior`, and `Examples` blocks for `process_order/2`, `calculate_order_total/2`, and `restock/2`.
+  - Refactored starter code doc comments: removed in-body `% TODO` and implementation hints across all three functions in `files[0].content` and `starterCode`.
+- [x] **103.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Reference solution and test runner compiled cleanly and passed all assertions on OTP 29 (`INVENTORY_ALL_PASS`).
+
+
 
 
 
