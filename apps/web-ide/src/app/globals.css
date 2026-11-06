@@ -284,9 +284,19 @@ samp,
     inset 0 -1px 0 rgba(0, 0, 0, 0.50);
 }
 
-/* Specular Rim — lit top edge reflection */
-.glass-specular-rim {
+/* Specular Rim — lit top edge reflection with strict position guards */
+.glass-specular-rim:not(.fixed):not(.absolute) {
   position: relative;
+}
+
+.glass-specular-rim.fixed,
+.fixed.glass-specular-rim {
+  position: fixed !important;
+}
+
+.glass-specular-rim.absolute,
+.absolute.glass-specular-rim {
+  position: absolute !important;
 }
 
 .glass-specular-rim::before {
@@ -307,10 +317,10 @@ samp,
   z-index: 10;
 }
 
-/* Specular Light Sweep animation */
+/* Specular Light Sweep animation — smooth, calm 2.8s glass reflection */
 @keyframes glass-specular-sweep {
   0% { transform: translateX(-150%) skewX(-25deg); opacity: 0; }
-  20% { opacity: 0.65; }
+  30% { opacity: 0.28; }
   100% { transform: translateX(250%) skewX(-25deg); opacity: 0; }
 }
 
@@ -329,20 +339,25 @@ samp,
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.06) 45%,
-    rgba(255, 255, 255, 0.20) 50%,
-    rgba(255, 255, 255, 0.06) 55%,
+    rgba(255, 255, 255, 0.03) 35%,
+    rgba(255, 255, 255, 0.22) 50%,
+    rgba(255, 255, 255, 0.03) 65%,
     transparent 100%
   );
   pointer-events: none;
   opacity: 0;
   transform: translateX(-150%) skewX(-25deg);
-  transition: opacity 0.3s ease;
+  transition: opacity 0.4s ease;
 }
 
 .glass-sweep-hover:hover::after {
   opacity: 1;
-  animation: glass-specular-sweep 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: glass-specular-sweep 2.8s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+/* Liquid Glass Refraction (Hero Optic Surface) */
+.glass-liquid {
+  filter: url(#beam-liquid-glass);
 }
 
 /* Accessibility: Non-negotiable prefers-reduced-transparency & motion */
@@ -374,6 +389,10 @@ samp,
 @media (prefers-reduced-motion: reduce) {
   .glass-sweep-hover::after {
     display: none !important;
+  }
+  .glass-liquid,
+  .liquid {
+    filter: none !important;
   }
   .glass-pill,
   .glass-card,

@@ -1184,7 +1184,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
       <div
         key={`right-pane-${lesson.id}`}
         className={isEditorMaximized
-          ? 'fixed inset-0 z-50 flex flex-col w-full h-full'
+          ? 'fixed inset-0 z-[60] flex flex-col w-full h-full'
           : `${mobileTab === 'code' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-col flex-1 min-h-0 overflow-hidden relative`}
         style={{ background: isDark ? '#0B0F17' : '#FFFFFF' }}
       >
@@ -1406,7 +1406,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
         {/* ── Boot.dev Action Bar ── */}
         <div
           id="lesson-action-bar"
-          className="flex items-center gap-2 px-3 py-1.5 flex-shrink-0 pb-safe glass-specular-rim"
+          className={`${isEditorMaximized ? 'hidden sm:flex' : 'flex'} items-center gap-2 px-3 py-1.5 flex-shrink-0 pb-safe glass-specular-rim`}
           style={{
             minHeight: '48px',
             background: isDark ? 'rgba(10,15,28,0.40)' : 'rgba(241,245,249,0.55)',

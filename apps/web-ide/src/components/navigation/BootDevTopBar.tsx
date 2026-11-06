@@ -369,18 +369,18 @@ export function BootDevTopBar() {
     <>
       <header
         id="beamforge-topbar"
-        className="fixed top-0 left-0 right-0 z-50 h-14 px-3 sm:px-4 flex items-center justify-between gap-2 select-none glass-specular-rim"
+        className="fixed top-0 left-0 right-0 w-full z-50 h-14 px-3 sm:px-4 flex items-center justify-between gap-2 select-none"
         style={{
           background: isDark
-            ? 'rgba(10, 15, 28, 0.42)'
-            : 'rgba(255, 255, 255, 0.45)',
-          backdropFilter: 'blur(28px) saturate(190%)',
-          WebkitBackdropFilter: 'blur(28px) saturate(190%)',
+            ? 'rgba(11, 15, 23, 0.72)'
+            : 'rgba(255, 255, 255, 0.78)',
+          backdropFilter: 'blur(28px) saturate(200%)',
+          WebkitBackdropFilter: 'blur(28px) saturate(200%)',
           borderBottom: isDark
             ? '1px solid rgba(255, 255, 255, 0.12)'
-            : '1px solid rgba(255, 255, 255, 0.60)',
+            : '1px solid rgba(255, 255, 255, 0.85)',
           boxShadow: isDark
-            ? '0 12px 36px -10px rgba(0, 0, 0, 0.65), inset 0 1px 0 0 rgba(255, 255, 255, 0.25), inset 0 -1px 0 0 rgba(0, 0, 0, 0.35)'
+            ? '0 12px 36px -10px rgba(0, 0, 0, 0.65), inset 0 1px 0 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 0 rgba(0, 0, 0, 0.35)'
             : '0 10px 30px -8px rgba(15, 23, 42, 0.08), inset 0 1px 0 0 rgba(255, 255, 255, 0.90), inset 0 -1px 0 0 rgba(15, 23, 42, 0.05)',
         }}
       >

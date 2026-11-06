@@ -97,8 +97,14 @@ export function LandingHero() {
         </div>
       </div>
 
-      {/* Interactive Anchor Terminal */}
-      <InteractiveHeroPreview />
+      {/* Interactive Anchor Terminal with 2026 Liquid Glass Optic Aura */}
+      <div className="relative">
+        <div
+          className="absolute inset-0 rounded-3xl pointer-events-none -z-10 glass-liquid opacity-25 dark:opacity-15 blur-[1px]"
+          aria-hidden="true"
+        />
+        <InteractiveHeroPreview />
+      </div>
     </section>
   );
 }

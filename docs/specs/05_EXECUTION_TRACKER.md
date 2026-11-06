@@ -1851,6 +1851,27 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: All Erlang grader, tracer, and simulation modules compiled cleanly with 0 errors.
 
+## Phase 86: TopBar Layout Conflict Fix, Specular Animation Smoothing & Missing Glass Filter Wire-Up
+- [x] **86.1: Resolve TopBar Layout Conflict & Flex Root Architecture (`syllabus/page.tsx`, `learn/[lessonId]/page.tsx`, `BootDevTopBar.tsx`, `globals.css`)**:
+  - Identified root cause of horizontal split layout collapse: `.glass-specular-rim` had unconditional `position: relative` in `globals.css`, overriding Tailwind's `.fixed` on `BootDevTopBar`.
+  - Added strict position guards in `globals.css`: `.glass-specular-rim:not(.fixed):not(.absolute) { position: relative; }` and `.glass-specular-rim.fixed { position: fixed !important; }`.
+  - Upgraded `<main>` containers in both `syllabus/page.tsx` and `learn/[lessonId]/page.tsx` with explicit `flex-col`, preventing pages from ever falling back to a horizontal two-column split.
+  - Reinforced `BootDevTopBar.tsx` with `w-full` and solid readability opacity (`0.72` dark, `0.78` light).
+  - Ensured `LessonSuccessToast.tsx` remains fixed to viewport without position degradation.
+- [x] **86.2: Smooth & Decelerate Glass Specular Sweep Animation (`globals.css`)**:
+  - Replaced rapid 1.2s specular flash with an authentic 2.8s Apple-style specular sweep (`cubic-bezier(0.25, 1, 0.5, 1)`).
+  - Tamed peak highlight opacity from glaring `0.65` down to subtle `0.28`, creating a gentle, luxurious light sheen on card hovers.
+- [x] **86.3: Wire Up Missing 2026 Liquid Glass Filter (`LandingHero.tsx`, `globals.css`)**:
+  - Added `.glass-liquid { filter: url(#beam-liquid-glass); }` class to `globals.css` and connected it to reduced-motion defeatability.
+  - Applied `.glass-liquid` optic lens backdrop in `LandingHero.tsx` behind `InteractiveHeroPreview`, fulfilling the refraction specification.
+- [x] **86.4: Mobile Editor Maximize Refinements (`LessonSplitView.tsx`)**:
+  - Elevated maximized code editor to `z-[60]` to guarantee clean z-index hierarchy over `BootDevTopBar` (`z-50`).
+  - Hid `lesson-action-bar` on mobile screens when maximized (`${isEditorMaximized ? 'hidden sm:flex' : 'flex'}`), leaving maximum vertical canvas for virtual keyboard and keeping syntax helpers strip pinned.
+- [x] **86.5: Multi-Compiler & Production Build Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: All Erlang grader modules compiled cleanly with 0 errors.
+
 
 
 

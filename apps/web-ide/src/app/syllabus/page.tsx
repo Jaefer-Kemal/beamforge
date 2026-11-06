@@ -26,7 +26,7 @@ export default function SyllabusPage() {
   }, [setBootDevView, hydrateFromStorageAndDb]);
 
   return (
-    <main className="flex h-screen h-dvh w-screen overflow-hidden relative bg-[#E8ECF2] dark:bg-[#060810] text-[#0A0F1E] dark:text-[#F0F4FC] transition-colors duration-300">
+    <main className="flex flex-col h-screen h-dvh w-screen overflow-hidden relative bg-[#E8ECF2] dark:bg-[#060810] text-[#0A0F1E] dark:text-[#F0F4FC] transition-colors duration-300">
       {/* Top Floating Glass Bar */}
       <BootDevTopBar />
 

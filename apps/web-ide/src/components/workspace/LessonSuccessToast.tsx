@@ -71,7 +71,7 @@ export const LessonSuccessToast: React.FC = () => {
   return (
     <div
       id="lesson-success-toast"
-      className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3 rounded-2xl max-w-xl w-[92vw] sm:w-auto glass-floating glass-specular-rim animate-slide-up transition-all duration-300"
+      className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3 rounded-2xl max-w-xl w-[92vw] sm:w-auto glass-floating animate-slide-up transition-all duration-300"
       style={{
         background: isDark ? 'rgba(12, 18, 35, 0.65)' : 'rgba(255, 255, 255, 0.70)',
         border: isDark ? '1px solid rgba(255, 255, 255, 0.16)' : '1px solid rgba(255, 255, 255, 0.75)',
