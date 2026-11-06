@@ -506,28 +506,29 @@ If you need to match a value in a pattern but do not intend to use it, use the s
 
 ## Parallel Worked Example
 
-Here is a module demonstrating how sequential calculations progress state through new variable names, and how pattern matching with wildcards extracts payload data from network packets:
+Here is a module demonstrating how sequential calculations progress state through new variable names, and how pattern matching with wildcards extracts specific fields from multi-element compound terms:
 
 \`\`\`erlang
--module(packet_calculator).
--export([calc_packet_fee/2, extract_payload/1]).
+-module(auth_session).
+-export([calculate_extended_ttl/2, extract_user_id/1]).
 
-calc_packet_fee(BaseFee, PerByteRate) ->
-    InitialCharge = BaseFee,
-    HandlingFee   = InitialCharge + 5,             %% Add handling charge
-    TotalCost     = HandlingFee + (PerByteRate * 4), %% Add byte usage charge
-    TotalCost.
+%% Progress expiration calculations sequentially through distinct immutable variables
+calculate_extended_ttl(BaseTtl, GracePeriod) ->
+    InitialTtl  = BaseTtl,
+    BufferedTtl = InitialTtl + GracePeriod,
+    MaxTtl      = BufferedTtl * 3,
+    MaxTtl.
 
-extract_payload(NetworkPacket) ->
-    %% NetworkPacket has the format: {packet, SeqNumber, PayloadData}
-    %% The wildcard '_' discards the tag and sequence number without binding them
-    {_, _, PayloadData} = NetworkPacket,
-    PayloadData.
+%% Extract the user ID from a 4-element session record: {session, SessionId, UserId, CreatedAt}
+extract_user_id(SessionRecord) ->
+    %% The wildcard '_' matches and discards elements without binding a variable name
+    {_, _, TargetUser, _} = SessionRecord,
+    TargetUser.
 \`\`\`
 
 Notice:
-- In \`calc_packet_fee\`, variables \`InitialCharge\`, \`HandlingFee\`, and \`TotalCost\` progress the calculation sequentially without mutation.
-- In \`extract_payload\`, \`{_, _, PayloadData} = NetworkPacket\` discards the first two elements using \`_\` and extracts \`PayloadData\`.
+- In \`calculate_extended_ttl\`, variables \`InitialTtl\`, \`BufferedTtl\`, and \`MaxTtl\` progress the calculation sequentially without mutating any memory.
+- In \`extract_user_id\`, \`{_, _, TargetUser, _} = SessionRecord\` discards the first, second, and fourth elements using the wildcard \`_\`, binding only \`TargetUser\`.
 
 ## Official Erlang Docs & Function Reference
 
@@ -541,18 +542,25 @@ Pattern = Expression
 
 ## Assignment Specification
 
-Implement two functions in \`pattern_vars.erl\`:
+In \`pattern_vars.erl\`, implement two functions demonstrating immutable variable progression and pattern matching:
 
 1. \`rebind_update(Base, Increment)\`:
-   - Bind variable \`V1\` to \`Base\`.
-   - Bind variable \`V2\` to \`V1 + Increment\`.
-   - Bind variable \`V3\` to \`V2 * 2\`.
-   - Return \`V3\`.
+   - **Input**: Integer \`Base\` and integer \`Increment\`.
+   - **Behavior**: Progress the calculation across multiple sequential, newly bound immutable variables:
+     - Bind an initial variable to \`Base\`.
+     - Bind a second variable to the sum of the first variable and \`Increment\`.
+     - Bind a third variable to double the second variable (multiplied by 2), and return it.
+     - Never mutate or re-assign an existing variable.
+   - **Examples**:
+     - \`pattern_vars:rebind_update(10, 5)\` returns \`30\` (\`(10 + 5) * 2 = 30\`).
+     - \`pattern_vars:rebind_update(100, 50)\` returns \`300\`.
 
 2. \`extract_middle(TripleTuple)\`:
-   - Given a 3-element tuple passed as \`TripleTuple\` (e.g., \`{alpha, target_val, omega}\`).
-   - Use the pattern matching operator \`=\` with the wildcard \`_\` to discard the first and third elements, extracting only the middle value.
-   - Return the extracted middle value.
+   - **Input**: A 3-element tuple containing arbitrary terms (e.g., \`{alpha, beta, gamma}\` or \`{1, 999, "test"}\`).
+   - **Behavior**: Using pattern matching with the \`=\` operator, destructure the tuple and extract only the middle (second) element while discarding the first and third elements with the wildcard \`_\`.
+   - **Examples**:
+     - \`pattern_vars:extract_middle({alpha, beta, gamma})\` returns \`beta\`.
+     - \`pattern_vars:extract_middle({1, 999, "test"})\` returns \`999\`.
 
 ## Rules & Verification Constraints
 
@@ -620,18 +628,13 @@ Implement two functions in \`pattern_vars.erl\`:
         content: `-module(pattern_vars).
 -export([rebind_update/2, extract_middle/1]).
 
-%% @doc Progress state using sequential variables V1, V2, and V3.
+%% @doc Progress calculation across sequential immutable variable bindings:
+%% adds Increment to Base, doubles the result, and returns the final value.
 rebind_update(Base, Increment) ->
-    %% Progress state across sequential immutable variables:
-    %% 1. Bind V1 to Base.
-    %% 2. Bind V2 to V1 plus Increment.
-    %% 3. Bind V3 to V2 multiplied by 2.
-    %% 4. Return V3.
     ok.
 
-%% @doc Extract the second element from a 3-element tuple using pattern matching.
+%% @doc Return the middle (second) element of a 3-element tuple using pattern matching.
 extract_middle(TripleTuple) ->
-    %% Destructure the 3-element tuple using the match operator = and wildcard _ to extract the middle value.
     ok.`,
       },
     ],
@@ -652,18 +655,13 @@ extract_middle(TripleTuple) ->
     starterCode: `-module(pattern_vars).
 -export([rebind_update/2, extract_middle/1]).
 
-%% @doc Progress state using sequential variables V1, V2, and V3.
+%% @doc Progress calculation across sequential immutable variable bindings:
+%% adds Increment to Base, doubles the result, and returns the final value.
 rebind_update(Base, Increment) ->
-    %% Progress state across sequential immutable variables:
-    %% 1. Bind V1 to Base.
-    %% 2. Bind V2 to V1 plus Increment.
-    %% 3. Bind V3 to V2 multiplied by 2.
-    %% 4. Return V3.
     ok.
 
-%% @doc Extract the second element from a 3-element tuple using pattern matching.
+%% @doc Return the middle (second) element of a 3-element tuple using pattern matching.
 extract_middle(TripleTuple) ->
-    %% Destructure the 3-element tuple using the match operator = and wildcard _ to extract the middle value.
     ok.`,
     solutionCode: `-module(pattern_vars).
 -export([rebind_update/2, extract_middle/1]).

@@ -1939,6 +1939,20 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
 
+## Phase 91: Pedagogical Anti-Spoiler Protocol Spec & Lecture 1.3 Despoiling (`ch01-l03`)
+- [x] **91.1: Authored Master Anti-Spoiler Governance Specification (`08_PEDAGOGICAL_AUDIT_AND_ANTI_SPOILER_PROTOCOL.md`)**:
+  - Established the 4-pillar audit checklist (domain disjunction, clean `Input`/`Behavior`/`Examples`, clean `@doc` starter contracts, variable neutrality).
+  - Codified the context-shielding single-lecture workflow and batched chapter-level deployment protocol.
+  - Updated `AGENTS.md` Gate 1 to mandate reading Spec 08 before curriculum edits.
+- [x] **91.2: Audit & Eliminate Exercise Code Spoilers in Lecture 1.3 (`ch01-l03`)**:
+  - Replaced `packet_calculator.erl` parallel example with `auth_session.erl` demonstrating sequential TTL progression (`calculate_extended_ttl/2`) and wildcard element extraction from a 4-element session tuple (`extract_user_id/1`), avoiding clone patterns of `extract_middle/1`'s 3-element tuple.
+  - Audited and de-spoiled the Assignment Specification bullets: removed literal syntax lines (`V1 = Base`, `V2 = V1 + Increment`, `V3 = V2 * 2`, `return V3`) in favor of clear inputs, domain rules, and examples.
+  - Upgraded starter code comments from spoon-fed implementation steps to standard developer `@doc` contracts.
+- [x] **91.3: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+
+
 
 
 
