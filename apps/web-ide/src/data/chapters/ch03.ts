@@ -1531,25 +1531,26 @@ read_socket_options(OptsList) ->
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-In database systems (like SQL) and query languages, you routinely express transformations as declarative queries:
+In database systems (like SQL) and query languages, you routinely express data transformations as declarative queries:
 \`SELECT name FROM users WHERE status = 'active'\`.
 
-In Erlang, writing such transformations using \`lists:map\` and \`lists:filter\` requires chaining multiple higher-order functions.
+In Erlang, writing such transformations using \`lists:map/2\` and \`lists:filter/2\` often requires chaining multiple higher-order functions and intermediate allocations.
 
-To provide clean, mathematical, declarative data query ergonomics, Erlang incorporates **List Comprehensions** (derived directly from mathematical set-builder notation: $\{ f(x) \mid x \in S \land p(x) \}$).
+To provide clean, mathematical, declarative data query ergonomics, Erlang incorporates **List Comprehensions** (derived directly from mathematical set-builder notation: $\{ f(x) \mid x \in S \land p(x) \}$). The BEAM compiler transforms list comprehensions into highly optimized, tail-recursive accumulator loops.
 
 ## Deep Concept Breakdown & Under the Hood
 
 ### 1. Anatomy of a List Comprehension
-A list comprehension is bounded by square brackets \`[\` and \`]\`, with an output expression separated from qualifiers by the double vertical pipe \`||\`:
+
+A list comprehension is bounded by square brackets \`[\` and \`]\`, with an output expression separated from qualifiers by the double vertical bar \`||\`:
 
 \`\`\`erlang
 [ OutputExpression || Qualifier1, Qualifier2, ... ]
 \`\`\`
 
 Qualifiers can be either:
-- **Generators (\`Pattern <- List\`)**: Extracts elements from a list.
-- **Filters (Boolean Predicates)**: Conditions that must evaluate to \`true\`.
+- **Generators (\`Pattern <- List\`)**: Extracts and pattern-matches elements from a collection.
+- **Filters (Boolean Predicates)**: Conditions that must evaluate to \`true\` for an element to be retained.
 
 \`\`\`erlang
 Numbers = [1, 2, 3, 4, 5, 6],
@@ -1558,77 +1559,80 @@ EvenSquares = [X * X || X <- Numbers, X rem 2 =:= 0].
 \`\`\`
 
 ### 2. Generator Pattern Matching (The Silent Skip Rule)
+
 Here is a profound operational difference between \`lists:map/2\` and a List Comprehension generator:
 
-If you use \`lists:map\` with a pattern:
+If you use \`lists:map/2\` with a single pattern:
 \`\`\`erlang
-Users = [{user, 1, "Alice", active}, {user, 2, "Bob", suspended}],
-%% CRASH! Bob does not match the active pattern -> function_clause exception!
-lists:map(fun({user, Id, Name, active}) -> Name end, Users).
+Nodes = [{node, s1, online, 80}, {node, s2, offline, 0}],
+%% CRASH! s2 fails to match the online pattern -> function_clause exception!
+lists:map(fun({node, Id, online, Load}) -> Id end, Nodes).
 \`\`\`
 
 In a List Comprehension, **non-matching elements are silently skipped**:
 \`\`\`erlang
-ActiveNames = [Name || {user, _Id, Name, active} <- Users].
-%% => ["Alice"]  -- Bob is silently filtered out with ZERO exceptions!
+OnlineNodeIds = [Id || {node, Id, online, _Load} <- Nodes].
+%% => [s1]  -- s2 is silently skipped with ZERO runtime exceptions!
 \`\`\`
 
-The generator \`Pattern <- List\` combines pattern matching and filtering into a single, bulletproof construct.
+The generator \`Pattern <- List\` combines extraction, pattern matching, and filtering into a single declarative expression.
 
 ### 3. Multiple Generators & Relational Joins
-You can include multiple generators in a single comprehension. The rightmost generator loops fastest (like nested \`for\` loops):
+
+You can include multiple generators in a single comprehension. The rightmost generator advances fastest (mirroring nested loops):
 
 \`\`\`erlang
-Xs = [1, 2],
-Ys = [a, b],
-Pairs = [{X, Y} || X <- Xs, Y <- Ys].
-%% => [{1, a}, {1, b}, {2, a}, {2, b}]
+Bands = [low, high],
+Channels = [1, 2],
+Frequencies = [{B, C} || B <- Bands, C <- Channels].
+%% => [{low, 1}, {low, 2}, {high, 1}, {high, 2}]
 \`\`\`
 
 You can combine multiple generators with filter predicates to execute relational **inner joins**:
 
 \`\`\`erlang
-Inv = [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}],
-Orders = [{order, 1, 2}, {order, 2, 3}, {order, 999, 1}],
+Projects = [{proj, 101, "Compiler", 4}, {proj, 102, "Kernel", 2}],
+Members  = [{member, 501, 101}, {member, 502, 999}],
 
-Receipts = [
-    {receipt, Id, Name, Qty * Price}
- || {order, OrderId, Qty} <- Orders,
-    {product, Id, Name, Price, Stock} <- Inv,
-    OrderId =:= Id,
-    Stock >= Qty
+Assignments = [
+    {assigned, MemberId, ProjName}
+ || {member, MemberId, TargetProjId} <- Members,
+    {proj, ProjId, ProjName, _Seats} <- Projects,
+    TargetProjId =:= ProjId
 ].
-%% => [{receipt, 1, "Keyboard", 100}, {receipt, 2, "Mouse", 75}]
-%% Order 999 is skipped automatically because no matching product exists!
+%% => [{assigned, 501, "Compiler"}]
+%% Member 502 is skipped automatically because project 999 does not exist!
 \`\`\`
 
-## Parallel Worked Example
+## Parallel Worked Example: Telecom Gateway Dispatch Table
 
-Consider building an event-ticketing engine:
+The following module manages telecommunications gateway routing. Notice how generator pattern matching extracts active endpoints, Cartesian combinations pair channel coordinates, and multiple generators perform relational joins between packets and routing rules:
 
 \`\`\`erlang
--module(ticket_queries).
--export([confirmed_buyer_names/1, seat_grid/2, issue_valid_tickets/2]).
+-module(telecom_routing).
+-export([active_gateway_endpoints/1, cross_channel_pairs/2, route_dispatch_table/2]).
 
-%% 1. Extract buyer names for confirmed tickets:
-confirmed_buyer_names(Reservations) ->
-    [Name || {res, _Id, Name, confirmed} <- Reservations].
+%% 1. Extracts gateway endpoint strings for online gateways:
+active_gateway_endpoints(Gateways) ->
+    [EndpointStr || {gw, _Id, EndpointStr, online} <- Gateways].
 
-%% 2. Generate Cartesian seat matrix:
-seat_grid(Rows, Seats) ->
-    [{Row, Seat} || Row <- Rows, Seat <- Seats].
+%% 2. Generates Cartesian prefix-suffix channel combinations:
+cross_channel_pairs(Prefixes, Suffixes) ->
+    [{Pre, Suf} || Pre <- Prefixes, Suf <- Suffixes].
 
-%% 3. Relational join between concert passes and customer accounts:
-issue_valid_tickets(Passes, Customers) ->
+%% 3. Relational join between transmission routes and packets:
+route_dispatch_table(Routes, Packets) ->
     [
-        {ticket, CustId, CustName, Event, Price}
-     || {pass, PassId, Event, Price} <- Passes,
-        {customer, CustId, CustName, PassId} <- Customers,
-        Price > 0
+        {dispatch, PktId, DestIp, PayloadBytes}
+     || {packet, PktId, TargetRouteId, PayloadBytes} <- Packets,
+        {route, RouteId, DestIp, MaxBandwidth} <- Routes,
+        TargetRouteId =:= RouteId,
+        MaxBandwidth >= PayloadBytes,
+        PayloadBytes > 0
     ].
 \`\`\`
 
-## Official Erlang Docs & Function Reference
+## Standard Library Function Reference
 
 \`\`\`erlang
 [ Expr || Pattern <- List, GuardOrFilter ]
@@ -1638,21 +1642,42 @@ issue_valid_tickets(Passes, Customers) ->
 
 Implement three query functions using list comprehensions in \`src/comprehension_queries.erl\`:
 
-1. \`active_user_names(Users)\`:
-   - Input: \`[{user, Id, Name, Status}, ...]\`.
-   - Uses a list comprehension with generator pattern matching to return a list of \`Name\` strings for users whose \`Status =:= active\`.
-2. \`matrix_cartesian(Xs, Ys)\`:
-   - Uses two generators in a list comprehension to return all pairs \`[{X, Y} || X <- Xs, Y <- Ys]\`.
-3. \`fulfilled_order_receipts(Inventory, Orders)\`:
-   - \`Inventory = [{product, Id, Name, Price, Stock}, ...]\`.
-   - \`Orders = [{order, ProdId, Qty}, ...]\`.
-   - Uses a list comprehension with two generators and filter conditions (\`ProdId =:= Id\`, \`Stock >= Qty\`, \`Qty > 0\`) to return:
-     \`[{receipt, Id, Name, Qty * Price} || ...]\`.
+### 1. \`active_user_names/1\`
+- **Input**: A list of user records structured as \`[{user, Id, Name, Status}, ...]\`, where \`Id\` is an integer, \`Name\` is a string, and \`Status\` is an atom (such as \`active\` or \`suspended\`).
+- **Behavior**: Extract user names using a list comprehension. Rely on generator pattern matching to match only records whose status equals \`active\`, silently skipping any inactive, suspended, or differently formatted tuples without throwing exceptions.
+- **Examples**:
+  \`\`\`erlang
+  comprehension_queries:active_user_names([{user, 1, "Alice", active}, {user, 2, "Bob", suspended}, {user, 3, "Charlie", active}])
+  %% => ["Alice", "Charlie"]
+  \`\`\`
 
-## Rules & Verification Constraints
+### 2. \`matrix_cartesian/2\`
+- **Input**: Two lists, \`Xs\` and \`Ys\`, containing arbitrary elements.
+- **Behavior**: Generate the full Cartesian product of both lists using multiple generators in a single list comprehension. Each combination must be formatted as a 2-tuple \`{X, Y}\`. The generators must be arranged so that \`Ys\` cycles fastest for each element of \`Xs\`.
+- **Examples**:
+  \`\`\`erlang
+  comprehension_queries:matrix_cartesian([1, 2], [x, y])
+  %% => [{1, x}, {1, y}, {2, x}, {2, y}]
+  \`\`\`
 
-- Must use list comprehensions (\`[... || ...]\`).
-- Strictly no Maps (\`#{}\`) or Bit-Syntax Binaries (\`<<...>>\`). Use tuples, strings, and integers only.`,
+### 3. \`fulfilled_order_receipts/2\`
+- **Input**:
+  - \`Inventory\`: A list of catalog records formatted as \`[{product, Id, Name, Price, Stock}, ...]\`.
+  - \`Orders\`: A list of customer order requests formatted as \`[{order, ProdId, Qty}, ...]\`.
+- **Behavior**: Perform an inner join between \`Orders\` and \`Inventory\` using a list comprehension to produce receipt tuples for all fulfilled orders:
+  - Associate each order with its corresponding inventory item by matching \`ProdId\` with \`Id\`.
+  - Filter out orders where \`Qty\` is not strictly positive or where \`Qty\` exceeds the available inventory \`Stock\`.
+  - For each fulfilled order, emit \`{receipt, Id, Name, TotalCost}\`, where \`TotalCost\` equals \`Qty * Price\`.
+- **Examples**:
+  \`\`\`erlang
+  comprehension_queries:fulfilled_order_receipts([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 1}], [{order, 1, 2}, {order, 2, 5}])
+  %% => [{receipt, 1, "Keyboard", 100}]
+  \`\`\`
+
+## Verification Constraints
+
+- You must employ list comprehensions (\`[... || ...]\`) in all three functions.
+- Strictly no Maps (\`#{}\`) or Bit-Syntax Binaries (\`<<...>>\`). Use tuples, lists, strings, and numbers only.`,
     otpDocCards: [
       {
         functionName: 'list_comprehensions',
@@ -1721,19 +1746,16 @@ Implement three query functions using list comprehensions in \`src/comprehension
         content: `-module(comprehension_queries).
 -export([active_user_names/1, matrix_cartesian/2, fulfilled_order_receipts/2]).
 
-%% @doc Return [Name] for active users using list comprehension generator pattern matching.
+%% @doc Extracts user names for active accounts via generator pattern matching.
 active_user_names(_Users) ->
-    %% % TODO: Filter Users with a list comprehension pattern-matching on active user tuples and return [Name]
     ok.
 
-%% @doc Return [{X, Y}] Cartesian product using two generators.
+%% @doc Computes the Cartesian product pairs of two collections.
 matrix_cartesian(_Xs, _Ys) ->
-    %% % TODO: Combine two generator qualifiers across Xs and Ys to produce all {X, Y} Cartesian pairs
     ok.
 
-%% @doc Join Orders and Inventory to return [{receipt, Id, Name, Qty * Price}] for fulfilled orders.
+%% @doc Joins orders and inventory to generate receipts for fulfilled orders.
 fulfilled_order_receipts(_Inventory, _Orders) ->
-    %% Join {order, ProdId, Qty} and {product, Id, Name, Price, Stock} where ProdId =:= Id, Stock >= Qty, Qty > 0
     ok.`,
       },
     ],
@@ -1760,19 +1782,16 @@ fulfilled_order_receipts(Inventory, Orders) ->
     starterCode: `-module(comprehension_queries).
 -export([active_user_names/1, matrix_cartesian/2, fulfilled_order_receipts/2]).
 
-%% @doc Return [Name] for active users using list comprehension generator pattern matching.
+%% @doc Extracts user names for active accounts via generator pattern matching.
 active_user_names(_Users) ->
-    %% % TODO: Filter Users with a list comprehension pattern-matching on active user tuples and return [Name]
     ok.
 
-%% @doc Return [{X, Y}] Cartesian product using two generators.
+%% @doc Computes the Cartesian product pairs of two collections.
 matrix_cartesian(_Xs, _Ys) ->
-    %% % TODO: Combine two generator qualifiers across Xs and Ys to produce all {X, Y} Cartesian pairs
     ok.
 
-%% @doc Join Orders and Inventory to return [{receipt, Id, Name, Qty * Price}] for fulfilled orders.
+%% @doc Joins orders and inventory to generate receipts for fulfilled orders.
 fulfilled_order_receipts(_Inventory, _Orders) ->
-    %% Join {order, ProdId, Qty} and {product, Id, Name, Price, Stock} where ProdId =:= Id, Stock >= Qty, Qty > 0
     ok.`,
     solutionCode: `-module(comprehension_queries).
 -export([active_user_names/1, matrix_cartesian/2, fulfilled_order_receipts/2]).

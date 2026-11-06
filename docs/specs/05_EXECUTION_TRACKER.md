@@ -2145,6 +2145,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
 
+## Phase 109: Pedagogical Despoiling of Chapter 3 Lecture 6 (`ch03-l06`)
+- [x] **109.1: Audit & Eliminate Exercise Code Spoilers in Lecture 3.6 (`ch03-l06`)**:
+  - Neutralized concept breakdown: eliminated verbatim code leaks in generator pattern matching (`Users` with `{user, _Id, Name, active}`) and relational joins (`Inv` and `Orders` yielding `{receipt, Id, Name, Qty * Price}`), replacing them with neutral server node status filtering (`Nodes` with `{node, Id, online, Load}`) and project-member assignments (`Projects` and `Members`).
+  - Replaced `ticket_queries.erl` with an authentic telecommunications gateway routing module `telecom_routing.erl` (`active_gateway_endpoints/1`, `cross_channel_pairs/2`, `route_dispatch_table/2`), achieving domain disjunction from users, matrices, and retail inventory receipts.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `active_user_names/1`, `matrix_cartesian/2`, and `fulfilled_order_receipts/2`, eliminating formula dictation.
+  - Refactored starter code doc comments: removed `% TODO` comments and implementation hints from `files[0].content` and `starterCode`.
+- [x] **109.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+
+
 
 
 
