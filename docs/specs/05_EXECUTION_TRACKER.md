@@ -2123,6 +2123,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test suite assertions on OTP 29.
 
+## Phase 107: Pedagogical Despoiling of Chapter 3 Lecture 4 (`ch03-l04`)
+- [x] **107.1: Audit & Eliminate Exercise Code Spoilers in Lecture 3.4 (`ch03-l04`)**:
+  - Neutralized concept breakdown: replaced verbatim code leaks in tuple accumulators (`Entries` with `credit` and `debit`) with neutral match game scoring events (`MatchEvents` with `scored` and `penalized`).
+  - Replaced `latency_aggregator.erl` (which had directly cloned `min_max_latency`) with an authentic cargo and freight manifest module `cargo_manifest.erl` (`audit_freight/1` tracking hazard counts, gross tonnage, and peak container weights).
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `sum_ledger/1`, `min_max_latency/1`, and `reverse_with_fold/1`, eliminating formula dictation.
+  - Refactored starter code doc comments: removed all in-body comments (`%% Fold with initial accumulator...`) and prepend formula leaks from `files[0].content` and `starterCode`.
+- [x] **107.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+
+
 
 
 
