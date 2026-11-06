@@ -2006,6 +2006,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go test`: `TestDynamicVisibleTestsCurriculum` passed all 3 visible tests for `ch02-l01` cleanly on OTP 29.
   - `erlc.exe`: Starter module compiled cleanly with 0 errors.
 
+## Phase 97: Pedagogical Despoiling of Chapter 2 Lecture 2 (`ch02-l02`)
+- [x] **97.1: Audit & Eliminate Exercise Code Spoilers in Lecture 2.2 (`ch02-l02`)**:
+  - Neutralized silent guard exception breakdown: replaced `check_ratio(Num, Denom) when ... (Num / Denom) >= 2.0 -> high_ratio` with network throughput rating (`throughput_rating/2`).
+  - Replaced `health_guard.erl` parallel example (which had mirrored `classify_temperature` and `safe_ratio` 1-to-1 with identical quotient guards and clauses) with a distinct `flight_telemetry.erl` aeronautical module demonstrating airspace altitude tiers (`categorize_altitude/1`) and safe glide slope descent ratios (`safe_glide_slope/2`).
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks, removing raw Erlang backtick expressions (`TempC =< 0`, `TempC > 0 AND TempC =< 25`, `(A / B) >= 2.0`).
+  - Refactored starter code doc comments from spoon-fed lines to clean, standard `@doc` contracts in both `files[0].content` and `starterCode`.
+- [x] **97.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `go test`: `TestDynamicVisibleTestsCurriculum` passed all 4 visible tests for `ch02-l02` cleanly on OTP 29.
+  - `erlc.exe`: Starter module compiled cleanly with 0 errors.
+
 
 
 
