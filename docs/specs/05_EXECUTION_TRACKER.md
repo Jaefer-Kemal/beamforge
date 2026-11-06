@@ -1952,6 +1952,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
 
+## Phase 92: Pedagogical Despoiling of Chapter 1 Lecture 4 (`ch01-l04`)
+- [x] **92.1: Audit & Eliminate Exercise Code Spoilers in Lecture 1.4 (`ch01-l04`)**:
+  - Replaced `bank_events.erl` parallel example (which had mirrored `make_event`, `extract_caller`, and `swap_endpoints` 1-to-1) with a distinct `storage_ledger.erl` chunk partition ledger demonstrating 4-element tagged tuple creation (`allocate_chunk/3`), status extraction (`get_chunk_status/1`), and field modification (`update_chunk_checksum/2`) without cloning endpoint swapping.
+  - Neutralized Concept Breakdown tagged tuple explanation: replaced telecom `call_event` with a heartbeat node record (`{heartbeat, 101, primary_node, healthy}`).
+  - Audited and de-spoiled Assignment Specification: eliminated literal Erlang tuple syntax backticks in favor of `Input` / `Behavior` / `Examples` format.
+  - Upgraded starter code comments from spoon-fed lines to standard developer `@doc` contracts.
+- [x] **92.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+
+
 
 
 

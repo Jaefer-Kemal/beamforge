@@ -69,3 +69,4 @@ To avoid wasting agent context and developer time during iterative curriculum re
    - Verify HTTP 200 via `vercel curl` on the live production domain.
 4. **Execution Tracker Audit**:
    - Record each audited lecture in `docs/specs/05_EXECUTION_TRACKER.md`.
+

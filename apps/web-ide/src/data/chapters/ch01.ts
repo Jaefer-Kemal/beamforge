@@ -719,39 +719,44 @@ Tuples are stored as contiguous words on the process heap: a header word followe
 Erlang does not have classes or structs. Instead, by convention, the **first element of a tuple is an atom that declares its type or status**:
 - Success result: \`{ok, Payload}\`
 - Error condition: \`{error, invalid_port}\`
-- Telecom domain event: \`{call_event, CallId, Caller, Callee, DurationSeconds}\`
+- Domain record: \`{heartbeat, NodeId, NodeRole, CurrentStatus}\`
 
 You destructure a tagged tuple using the \`=\` operator:
 \`\`\`erlang
-Event = {call_event, 9021, alice, bob, 0},
-{call_event, Id, From, To, Secs} = Event.
-%% Id is now 9021, From is alice, To is bob, Secs is 0
+Heartbeat = {heartbeat, 101, primary_node, healthy},
+{heartbeat, NodeId, NodeRole, CurrentStatus} = Heartbeat.
+%% NodeId is 101, NodeRole is primary_node, CurrentStatus is healthy
 \`\`\`
 
 ## Parallel Worked Example
 
-Consider a banking transaction event system:
+Consider a distributed file storage chunk ledger:
 
 \`\`\`erlang
--module(bank_events).
--export([make_deposit/3, extract_account/1, reverse_transfer/1]).
+-module(storage_ledger).
+-export([allocate_chunk/3, get_chunk_status/1, update_chunk_checksum/2]).
 
-make_deposit(TxId, Account, Amount) ->
-    {deposit_event, TxId, Account, Amount, pending}.
+%% Create a 4-element tagged record tracking partition state:
+%% {chunk, ChunkId, Partition, Status}
+allocate_chunk(ChunkId, Partition, Status) ->
+    {chunk, ChunkId, Partition, Status}.
 
-extract_account(Event) ->
-    {deposit_event, _TxId, Account, _Amount, _Status} = Event,
-    Account.
+%% Extract the status atom from a chunk tuple using pattern matching
+get_chunk_status(ChunkRecord) ->
+    {chunk, _Id, _Partition, Status} = ChunkRecord,
+    Status.
 
-reverse_transfer(TransferEvent) ->
-    {transfer, Id, FromAcc, ToAcc, Amount} = TransferEvent,
-    {transfer, Id, ToAcc, FromAcc, Amount}.
+%% Update the checksum in a 5-element file descriptor:
+%% replaces OldChecksum with NewChecksum while preserving other metadata
+update_chunk_checksum(FileDescriptor, NewChecksum) ->
+    {file_entry, Path, SizeBytes, _OldChecksum, ModifiedAt} = FileDescriptor,
+    {file_entry, Path, SizeBytes, NewChecksum, ModifiedAt}.
 \`\`\`
 
 Notice:
-- \`make_deposit/3\` tags the tuple with \`deposit_event\` and sets the initial state to atom \`pending\`.
-- \`extract_account/1\` matches the tag and extracts \`Account\`.
-- \`reverse_transfer/1\` swaps \`FromAcc\` and \`ToAcc\`.
+- \`allocate_chunk/3\` tags the tuple with \`chunk\` and groups related partition attributes.
+- \`get_chunk_status/1\` pattern matches the 4-element tuple, discarding unused fields with \`_\`.
+- \`update_chunk_checksum/2\` unpacks the 5-element \`file_entry\` tuple and constructs a new tuple with updated checksum while preserving remaining fields.
 
 ## Official Erlang Docs & Function Reference
 
@@ -764,21 +769,28 @@ Notice:
 
 ## Assignment Specification
 
-Implement three functions in \`telecom_events.erl\`:
+In \`telecom_events.erl\`, implement three functions that model and manipulate structured telecom switch records:
 
 1. \`make_event(Id, Caller, Callee)\`:
-   - Construct and return a 5-element tagged tuple:
-     \`{call_event, Id, Caller, Callee, 0}\`.
-   - The initial duration must be the integer \`0\`.
+   - **Input**: Integer \`Id\`, atom \`Caller\`, and atom \`Callee\`.
+   - **Behavior**: Construct and return a 5-element tagged tuple. The tuple must start with the tag atom \`call_event\`, followed by the call identifier, caller, callee, and an initial duration integer of \`0\`.
+   - **Examples**:
+     - \`telecom_events:make_event(101, alice, bob)\` returns \`{call_event, 101, alice, bob, 0}\`.
+     - \`telecom_events:make_event(202, operator, support)\` returns \`{call_event, 202, operator, support, 0}\`.
 
 2. \`extract_caller(Event)\`:
-   - Given a \`call_event\` tuple passed as \`Event\`.
-   - Use pattern matching with \`=\` to extract and return the \`Caller\` value.
+   - **Input**: A 5-element \`call_event\` tuple.
+   - **Behavior**: Using pattern matching with the \`=\` operator, extract and return the \`Caller\` atom. Discard all other fields using wildcards.
+   - **Examples**:
+     - \`telecom_events:extract_caller({call_event, 101, alice, bob, 45})\` returns \`alice\`.
+     - \`telecom_events:extract_caller({call_event, 202, carol, dave, 120})\` returns \`carol\`.
 
 3. \`swap_endpoints(Event)\`:
-   - Given a \`call_event\` tuple: \`{call_event, Id, Caller, Callee, Duration}\`.
-   - Destructure the tuple and return a new \`call_event\` where \`Caller\` and \`Callee\` are swapped:
-     \`{call_event, Id, Callee, Caller, Duration}\`.
+   - **Input**: A 5-element \`call_event\` tuple containing call identifier, endpoints, and duration.
+   - **Behavior**: Destructure the event and return a newly constructed \`call_event\` tuple where the positions of \`Caller\` and \`Callee\` are reversed, while keeping the call ID and elapsed duration unchanged.
+   - **Examples**:
+     - \`telecom_events:swap_endpoints({call_event, 101, alice, bob, 45})\` returns \`{call_event, 101, bob, alice, 45}\`.
+     - \`telecom_events:swap_endpoints({call_event, 500, gateway_a, gateway_b, 0})\` returns \`{call_event, 500, gateway_b, gateway_a, 0}\`.
 
 ## Rules & Verification Constraints
 
@@ -853,21 +865,16 @@ Implement three functions in \`telecom_events.erl\`:
         content: `-module(telecom_events).
 -export([make_event/3, extract_caller/1, swap_endpoints/1]).
 
-%% @doc Construct a 5-element tagged tuple starting with call_event and initial duration 0.
+%% @doc Return a 5-element call_event tuple with initial duration 0.
 make_event(Id, Caller, Callee) ->
-    %% Construct and return a 5-element tagged tuple starting with the atom 'call_event'
-    %% and an initial duration of 0.
     ok.
 
-%% @doc Extract the Caller atom from a call_event tuple.
+%% @doc Extract and return the Caller atom from a call_event tuple.
 extract_caller(Event) ->
-    %% Destructure the incoming call_event tuple using pattern matching and extract the Caller atom.
     ok.
 
-%% @doc Swap Caller and Callee positions in the call_event tuple.
+%% @doc Return a new call_event tuple with Caller and Callee positions swapped.
 swap_endpoints(Event) ->
-    %% Destructure the event and construct a new call_event tuple where Caller and Callee
-    %% positions are exchanged, keeping Id and Duration intact.
     ok.`,
       },
     ],
@@ -889,21 +896,16 @@ swap_endpoints(Event) ->
     starterCode: `-module(telecom_events).
 -export([make_event/3, extract_caller/1, swap_endpoints/1]).
 
-%% @doc Construct a 5-element tagged tuple starting with call_event and initial duration 0.
+%% @doc Return a 5-element call_event tuple with initial duration 0.
 make_event(Id, Caller, Callee) ->
-    %% Construct and return a 5-element tagged tuple starting with the atom 'call_event'
-    %% and an initial duration of 0.
     ok.
 
-%% @doc Extract the Caller atom from a call_event tuple.
+%% @doc Extract and return the Caller atom from a call_event tuple.
 extract_caller(Event) ->
-    %% Destructure the incoming call_event tuple using pattern matching and extract the Caller atom.
     ok.
 
-%% @doc Swap Caller and Callee positions in the call_event tuple.
+%% @doc Return a new call_event tuple with Caller and Callee positions swapped.
 swap_endpoints(Event) ->
-    %% Destructure the event and construct a new call_event tuple where Caller and Callee
-    %% positions are exchanged, keeping Id and Duration intact.
     ok.`,
     solutionCode: `-module(telecom_events).
 -export([make_event/3, extract_caller/1, swap_endpoints/1]).
