@@ -2030,6 +2030,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go test`: `TestDynamicVisibleTestsCurriculum` passed all 4 visible tests for `ch02-l03` cleanly on OTP 29.
   - `erlc.exe`: Starter module compiled cleanly with 0 errors.
 
+## Phase 99: Pedagogical Despoiling of Chapter 2 Lecture 4 (`ch02-l04`)
+- [x] **99.1: Audit & Eliminate Exercise Code Spoilers in Lecture 2.4 (`ch02-l04`)**:
+  - Neutralized concept breakdown 3-case recursive pattern: replaced `{product, TargetId, _, _, _}` with generic registry lookup `{entry, TargetKey, Value}`.
+  - Replaced `badge_registry.erl` parallel example (which had mirrored `find_product` and `contains_item` 1-to-1) with a distinct `cluster_nodes.erl` distributed system module demonstrating peer topology lookup (`locate_active_peer/2`) and regional node counting (`count_matching_region/2`).
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks, eliminating raw Erlang syntax lines (`Id =:= TargetId`, `=:=`, `[]`).
+  - Refactored starter code doc comments from `% TODO` hint comments to clean, standard `@doc` contracts in both `files[0].content` and `starterCode`.
+- [x] **99.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `go test`: `TestDynamicVisibleTestsCurriculum` passed all 4 visible tests for `ch02-l04` cleanly on OTP 29.
+  - `erlc.exe`: Starter module compiled cleanly with 0 errors.
+
 
 
 
