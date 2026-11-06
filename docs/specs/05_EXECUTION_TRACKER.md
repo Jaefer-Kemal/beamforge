@@ -2178,16 +2178,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
 
-## Phase 112: Pedagogical Despoiling of Chapter 4 Lecture 2 (`ch04-l02`)
-- [x] **112.1: Audit & Eliminate Exercise Code Spoilers in Lecture 4.2 (`ch04-l02`)**:
-  - Neutralized concept breakdown: replaced verbatim code leaks in config merging (`secret_key` and `debug_token`) with neutral database pool configurations (`BaseDbConfig` and `ProdDbConfig` stripping `internal_token`).
-  - Replaced `cache_stats.erl` with an authentic gaming character inventory module `player_profile.erl` (`get_stat_or_default/3`, `record_skill_advancement/2`, `merge_character_gear/2`, `total_inventory_slots_used/1`), achieving domain disjunction from node loads, telemetry tags, and service configs.
-  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `safe_get_load/2`, `increment_tag_counts/2`, `merge_configs/2`, and `sum_map_values/1`, eliminating formula dictation.
-  - Refactored starter code doc comments: removed all `% TODO` comments and hints from function bodies in `files[0].content` and `starterCode`.
-- [x] **112.2: Multi-Compiler & Backend Verification**:
+## Phase 113: Pedagogical Despoiling of Chapter 4 Lecture 3 (`ch04-l03`)
+- [x] **113.1: Audit & Eliminate Exercise Code Spoilers in Lecture 4.3 (`ch04-l03`)**:
+  - Neutralized concept breakdown: replaced verbatim code leaks in record definition (`-record(frame, {seq = 0, type = data, payload})`), updates, and `#frame.seq` evaluation with neutral telemetry sensor records (`-record(sensor_reading, {sensor_id, timestamp = 0, value, status = ok})`) and `#sensor_reading.timestamp` compile-time tuple index evaluation.
+  - Replaced parallel worked example with an authentic audit logging module `audit_logger.erl` (`-record(audit_event, {tenant_id, action, severity = low, timestamp = 0})`, `create_event/3`, `escalate_severity/1`, `severity_keypos/0`, `find_by_tenant/2`), achieving domain disjunction from protocol frames, sequence numbers, and frame payloads.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for record schema `frame`, `new_frame/3`, `advance_seq/1`, `frame_seq_index/0`, and `find_frame_by_seq/2`, eliminating code formula dictation.
+  - Updated mental model check to test compile-time tuple index resolution on `#sensor_reading.timestamp` without leaking the `#frame.seq` assignment value.
+  - Refactored starter code doc comments: removed all `% TODO` comments and implementation details from function bodies in `files[0].content` and `starterCode`.
+- [x] **113.2: Multi-Compiler & Backend Verification**:
   - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+
 
 
 
