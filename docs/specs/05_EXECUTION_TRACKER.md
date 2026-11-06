@@ -1798,6 +1798,33 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Erlang modules compiled cleanly with 0 errors.
 
+## Phase 84: Mobile Responsiveness, Editor Zen Maximize, Left Pane Header De-Cluttering & Dark Mode Contrast Fixes
+- [x] **84.1: Test Suite Header De-Cluttering (`LessonSplitView.tsx`)**:
+  - Removed redundant `" & Diffs"` / `"&amp; Diffs"` suffixes from drawer tabs and section headings (`label: 'Test Suite'`, `<span>Tests</span>`, `Test Case Assertions`).
+- [x] **84.2: Mobile/Tablet Editor Maximize (Zen Focus) Mode (`LessonSplitView.tsx`)**:
+  - Implemented `isEditorMaximized` state with a dedicated toggle button (`Maximize2` / `Minimize2`) in the file tabs toolbar.
+  - When maximized, the code editor expands to `fixed inset-0 z-50 flex flex-col w-full h-full`, hiding the top bar, progress nodes, and mobile switchers to provide maximum vertical typing canvas when virtual keyboards appear.
+  - Added Escape key handler (`Esc`) to instantly exit maximized Zen mode.
+- [x] **84.3: Left Pane Header De-Cluttering & Prominent Guide Title (`LessonSplitView.tsx`)**:
+  - Removed `{lesson.title}` from the cramped top header of the left pane.
+  - Placed the lesson title as a prominent, bold `<h1>` (`text-xl sm:text-2xl font-black`) directly inside the Guide scrollable body immediately above the incident banner / concept guide.
+  - Made the Guide and Submissions switcher tabs responsive by hiding text labels on mobile (`<span className="hidden sm:inline">...</span>`), retaining clean icons and numeric badges.
+- [x] **84.4: Submissions Detail & Modal Mobile Polish (`LessonSubmissionDetail.tsx`, `RestoreConfirmModal.tsx`)**:
+  - Made `Restore` and `Copy` buttons icon-only on mobile (`hidden sm:inline`), added `truncate` to `filePath`, and hid `Read Only` tag on small screens.
+  - Adjusted `RestoreConfirmModal` padding to `p-4 sm:p-6` to avoid viewport overflow on small devices.
+- [x] **84.5: Mobile Verification Drawer Optimization (`LessonSplitView.tsx`)**:
+  - Collapsed the long duplicate test case cards inside the Submit Verification tab on mobile screens (`hidden sm:block`) and replaced with a single-line compact summary (`sm:hidden`), keeping focus on grading pipeline stages and VM telemetry.
+- [x] **84.6: Level Success Proceed Toast Responsiveness (`LessonSuccessToast.tsx`)**:
+  - Transformed `LessonSuccessToast` layout into a responsive stacked card (`flex-col sm:flex-row items-stretch sm:items-center w-[92vw] sm:w-auto p-3.5 sm:px-5 sm:py-3`), preventing horizontal clipping on mobile viewports.
+- [x] **84.7: Landing Page Metrics Strip Grid & Dark Mode Card Contrast (`LandingMetricsStrip.tsx`, `LandingWorldsSection.tsx`)**:
+  - Refactored `LandingMetricsStrip` from a cramped single row `grid-cols-6` into an airy 2-3 column responsive grid (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6`), removing ellipses text truncation (`truncate`) so all 6 architectural descriptions are fully legible.
+  - Fixed dark mode white-on-white card bug in `LandingWorldsSection` by replacing invalid Tailwind class `dark:bg-slate-850/90` with `dark:bg-slate-900/95` and `dark:hover:bg-slate-800/80`.
+- [x] **84.8: Multi-Compiler & Production Build Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: All Erlang grader, tracer, and simulation modules compiled cleanly with 0 errors.
+
+
 
 
 

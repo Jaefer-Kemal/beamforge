@@ -28,9 +28,9 @@ export const RestoreConfirmModal: React.FC<RestoreConfirmModalProps> = ({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
       <div
-        className="w-full max-w-md rounded-2xl p-6 shadow-2xl relative overflow-hidden"
+        className="w-full max-w-md rounded-2xl p-4 sm:p-6 shadow-2xl relative overflow-hidden"
         style={{
           background: isDark ? 'rgba(15, 23, 42, 0.94)' : 'rgba(255, 255, 255, 0.98)',
           border: isDark ? '1px solid rgba(245, 158, 11, 0.30)' : '1px solid rgba(245, 158, 11, 0.35)',

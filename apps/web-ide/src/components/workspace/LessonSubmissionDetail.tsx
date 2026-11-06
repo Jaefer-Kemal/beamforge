@@ -272,16 +272,16 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
           borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
         }}
       >
-        <div className="flex items-center gap-2">
-          <FileCode className="w-4 h-4 text-blue-500" />
+        <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+          <FileCode className="w-4 h-4 text-blue-500 flex-shrink-0" />
           <span
-            className="text-xs font-mono font-bold"
+            className="text-xs font-mono font-bold truncate"
             style={{ color: isDark ? '#E2E8F0' : '#1E293B' }}
           >
             {filePath}
           </span>
           <span
-            className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded"
+            className="hidden sm:inline-block text-[10px] uppercase font-bold px-1.5 py-0.5 rounded flex-shrink-0"
             style={{
               background: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.05)',
               color: isDark ? '#94A3B8' : '#64748B',
@@ -291,7 +291,7 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           {/* Copy Button */}
           <button
             id="copy-submission-code-btn"
@@ -302,16 +302,17 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
               color: isDark ? '#CBD5E1' : '#334155',
               border: isDark ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(15, 23, 42, 0.08)',
             }}
+            title="Copy code to clipboard"
           >
             {copied ? (
               <>
                 <Check className="w-3 h-3 text-emerald-500" />
-                <span className="text-emerald-500">Copied</span>
+                <span className="text-emerald-500 hidden sm:inline">Copied</span>
               </>
             ) : (
               <>
                 <Copy className="w-3 h-3" />
-                <span>Copy</span>
+                <span className="hidden sm:inline">Copy</span>
               </>
             )}
           </button>
@@ -326,9 +327,10 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
               color: '#F59E0B',
               border: '1px solid rgba(245, 158, 11, 0.30)',
             }}
+            title="Restore snapshot to editor"
           >
             <RotateCcw className="w-3 h-3" />
-            <span>Restore to Editor</span>
+            <span className="hidden sm:inline">Restore</span>
           </button>
         </div>
       </div>

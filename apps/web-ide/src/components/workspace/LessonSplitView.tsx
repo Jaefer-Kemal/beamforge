@@ -26,6 +26,8 @@ import {
   History,
   Undo2,
   X,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { useWorkspaceStore, loadUserDraft } from '../../state/useWorkspaceStore';
 import type {
@@ -646,6 +648,18 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
   const monacoRef = useRef<any>(null);
   const [mobileTab, setMobileTab] = useState<'guide' | 'code' | 'results'>('guide');
   const [leftTab, setLeftTab] = useState<'guide' | 'submissions'>('guide');
+  const [isEditorMaximized, setIsEditorMaximized] = useState(false);
+
+  // Allow ESC key to exit maximized editor mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isEditorMaximized) {
+        setIsEditorMaximized(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isEditorMaximized]);
 
   // Reset active submission inspection when switching lessons
   useEffect(() => {
@@ -1007,13 +1021,6 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
               {lesson.difficulty}
             </span>
           </div>
-          <h1 className="text-sm font-bold ml-1 flex-1 truncate flex items-center gap-1.5"
-            style={{ color: isDark ? '#F8FAFC' : '#020617' }}>
-            {lesson.lessonType === 'incident_triage' && (
-              <AlertTriangle className="w-4 h-4 text-rose-500 flex-shrink-0 animate-pulse" />
-            )}
-            <span className="truncate">{lesson.title}</span>
-          </h1>
 
           {/* Left Segmented Switcher: [ Guide ] vs [ Submissions (N) ] */}
           <div
@@ -1036,9 +1043,10 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                   : (isDark ? '#94A3B8' : '#64748B'),
                 boxShadow: leftTab === 'guide' && !isDark ? '0 1px 3px rgba(15,23,42,0.08)' : 'none',
               }}
+              title="Guide"
             >
               <BookOpen className="w-3.5 h-3.5" />
-              <span>Guide</span>
+              <span className="hidden sm:inline">Guide</span>
             </button>
 
             <button
@@ -1054,9 +1062,10 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                   : (isDark ? '#94A3B8' : '#64748B'),
                 boxShadow: leftTab === 'submissions' && !isDark ? '0 1px 3px rgba(15,23,42,0.08)' : 'none',
               }}
+              title="Submissions"
             >
               <History className="w-3.5 h-3.5" />
-              <span>Submissions</span>
+              <span className="hidden sm:inline">Submissions</span>
               {submissions.length > 0 && (
                 <span
                   className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold"
@@ -1075,6 +1084,16 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
         {/* Left Scrollable Content */}
         {leftTab === 'guide' ? (
           <div key={`guide-${lesson.id}`} className="flex-1 overflow-y-auto px-5 py-4">
+            {/* Slot 0: Prominent Lesson Title */}
+            <h1
+              className="text-xl sm:text-2xl font-black tracking-tight mb-4 flex items-center gap-2"
+              style={{ color: isDark ? '#F8FAFC' : '#020617' }}
+            >
+              {lesson.lessonType === 'incident_triage' && (
+                <AlertTriangle className="w-5 h-5 text-rose-500 flex-shrink-0 animate-pulse" />
+              )}
+              <span>{lesson.title}</span>
+            </h1>
             {/* Slot 1: Incident Alert Banner (only on incident_triage or when incidentAlert is defined) */}
             {lesson.incidentAlert && (
               <IncidentAlertBanner key={`alert-${lesson.id}-${lesson.incidentAlert.id || 'banner'}`} alert={lesson.incidentAlert} isDark={isDark} />
@@ -1164,7 +1183,9 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           ════════════════════════════════════════════════════════════════════ */}
       <div
         key={`right-pane-${lesson.id}`}
-        className={`${mobileTab === 'code' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-col flex-1 min-h-0 overflow-hidden relative`}
+        className={isEditorMaximized
+          ? 'fixed inset-0 z-50 flex flex-col w-full h-full'
+          : `${mobileTab === 'code' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-col flex-1 min-h-0 overflow-hidden relative`}
         style={{ background: isDark ? '#0B0F17' : '#FFFFFF' }}
       >
 
@@ -1205,20 +1226,51 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             })}
           </div>
 
-          {/* Reset Button */}
-          <button
-            id="reset-template-btn"
-            onClick={() => setIsResetModalOpen(true)}
-            className="ml-2 px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 flex-shrink-0 transition-all duration-200 cursor-pointer"
-            style={{
-              background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
-              color: isDark ? '#CBD5E1' : '#334155',
-              border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
-            }}
-          >
-            <RotateCcw className="w-3 h-3" />
-            <span>Reset</span>
-          </button>
+          {/* Action Tools: Reset & Maximize / Zen Focus Toggle */}
+          <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+            <button
+              id="reset-template-btn"
+              onClick={() => setIsResetModalOpen(true)}
+              className="px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 flex-shrink-0 transition-all duration-200 cursor-pointer"
+              style={{
+                background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
+                color: isDark ? '#CBD5E1' : '#334155',
+                border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
+              }}
+              title="Reset code to original starter template"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span className="hidden sm:inline">Reset</span>
+            </button>
+
+            <button
+              id="toggle-editor-maximize-btn"
+              onClick={() => setIsEditorMaximized(!isEditorMaximized)}
+              className="px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 flex-shrink-0 transition-all duration-200 cursor-pointer"
+              style={{
+                background: isEditorMaximized
+                  ? (isDark ? 'rgba(245, 158, 11, 0.25)' : 'rgba(245, 158, 11, 0.20)')
+                  : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)'),
+                color: isEditorMaximized ? '#F59E0B' : (isDark ? '#CBD5E1' : '#334155'),
+                border: isEditorMaximized
+                  ? '1px solid rgba(245, 158, 11, 0.40)'
+                  : (isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)'),
+              }}
+              title={isEditorMaximized ? 'Minimize Editor (Exit Zen Mode) [Esc]' : 'Maximize Editor (Zen Mode)'}
+            >
+              {isEditorMaximized ? (
+                <>
+                  <Minimize2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Minimize</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Maximize</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Undo Restore Notification Banner */}
@@ -1511,7 +1563,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             {([ 
               {
                 key: 'test_results' as const,
-                label: 'Test Suite & Diffs',
+                label: 'Test Suite',
                 icon: FlaskConical,
                 badge: runResult && !runResult.compileOk
                   ? { text: 'Build Error', color: '#EF4444', bg: 'rgba(239,68,68,0.20)' }
@@ -1821,38 +1873,56 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
 
                       {/* Visible Test Cases & Assertions Evaluated During Verification */}
                       {lesson.visibleTestCases && lesson.visibleTestCases.length > 0 && (
-                        <div className="pt-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-bold uppercase tracking-wider" style={{ color: isDark ? '#64748B' : '#94A3B8' }}>
-                              Visible Test Cases &amp; Assertions
-                            </span>
-                            {runResult?.visibleTests && runResult.visibleTests.length > 0 && (
-                              <span
-                                className="px-2 py-0.5 rounded-full text-[10px] font-bold"
-                                style={{
-                                  background: runResult.visibleTests.every((t) => t.passed) ? 'rgba(16,185,129,0.20)' : 'rgba(239,68,68,0.20)',
-                                  color: runResult.visibleTests.every((t) => t.passed) ? '#10B981' : '#EF4444',
-                                }}
-                              >
-                                {runResult.visibleTests.filter((t) => t.passed).length}/{runResult.visibleTests.length} Passed
+                        <>
+                          {/* Desktop Full Test Case Cards */}
+                          <div className="pt-3 hidden sm:block">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-bold uppercase tracking-wider" style={{ color: isDark ? '#64748B' : '#94A3B8' }}>
+                                Visible Test Cases &amp; Assertions
                               </span>
-                            )}
-                          </div>
-                          {lesson.visibleTestCases.map((tc, idx) => {
-                            const matchedTest = runResult?.visibleTests?.find(
-                              (t) => t.callStr.trim() === tc.erlangCall.trim() || t.expected.trim() === tc.expectedOutput.trim()
-                            ) || (runResult?.visibleTests ? runResult.visibleTests[idx] : undefined);
+                              {runResult?.visibleTests && runResult.visibleTests.length > 0 && (
+                                <span
+                                  className="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                                  style={{
+                                    background: runResult.visibleTests.every((t) => t.passed) ? 'rgba(16,185,129,0.20)' : 'rgba(239,68,68,0.20)',
+                                    color: runResult.visibleTests.every((t) => t.passed) ? '#10B981' : '#EF4444',
+                                  }}
+                                >
+                                  {runResult.visibleTests.filter((t) => t.passed).length}/{runResult.visibleTests.length} Passed
+                                </span>
+                              )}
+                            </div>
+                            {lesson.visibleTestCases.map((tc, idx) => {
+                              const matchedTest = runResult?.visibleTests?.find(
+                                (t) => t.callStr.trim() === tc.erlangCall.trim() || t.expected.trim() === tc.expectedOutput.trim()
+                              ) || (runResult?.visibleTests ? runResult.visibleTests[idx] : undefined);
 
-                            return (
-                              <UnifiedTestCaseCard
-                                key={`verify-${tc.id || idx}`}
-                                testCase={tc}
-                                runTest={matchedTest}
-                                isDark={isDark}
-                              />
-                            );
-                          })}
-                        </div>
+                              return (
+                                <UnifiedTestCaseCard
+                                  key={`verify-${tc.id || idx}`}
+                                  testCase={tc}
+                                  runTest={matchedTest}
+                                  isDark={isDark}
+                                />
+                              );
+                            })}
+                          </div>
+
+                          {/* Mobile Compact Verification Summary */}
+                          <div className="pt-2 sm:hidden flex items-center justify-between text-xs px-1 text-slate-400">
+                            <span>Test Assertions:</span>
+                            <span
+                              className="font-mono font-bold"
+                              style={{
+                                color: runResult?.visibleTests && runResult.visibleTests.every((t) => t.passed) ? '#10B981' : '#EF4444',
+                              }}
+                            >
+                              {runResult?.visibleTests
+                                ? `${runResult.visibleTests.filter((t) => t.passed).length}/${runResult.visibleTests.length} Passed`
+                                : `${lesson.visibleTestCases.length} evaluated`}
+                            </span>
+                          </div>
+                        </>
                       )}
 
                       {/* BEAM VM Real Telemetry Strip placed under submit verification pipeline */}
@@ -1923,7 +1993,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
               }}
             >
               <FlaskConical className="w-3.5 h-3.5" />
-              <span>Tests &amp; Diffs</span>
+              <span>Tests</span>
               {runResult && (
                 <span
                   className="px-1.5 py-0.2 rounded-full text-[10px] font-bold ml-0.5"
@@ -2038,7 +2108,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between pb-1">
                     <span className="text-xs font-bold uppercase tracking-wider" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                      Test Case Assertions &amp; Diffs
+                      Test Case Assertions
                     </span>
                     <span
                       className="text-xs font-bold px-2 py-0.5 rounded-full"

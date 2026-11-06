@@ -180,8 +180,8 @@ export function LandingWorldsSection() {
               onClick={() => setSelectedWorld(world)}
               className={`cursor-pointer rounded-3xl p-5 sm:p-6 backdrop-blur-2xl transition-all duration-300 flex flex-col justify-between ${
                 isSelected
-                  ? 'bg-white/90 dark:bg-slate-850/90 shadow-[0_12px_36px_rgba(15,23,42,0.1)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.5)] border-2 border-amber-400/60 dark:border-amber-400/50 scale-[1.02]'
-                  : 'bg-white/65 dark:bg-slate-900/65 hover:bg-white/80 dark:hover:bg-slate-850/80 border border-white/80 dark:border-white/10 shadow-[0_4px_20px_rgba(15,23,42,0.04)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)]'
+                  ? 'bg-white/90 dark:bg-slate-900/95 shadow-[0_12px_36px_rgba(15,23,42,0.1)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.5)] border-2 border-amber-400/60 dark:border-amber-400/50 scale-[1.02]'
+                  : 'bg-white/65 dark:bg-slate-900/65 hover:bg-white/80 dark:hover:bg-slate-800/80 border border-white/80 dark:border-white/10 shadow-[0_4px_20px_rgba(15,23,42,0.04)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)]'
               }`}
             >
               <div>

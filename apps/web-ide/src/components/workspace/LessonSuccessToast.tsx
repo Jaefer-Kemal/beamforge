@@ -71,9 +71,9 @@ export const LessonSuccessToast: React.FC = () => {
   return (
     <div
       id="lesson-success-toast"
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 px-4 sm:px-5 py-3 rounded-2xl max-w-xl w-[94vw] sm:w-auto shadow-2xl animate-slide-up transition-all duration-300"
+      className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3 rounded-2xl max-w-xl w-[92vw] sm:w-auto shadow-2xl animate-slide-up transition-all duration-300"
       style={{
-        background: isDark ? 'rgba(15, 23, 42, 0.92)' : 'rgba(255, 255, 255, 0.94)',
+        background: isDark ? 'rgba(15, 23, 42, 0.94)' : 'rgba(255, 255, 255, 0.96)',
         border: isDark ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.85)',
         backdropFilter: 'blur(32px)',
         boxShadow: isDark
@@ -81,31 +81,45 @@ export const LessonSuccessToast: React.FC = () => {
           : '0 16px 40px rgba(15, 23, 42, 0.12), 0 0 20px rgba(16, 185, 129, 0.15)',
       }}
     >
-      {/* Emerald Icon */}
-      <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-500 flex-shrink-0">
-        <CheckCircle2 className="w-5 h-5" />
-      </div>
+      <div className="flex items-center justify-between gap-3 flex-1 min-w-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          {/* Emerald Icon */}
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-500 flex-shrink-0">
+            <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5" />
+          </div>
 
-      {/* Info Message */}
-      <div className="flex flex-col min-w-0 pr-1">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-            {isNewChapter ? 'Chapter Complete!' : 'Lesson Complete!'}
-          </span>
-          {xpAwarded > 0 && (
-            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25">
-              <Zap className="w-2.5 h-2.5" />
-              +{xpAwarded} XP
-            </span>
-          )}
+          {/* Info Message */}
+          <div className="flex flex-col min-w-0 pr-1 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                {isNewChapter ? 'Chapter Complete!' : 'Lesson Complete!'}
+              </span>
+              {xpAwarded > 0 && (
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25">
+                  <Zap className="w-2.5 h-2.5" />
+                  +{xpAwarded} XP
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-700 dark:text-slate-300 truncate max-w-[220px] sm:max-w-xs md:max-w-sm">
+              <span className="opacity-60">Up next: </span>
+              <span className="font-semibold text-slate-900 dark:text-white">
+                {isNewChapter ? `CH${nextChapterNum}: ` : `L${nextLessonNum}: `}
+                {nextLessonTitle}
+              </span>
+            </p>
+          </div>
         </div>
-        <p className="text-xs text-slate-700 dark:text-slate-300 truncate max-w-xs sm:max-w-sm">
-          <span className="opacity-60">Up next: </span>
-          <span className="font-semibold text-slate-900 dark:text-white">
-            {isNewChapter ? `CH${nextChapterNum}: ` : `L${nextLessonNum}: `}
-            {nextLessonTitle}
-          </span>
-        </p>
+
+        {/* Mobile close button */}
+        <button
+          onClick={closeSuccessToast}
+          title="Stay on this lesson"
+          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer sm:hidden flex-shrink-0"
+          style={{ background: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(15, 23, 42, 0.04)' }}
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* Action Buttons */}
@@ -113,7 +127,7 @@ export const LessonSuccessToast: React.FC = () => {
         <button
           id="proceed-next-lesson-btn"
           onClick={handleProceed}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-md cursor-pointer transition-all hover:scale-105 active:scale-95"
+          className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 sm:py-2.5 rounded-xl text-xs font-bold text-white shadow-md cursor-pointer transition-all hover:scale-105 active:scale-95"
           style={{
             background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
             boxShadow: '0 4px 14px rgba(245, 158, 11, 0.40)',
@@ -126,10 +140,11 @@ export const LessonSuccessToast: React.FC = () => {
           </kbd>
         </button>
 
+        {/* Desktop close button */}
         <button
           onClick={closeSuccessToast}
           title="Stay on this lesson"
-          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
+          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer hidden sm:block"
           style={{ background: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(15, 23, 42, 0.04)' }}
         >
           <X className="w-3.5 h-3.5" />
