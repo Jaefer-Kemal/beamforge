@@ -1972,6 +1972,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
 
+## Phase 94: Pedagogical Despoiling of Chapter 1 Lecture 7 (`ch01-l07`)
+- [x] **94.1: Audit & Eliminate Exercise Code Spoilers in Lecture 1.7 (`ch01-l07`)**:
+  - Neutralized concept notes repeated variable matching explanation: replaced identical pair `{X, X} -> {matched, X}; _ -> mismatch` with loopback endpoint router `{Endpoint, Endpoint} -> {loopback, Endpoint}; {_Source, _Dest} -> external_route`.
+  - Replaced `http_classifier.erl` parallel example (which had mirrored `describe_status`, `head_or_default`, and `verify_identical_pair` 1-to-1) with a distinct `actuator_controller.erl` hardware module demonstrating multi-clause power profile mapping (`mode_profile/1`), sensor queue head retrieval (`lead_telemetry_or_default/2`), and redundant pin voltage comparison (`verify_symmetric_pins/1`).
+  - Audited and de-spoiled Assignment Specification: eliminated literal Erlang syntax lines (`[H | _] -> H`, `{X, X} -> {matched, X}`) in favor of structured `Input` / `Behavior` / `Examples` definitions.
+  - Upgraded starter code comments from spoon-fed hints inside function bodies to clean `@doc` contracts in both `files[0].content` and `starterCode`.
+- [x] **94.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Starter module compiled cleanly with 0 errors.
+
 
 
 
