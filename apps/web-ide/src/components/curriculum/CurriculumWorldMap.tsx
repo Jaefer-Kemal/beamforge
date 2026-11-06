@@ -22,11 +22,11 @@ import {
   Zap,
   AlertTriangle,
   Lock,
+  Network,
 } from 'lucide-react';
 import { COURSE_WORLDS } from '../../data/courseWorlds';
 import { ALL_CURRICULUM_CHAPTERS } from '../../data/chapters';
 import { CHAPTERS } from '../navigation/BootDevTopBar';
-import { BeamForgeLogo } from '../navigation/BeamForgeLogo';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import { PrerequisiteModal } from '../workspace/PrerequisiteModal';
 import { checkLessonAccess, LessonPrerequisiteInfo } from '../../lib/curriculumAccess';
@@ -372,7 +372,7 @@ export function CurriculumWorldMap() {
                 className="w-full h-full rounded-[14px] flex items-center justify-center shadow-inner"
                 style={{ background: isDark ? '#0B0F17' : '#FFFFFF' }}
               >
-                <BeamForgeLogo size={32} />
+                <Network className="w-7 h-7 sm:w-8 sm:h-8 text-indigo-500 stroke-[2.2]" />
               </div>
             </div>
             <div>
@@ -567,13 +567,13 @@ export function CurriculumWorldMap() {
                         </span>
                       </div>
                       <h2
-                        className="text-lg md:text-xl font-bold tracking-tight truncate"
+                        className="text-base sm:text-lg md:text-xl font-bold tracking-tight break-words leading-snug"
                         style={{ color: isDark ? '#F8FAFC' : '#020617' }}
                       >
                         {world.title}
                       </h2>
                       <p
-                        className="text-xs mt-0.5 truncate hidden sm:block font-medium"
+                        className="text-xs mt-1 font-medium break-words leading-relaxed line-clamp-2 sm:line-clamp-1"
                         style={{ color: isDark ? '#94A3B8' : '#64748B' }}
                       >
                         {world.subtitle}

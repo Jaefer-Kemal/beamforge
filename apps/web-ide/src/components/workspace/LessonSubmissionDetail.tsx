@@ -11,11 +11,11 @@ import {
   Check,
   RotateCcw,
   FileCode,
-  ShieldCheck,
-  FlaskConical,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import type { UserSubmissionRecord } from '../../types/submissions';
-import { ErlangCodeBlock } from '../../lib/monacoErlang';
+import { highlightErlangLine } from '../../lib/monacoErlang';
 import { RestoreConfirmModal } from './RestoreConfirmModal';
 
 interface LessonSubmissionDetailProps {
@@ -33,6 +33,7 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const fileEntries = Object.entries(submission.files || {});
   const [selectedFilePath, setSelectedFilePath] = useState<string>(
@@ -42,6 +43,7 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
   const activeEntry = fileEntries.find(([path]) => path === selectedFilePath) || fileEntries[0];
   const filePath = activeEntry?.[0] || 'src/solution.erl';
   const fileContent = typeof activeEntry?.[1] === 'string' ? activeEntry[1] : '% No file content recorded';
+  const lines = fileContent ? fileContent.split('\n') : [];
 
   const isAccepted = submission.status === 'passed';
   const isCompileError = submission.status === 'compile_error';
@@ -65,7 +67,7 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
   });
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col h-full overflow-y-auto px-4 sm:px-5 py-4 pb-24">
+    <div className="flex-1 min-h-0 flex flex-col overflow-y-auto px-4 sm:px-5 py-4 pb-20">
       {/* Top Navigation & Timestamp */}
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <button
@@ -292,6 +294,35 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* Maximize / Collapse Code Viewer */}
+          <button
+            id="toggle-submission-expand-btn"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all"
+            style={{
+              background: isExpanded
+                ? (isDark ? 'rgba(99, 102, 241, 0.20)' : 'rgba(99, 102, 241, 0.12)')
+                : (isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.06)'),
+              color: isExpanded ? '#818CF8' : (isDark ? '#CBD5E1' : '#334155'),
+              border: isExpanded
+                ? '1px solid rgba(99, 102, 241, 0.35)'
+                : (isDark ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(15, 23, 42, 0.08)'),
+            }}
+            title={isExpanded ? 'Collapse code viewer' : 'Expand to view full code comfortably'}
+          >
+            {isExpanded ? (
+              <>
+                <Minimize2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Collapse</span>
+              </>
+            ) : (
+              <>
+                <Maximize2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Expand</span>
+              </>
+            )}
+          </button>
+
           {/* Copy Button */}
           <button
             id="copy-submission-code-btn"
@@ -335,15 +366,42 @@ export const LessonSubmissionDetail: React.FC<LessonSubmissionDetailProps> = ({
         </div>
       </div>
 
-      {/* Read-Only Syntax Highlighted Erlang Code */}
+      {/* Read-Only Syntax Highlighted Erlang Code with Line Numbers and Un-clipped Scroll Container */}
       <div
         id="submission-code-viewer"
-        className="rounded-b-xl border-b border-x overflow-hidden mb-4"
+        className="rounded-b-xl border-b border-x overflow-hidden mb-6 flex-shrink-0"
         style={{
           borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
+          background: isDark ? '#090D16' : '#F8FAFC',
         }}
       >
-        <ErlangCodeBlock code={fileContent} isDark={isDark} />
+        <div
+          className={`p-3 font-mono text-xs overflow-x-auto overflow-y-auto transition-all ${
+            isExpanded ? 'max-h-[80vh]' : 'max-h-[460px]'
+          }`}
+        >
+          {lines.map((line, idx) => (
+            <div key={idx} className="flex leading-relaxed hover:bg-white/5 px-1 rounded min-w-fit">
+              <span
+                className="w-9 select-none text-right pr-3 font-mono text-[11px] opacity-40 shrink-0"
+                style={{ color: isDark ? '#94A3B8' : '#64748B' }}
+              >
+                {idx + 1}
+              </span>
+              <span
+                className="flex-1 whitespace-pre font-mono text-xs"
+                style={{ color: isDark ? '#E2E8F0' : '#1E293B' }}
+              >
+                {highlightErlangLine(line, isDark)}
+              </span>
+            </div>
+          ))}
+          {lines.length === 0 && (
+            <div className="p-4 text-center text-xs text-slate-400">
+              % No file content recorded
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Guarded Restore Confirmation Modal */}

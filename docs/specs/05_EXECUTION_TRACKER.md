@@ -1896,6 +1896,31 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: All Erlang grader modules compiled cleanly with 0 errors.
 
+## Phase 88: Mobile Drawer Polish, Distinct Syllabus Hero Icon, World Name Wrapping & Solution-Style Submissions Code Viewer
+- [x] **88.1: Mobile Drawer Leaderboard Unification (`BootDevTopBar.tsx`)**:
+  - Removed duplicate "Leaderboard" button from the top stats row of the mobile menu drawer (`#mobile-menu-drawer`), leaving streak badge and level & role pill.
+  - Renamed the "Rankings" button in the Quick Settings bar to "Leaderboard" (`<Trophy className="w-3.5 h-3.5" /> <span>Leaderboard</span>`), eliminating UI redundancy and properly utilizing space.
+- [x] **88.2: Distinct Distributed Actor Syllabus Hero Icon (`CurriculumWorldMap.tsx`)**:
+  - Replaced duplicate `BeamForgeLogo` in the syllabus hero banner with `Network` (`w-7 h-7 sm:w-8 sm:h-8 text-indigo-500 stroke-[2.2]`) from `lucide-react`.
+  - Icon visually symbolizes BEAM actor mailboxes, supervision tree hierarchies, and distributed XMPP node routing without clashing with the topbar brand logo.
+  - Removed unused `BeamForgeLogo` import.
+- [x] **88.3: World Title & Subtitle Mobile Truncation Resolution (`CurriculumWorldMap.tsx`)**:
+  - Removed strict `truncate` class on World banner heading (`h2`) in `CurriculumWorldMap.tsx`.
+  - Applied `text-base sm:text-lg md:text-xl font-bold tracking-tight break-words leading-snug`, allowing full titles like "The Functional Core & Term Anatomy" and "Distributed Systems & Telemetry" to wrap naturally on 360–400px mobile screens without cut-offs.
+  - Replaced `hidden sm:block truncate` on the subtitle with `line-clamp-2 sm:line-clamp-1 break-words leading-relaxed text-xs mt-1 font-medium`, rendering legible world descriptions on mobile viewports.
+- [x] **88.4: Rebuilt Submission Code Viewer with Line Numbers, Syntax Highlighting & Maximize Toggle (`LessonSubmissionDetail.tsx`)**:
+  - Rebuilt `#submission-code-viewer` using `SolutionViewerTab.tsx`'s proven architectural pattern.
+  - Line-by-line flex container with dedicated fixed line-number gutter (`w-9 select-none text-right pr-3 font-mono text-[11px] opacity-40 shrink-0`), rendering exact line numbers (`1, 2, 3...`).
+  - Integrated `highlightErlangLine(line, isDark)` from `lib/monacoErlang.tsx` for static syntax highlighting of atoms, directives, keywords, variables, numbers, and comments.
+  - Added dedicated inner scroll container (`p-3 font-mono text-xs overflow-x-auto overflow-y-auto max-h-[460px]`) allowing full vertical and horizontal scrolling without clipping.
+  - Added interactive Expand / Maximize toggle button (`Maximize2` / `Minimize2`) in the code header allowing users to expand the code viewer to `max-h-[80vh]`.
+  - Removed restrictive `h-full` on the root container, ensuring flexbox stretches naturally inside the left textbook pane without pushing the bottom offscreen.
+- [x] **88.5: Multi-Compiler & Production Build Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: All Erlang grader modules compiled cleanly with 0 errors.
+
+
 
 
 

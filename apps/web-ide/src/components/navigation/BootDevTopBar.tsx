@@ -1204,24 +1204,6 @@ export function BootDevTopBar() {
               >
                 Lv{mounted ? level : 1} · {mounted ? role : 'Apprentice'}
               </button>
-
-              {/* Global Leaderboard Button */}
-              <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  setDrawerTab('rankings');
-                  setIsLeaderboardOpen(true);
-                }}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold cursor-pointer transition-all"
-                style={{
-                  background: isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.12)',
-                  border: '1px solid rgba(245, 158, 11, 0.35)',
-                  color: '#F59E0B',
-                }}
-              >
-                <Trophy className="w-3 h-3 fill-amber-500/20" />
-                <span>Leaderboard</span>
-              </button>
             </div>
           </div>
 
@@ -1306,7 +1288,7 @@ export function BootDevTopBar() {
               style={{ background: 'rgba(245, 158, 11, 0.12)' }}
             >
               <Trophy className="w-3.5 h-3.5" />
-              <span>Rankings</span>
+              <span>Leaderboard</span>
             </button>
           </div>
 
