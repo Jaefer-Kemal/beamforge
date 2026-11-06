@@ -24,11 +24,11 @@ In Erlang, the BEAM Virtual Machine deconstructs arbitrary nested data structure
 When an Erlang function is invoked, the BEAM VM uses specialized bytecode instructions (\`test_heap\`, \`get_tuple_element\`, \`is_eq_exact\`) to test the shape and contents of arguments before the function body ever executes:
 
 \`\`\`erlang
-%% Unpacking deeply nested tuples directly in the clause head:
-handle_packet({packet, {header, 4, {route, From, To}}, Payload}) ->
-    {ok, ipv4, From, To, Payload};
-handle_packet({packet, {header, 6, {route, From, To}}, Payload}) ->
-    {ok, ipv6, From, To, Payload}.
+%% Unpacking nested records in clause heads:
+inspect_service({service_event, {meta, http, {endpoint, Host, Port}}, Details}) ->
+    {valid_http, Host, Port, Details};
+inspect_service({service_event, {meta, grpc, {endpoint, Host, Port}}, Details}) ->
+    {valid_grpc, Host, Port, Details}.
 \`\`\`
 
 If an incoming argument does not match any declared pattern, Erlang raises a \`function_clause\` runtime exception immediately. This prevents corrupted state from silently propagating deeper into your application.
@@ -40,50 +40,54 @@ A novice might destructure the fields and then rebuild the entire tuple from scr
 
 \`\`\`erlang
 %% Inefficient: Reconstructs a brand-new tuple on the process heap:
-forward_packet({packet, {header, 4, {route, _From, Dst}}, Payload}) ->
-    NewPacket = {packet, {header, 4, {route, _From, Dst}}, Payload},
-    {forwarded, Dst, NewPacket}.
+forward_reading({reading, {sensor, temp, SensorId}, Value}) ->
+    RebuiltReading = {reading, {sensor, temp, SensorId}, Value},
+    {forwarded, SensorId, RebuiltReading}.
 \`\`\`
 
 Erlang provides a powerful construct called **Pattern Aliasing** using the \`=\` operator directly inside the function signature:
 
 \`\`\`erlang
-%% Idiomatic: Binds the whole term to FullPacket with ZERO heap re-allocation!
-forward_packet({packet, {header, 4, {route, _From, Dst}}, _Payload} = FullPacket) ->
-    {forwarded, Dst, FullPacket}.
+%% Idiomatic: Binds the whole term to FullReading with ZERO heap re-allocation!
+forward_reading({reading, {sensor, temp, SensorId}, _Value} = FullReading) ->
+    {forwarded, SensorId, FullReading}.
 \`\`\`
 
-Here, \`FullPacket\` is an alias for the entire outer tuple term, while \`Dst\` is simultaneously bound to the inner destination field.
+Here, \`FullReading\` is an alias for the entire outer tuple term, while \`SensorId\` is simultaneously bound to the inner identifier field.
 
 > [!warning] Common Beginner Syntax Trap: Aliasing Direction
 > In function heads, \`Pattern = Variable\` and \`Variable = Pattern\` are both valid syntax in Erlang.
-> However, placing the descriptive pattern first (e.g. \`{packet, ...} = FullPacket\`) makes your function signatures significantly easier for teammates to read during code review.
-> Remember: never use uppercase names for atom tags (\`Packet\` is a variable; \`packet\` is an atom).
+> However, placing the descriptive pattern first (e.g. \`{reading, ...} = FullReading\`) makes your function signatures significantly easier for teammates to read during code review.
+> Remember: never use uppercase names for atom tags (\`Reading\` is a variable; \`reading\` is an atom).
 
 ## Parallel Worked Example
 
-Consider a banking gateway inspecting financial transactions:
+Consider an industrial smart grid power station dispatcher:
 
 \`\`\`erlang
--module(tx_router).
--export([route_tx/1, archive_tx/1]).
+-module(grid_dispatcher).
+-export([parse_telemetry/1, route_critical_alert/1]).
 
-%% Extract routing details from nested transaction envelope
-route_tx({tx, {routing, 900, {account, Src, Dst}}, _Amount}) ->
-    {ok, express_settlement, Src, Dst};
-route_tx({tx, {routing, 100, {account, Src, Dst}}, _Amount}) ->
-    {ok, standard_clearing, Src, Dst};
-route_tx({tx, {routing, InvalidCode, _Accts}, _Amount}) ->
-    {error, {unsupported_network, InvalidCode}};
-route_tx(_) ->
-    {error, malformed_transaction}.
+%% Extract substation voltage telemetry from nested device frames
+parse_telemetry({meter_event, {device_meta, high_voltage, {bus, StationId, FeederId}}, _Metrics}) ->
+    {monitored, hvdc, StationId, FeederId};
+parse_telemetry({meter_event, {device_meta, low_voltage, {bus, StationId, FeederId}}, _Metrics}) ->
+    {monitored, lvdc, StationId, FeederId};
+parse_telemetry({meter_event, {device_meta, UnknownGrid, {bus, _Station, _Feeder}}, _Metrics}) ->
+    {alert, {unrecognized_grid_type, UnknownGrid}};
+parse_telemetry(_) ->
+    {alert, corrupt_telemetry_frame}.
 
-%% Simultaneously match priority and retain the complete transaction term
-archive_tx({tx, {routing, 900, _}, _} = HighPriorityTx) ->
-    {archived_express, HighPriorityTx};
-archive_tx(StandardTx) ->
-    {archived_standard, StandardTx}.
+%% Match critical fault conditions and forward the entire unaltered frame to the emergency queue
+route_critical_alert({meter_event, {device_meta, high_voltage, {bus, StationId, _}}, _} = CriticalFrame) ->
+    {emergency_dispatch, StationId, CriticalFrame};
+route_critical_alert(StandardFrame) ->
+    {routine_storage, StandardFrame}.
 \`\`\`
+
+Notice:
+- \`parse_telemetry/1\` extracts nested fields from \`{meter_event, ...}\` tuples directly in the clause heads, providing fallback clauses for unsupported grid types and corrupt structures.
+- \`route_critical_alert/1\` uses simultaneous pattern aliasing (\`= CriticalFrame\`) to extract \`StationId\` while retaining the full, unmodified data term on the process heap with zero re-allocation.
 
 ## Official Erlang Docs & Function Reference
 
@@ -96,19 +100,29 @@ FunctionName(PatternN = FullVar, ...) -> Body.
 
 ## Assignment Specification
 
-Implement two routing functions in \`deep_match.erl\`:
+Implement two deep pattern matching functions in \`deep_match.erl\`:
 
-1. \`extract_route(Packet)\`:
-   - Matches a 3-element tuple: \`{packet, {header, Version, {route, From, To}}, Payload}\`.
-   - If \`Version =:= 4\`, returns \`{ok, ipv4, From, To}\`.
-   - If \`Version =:= 6\`, returns \`{ok, ipv6, From, To}\`.
-   - If \`Version\` is any other value, returns \`{error, {unsupported_version, Version}}\`.
-   - If \`Packet\` does not match the packet envelope shape at all, returns \`{error, malformed_envelope}\`.
+### 1. \`extract_route(Packet)\`
+- **Input**: A packet term \`Packet\`. Valid packets are structured as a 3-element tuple containing the atom tag \`packet\`, an inner 3-element header tuple \`{header, Version, RouteTuple}\`, and a payload list \`Payload\`. The \`RouteTuple\` is a 3-element tuple \`{route, From, To}\` where \`From\` and \`To\` are endpoint strings.
+- **Behavior**: Unpack the routing information directly within the function clause heads:
+  - If \`Version\` is integer \`4\`: Returns \`{ok, ipv4, From, To}\`.
+  - If \`Version\` is integer \`6\`: Returns \`{ok, ipv6, From, To}\`.
+  - If the packet matches the 3-element envelope and header structure but \`Version\` is any other value: Returns \`{error, {unsupported_version, Version}}\`.
+  - If \`Packet\` does not conform to the expected envelope structure: Returns \`{error, malformed_envelope}\`.
+- **Examples**:
+  - \`deep_match:extract_route({packet, {header, 4, {route, "10.0.0.1", "10.0.0.2"}}, [ping, 1]})\` returns \`{ok, ipv4, "10.0.0.1", "10.0.0.2"}\`.
+  - \`deep_match:extract_route({packet, {header, 6, {route, "fe80::1", "fe80::2"}}, []})\` returns \`{ok, ipv6, "fe80::1", "fe80::2"}\`.
+  - \`deep_match:extract_route({packet, {header, 5, {route, "10.0.0.1", "10.0.0.2"}}, []})\` returns \`{error, {unsupported_version, 5}}\`.
+  - \`deep_match:extract_route({corrupt, envelope})\` returns \`{error, malformed_envelope}\`.
 
-2. \`repackage_envelope(Packet)\`:
-   - Uses function-head aliasing (\`= FullPacket\`) to match IPv4 packets: \`{packet, {header, 4, {route, _From, Dst}}, _Payload} = FullPacket\`.
-   - Returns \`{forwarded, Dst, FullPacket}\`.
-   - Any other input returns \`{dropped, Packet}\`.
+### 2. \`repackage_envelope(Packet)\`
+- **Input**: Any Erlang term \`Packet\`.
+- **Behavior**: Inspect the packet structure using simultaneous pattern aliasing in the function head:
+  - When matching an IPv4 packet (where \`Version\` is \`4\`), bind the inner destination host \`Dst\` while simultaneously binding the entire untouched packet term to an alias variable. Return \`{forwarded, Dst, FullPacket}\`.
+  - For any other input that does not match an IPv4 packet, return \`{dropped, Packet}\`.
+- **Examples**:
+  - \`deep_match:repackage_envelope({packet, {header, 4, {route, "src_host", "dst_host"}}, [data, 42]})\` returns \`{forwarded, "dst_host", {packet, {header, 4, {route, "src_host", "dst_host"}}, [data, 42]}}\`.
+  - \`deep_match:repackage_envelope({packet, {header, 6, {route, "a", "b"}}, []})\` returns \`{dropped, {packet, {header, 6, {route, "a", "b"}}, []}}\`.
 
 ## Rules & Verification Constraints
 
@@ -183,17 +197,12 @@ Implement two routing functions in \`deep_match.erl\`:
         content: `-module(deep_match).
 -export([extract_route/1, repackage_envelope/1]).
 
-%% @doc Deconstructs a nested packet envelope into routing endpoints.
-%% See lesson guide for the exact envelope tuple shape and return contracts.
-extract_route(_Packet) ->
-    %% % TODO: Implement multi-clause pattern matching across IPv4, IPv6,
-    %% % unsupported versions, and malformed envelope shapes.
+%% @doc Extract IP version and endpoints from a nested packet envelope.
+extract_route(Packet) ->
     ok.
 
-%% @doc Forwards IPv4 packets using pattern aliasing (= FullPacket) to preserve the original term.
-repackage_envelope(_Packet) ->
-    %% % TODO: Use pattern aliasing in the function head to extract Dst from IPv4 packets
-    %% % while retaining the unmodified envelope, or drop unrecognized packets.
+%% @doc Forward IPv4 envelopes with destination host, dropping other packets.
+repackage_envelope(Packet) ->
     ok.`,
       },
     ],
@@ -218,17 +227,12 @@ repackage_envelope(Packet) ->
     starterCode: `-module(deep_match).
 -export([extract_route/1, repackage_envelope/1]).
 
-%% @doc Deconstructs a nested packet envelope into routing endpoints.
-%% See lesson guide for the exact envelope tuple shape and return contracts.
-extract_route(_Packet) ->
-    %% % TODO: Implement multi-clause pattern matching across IPv4, IPv6,
-    %% % unsupported versions, and malformed envelope shapes.
+%% @doc Extract IP version and endpoints from a nested packet envelope.
+extract_route(Packet) ->
     ok.
 
-%% @doc Forwards IPv4 packets using pattern aliasing (= FullPacket) to preserve the original term.
-repackage_envelope(_Packet) ->
-    %% % TODO: Use pattern aliasing in the function head to extract Dst from IPv4 packets
-    %% % while retaining the unmodified envelope, or drop unrecognized packets.
+%% @doc Forward IPv4 envelopes with destination host, dropping other packets.
+repackage_envelope(Packet) ->
     ok.`,
     solutionCode: `-module(deep_match).
 -export([extract_route/1, repackage_envelope/1]).

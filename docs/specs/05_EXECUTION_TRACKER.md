@@ -1994,6 +1994,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go test`: `TestDynamicVisibleTestsCurriculum` passed all visible tests for `ch01-l06`, `ch01-l07`, and `ch01-l08` cleanly on OTP 29.
   - `erlc.exe`: Starter module compiled cleanly with 0 errors.
 
+## Phase 96: Pedagogical Despoiling of Chapter 2 Lecture 1 (`ch02-l01`)
+- [x] **96.1: Audit & Eliminate Exercise Code Spoilers in Lecture 2.1 (`ch02-l01`)**:
+  - Neutralized concept breakdown deep destructuring and aliasing examples: replaced `{packet, {header, 4, ...}}` with service event routing (`inspect_service/1`) and sensor reading aliasing (`forward_reading/1`).
+  - Replaced `tx_router.erl` parallel example (which had mirrored `extract_route` and `repackage_envelope` 1-to-1 with identical clause counts and structure) with a distinct `grid_dispatcher.erl` smart grid power station module demonstrating multi-clause frame inspection (`parse_telemetry/1`) and emergency dispatch aliasing (`route_critical_alert/1`).
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks, eliminating the explicit 1-line Erlang aliasing formula spoiler (`{packet, {header, 4, {route, _From, Dst}}, _Payload} = FullPacket`).
+  - Upgraded starter code comments from `% TODO` hint comments to standard developer `@doc` contracts in both `files[0].content` and `starterCode`.
+- [x] **96.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `go test`: `TestDynamicVisibleTestsCurriculum` passed all 3 visible tests for `ch02-l01` cleanly on OTP 29.
+  - `erlc.exe`: Starter module compiled cleanly with 0 errors.
+
 
 
 
