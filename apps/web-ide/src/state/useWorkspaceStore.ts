@@ -868,6 +868,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             k.startsWith(`beamforge_draft_${activeUser.id}`) ||
             k.startsWith(`beamforge_submissions_${activeUser.id}`) ||
             k.startsWith(`beamforge_accepted_${activeUser.id}`) ||
+            k.startsWith(`beamforge_completed_${activeUser.id}_`) ||
             k.startsWith('beamforge_completed_')
           ) {
             localStorage.removeItem(k);
@@ -948,15 +949,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           }
         }
 
-        // Direct scan of all beamforge_completed_* keys
+        // Clean legacy un-namespaced keys and scan user-scoped beamforge_completed_${currentUserId}_* keys
         const directCompleted: string[] = [];
+        const userPrefix = `beamforge_completed_${currentUserId}_`;
         try {
+          const keysToRemove: string[] = [];
           for (let i = 0; i < localStorage.length; i++) {
             const k = localStorage.key(i);
-            if (k && k.startsWith('beamforge_completed_')) {
-              directCompleted.push(k.replace('beamforge_completed_', ''));
+            if (k) {
+              if (k.startsWith(userPrefix)) {
+                directCompleted.push(k.replace(userPrefix, ''));
+              } else if (k.startsWith('beamforge_completed_ch') || k.startsWith('beamforge_completed_ps')) {
+                // Legacy un-namespaced key that causes cross-user pollution - purge!
+                keysToRemove.push(k);
+              }
             }
           }
+          keysToRemove.forEach((k) => {
+            try { localStorage.removeItem(k); } catch {}
+          });
         } catch {}
 
         if (cachedUser || directCompleted.length > 0) {
@@ -983,9 +994,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             const acceptedFiles: Record<string, Record<string, string>> = data.acceptedFiles || {};
             const cloudDrafts: Record<string, Record<string, string>> = data.drafts || {};
 
-            // Immediate cross-device sync into localStorage
+            // Immediate cross-device sync into user-scoped localStorage
             authoritativeCompleted.forEach((lid: string) => {
-              try { localStorage.setItem(`beamforge_completed_${lid}`, 'true'); } catch {}
+              try { localStorage.setItem(`beamforge_completed_${currentUserId}_${lid}`, 'true'); } catch {}
             });
 
             Object.entries(acceptedFiles).forEach(([exId, filesMap]) => {
@@ -1011,14 +1022,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             });
 
             set((state) => {
-              const mergedCompleted = Array.from(new Set([...state.completedLevelIds, ...authoritativeCompleted]));
+              // Authoritative completed from Neon backend is the single source of truth for this user:
+              const authoritativeUserCompleted = authoritativeCompleted;
               const mergedUnlockedSolutions = Array.from(new Set([...state.unlockedSolutionLessonIds, ...(dbUser.unlockedSolutionLessonIds || [])]));
-              const mergedXp = Math.max(state.totalXp, dbUser.totalXp || 0);
+              const canonicalXp = dbUser.totalXp ?? (authoritativeUserCompleted.length * 100);
               const mergedUser: UserProfile = {
                 ...state.currentUser,
                 ...dbUser,
-                completedLevelIds: mergedCompleted,
-                totalXp: mergedXp,
+                completedLevelIds: authoritativeUserCompleted,
+                totalXp: canonicalXp,
                 unlockedSolutionLessonIds: mergedUnlockedSolutions,
               };
 
@@ -1042,8 +1054,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               try {
                 localStorage.setItem(`beamforge_user_${currentUserId}`, JSON.stringify(mergedUser));
                 localStorage.setItem('beamforge_progress', JSON.stringify({
-                  completedLevelIds: mergedCompleted,
-                  totalXp: mergedXp,
+                  completedLevelIds: authoritativeUserCompleted,
+                  totalXp: canonicalXp,
                   unlockedWorldIds: ['world-1-foundations'],
                   devModeUnlockedAll: false,
                   unlockedSolutionLessonIds: mergedUnlockedSolutions,
@@ -1051,9 +1063,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               } catch {}
               return {
                 currentUser: mergedUser,
-                completedLevelIds: mergedCompleted,
-                completedWithXpLevelIds: mergedCompleted,
-                totalXp: mergedXp,
+                completedLevelIds: authoritativeUserCompleted,
+                completedWithXpLevelIds: authoritativeUserCompleted,
+                totalXp: canonicalXp,
                 unlockedSolutionLessonIds: mergedUnlockedSolutions,
                 files: currentFiles,
                 isHydrated: true,
@@ -1316,7 +1328,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       syncUserToStorageAndDb(updatedUser);
       if (typeof window !== 'undefined') {
         try {
-          localStorage.setItem(`beamforge_completed_${levelId}`, 'true');
+          localStorage.setItem(`beamforge_completed_${updatedUser.id}_${levelId}`, 'true');
         } catch {}
       }
 
@@ -1730,7 +1742,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               currentUser: data.user ? { ...state.currentUser, ...data.user } : state.currentUser,
             }));
             data.completedLevelIds.forEach((lid: string) => {
-              try { localStorage.setItem(`beamforge_completed_${lid}`, 'true'); } catch {}
+              try { localStorage.setItem(`beamforge_completed_${payload.userId}_${lid}`, 'true'); } catch {}
             });
           }
         }

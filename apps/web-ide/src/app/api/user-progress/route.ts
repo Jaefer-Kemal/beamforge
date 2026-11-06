@@ -219,8 +219,11 @@ export async function GET(req: NextRequest) {
       }
       if (!Array.isArray(completedLevelIds)) completedLevelIds = [];
 
-      // Reconcile user profile completed list with authoritative passed submissions
-      const mergedCompleted = Array.from(new Set([...completedLevelIds, ...dbPassedIds]));
+      // Authoritative completion determination:
+      // For real learners (like user_alpha), completion is STRICTLY derived from passed submissions.
+      // Preset mock users (user_beta, user_master) only use mock arrays if they have no passed submissions.
+      const isPresetDemo = (userId === 'user_beta' || userId === 'user_master') && dbPassedIds.length === 0;
+      const authoritativeCompleted = isPresetDemo ? preset.completedLevelIds : dbPassedIds;
 
       let unlockedSolutionLessonIds = r.unlocked_solution_lesson_ids;
       if (typeof unlockedSolutionLessonIds === 'string') {
@@ -228,13 +231,30 @@ export async function GET(req: NextRequest) {
       }
       if (!Array.isArray(unlockedSolutionLessonIds)) unlockedSolutionLessonIds = [];
 
-      const totalXp = Number(r.total_xp || 0);
-      const derived = xpToRole(totalXp);
+      // Compute authoritative total XP
+      let canonicalXp = Number(r.total_xp || 0);
+      if (!isPresetDemo) {
+        canonicalXp = authoritativeCompleted.length * 100;
+        for (const lid of authoritativeCompleted) {
+          if (unlockedSolutionLessonIds.includes(lid)) {
+            canonicalXp -= 50;
+          }
+        }
+        if (canonicalXp < 0) canonicalXp = 0;
+      }
 
-      if (mergedCompleted.length > completedLevelIds.length) {
+      const derived = xpToRole(canonicalXp);
+
+      // Prune database drift if beamforge_users had contaminated entries
+      const currentSorted = JSON.stringify([...completedLevelIds].sort());
+      const authorSorted = JSON.stringify([...authoritativeCompleted].sort());
+      if (currentSorted !== authorSorted || Number(r.total_xp) !== canonicalXp) {
         await sql`
           UPDATE beamforge_users
-          SET completed_level_ids = ${JSON.stringify(mergedCompleted)},
+          SET completed_level_ids = ${JSON.stringify(authoritativeCompleted)},
+              total_xp = ${canonicalXp},
+              level = ${derived.level},
+              role = ${derived.role},
               updated_at = NOW()
           WHERE id = ${userId}
         `;
@@ -247,8 +267,8 @@ export async function GET(req: NextRequest) {
         level: derived.level,
         avatarColor: preset.avatarColor,
         bio: preset.bio,
-        totalXp,
-        completedLevelIds: mergedCompleted,
+        totalXp: canonicalXp,
+        completedLevelIds: authoritativeCompleted,
         unlockedSolutionLessonIds,
         lastActiveExercise: r.last_active_exercise || preset.lastActiveExercise,
         streakDays: Number(r.streak_days || preset.streakDays || 1),
@@ -257,7 +277,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         source: 'neon',
         user,
-        completedLevelIds: mergedCompleted,
+        completedLevelIds: authoritativeCompleted,
         acceptedFiles,
         drafts: cloudDrafts,
         dbConnected: true,
@@ -265,16 +285,19 @@ export async function GET(req: NextRequest) {
     }
 
     // Seed preset user if not in database yet, seeded with any existing passed submissions
-    const initialCompleted = Array.from(new Set([...preset.completedLevelIds, ...dbPassedIds]));
+    const isPresetDemo = (userId === 'user_beta' || userId === 'user_master') && dbPassedIds.length === 0;
+    const initialCompleted = isPresetDemo ? preset.completedLevelIds : dbPassedIds;
+    const initialXp = isPresetDemo ? preset.totalXp : initialCompleted.length * 100;
+    const initialDerived = xpToRole(initialXp);
     await sql`
       INSERT INTO beamforge_users (
         id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, last_activity_date
       ) VALUES (
         ${preset.id},
         ${preset.name},
-        ${preset.role},
-        ${preset.level},
-        ${preset.totalXp},
+        ${initialDerived.role},
+        ${initialDerived.level},
+        ${initialXp},
         ${JSON.stringify(initialCompleted)},
         ${JSON.stringify(preset.unlockedSolutionLessonIds)},
         ${preset.lastActiveExercise},
@@ -286,6 +309,9 @@ export async function GET(req: NextRequest) {
 
     const seededUser: UserProfile = {
       ...preset,
+      role: initialDerived.role,
+      level: initialDerived.level,
+      totalXp: initialXp,
       completedLevelIds: initialCompleted,
     };
 
@@ -449,7 +475,32 @@ export async function POST(req: NextRequest) {
     }
 
     await ensureTable(sql);
-    const { level: canonicalLevel, role: canonicalRole } = xpToRole(user.totalXp);
+
+    // Strictly enforce backend authority for completedLevelIds:
+    // Never allow a client to claim completed lessons without passed submissions!
+    const passedSubmissions = await sql`
+      SELECT DISTINCT ON (exercise_id) exercise_id
+      FROM beamforge_submissions
+      WHERE user_id = ${user.id} AND status = 'passed'
+      ORDER BY exercise_id, created_at DESC
+    `;
+    const dbPassedIds: string[] = (passedSubmissions || []).map((s: any) => s.exercise_id);
+    const isPreset = (user.id === 'user_beta' || user.id === 'user_master') && dbPassedIds.length === 0;
+    const authoritativeCompleted = isPreset ? (user.completedLevelIds || []) : dbPassedIds;
+
+    let canonicalXp = Number(user.totalXp || 0);
+    if (!isPreset) {
+      canonicalXp = authoritativeCompleted.length * 100;
+      const unlockedSolutions = Array.isArray(user.unlockedSolutionLessonIds) ? user.unlockedSolutionLessonIds : [];
+      for (const lid of authoritativeCompleted) {
+        if (unlockedSolutions.includes(lid)) {
+          canonicalXp -= 50;
+        }
+      }
+      if (canonicalXp < 0) canonicalXp = 0;
+    }
+    const { level: canonicalLevel, role: canonicalRole } = xpToRole(canonicalXp);
+
     await sql`
       INSERT INTO beamforge_users (
         id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, last_activity_date, updated_at
@@ -458,10 +509,10 @@ export async function POST(req: NextRequest) {
         ${user.name},
         ${canonicalRole},
         ${canonicalLevel},
-        ${user.totalXp},
-        ${JSON.stringify(user.completedLevelIds)},
-        ${JSON.stringify(user.unlockedSolutionLessonIds)},
-        ${user.lastActiveExercise},
+        ${canonicalXp},
+        ${JSON.stringify(authoritativeCompleted)},
+        ${JSON.stringify(user.unlockedSolutionLessonIds || [])},
+        ${user.lastActiveExercise || 'ch01-l01'},
         ${user.streakDays || 1},
         ${user.lastActivityDate || null},
         NOW()
@@ -478,7 +529,13 @@ export async function POST(req: NextRequest) {
         updated_at = NOW()
     `;
 
-    return NextResponse.json({ status: 'ok', source: 'neon', dbConnected: true });
+    return NextResponse.json({
+      status: 'ok',
+      source: 'neon',
+      completedLevelIds: authoritativeCompleted,
+      totalXp: canonicalXp,
+      dbConnected: true,
+    });
   } catch (error: any) {
     console.error('[Neon DB] POST user error:', error);
     return NextResponse.json({ error: error.message, dbConnected: false }, { status: 500 });

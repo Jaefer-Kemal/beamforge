@@ -1734,5 +1734,23 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Executed `vercel project rm web-ide --confirm-name web-ide --scope jaefer-kemals-projects` via Vercel CLI, cleanly removing the duplicate project.
   - Verified with `vercel project ls` that only the active production project `beamforge` (`https://beamforge-eight.vercel.app`) remains connected to the repository.
 
+## Phase 80: Strict Backend Submission Authority, Cross-User Pollution Elimination & User-Scoped Storage Isolation
+- [x] **80.1: Strict Backend Authority & Client Payload Rejection (`route.ts`)**:
+  - In `apps/web-ide/src/app/api/user-progress/route.ts`, upgraded both `GET` and `POST` handlers so that for real learners (`user_alpha` and any non-preset), `completedLevelIds` is STRICTLY derived from `beamforge_submissions` where `status = 'passed' AND user_id = $userId`.
+  - Fabricated or contaminated completion lists sent by the client are rejected in `POST`, protecting the database from dirty client states.
+  - Total XP is recalculated authoritatively from passed submissions and unlocked solutions, and `beamforge_users` is automatically updated to prune any historical drift.
+- [x] **80.2: User-Scoped `localStorage` Namespacing (`useWorkspaceStore.ts`, `curriculumAccess.ts`, `BootDevTopBar.tsx`, `LessonSplitView.tsx`)**:
+  - Replaced all un-namespaced keys `beamforge_completed_${lid}` with user-scoped `beamforge_completed_${userId}_${lid}`.
+  - In `hydrateFromStorageAndDb`: automatically scans and purges any legacy un-namespaced `beamforge_completed_ch*` keys from browser storage to eliminate cross-profile pollution.
+  - Updated `checkLessonAccess`, `checkLessonAccessById`, `isLessonDone`, and `isSolved` to strictly query user-scoped keys for the active user.
+- [x] **80.3: Live Neon Database Reconciled**:
+  - Restored `user_alpha` in `beamforge_users` to strictly `['ch01-l01', 'ch01-l02']` with 150 total XP and active exercise `ch01-l03`, matching their 8 passed submissions in `beamforge_submissions`.
+- [x] **80.4: Compilers & Production Build Verification**:
+  - `npx tsc --noEmit`: Passed with 0 errors.
+  - `npm run build`: Next.js 14 production build passed with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Erlang AST verifier and grader modules compiled cleanly with 0 errors.
+
+
 
 

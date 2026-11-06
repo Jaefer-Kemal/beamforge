@@ -53,35 +53,29 @@ export function checkLessonAccess(
   const targetLessonId = targetLesson?.id || `ch0${chapterNum}-l0${lessonNum}`;
   const targetLessonTitle = targetLesson?.title || `Lesson ${lessonNum}`;
 
-  // Combine passed completedLevelIds with immediate local storage cache
-  let effectiveCompleted = completedLevelIds || [];
+  // Combine passed completedLevelIds with immediate user-scoped local storage cache
+  let effectiveCompleted = [...(completedLevelIds || [])];
   if (typeof window !== 'undefined') {
     try {
-      if (localStorage.getItem(`beamforge_completed_${targetLessonId}`) === 'true') {
+      const uid = localStorage.getItem('bf_current_user_id') || 'user_alpha';
+      if (localStorage.getItem(`beamforge_completed_${uid}_${targetLessonId}`) === 'true') {
         return { isUnlocked: true };
       }
+      const userPrefix = `beamforge_completed_${uid}_`;
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k && k.startsWith('beamforge_completed_')) {
-          const lid = k.replace('beamforge_completed_', '');
+        if (k && k.startsWith(userPrefix)) {
+          const lid = k.replace(userPrefix, '');
           if (!effectiveCompleted.includes(lid)) {
             effectiveCompleted.push(lid);
           }
         }
       }
-      const uid = localStorage.getItem('bf_current_user_id') || 'user_alpha';
       const cached = localStorage.getItem(`beamforge_user_${uid}`);
       if (cached) {
         const u = JSON.parse(cached);
         if (u.completedLevelIds && Array.isArray(u.completedLevelIds)) {
           effectiveCompleted = Array.from(new Set([...effectiveCompleted, ...u.completedLevelIds]));
-        }
-      }
-      const prog = localStorage.getItem('beamforge_progress');
-      if (prog) {
-        const p = JSON.parse(prog);
-        if (p.completedLevelIds && Array.isArray(p.completedLevelIds)) {
-          effectiveCompleted = Array.from(new Set([...effectiveCompleted, ...p.completedLevelIds]));
         }
       }
     } catch {}
@@ -161,25 +155,17 @@ export function checkLessonAccessById(
   if (completedLevelIds && completedLevelIds.includes(lessonId)) return { isUnlocked: true };
   if (typeof window !== 'undefined') {
     try {
-      if (localStorage.getItem(`beamforge_completed_${lessonId}`) === 'true') {
+      const uid = localStorage.getItem('bf_current_user_id') || 'user_alpha';
+      if (localStorage.getItem(`beamforge_completed_${uid}_${lessonId}`) === 'true') {
         return { isUnlocked: true };
       }
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith('beamforge_accepted_') && k.endsWith(`_${lessonId}`)) {
-          return { isUnlocked: true };
-        }
+      if (localStorage.getItem(`beamforge_accepted_${uid}_${lessonId}`)) {
+        return { isUnlocked: true };
       }
-      const uid = localStorage.getItem('bf_current_user_id') || 'user_alpha';
       const cached = localStorage.getItem(`beamforge_user_${uid}`);
       if (cached) {
         const u = JSON.parse(cached);
         if (u.completedLevelIds?.includes(lessonId)) return { isUnlocked: true };
-      }
-      const prog = localStorage.getItem('beamforge_progress');
-      if (prog) {
-        const p = JSON.parse(prog);
-        if (p.completedLevelIds?.includes(lessonId)) return { isUnlocked: true };
       }
     } catch {}
   }

@@ -245,17 +245,15 @@ export function BootDevTopBar() {
 
   const isDark = theme === 'dark';
 
-  // Fast-path helper checking both in-memory store and immediate local storage keys
+  // Fast-path helper checking both in-memory store and immediate user-scoped local storage keys
   const isLessonDone = (lid: string) => {
     if (!lid) return false;
     if (completedLevelIds.includes(lid)) return true;
     if (typeof window !== 'undefined') {
       try {
-        if (localStorage.getItem(`beamforge_completed_${lid}`) === 'true') return true;
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && k.startsWith('beamforge_accepted_') && k.endsWith(`_${lid}`)) return true;
-        }
+        const uid = currentUser?.id || localStorage.getItem('bf_current_user_id') || 'user_alpha';
+        if (localStorage.getItem(`beamforge_completed_${uid}_${lid}`) === 'true') return true;
+        if (localStorage.getItem(`beamforge_accepted_${uid}_${lid}`)) return true;
       } catch {}
     }
     return false;

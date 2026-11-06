@@ -663,32 +663,20 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
   const isLessonUnlocked = accessResult.isUnlocked;
 
   // Solution access: Free and immediate if already solved, otherwise gated via Option B modal
-  // Fallbacks to currentUser and localStorage ensure refreshes/reloads never ask to forfeit XP for already solved lessons
+  // Fallbacks to currentUser and user-scoped localStorage ensure refreshes/reloads never ask to forfeit XP for already solved lessons
   const isSolved = React.useMemo(() => {
     if ((completedLevelIds || []).includes(lesson.id)) return true;
     if ((currentUser?.completedLevelIds || []).includes(lesson.id)) return true;
     if (typeof window !== 'undefined') {
       try {
-        if (localStorage.getItem(`beamforge_completed_${lesson.id}`) === 'true') return true;
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && k.startsWith('beamforge_accepted_') && k.endsWith(`_${lesson.id}`)) {
-            return true;
-          }
-        }
         const uid = currentUser?.id || localStorage.getItem('bf_current_user_id') || 'user_alpha';
+        if (localStorage.getItem(`beamforge_completed_${uid}_${lesson.id}`) === 'true') return true;
+        if (localStorage.getItem(`beamforge_accepted_${uid}_${lesson.id}`)) return true;
         const cached = localStorage.getItem(`beamforge_user_${uid}`);
         if (cached) {
           const u = JSON.parse(cached);
           if (u.completedLevelIds?.includes(lesson.id)) return true;
         }
-        const prog = localStorage.getItem('beamforge_progress');
-        if (prog) {
-          const p = JSON.parse(prog);
-          if (p.completedLevelIds?.includes(lesson.id)) return true;
-        }
-        const accepted = localStorage.getItem(`beamforge_accepted_${uid}_${lesson.id}`);
-        if (accepted) return true;
       } catch {}
     }
     return false;
