@@ -1728,4 +1728,11 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Erlang AST verifier and grader modules compiled cleanly with 0 errors.
 
+## Phase 79: Duplicate Vercel Deployment Check Removal
+- [x] **79.1: Duplicate Project Deletion on Vercel**:
+  - Identified the root cause of the failing GitHub check: an old duplicate Vercel project `web-ide` was linked to the repository with root directory `./`, failing Next.js builds because `app/` resides in `apps/web-ide`.
+  - Executed `vercel project rm web-ide --confirm-name web-ide --scope jaefer-kemals-projects` via Vercel CLI, cleanly removing the duplicate project.
+  - Verified with `vercel project ls` that only the active production project `beamforge` (`https://beamforge-eight.vercel.app`) remains connected to the repository.
+
+
 
