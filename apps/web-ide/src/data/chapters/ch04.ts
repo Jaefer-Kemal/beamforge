@@ -1246,10 +1246,11 @@ flatten_iolist(IoList) ->
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-Erlang's **Bit Syntax (\`<<...>>\`)** is widely celebrated as one of the greatest inventions in programming language history.
+Erlang's **Bit Syntax (\`<<...>>\`)** is widely celebrated as one of the most powerful declarative binary features in programming language history.
 
-In C, Go, or Rust, parsing binary network protocols (TCP/IP packets, TLS frames, DNS queries, or WebSocket frames) requires writing fragile, error-prone bit-shifting and masking operations (\`(byte >> 4) & 0x0F\`).
-In Erlang, you declare the binary wire format with exact bit widths, signedness, and endianness directly in pattern matching expressions!
+In C, Go, or Rust, parsing and emitting binary network protocols (TCP/IP packets, TLS records, DNS queries, or WebSocket frames) requires writing fragile, error-prone bit-shifting and bit-masking arithmetic (\`(byte >> 4) & 0x0F\`).
+
+In Erlang, you declare the binary wire format with exact bit widths, signedness, and endianness directly in pattern matching expressions! The BEAM compiler maps these declarations into low-level CPU vector operations with near-zero overhead.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -1262,7 +1263,7 @@ A bit syntax expression contains comma-separated segments:
 The specifier components (\`Type-Signedness-Endianness-Unit\`) include:
 - **Type:**
   - \`integer\` (default)
-  - \`binary\` / \`bytes\` (byte-aligned chunk)
+  - \`binary\` / \`bytes\` (byte-aligned binary chunk)
   - \`bitstring\` / \`bits\` (arbitrary bit count)
   - \`float\` (32 or 64-bit IEEE float)
   - \`utf8\` (Unicode UTF-8 codepoint)
@@ -1270,34 +1271,34 @@ The specifier components (\`Type-Signedness-Endianness-Unit\`) include:
   - \`unsigned\` (default, \`0..255\` for 8 bits)
   - \`signed\` (two's complement, \`-128..127\` for 8 bits)
 - **Endianness:**
-  - \`big\` (Network Byte Order, default): Most significant byte first (\`<<1024:16/big>> == <<4, 0>>\`).
-  - \`little\` (x86 architecture order): Least significant byte first (\`<<1024:16/little>> == <<0, 4>>\`).
+  - \`big\` (Network Byte Order, default): Most significant byte first (\`<<512:16/big>> == <<2, 0>>\`).
+  - \`little\` (x86 architecture order): Least significant byte first (\`<<512:16/little>> == <<0, 2>>\`).
 
 ### 2. Packing Bit-Level Fields
-Consider an IPv4-style header with a 4-bit Version, a 4-bit Header Flags, and a 16-bit Total Length:
+Consider an IoT sensor header packing a 4-bit Device Type, a 4-bit Alert Priority, and a 16-bit Metric Reading:
 
 \`\`\`erlang
-%% Version: 4 (0100), Flags: 2 (0010) => 01000010 = 0x42 (decimal 66)
-%% Length: 1024 => 0x0400 (decimal 4, 0)
-Header = <<4:4, 2:4, 1024:16/big>>.
-%% Result is a 3-byte binary: <<66, 4, 0>>!
+%% Device Type: 3 (0011), Priority: 1 (0001) => 00110001 = 0x31 (decimal 49)
+%% Metric Reading: 512 => 0x0200 (decimal 2, 0)
+TelemetryHeader = <<3:4, 1:4, 512:16/big>>.
+%% Result is a 3-byte binary: <<49, 2, 0>>!
 \`\`\`
 
-The BEAM compiler emits hardware vector instructions (\`bs_put_integer\`, \`bs_put_binary\`) directly into machine code for near-zero CPU overhead.
+The BEAM compiler emits hardware vector instructions (\`bs_put_integer\`, \`bs_put_binary\`) directly into machine code for maximum throughput.
 
 ### 3. Dynamic Length Pattern Matching
-In Erlang, you can bind a variable in the first segment of a binary pattern and **immediately use that variable as the size specifier** of a subsequent segment in the very same pattern!
+In Erlang, you can bind a variable in an earlier segment of a binary pattern and **immediately use that variable as the size specifier** of a subsequent segment in the very same pattern!
 
 \`\`\`erlang
 %% Len is bound first, then exactly Len bytes are extracted into Payload:
 <<Len:16/big, Payload:Len/binary, Rest/binary>> = Packet.
 \`\`\`
 
-If \`Packet\` contains fewer than \`Len\` bytes, the pattern simply fails to match.
+If \`Packet\` contains fewer than \`Len\` bytes, the pattern match fails cleanly without memory overrun exceptions.
 
-## Parallel Worked Example
+## Parallel Worked Example: DNS Query Header Wire Formatter
 
-Consider packing a DNS question header:
+The following module demonstrates packing and pattern-matching bit fields in a DNS question header domain:
 
 \`\`\`erlang
 -module(dns_header).
@@ -1324,25 +1325,44 @@ TypeSpecifiers = Type-Signedness-Endianness-Unit
 
 ## Assignment Specification
 
-Implement binary wire packing in \`src/bit_packer.erl\`:
+Implement binary wire packing and header unpacking in \`src/bit_packer.erl\`.
 
-1. \`pack_header(Version, Flags, Length)\`:
-   - \`Version\`: 4 bits unsigned integer.
-   - \`Flags\`: 4 bits unsigned integer.
-   - \`Length\`: 16 bits big-endian unsigned integer.
-   - Returns a 3-byte binary: \`<<Version:4, Flags:4, Length:16/big-unsigned-integer>>\`.
-2. \`unpack_header(Binary)\`:
-   - Matches \`<<Version:4, Flags:4, Length:16/big-unsigned-integer, Payload/binary>>\`.
-   - Returns \`{ok, Version, Flags, Length, Payload}\`.
-   - If \`Binary\` has fewer than 3 bytes, returns \`{error, insufficient_bytes}\`.
-3. \`encode_utf8_tagged(TextBinary)\`:
-   - Prepends a single byte \`16#01\` tag followed by a 16-bit big-endian length prefix and \`TextBinary\`:
-     \`<<16#01:8, (byte_size(TextBinary)):16/big, TextBinary/binary>>\`.
+### Functions to Implement
+
+#### \`pack_header/3\`
+- **Input**:
+  - \`Version\`: non-negative integer (4-bit unsigned)
+  - \`Flags\`: non-negative integer (4-bit unsigned)
+  - \`Length\`: non-negative integer (16-bit unsigned)
+- **Behavior**: Packs the 4-bit version, 4-bit flags, and 16-bit big-endian unsigned length into a compact 3-byte binary header.
+- **Examples**:
+  - \`pack_header(4, 2, 1024)\` $\\rightarrow$ \`<<66, 4, 0>>\`
+  - \`pack_header(1, 15, 65535)\` $\\rightarrow$ \`<<31, 255, 255>>\`
+
+#### \`unpack_header/1\`
+- **Input**:
+  - \`Binary\`: a binary stream
+- **Behavior**: Inspects \`Binary\` for a 3-byte header. If at least 3 bytes are available, extracts the 4-bit \`Version\`, 4-bit \`Flags\`, and 16-bit big-endian \`Length\`, and captures all remaining trailing bytes as \`Payload\`, returning \`{ok, Version, Flags, Length, Payload}\`. If fewer than 3 bytes are provided, returns \`{error, insufficient_bytes}\`.
+- **Examples**:
+  - \`unpack_header(<<66, 4, 0, "PAYLOAD">>)\` $\\rightarrow$ \`{ok, 4, 2, 1024, <<"PAYLOAD">>}\`
+  - \`unpack_header(<<66, 4>>)\` $\\rightarrow$ \`{error, insufficient_bytes}\`
+
+#### \`encode_utf8_tagged/1\`
+- **Input**:
+  - \`TextBinary\`: a binary text string
+- **Behavior**: Constructs a length-prefixed tagged binary message by packing:
+  1. An 8-bit tag byte with hexadecimal value \`16#01\` (decimal \`1\`),
+  2. A 16-bit big-endian unsigned integer representing the byte length of \`TextBinary\`,
+  3. The raw \`TextBinary\` payload bytes.
+- **Examples**:
+  - \`encode_utf8_tagged(<<"HELLO">>)\` $\\rightarrow$ \`<<1, 0, 5, "HELLO">>\`
+  - \`encode_utf8_tagged(<<"HELLO_OTP">>)\` $\\rightarrow$ \`<<1, 0, 9, "HELLO_OTP">>\`
 
 ## Rules & Verification Constraints
 
 - Must use Bit Syntax \`<<...>>\`.
-- Endianness for 16-bit integers must be big-endian (\`big\`).`,
+- All multi-byte numeric fields must use big-endian (\`big\`) network byte ordering.
+- Guard \`encode_utf8_tagged/1\` with \`is_binary/1\`.`,
     otpDocCards: [
       {
         functionName: 'bit_syntax',
@@ -1355,25 +1375,25 @@ Implement binary wire packing in \`src/bit_packer.erl\`:
       },
     ],
     mentalModelCheck: {
-      question: 'What is the binary representation of <<4:4, 2:4, 1024:16/big>>?',
+      question: 'What is the binary representation of <<3:4, 1:4, 512:16/big>>?',
       options: [
         {
           id: 'A',
-          label: '<<66, 4, 0>> (0x42 = 0100 0010 = 66, and 1024 in 16-bit big-endian is 0x0400 = 4, 0)',
+          label: '<<49, 2, 0>> (0x31 = 0011 0001 = 49, and 512 in 16-bit big-endian is 0x0200 = 2, 0)',
           isCorrect: true,
-          explanation: '4 (0100) and 2 (0010) pack into the first byte (01000010 = 66); 1024 is high byte 4 and low byte 0.',
+          explanation: '3 (0011) and 1 (0001) pack into the first byte (00110001 = 49); 512 in 16 bits big-endian is high byte 2 and low byte 0.',
         },
         {
           id: 'B',
-          label: '<<4, 2, 10, 24>>',
+          label: '<<3, 1, 5, 12>>',
           isCorrect: false,
-          explanation: '4 and 2 are 4-bit nibbles that pack together into a single 8-bit byte.',
+          explanation: '3 and 1 are 4-bit nibbles that pack together into a single 8-bit byte.',
         },
         {
           id: 'C',
-          label: '<<66, 0, 4>>',
+          label: '<<49, 0, 2>>',
           isCorrect: false,
-          explanation: '<<66, 0, 4>> would be little-endian; big-endian places the high byte 4 first.',
+          explanation: '<<49, 0, 2>> represents little-endian byte ordering; big-endian places the high byte 2 first.',
         },
       ],
     },
@@ -1418,19 +1438,16 @@ Implement binary wire packing in \`src/bit_packer.erl\`:
         content: `-module(bit_packer).
 -export([pack_header/3, unpack_header/1, encode_utf8_tagged/1]).
 
-%% @doc Pack Version (4 bits), Flags (4 bits), Length (16 bits big).
+%% @doc Pack 4-bit Version, 4-bit Flags, and 16-bit big-endian Length into a 3-byte binary.
 pack_header(_Version, _Flags, _Length) ->
-    %% % TODO: Pack Version, Flags, and Length into a 3-byte binary.
     <<>>.
 
 %% @doc Unpack 3-byte header and extract trailing payload binary.
 unpack_header(_Binary) ->
-    %% % TODO: Extract Version, Flags, Length, and remaining payload.
     {error, insufficient_bytes}.
 
 %% @doc Encode length-prefixed tagged text binary.
-encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
-    %% % TODO: Prepend 1-byte tag (16#01) and 16-bit big-endian length prefix to TextBinary.
+encode_utf8_tagged(_TextBinary) ->
     <<>>.`,
       },
     ],
@@ -1453,19 +1470,16 @@ encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
     starterCode: `-module(bit_packer).
 -export([pack_header/3, unpack_header/1, encode_utf8_tagged/1]).
 
-%% @doc Pack Version (4 bits), Flags (4 bits), Length (16 bits big).
+%% @doc Pack 4-bit Version, 4-bit Flags, and 16-bit big-endian Length into a 3-byte binary.
 pack_header(_Version, _Flags, _Length) ->
-    %% % TODO: Pack Version, Flags, and Length into a 3-byte binary.
     <<>>.
 
 %% @doc Unpack 3-byte header and extract trailing payload binary.
 unpack_header(_Binary) ->
-    %% % TODO: Extract Version, Flags, Length, and remaining payload.
     {error, insufficient_bytes}.
 
 %% @doc Encode length-prefixed tagged text binary.
-encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
-    %% % TODO: Prepend 1-byte tag (16#01) and 16-bit big-endian length prefix to TextBinary.
+encode_utf8_tagged(_TextBinary) ->
     <<>>.`,
     solutionCode: `-module(bit_packer).
 -export([pack_header/3, unpack_header/1, encode_utf8_tagged/1]).

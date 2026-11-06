@@ -2201,6 +2201,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
 
+## Phase 115: Pedagogical Despoiling of Chapter 4 Lecture 5 (`ch04-l05`)
+- [x] **115.1: Audit & Eliminate Exercise Code Spoilers in Lecture 4.5 (`ch04-l05`)**:
+  - Neutralized concept breakdown: replaced verbatim code leaks in bit packing (`Header = <<4:4, 2:4, 1024:16/big>>`) with neutral IoT telemetry packet packing (`TelemetryHeader = <<3:4, 1:4, 512:16/big>>` evaluating to `<<49, 2, 0>>`), eliminating assignment constant leaks.
+  - Audited parallel worked example `dns_header.erl` (`encode_query_header/3`, `decode_query_header/1`), confirming domain disjunction in the DNS question wire header domain.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `pack_header/3`, `unpack_header/1`, and `encode_utf8_tagged/1`, eliminating raw Erlang bit syntax pattern dictation.
+  - Updated mental model check to test bit packing and big-endian resolution on `<<3:4, 1:4, 512:16/big>>` without leaking assignment values.
+  - Refactored starter code doc comments: removed all `% TODO` comments and implementation details from function bodies in `files[0].content` and `starterCode`.
+- [x] **115.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+
+
 
 
 
