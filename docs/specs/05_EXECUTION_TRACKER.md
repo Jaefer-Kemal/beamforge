@@ -2167,6 +2167,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
 
+## Phase 111: Pedagogical Despoiling of Chapter 4 Lecture 1 (`ch04-l01`)
+- [x] **111.1: Audit & Eliminate Exercise Code Spoilers in Lecture 4.1 (`ch04-l01`)**:
+  - Neutralized concept breakdown: eliminated verbatim code leaks in association (`Session0 = #{user_id => alice, role => admin, ...}`) and exact matching (`update_presence(#{user_id := ExpectedId, login_count := Count}...)`), replacing them with neutral player character profiles (`Profile0 = #{player_id => hero_1, class => warrior, ...}`) and task status updates (`update_task_status`).
+  - Audited parallel worked example `device_registry.erl` (`register_device/2`, `update_ping/3`, `is_active_gateway/1`) confirming strong domain disjunction in the IoT telemetry domain.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `create_session/2`, `update_presence/3`, and `is_admin_session/1`.
+  - Refactored starter code doc comments: removed all `% TODO` comments and implementation details from function bodies in `files[0].content` and `starterCode`.
+- [x] **111.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+
+
 
 
 
