@@ -2134,6 +2134,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
 
+## Phase 108: Pedagogical Despoiling of Chapter 3 Lecture 5 (`ch03-l05`)
+- [x] **108.1: Audit & Eliminate Exercise Code Spoilers in Lecture 3.5 (`ch03-l05`)**:
+  - Neutralized concept breakdown: eliminated verbatim code leaks in keylists (`Inv` with `product` tuples) and proplists (`Opts = [binary, {packet, 4}, ...]`), replacing them with neutral employee directory lookups (`Employees` with `{emp, Id, Name, Role}`) and database pool options (`DbOpts = [ssl, {timeout, 5000}, ...]`).
+  - Replaced `worker_pool_cfg.erl` with an authentic cluster registry module `cluster_node_registry.erl` (`lookup_node/2`, `upsert_node/2`, `read_rpc_options/1`), achieving domain disjunction from product inventory and socket options.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `find_product_by_id/2`, `upsert_product/2`, and `read_socket_options/1`, eliminating formula dictation.
+  - Refactored starter code doc comments: removed in-body implementation comments and hints (e.g., `%% Port default: 8080`, `%% IsBinary: proplists:get_bool...`) from `files[0].content` and `starterCode`.
+- [x] **108.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Starter module and reference solution compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+
+
 
 
 
