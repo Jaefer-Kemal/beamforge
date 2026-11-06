@@ -1571,7 +1571,7 @@ keep_valid_orders([_InvalidOrder | Rest], Acc) ->
 
 In real-world backend applications, you rarely just read or filter lists: you need to **update records inside an immutable dataset**.
 
-In the upcoming Chapter 2 Capstone Problem Set (\`inventory.erl\` in Lesson 2.8), an incoming customer order requires you to find a specific product inside an inventory list and **deduct the purchased quantity from that product's stock**, while leaving all other products in their exact relative positions.
+In the upcoming Chapter 2 Capstone Problem Set (\`inventory.erl\` in Lesson 2.8), an incoming customer order requires you to find a specific product inside an inventory list and deduct purchased units from stock, while leaving all other products in their exact relative positions.
 
 Because Erlang data structures are 100% immutable, you cannot do \`product.stock -= qty\`.
 Instead, you must master the **Tail-Recursive List Update Pattern**.
@@ -1587,20 +1587,20 @@ To "modify" a record in an immutable list:
 5. At the base case (\`[]\`), call \`lists:reverse(Acc)\` to restore original list order.
 
 \`\`\`erlang
-update_stock([], _TargetId, _DeductQty, Acc) ->
+update_entry([], _TargetKey, _NewVal, Acc) ->
     lists:reverse(Acc);
-update_stock([{product, Id, Name, Price, Stock} | Rest], TargetId, DeductQty, Acc)
-  when Id =:= TargetId, Stock >= DeductQty ->
-    UpdatedProd = {product, Id, Name, Price, Stock - DeductQty},
-    update_stock(Rest, TargetId, DeductQty, [UpdatedProd | Acc]);
-update_stock([OtherProd | Rest], TargetId, DeductQty, Acc) ->
-    update_stock(Rest, TargetId, DeductQty, [OtherProd | Acc]).
+update_entry([{item, Key, Label, _OldVal} | Rest], TargetKey, NewVal, Acc)
+  when Key =:= TargetKey ->
+    UpdatedItem = {item, Key, Label, NewVal},
+    update_entry(Rest, TargetKey, NewVal, [UpdatedItem | Acc]);
+update_entry([OtherItem | Rest], TargetKey, NewVal, Acc) ->
+    update_entry(Rest, TargetKey, NewVal, [OtherItem | Acc]).
 \`\`\`
 
 ### 2. Dual-Accumulator Partitioning
 Sometimes a function needs to produce **two separate lists** from a single stream of inputs (e.g. separating valid orders from invalid orders, or successful payments from failed payments).
 
-Instead of traversing the list twice (which would be $2 \times O(N)$), Erlang functions pass **two accumulators simultaneously**:
+Instead of traversing the list twice (which would be $2 \\times O(N)$), Erlang functions pass **two accumulators simultaneously**:
 
 \`\`\`erlang
 partition_stream(List) ->
@@ -1622,34 +1622,34 @@ In a single, cache-friendly tail-recursive pass, both output lists are populated
 
 ## Parallel Worked Example
 
-Updating player levels and partitioning active vs inactive players in a gaming guild:
+Managing telecommunications SIP trunks and load-balancing traffic:
 
 \`\`\`erlang
--module(guild_manager).
--export([level_up_player/3, partition_by_level/2]).
+-module(sip_trunk_manager).
+-export([adjust_trunk_codec/3, split_by_utilization/2]).
 
-level_up_player(Players, TargetPlayerId, BonusLevels) ->
-    level_up_loop(Players, TargetPlayerId, BonusLevels, []).
+adjust_trunk_codec(Trunks, TargetId, NewCodec) ->
+    adjust_loop(Trunks, TargetId, NewCodec, []).
 
-level_up_loop([], _TargetId, _Bonus, Acc) ->
+adjust_loop([], _TargetId, _NewCodec, Acc) ->
     lists:reverse(Acc);
-level_up_loop([{player, Id, Name, Lvl} | Rest], TargetId, Bonus, Acc)
+adjust_loop([{trunk, Id, Host, Port, _OldCodec, MaxChannels} | Rest], TargetId, NewCodec, Acc)
   when Id =:= TargetId ->
-    Updated = {player, Id, Name, Lvl + Bonus},
-    level_up_loop(Rest, TargetId, Bonus, [Updated | Acc]);
-level_up_loop([OtherPlayer | Rest], TargetId, Bonus, Acc) ->
-    level_up_loop(Rest, TargetId, Bonus, [OtherPlayer | Acc]).
+    Updated = {trunk, Id, Host, Port, NewCodec, MaxChannels},
+    adjust_loop(Rest, TargetId, NewCodec, [Updated | Acc]);
+adjust_loop([OtherTrunk | Rest], TargetId, NewCodec, Acc) ->
+    adjust_loop(Rest, TargetId, NewCodec, [OtherTrunk | Acc]).
 
-partition_by_level(Players, MinLevel) ->
-    partition_loop(Players, MinLevel, [], []).
+split_by_utilization(TrunkLoads, Threshold) ->
+    split_loop(TrunkLoads, Threshold, [], []).
 
-partition_loop([], _MinLvl, HighAcc, LowAcc) ->
-    {lists:reverse(HighAcc), lists:reverse(LowAcc)};
-partition_loop([{player, _Id, _Name, Lvl} = P | Rest], MinLvl, HighAcc, LowAcc)
-  when Lvl >= MinLvl ->
-    partition_loop(Rest, MinLvl, [P | HighAcc], LowAcc);
-partition_loop([P | Rest], MinLvl, HighAcc, LowAcc) ->
-    partition_loop(Rest, MinLvl, HighAcc, [P | LowAcc]).
+split_loop([], _Threshold, HighAcc, NormalAcc) ->
+    {lists:reverse(HighAcc), lists:reverse(NormalAcc)};
+split_loop([{load, _Id, ActiveCalls} = Load | Rest], Threshold, HighAcc, NormalAcc)
+  when ActiveCalls > Threshold ->
+    split_loop(Rest, Threshold, [Load | HighAcc], NormalAcc);
+split_loop([Load | Rest], Threshold, HighAcc, NormalAcc) ->
+    split_loop(Rest, Threshold, HighAcc, [Load | NormalAcc]).
 \`\`\`
 
 ## Official Erlang Docs & Function Reference
@@ -1666,18 +1666,27 @@ Process(List, AccA, AccB) ->
 
 ## Assignment Specification
 
-Implement two list manipulation functions in \`tuple_updater.erl\`:
+Implement tail-recursive immutable list manipulation functions in \`tuple_updater.erl\`:
 
-1. \`update_product_price(Inventory, TargetId, NewPrice)\`:
-   - \`Inventory\` is a list of \`[{product, Id, Name, Price, Stock}, ...]\`.
-   - Locates the product with \`Id =:= TargetId\` and constructs a new tuple with \`NewPrice\`.
-   - All other products remain unchanged, in their exact original order.
-   - If \`TargetId\` is not present, returns \`Inventory\` unchanged.
+### \`update_product_price/3\`
+- **Input**:
+  - \`Inventory\` — A list of zero or more product tuples of the form \`{product, Id, Name, Price, Stock}\`, where \`Id\` is an integer, \`Name\` is a string, and \`Price\` and \`Stock\` are numbers.
+  - \`TargetId\` — An integer representing the unique product identifier to update.
+  - \`NewPrice\` — A number representing the replacement price.
+- **Behavior**: Traverses the inventory list and replaces the price of the product whose identifier matches \`TargetId\` with \`NewPrice\`, retaining all other tuple fields (\`Id\`, \`Name\`, and \`Stock\`) and preserving the exact relative position of all products. If \`TargetId\` is not found, the original inventory list is returned unchanged. Must be strictly tail-recursive using an auxiliary accumulator and \`lists:reverse/1\` at the base case.
+- **Examples**:
+  - \`tuple_updater:update_product_price([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}], 2, 30)\` returns \`[{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 30, 5}]\`.
+  - \`tuple_updater:update_product_price([{product, 1, "Keyboard", 50, 10}], 99, 100)\` returns \`[{product, 1, "Keyboard", 50, 10}]\`.
+  - \`tuple_updater:update_product_price([], 1, 10)\` returns \`[]\`.
 
-2. \`partition_orders(Orders, MinQty)\`:
-   - \`Orders\` is a list of \`[{order, Id, Qty}, ...]\`.
-   - Uses dual accumulators to partition into \`{ValidOrders, RejectedOrders}\`.
-   - An order is valid if \`Qty >= MinQty\`. Both output lists must preserve original input order.
+### \`partition_orders/2\`
+- **Input**:
+  - \`Orders\` — A list of zero or more 3-element tuples of the form \`{order, Id, Qty}\`, where \`Id\` is an integer and \`Qty\` is an integer order quantity.
+  - \`MinQty\` — An integer specifying the minimum threshold for valid orders.
+- **Behavior**: Partitions the orders into a 2-tuple of lists \`{ValidOrders, RejectedOrders}\` in a single tail-recursive pass using dual accumulators. An order is valid if its quantity \`Qty\` is greater than or equal to \`MinQty\`; otherwise it is rejected. Both resulting lists must preserve the exact relative order of elements from the input. Returns \`{lists:reverse(ValidAcc), lists:reverse(RejectedAcc)}\` at the base case.
+- **Examples**:
+  - \`tuple_updater:partition_orders([{order, 1, 10}, {order, 2, 2}, {order, 3, 5}, {order, 4, 1}], 5)\` returns \`{[{order, 1, 10}, {order, 3, 5}], [{order, 2, 2}, {order, 4, 1}]}\`.
+  - \`tuple_updater:partition_orders([], 5)\` returns \`{[], []}\`.
 
 ## Rules & Verification Constraints
 
@@ -1712,7 +1721,7 @@ Implement two list manipulation functions in \`tuple_updater.erl\`:
         },
         {
           id: 'C',
-          label: 'To check if the TargetId exists multiple times in the global atom table',
+          label: 'To check if the target identifier exists multiple times in the global atom table',
           isCorrect: false,
           explanation: 'Product IDs are integers, not atoms.',
         },
@@ -1754,19 +1763,12 @@ Implement two list manipulation functions in \`tuple_updater.erl\`:
         content: `-module(tuple_updater).
 -export([update_product_price/3, partition_orders/2]).
 
-%% @doc Update the price of product TargetId in Inventory while preserving list order.
+%% @doc Update the price of a matching product in inventory while preserving order.
 update_product_price(Inventory, TargetId, NewPrice) ->
-    %% 1. Delegate to helper with Acc: update_product_price(Inventory, TargetId, NewPrice, []).
-    %% 2. In base case [], return lists:reverse(Acc).
-    %% 3. When Id =:= TargetId, update Price to NewPrice and accumulate.
-    %% 4. For other products, accumulate unchanged.
     ok.
 
-%% @doc Partition orders into {Valid, Rejected} where Valid has Qty >= MinQty.
+%% @doc Partition orders into valid and rejected lists based on minimum quantity.
 partition_orders(Orders, MinQty) ->
-    %% 1. Delegate to helper with two accumulators: partition_orders(Orders, MinQty, [], []).
-    %% 2. In base case [], return {lists:reverse(ValidAcc), lists:reverse(RejAcc)}.
-    %% 3. When Qty >= MinQty, add to ValidAcc; otherwise add to RejAcc.
     ok.`,
       },
     ],
@@ -1800,19 +1802,12 @@ partition_orders([O | Rest], MinQty, ValidAcc, RejAcc) ->
     starterCode: `-module(tuple_updater).
 -export([update_product_price/3, partition_orders/2]).
 
-%% @doc Update the price of product TargetId in Inventory while preserving list order.
+%% @doc Update the price of a matching product in inventory while preserving order.
 update_product_price(Inventory, TargetId, NewPrice) ->
-    %% 1. Delegate to helper with Acc: update_product_price(Inventory, TargetId, NewPrice, []).
-    %% 2. In base case [], return lists:reverse(Acc).
-    %% 3. When Id =:= TargetId, update Price to NewPrice and accumulate.
-    %% 4. For other products, accumulate unchanged.
     ok.
 
-%% @doc Partition orders into {Valid, Rejected} where Valid has Qty >= MinQty.
+%% @doc Partition orders into valid and rejected lists based on minimum quantity.
 partition_orders(Orders, MinQty) ->
-    %% 1. Delegate to helper with two accumulators: partition_orders(Orders, MinQty, [], []).
-    %% 2. In base case [], return {lists:reverse(ValidAcc), lists:reverse(RejAcc)}.
-    %% 3. When Qty >= MinQty, add to ValidAcc; otherwise add to RejAcc.
     ok.`,
     solutionCode: `-module(tuple_updater).
 -export([update_product_price/3, partition_orders/2]).
