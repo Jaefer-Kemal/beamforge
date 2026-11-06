@@ -325,12 +325,14 @@ Calling \`maps:get/2\` on a missing key immediately raises a \`{badkey, Key}\` r
 ## Deep Concept Breakdown & Under the Hood
 
 ### 1. Safe Lookups: \`maps:get/3\` vs. \`maps:find/2\`
+
 - **\`maps:get(Key, Map, Default) -> Value | Default\`:**
   Returns \`Value\` if \`Key\` exists; otherwise returns \`Default\` with zero exceptions.
 - **\`maps:find(Key, Map) -> {ok, Value} | error\`:**
   Essential when a key might legitimately hold the value \`undefined\` or \`false\`. It unequivocally distinguishes between a missing key (\`error\`) and a present key with a falsy value (\`{ok, false}\`).
 
 ### 2. High-Performance Counters: \`maps:update_with/4\`
+
 In statistics collectors and rate limiters, you often need to increment a counter for a key that may or may not exist yet.
 Without \`update_with\`, developers write verbose 7-line \`case maps:find/2 of\` blocks.
 With **\`maps:update_with/4\`**, it becomes an atomic, single-pass operation:
@@ -342,54 +344,56 @@ maps:update_with(Key, fun(Old) -> Old + 1 end, InitialValueIfMissing, Map)
 If \`Key\` exists, the fun transforms the old value. If absent, \`InitialValueIfMissing\` is inserted directly without evaluating the fun!
 
 ### 3. Layered Configuration Merging: \`maps:merge/2\` & \`maps:without/2\`
+
 Production microservices merge default base settings with environment overrides:
 
 \`\`\`erlang
-DefaultCfg = #{port => 8080, workers => 10, timeout => 5000},
-EnvOverrides = #{workers => 50, secret_key => top_secret},
-ActiveCfg = maps:merge(DefaultCfg, EnvOverrides).
-%% => #{port => 8080, workers => 50, timeout => 5000, secret_key => top_secret}
+BaseDbConfig = #{host => "localhost", pool_size => 5, timeout_ms => 3000},
+ProdDbConfig = #{host => "db.prod.internal", pool_size => 25, internal_token => abc123xyz},
+ResolvedConfig = maps:merge(BaseDbConfig, ProdDbConfig).
+%% => #{host => "db.prod.internal", pool_size => 25, timeout_ms => 3000, internal_token => abc123xyz}
 \`\`\`
 
 > [!important] Rule of Precedence in maps:merge/2
 > In \`maps:merge(Map1, Map2)\`, if a key exists in both maps, **the value from \`Map2\` (the second argument) ALWAYS wins!**
 
-To strip sensitive credentials or internal debugging flags before exposing configuration to telemetry:
+To strip internal debugging tokens or sensitive keys before logging or exporting:
 \`\`\`erlang
-Sanitized = maps:without([secret_key, debug_token], ActiveCfg).
+ExposedConfig = maps:without([internal_token], ResolvedConfig).
 \`\`\`
 
 ### 4. Zero-List Folding: \`maps:fold/3\`
-To aggregate all values or keys across a map, novices often write \`lists:foldl(Fun, 0, maps:to_list(Map))\`. This allocates an intermediate list of 2-tuples on the process heap!
+
+To aggregate values across a map, novices often write \`lists:foldl(Fun, 0, maps:to_list(Map))\`. This allocates an intermediate list of 2-tuples on the process heap!
 **\`maps:fold(fun(Key, Val, AccIn) -> AccOut end, Acc0, Map)\`** iterates directly across the internal FlatMap or HAMT structures in $O(1)$ stack space without intermediate list allocations.
 
-## Parallel Worked Example
+## Parallel Worked Example: Player Profile & Inventory Management
 
-Consider a cache coordinator managing cluster statistics:
+The following module manages player RPG profiles and equipment. Notice how \`maps:get/3\` supplies fallback stats, \`maps:update_with/4\` tracks skill increments, \`maps:merge/2\` and \`maps:without/2\` handle gear updates, and \`maps:fold/3\` computes total inventory capacity:
 
 \`\`\`erlang
--module(cache_stats).
--export([fetch_stat/3, record_hit/2, combine_nodes/2, total_hits/1]).
+-module(player_profile).
+-export([get_stat_or_default/3, record_skill_advancement/2, merge_character_gear/2, total_inventory_slots_used/1]).
 
-%% Safe fallback lookup
-fetch_stat(StatsMap, Metric, DefaultVal) ->
-    maps:get(Metric, StatsMap, DefaultVal).
+%% 1. Safe fallback lookup
+get_stat_or_default(Profile, StatKey, DefaultScore) ->
+    maps:get(StatKey, Profile, DefaultScore).
 
-%% Atomic metric counter
-record_hit(StatsMap, CacheName) ->
-    maps:update_with(CacheName, fun(Count) -> Count + 1 end, 1, StatsMap).
+%% 2. Atomic skill counter increment
+record_skill_advancement(SkillsMap, SkillName) ->
+    maps:update_with(SkillName, fun(Count) -> Count + 1 end, 1, SkillsMap).
 
-%% Merge node metrics and strip ephemeral tokens
-combine_nodes(LocalNodeMap, RemoteNodeMap) ->
-    Merged = maps:merge(LocalNodeMap, RemoteNodeMap),
-    maps:without([sync_token, temp_id], Merged).
+%% 3. Merge gear rewards and strip temporary quest markers
+merge_character_gear(DefaultGear, QuestRewards) ->
+    Merged = maps:merge(DefaultGear, QuestRewards),
+    maps:without([quest_marker, debug_seed], Merged).
 
-%% Direct fold summation
-total_hits(StatsMap) ->
-    maps:fold(fun(_Name, Hits, Total) -> Total + Hits end, 0, StatsMap).
+%% 4. Direct fold summation across backpack items
+total_inventory_slots_used(BackpackMap) ->
+    maps:fold(fun(_Item, Qty, Total) -> Total + Qty end, 0, BackpackMap).
 \`\`\`
 
-## Official Erlang Docs & Function Reference
+## Standard Library Function Reference
 
 \`\`\`erlang
 maps:get(Key, Map, Default) -> Value | Default
@@ -402,23 +406,63 @@ maps:fold(Fun, Acc0, Map) -> Acc
 
 ## Assignment Specification
 
-Implement four map utility functions in \`src/map_stdlib.erl\`:
+Implement four map processing functions in \`src/map_stdlib.erl\`:
 
-1. \`safe_get_load(NodeMetricsMap, NodeAtom)\`:
-   - Uses \`maps:get/3\` to return the load integer for \`NodeAtom\`, or \`0\` if missing.
-2. \`increment_tag_counts(TagList, InitialCountsMap)\`:
-   - Folds over \`TagList\` using \`lists:foldl/3\`.
-   - Uses \`maps:update_with(Tag, fun(C) -> C + 1 end, 1, AccMap)\` to count occurrences of each tag atom.
-3. \`merge_configs(DefaultCfgMap, UserCfgMap)\`:
-   - Merges \`DefaultCfgMap\` with \`UserCfgMap\` using \`maps:merge/2\` (user overrides win).
-   - Uses \`maps:without/2\` to strip sensitive keys \`secret_key\` and \`debug_token\`.
-4. \`sum_map_values(NumericMap)\`:
-   - Uses \`maps:fold/3\` to calculate the sum of all integer values in \`NumericMap\`.
+### 1. \`safe_get_load/2\`
+- **Input**:
+  - \`NodeMetricsMap\`: A map associating node atoms with integer load values.
+  - \`NodeAtom\`: The target node atom to inspect.
+- **Behavior**: Retrieve the load value associated with \`NodeAtom\` using \`maps:get/3\`. If \`NodeAtom\` is present, return its integer load value. If \`NodeAtom\` is missing, return \`0\` with zero exceptions.
+- **Examples**:
+  \`\`\`erlang
+  map_stdlib:safe_get_load(#{node_a => 42}, node_a) -> 42
+  map_stdlib:safe_get_load(#{node_a => 42}, node_b) -> 0
+  \`\`\`
 
-## Rules & Verification Constraints
+### 2. \`increment_tag_counts/2\`
+- **Input**:
+  - \`TagList\`: A list of tag atoms (e.g., \`[api, web, api, db, api]\`).
+  - \`InitialCountsMap\`: A map containing baseline tag counts.
+- **Behavior**: Tally the frequency of each tag in \`TagList\` by folding across the list and updating the accumulator map using \`maps:update_with/4\`.
+  - For each tag encountered, if it already exists in the map, increment its existing count by \`1\`.
+  - If the tag is not yet present, initialize its count to \`1\`.
+  - Returns the updated frequency map.
+- **Examples**:
+  \`\`\`erlang
+  map_stdlib:increment_tag_counts([api, web, api, db, api], #{})
+  %% => #{api => 3, db => 1, web => 1}
+  \`\`\`
 
-- Must use \`maps:get/3\`, \`maps:update_with/4\`, \`maps:merge/2\`, and \`maps:fold/3\`.
-- All keys must be atoms; values must be numbers or atoms.`,
+### 3. \`merge_configs/2\`
+- **Input**:
+  - \`DefaultCfgMap\`: A baseline configuration map.
+  - \`UserCfgMap\`: A map containing user-specified override settings.
+- **Behavior**: Combine both configuration layers and sanitize the result:
+  - Merge the two maps using \`maps:merge/2\`, ensuring user-specified settings take precedence on duplicate keys.
+  - Remove sensitive keys \`secret_key\` and \`debug_token\` from the merged result using \`maps:without/2\`.
+  - Returns the sanitized configuration map.
+- **Examples**:
+  \`\`\`erlang
+  map_stdlib:merge_configs(
+      #{port => 8080, timeout => 5000},
+      #{port => 9000, secret_key => bad_secret, debug_token => 1234}
+  )
+  %% => #{port => 9000, timeout => 5000}
+  \`\`\`
+
+### 4. \`sum_map_values/1\`
+- **Input**: A map \`NumericMap\` whose values are numbers.
+- **Behavior**: Aggregate all values across \`NumericMap\` into a single sum using \`maps:fold/3\` without allocating intermediate lists on the heap. An empty map returns \`0\`.
+- **Examples**:
+  \`\`\`erlang
+  map_stdlib:sum_map_values(#{cpu => 25, mem => 45, io => 10})
+  %% => 80
+  \`\`\`
+
+## Verification Constraints
+
+- You must employ \`maps:get/3\`, \`maps:update_with/4\`, \`maps:merge/2\`, and \`maps:fold/3\`.
+- Do not convert the map to an intermediate list with \`maps:to_list/1\`.`,
     otpDocCards: [
       {
         functionName: 'maps:update_with/4',
@@ -503,24 +547,20 @@ Implement four map utility functions in \`src/map_stdlib.erl\`:
         content: `-module(map_stdlib).
 -export([safe_get_load/2, increment_tag_counts/2, merge_configs/2, sum_map_values/1]).
 
-%% @doc Return load for NodeAtom from NodeMetricsMap or default 0 using maps:get/3.
+%% @doc Retrieves node load metric with a safe zero fallback default.
 safe_get_load(_NodeMetricsMap, _NodeAtom) ->
-    %% % TODO: Retrieve load metric for the target node, returning 0 if key is absent.
     0.
 
-%% @doc Count tag occurrences by folding TagList into InitialCountsMap with maps:update_with/4.
+%% @doc Tallies tag symbol frequencies into an accumulator map.
 increment_tag_counts(_TagList, InitialCountsMap) ->
-    %% % TODO: Tally occurrences of each tag symbol into the accumulator map.
     InitialCountsMap.
 
-%% @doc Merge DefaultCfgMap with UserCfgMap (User wins), then strip secret_key and debug_token.
+%% @doc Merges override settings onto defaults and strips sensitive keys.
 merge_configs(DefaultCfgMap, _UserCfgMap) ->
-    %% % TODO: Combine configuration maps (user settings take precedence) and strip sensitive keys.
     DefaultCfgMap.
 
-%% @doc Sum all integer values in NumericMap using maps:fold/3.
+%% @doc Aggregates all values across a numeric map into a total sum.
 sum_map_values(_NumericMap) ->
-    %% % TODO: Aggregate all values across the map into a total sum.
     0.`,
       },
     ],
@@ -548,24 +588,20 @@ sum_map_values(NumericMap) ->
     starterCode: `-module(map_stdlib).
 -export([safe_get_load/2, increment_tag_counts/2, merge_configs/2, sum_map_values/1]).
 
-%% @doc Return load for NodeAtom from NodeMetricsMap or default 0 using maps:get/3.
+%% @doc Retrieves node load metric with a safe zero fallback default.
 safe_get_load(_NodeMetricsMap, _NodeAtom) ->
-    %% % TODO: Retrieve load metric for the target node, returning 0 if key is absent.
     0.
 
-%% @doc Count tag occurrences by folding TagList into InitialCountsMap with maps:update_with/4.
+%% @doc Tallies tag symbol frequencies into an accumulator map.
 increment_tag_counts(_TagList, InitialCountsMap) ->
-    %% % TODO: Tally occurrences of each tag symbol into the accumulator map.
     InitialCountsMap.
 
-%% @doc Merge DefaultCfgMap with UserCfgMap (User wins), then strip secret_key and debug_token.
+%% @doc Merges override settings onto defaults and strips sensitive keys.
 merge_configs(DefaultCfgMap, _UserCfgMap) ->
-    %% % TODO: Combine configuration maps (user settings take precedence) and strip sensitive keys.
     DefaultCfgMap.
 
-%% @doc Sum all integer values in NumericMap using maps:fold/3.
+%% @doc Aggregates all values across a numeric map into a total sum.
 sum_map_values(_NumericMap) ->
-    %% % TODO: Aggregate all values across the map into a total sum.
     0.`,
     solutionCode: `-module(map_stdlib).
 -export([safe_get_load/2, increment_tag_counts/2, merge_configs/2, sum_map_values/1]).
