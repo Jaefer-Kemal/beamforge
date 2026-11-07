@@ -2262,6 +2262,20 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
 
+## Phase 120: Pedagogical Despoiling of Chapter 5 Lecture 2 (`ch05-l02`)
+- [x] **120.1: Domain Disjunction & Anti-Spoiler Decontamination (`ch05-l02`)**:
+  - Neutralized Concept Breakdown Section 2: replaced assignment-cloned ping/pong protocol snippets (`{ping, self(), <<"heartbeat">>}`, `{ping, CallerPid, Payload}`) with a domain-independent bank account inquiry protocol (`{query_balance, self(), <<"acct_8492">>}`, `{query_balance, CallerPid, AccountId} -> CallerPid ! {balance_result, self(), AccountId, 250000}`).
+  - Replaced parallel worked example with Telemetry Sensor Gateway (`sensor_gateway.erl`: `start_hub/0`, `push_metric/3`, `fanout_telemetry/2`, `gateway_loop/0`), preventing clone functions and eliminating copy-paste leaks of `{sent, length(PidsList)}`.
+  - Structured Assignment Specification into rigorous `Input`, `Behavior`, and `Output` contracts across `start_responder/0`, `responder_loop/0`, `ping/2`, and `broadcast/2` without raw Erlang code syntax or backtick formula leaks.
+- [x] **120.2: Starter Code Hygiene & Compiler Gate**:
+  - Stripped all `%% Architectural Requirement: ...` inline spoilers and comments from function bodies in `files[0].content` and `starterCode`.
+  - Added clean EDoc annotations (`@doc`, `-spec`) and valid stub return values (`self()`, `ok`, `{error, timeout}`, `{sent, 0}`).
+  - Verified starter and solution compilation via `erlc.exe` with zero errors or warnings.
+  - Verified roundtrip and broadcast test suite execution on OTP 29 with all assertions passing (`ALL TESTS PASSED`).
+  - Next.js 14 production build (`npm --prefix apps/web-ide run build`) passed with zero errors across all 8 routes.
+  - Go orchestrator backend (`go build ./...`) passed with zero compilation errors.
+
+
 
 
 

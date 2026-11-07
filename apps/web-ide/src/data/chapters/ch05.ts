@@ -393,13 +393,13 @@ When Process A evaluates \`Pid ! Message\`:
 ### 2. Identifying Callers with \`self/0\`
 An actor has no built-in way of knowing who sent a message. Unlike TCP sockets with source IP headers, raw messages do not carry implicit return addresses. If a caller expects a response, it **must explicitly include its own PID** (\`self()\`) inside a tagged tuple:
 \`\`\`erlang
-%% Caller sends request with self():
-WorkerPid ! {ping, self(), <<"heartbeat">>}.
+%% Caller sends request with its own PID for routing:
+WorkerPid ! {query_balance, self(), <<"acct_8492">>}.
 
 %% Worker pattern-matches CallerPid and replies:
 receive
-    {ping, CallerPid, Payload} ->
-        CallerPid ! {pong, self(), Payload}
+    {query_balance, CallerPid, AccountId} ->
+        CallerPid ! {balance_result, self(), AccountId, 250000}
 end.
 \`\`\`
 
@@ -415,38 +415,41 @@ Erlang provides two ways to spawn processes:
 
 ## Parallel Worked Example
 
-Consider a distributed notification dispatcher:
+Consider a distributed telemetry ingestion hub that accepts metric events from workers and delivers periodic synchronization pulses:
 
 \`\`\`erlang
--module(notification_hub).
--export([start/0, send_alert/2, broadcast_alert/2, loop/0]).
+-module(sensor_gateway).
+-export([start_hub/0, push_metric/3, fanout_telemetry/2, gateway_loop/0]).
 
-%% Spawns the dispatcher actor using MFA spawn for hot-code upgrade compatibility
-start() ->
-    spawn(?MODULE, loop, []).
+%% Spawns the telemetry gateway actor
+start_hub() ->
+    spawn(?MODULE, gateway_loop, []).
 
-%% Client API: sends an alert and waits for confirmation
-send_alert(HubPid, AlertText) ->
-    HubPid ! {alert, self(), AlertText},
+%% Client API: sends a telemetry metric and waits for confirmation
+push_metric(HubPid, MetricName, Value) ->
+    HubPid ! {record_metric, self(), MetricName, Value},
     receive
-        {ack, HubPid, AlertText} ->
-            {ok, AlertText}
+        {metric_ack, HubPid, MetricName} ->
+            {ok, MetricName}
     after 1000 ->
         {error, timeout}
     end.
 
-%% Client API: broadcasts message to a list of subscriber PIDs
-broadcast_alert(Subscribers, AlertText) ->
-    [Pid ! {broadcast, AlertText} || Pid <- Subscribers],
-    {sent, length(Subscribers)}.
+%% Client API: fans out a sync pulse to listening collector processes
+fanout_telemetry(Collectors, SyncPulse) ->
+    DeliveredCount = lists:foldl(fun(Pid, Acc) ->
+        Pid ! {telemetry_pulse, SyncPulse},
+        Acc + 1
+    end, 0, Collectors),
+    {dispatched, DeliveredCount}.
 
 %% Internal actor loop: executes inside the spawned process
-loop() ->
+gateway_loop() ->
     receive
-        {alert, CallerPid, Text} ->
-            CallerPid ! {ack, self(), Text},
-            loop();
-        stop ->
+        {record_metric, CallerPid, MetricName, _Val} ->
+            CallerPid ! {metric_ack, self(), MetricName},
+            gateway_loop();
+        shutdown ->
             ok
     end.
 \`\`\`
@@ -468,21 +471,40 @@ Dest ! Message -> Message
 
 ## Assignment Specification
 
-Implement \`src/ping_actor.erl\` exporting \`start_responder/0\`, \`ping/2\`, \`broadcast/2\`, and \`responder_loop/0\`:
+Implement the concurrent ping-pong actor and messaging interface in \`src/ping_actor.erl\`. The module must export \`start_responder/0\`, \`responder_loop/0\`, \`ping/2\`, and \`broadcast/2\`.
 
-1. \`start_responder() -> pid()\`:
-   - Spawns \`responder_loop/0\` (or \`spawn(?MODULE, responder_loop, [])\`) and returns the newly spawned actor's PID.
-2. \`responder_loop() -> ok\`:
-   - Enters a tail-recursive \`receive\` loop.
-   - When receiving \`{ping, CallerPid, Payload}\`: sends \`CallerPid ! {pong, self(), Payload}\` and recurses to \`responder_loop()\`.
-   - When receiving \`stop\`: exits cleanly and returns \`ok\`.
-3. \`ping(ResponderPid, Payload) -> {ok, Payload} | {error, timeout}\`:
-   - Sends \`{ping, self(), Payload}\` to \`ResponderPid\`.
-   - Waits up to 1,000ms in a \`receive ... after 1000\` block for \`{pong, ResponderPid, Payload}\`.
-   - Returns \`{ok, Payload}\` on match, or \`{error, timeout}\` if no response arrives within 1,000ms.
-4. \`broadcast(PidsList, Msg) -> {sent, integer()}\`:
-   - Asynchronously sends \`Msg\` to every PID in \`PidsList\` using a list comprehension or \`lists:foreach/2\`.
-   - Returns \`{sent, Count}\` where \`Count\` is the length of \`PidsList\`.
+### 1. \`start_responder/0\`
+- **Input**: None.
+- **Behavior**: Spawns a concurrent process executing \`responder_loop/0\` and returns its process identifier.
+- **Output**: Returns the \`pid()\` of the spawned responder actor.
+
+### 2. \`responder_loop/0\`
+- **Input**: None (runs as a long-lived process).
+- **Behavior**:
+  - Enters a tail-recursive message receipt loop.
+  - When receiving a 3-tuple tagged with the atom \`ping\`, containing the caller process identifier and an arbitrary payload, it replies to the caller with a 3-tuple tagged with \`pong\` containing its own process identifier and the identical payload, then tail-recurses into \`responder_loop/0\`.
+  - When receiving the atom \`stop\`, it terminates the loop cleanly.
+- **Output**: Returns the atom \`ok\` upon termination.
+
+### 3. \`ping/2\`
+- **Input**:
+  - \`ResponderPid\`: The process identifier of a running responder actor.
+  - \`Payload\`: An arbitrary Erlang term.
+- **Behavior**:
+  - Sends a ping request tuple to \`ResponderPid\` containing its own process identifier and \`Payload\`.
+  - Selectively awaits a matching pong reply from \`ResponderPid\` carrying the matching payload with a 1,000-millisecond timeout.
+- **Output**:
+  - Returns \`{ok, Payload}\` when the corresponding reply is received within 1,000 milliseconds.
+  - Returns \`{error, timeout}\` if no matching reply arrives within 1,000 milliseconds.
+
+### 4. \`broadcast/2\`
+- **Input**:
+  - \`PidsList\`: A list of process identifiers.
+  - \`Msg\`: An arbitrary Erlang term to deliver.
+- **Behavior**:
+  - Asynchronously sends \`Msg\` to every process identifier in \`PidsList\`.
+  - Computes the total count of recipient processes messaged.
+- **Output**: Returns a 2-tuple \`{sent, Count}\` where Count represents the total number of recipient processes messaged.
 
 ## Rules & Verification Constraints
 
@@ -560,35 +582,33 @@ WorkerPid ! {calculate_tax, self(), OrderTotal}.`,
         name: 'ping_actor.erl',
         path: 'src/ping_actor.erl',
         content: `-module(ping_actor).
--export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
+-export([start_responder/0, responder_loop/0, ping/2, broadcast/2]).
 
-%% Spawns a responder process executing responder_loop/0
+%% @doc Spawns a new concurrent responder actor executing responder_loop/0.
+-spec start_responder() -> pid().
 start_responder() ->
-    %% Architectural Requirement: Spawn responder_loop/0 and return the PID
-    ok.
+    self().
 
-%% Tail-recursive receive loop handling {ping, CallerPid, Payload} and stop
+%% @doc Tail-recursive actor loop handling ping requests and termination.
+-spec responder_loop() -> ok.
 responder_loop() ->
-    %% Architectural Requirement:
-    %% Match {ping, CallerPid, Payload} -> send {pong, self(), Payload} to CallerPid and recurse
-    %% Match stop -> return ok
     ok.
 
-%% Client API: sends {ping, self(), Payload} and waits up to 1000ms for {pong, ResponderPid, Payload}
-ping(ResponderPid, Payload) ->
-    %% Architectural Requirement: Send ping with self(), selectively receive pong with 1000ms timeout
-    ok.
+%% @doc Dispatches a ping payload to ResponderPid and awaits a correlated pong.
+-spec ping(pid(), term()) -> {ok, term()} | {error, timeout}.
+ping(_ResponderPid, _Payload) ->
+    {error, timeout}.
 
-%% Client API: asynchronously sends Msg to every PID in PidsList
-broadcast(PidsList, Msg) ->
-    %% Architectural Requirement: Send Msg to each PID, return {sent, length(PidsList)}
-    ok.
+%% @doc Asynchronously delivers Msg to all processes in PidsList.
+-spec broadcast([pid()], term()) -> {sent, non_neg_integer()}.
+broadcast(_PidsList, _Msg) ->
+    {sent, 0}.
 `,
       },
     ],
     solutionFiles: {
       'src/ping_actor.erl': `-module(ping_actor).
--export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
+-export([start_responder/0, responder_loop/0, ping/2, broadcast/2]).
 
 start_responder() ->
     spawn(fun() -> responder_loop() end).
@@ -617,32 +637,30 @@ broadcast(PidsList, Msg) ->
 `,
     },
     starterCode: `-module(ping_actor).
--export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
+-export([start_responder/0, responder_loop/0, ping/2, broadcast/2]).
 
-%% Spawns a responder process executing responder_loop/0
+%% @doc Spawns a new concurrent responder actor executing responder_loop/0.
+-spec start_responder() -> pid().
 start_responder() ->
-    %% Architectural Requirement: Spawn responder_loop/0 and return the PID
-    ok.
+    self().
 
-%% Tail-recursive receive loop handling {ping, CallerPid, Payload} and stop
+%% @doc Tail-recursive actor loop handling ping requests and termination.
+-spec responder_loop() -> ok.
 responder_loop() ->
-    %% Architectural Requirement:
-    %% Match {ping, CallerPid, Payload} -> send {pong, self(), Payload} to CallerPid and recurse
-    %% Match stop -> return ok
     ok.
 
-%% Client API: sends {ping, self(), Payload} and waits up to 1000ms for {pong, ResponderPid, Payload}
-ping(ResponderPid, Payload) ->
-    %% Architectural Requirement: Send ping with self(), selectively receive pong with 1000ms timeout
-    ok.
+%% @doc Dispatches a ping payload to ResponderPid and awaits a correlated pong.
+-spec ping(pid(), term()) -> {ok, term()} | {error, timeout}.
+ping(_ResponderPid, _Payload) ->
+    {error, timeout}.
 
-%% Client API: asynchronously sends Msg to every PID in PidsList
-broadcast(PidsList, Msg) ->
-    %% Architectural Requirement: Send Msg to each PID, return {sent, length(PidsList)}
-    ok.
+%% @doc Asynchronously delivers Msg to all processes in PidsList.
+-spec broadcast([pid()], term()) -> {sent, non_neg_integer()}.
+broadcast(_PidsList, _Msg) ->
+    {sent, 0}.
 `,
     solutionCode: `-module(ping_actor).
--export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
+-export([start_responder/0, responder_loop/0, ping/2, broadcast/2]).
 
 start_responder() ->
     spawn(fun() -> responder_loop() end).
