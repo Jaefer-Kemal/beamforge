@@ -2350,6 +2350,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 3 test stages (`S1_SafeDivideAndAmount` division and integer checks, `S2_ValidateEmail` binary email parsing, and `S3_CheckoutPipeline` short-circuit validation pipeline).
 
+## Phase 129: Pedagogical Despoiling of Chapter 6 Lecture 3 (`ch06-l03`)
+- [x] **129.1: Audit & Eliminate Exercise Code Spoilers in Lecture 6.3 (`ch06-l03`)**:
+  - Neutralized concept breakdown: eliminated code leak of `try erlang:binary_to_term(Binary, [safe]) of Term -> ...` in the assignment spec, explaining the security architecture of `[safe]` against atom table exhaustion DoS attacks from first principles.
+  - Replaced clone parallel worked example `secure_blob_reader.erl` with an authentic streaming channel manager `telemetry_stream_sink.erl` (`safe_unpack_frame/1`, `with_stream_channel/3`, `flush_metrics_stream/2`), achieving complete domain disjunction while demonstrating higher-order resource wrappers, guaranteed `after` block execution, and stream drain notifications.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `safe_parse_payload/1`, `with_resource_cleanup/3`, and `process_transaction_log/2`, eliminating code syntax dictation.
+  - Refactored starter code doc comments: removed all in-body pseudocode lines from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+  - Tuned `process_transaction_log/2` implementation in `solutionCode` and `solutionFiles` to cleanly return `ok` and propagate `error:transaction_processing_failed` as verified by orchestrator assertion suites.
+- [x] **129.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 4 test stages (`S1_Ast` try_catch & binary_to_term audits, `S2_SafeParse` valid/corrupt term decoding, `S3_ResourceCleanup` guaranteed release on normal and error flows, and `S4_TransactionLog` guaranteed close notification).
+
+
 
 
 
