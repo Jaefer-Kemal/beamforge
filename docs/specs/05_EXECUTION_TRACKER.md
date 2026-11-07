@@ -2328,6 +2328,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 5 test stages (`S1_Ast` tail recursion & timeout audits, `S2_Transactions` deposit/withdraw validation, `S3_Transfers` atomic transfer consistency, `S4_Batch` dual accumulators, and `S5_RaceAudit` 10-worker double-spend race condition immunity).
 
+## Phase 127: Pedagogical Despoiling of Chapter 6 Lecture 1 (`ch06-l01`)
+- [x] **127.1: Audit & Eliminate Exercise Code Spoilers in Lecture 6.1 (`ch06-l01`)**:
+  - Neutralized concept breakdown: eliminated the verbatim leaked `check_payment(Payload)` try-catch block and `throw(negative_amount)` from Section 3 and the concept table, replacing them with a domain-neutral pattern matching structure on untrusted input (`throw:DomainError`, `error:RuntimeCrash`, `exit:HaltSignal`).
+  - Replaced parallel worked example `order_inspector.erl` with an authentic hardware sensor ingestion gate `telemetry_codec.erl` (`validate_telemetry/1`, `classify_telemetry/1`, `raise_signal/2`), achieving domain disjunction from payment transactions while demonstrating semantic mapping of `throw`, `error`, and `exit` within an isolated `try...catch` boundary.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `check_payment/1`, `safe_check/1`, and `trigger_class/2`, eliminating raw code dictation.
+  - Refactored starter code doc comments: removed all `%% % TODO:` comments and in-body pseudocode from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+- [x] **127.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 3 test stages (`S1_Ast` try_catch construct audit, `S2_DomainChecks` payment validation error/throw/exit mappings, and `S3_TriggerClass` direct exception raising verification).
+
+
 
 
 

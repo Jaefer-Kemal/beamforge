@@ -24,7 +24,7 @@ Unlike languages that have a single generic \`Exception\` base class, the BEAM r
 
 | Exception Class | Invocation Primitive | Production Semantics & Intended Usage |
 | :--- | :--- | :--- |
-| **\`throw(Value)\`** | \`throw(Value)\` | **Non-Local Return / Expected Domain Flow:** Used for intentional, expected early termination across deep recursion (e.g., aborting a nested syntax tree walk upon finding a target node, or signaling expected business validation failures like \`throw(negative_amount)\`). Callers are explicitly expected to catch throws. |
+| **\`throw(Value)\`** | \`throw(Value)\` | **Non-Local Return / Expected Domain Flow:** Used for intentional, expected early termination across deep recursion (e.g., aborting a nested syntax tree walk upon finding a target node, or signaling expected business validation failures like \`throw(key_not_found)\`). Callers are explicitly expected to catch throws. |
 | **\`error(Reason)\`** | \`erlang:error(Reason)\` | **Runtime Bugs & Contract Violations:** Generated automatically by the BEAM for VM errors (\`badarith\`, \`badmatch\`, \`function_clause\`, \`badarg\`) or raised explicitly via \`erlang:error(Reason)\`. It automatically captures the full process stacktrace (\`Class:Reason:Stacktrace\`). |
 | **\`exit(Reason)\`** | \`exit(Reason)\` | **Intentional Process Termination:** Signals that the current process deliberately wishes to stop running (e.g., \`exit(normal)\`, \`exit(shutdown)\`, or \`exit(database_unreachable)\`). When uncaught, it converts into an exit signal sent to linked processes. |
 
@@ -34,14 +34,14 @@ To catch and differentiate these three classes in sequential code, Erlang provid
 
 \`\`\`erlang
 try
-    check_payment(Payload)
+    evaluate_untrusted_input(Input)
 catch
-    throw:Reason ->
-        {rejected, Reason};
-    error:Reason ->
-        {bug_detected, Reason};
-    exit:Reason ->
-        {process_aborted, Reason}
+    throw:DomainError ->
+        {expected_rejection, DomainError};
+    error:RuntimeCrash ->
+        {internal_bug, RuntimeCrash};
+    exit:HaltSignal ->
+        {subsystem_stopped, HaltSignal}
 end
 \`\`\`
 
@@ -50,31 +50,54 @@ end
 
 ## Parallel Worked Example
 
-The following module inspects order requests, classifying invalid data with the appropriate exception primitive:
+The following module inspects hardware sensor telemetry packets, classifying invalid readings and status flags with the appropriate exception primitive:
 
 \`\`\`erlang
--module(order_inspector).
--export([validate_order/1, safe_inspect/1]).
+-module(telemetry_codec).
+-export([
+    validate_telemetry/1,
+    classify_telemetry/1,
+    raise_signal/2
+]).
 
-validate_order({order, Qty, Sku}) ->
+%% @doc Validates a raw sensor packet: {sensor, DeviceId, Reading, Unit}
+validate_telemetry({sensor, DeviceId, Reading, Unit}) ->
     if
-        not is_integer(Qty) -> erlang:error(bad_quantity_type);
-        Qty < 0            -> throw(negative_quantity);
-        Qty =:= 0          -> exit(zero_order_abort);
-        not is_binary(Sku) -> throw(invalid_sku_format);
-        true               -> {approved, Qty, Sku}
+        not is_number(Reading) ->
+            erlang:error(malformed_reading_type);
+        Reading < -273.15 ->
+            throw(sub_absolute_zero);
+        Reading == 0 ->
+            exit(sensor_quiescent_abort);
+        Unit =/= celsius andalso Unit =/= kelvin andalso Unit =/= fahrenheit ->
+            throw({unsupported_unit, Unit});
+        true ->
+            {valid, DeviceId, Reading, Unit}
     end;
-validate_order(_Invalid) ->
-    erlang:error(invalid_order_tuple).
+validate_telemetry(_Invalid) ->
+    erlang:error(invalid_packet_format).
 
-safe_inspect(OrderTuple) ->
-    try validate_order(OrderTuple) of
-        {approved, Qty, Sku} -> {ok, #{qty => Qty, sku => Sku}}
+%% @doc Evaluates validation inside try...catch, normalizing each class
+classify_telemetry(PacketTuple) ->
+    try validate_telemetry(PacketTuple) of
+        {valid, DeviceId, Reading, Unit} ->
+            {accepted, DeviceId, Reading, Unit}
     catch
-        throw:Reason -> {rejected, Reason};
-        error:Reason -> {bug_detected, Reason};
-        exit:Reason  -> {process_aborted, Reason}
+        throw:Reason ->
+            {quarantined, Reason};
+        error:Reason ->
+            {protocol_violation, Reason};
+        exit:Reason ->
+            {stream_terminated, Reason}
     end.
+
+%% @doc Directly raises the requested exception class and reason
+raise_signal(throw, Reason) ->
+    throw(Reason);
+raise_signal(error, Reason) ->
+    erlang:error(Reason);
+raise_signal(exit, Reason) ->
+    exit(Reason).
 \`\`\`
 
 ## Official Erlang Docs & Function Reference
@@ -91,24 +114,41 @@ exit(Reason) -> no_return()
 
 Implement \`src/exception_classifier.erl\` exporting \`check_payment/1\`, \`safe_check/1\`, and \`trigger_class/2\`:
 
-1. \`check_payment(PaymentTuple)\`:
-   - Matches \`{payment, Amount, Currency}\`:
-     - If \`not is_integer(Amount)\` -> raises \`erlang:error(bad_amount_type)\`.
-     - If \`Amount < 0\` -> calls \`throw(negative_amount)\`.
-     - If \`Amount =:= 0\` -> calls \`exit(zero_payment_abort)\`.
-     - If \`Currency =/= usd andalso Currency =/= eur andalso Currency =/= etb\` -> calls \`throw({unsupported_currency, Currency})\`.
-     - Otherwise -> returns \`{approved, Amount, Currency}\`.
-   - If \`PaymentTuple\` is not a 3-element payment tuple -> raises \`erlang:error(invalid_payment_tuple)\`.
-2. \`safe_check(PaymentTuple)\`:
-   - Evaluates \`check_payment(PaymentTuple)\` inside a \`try ... catch\` block:
-     - On successful approval -> returns \`{approved, Amount, Currency}\`.
-     - On \`throw:Reason\` -> returns \`{rejected, Reason}\`.
-     - On \`error:Reason\` -> returns \`{bug_detected, Reason}\`.
-     - On \`exit:Reason\` -> returns \`{process_aborted, Reason}\`.
-3. \`trigger_class(ClassAtom, Reason)\`:
-   - When \`ClassAtom =:= throw\` -> executes \`throw(Reason)\`.
-   - When \`ClassAtom =:= error\` -> executes \`erlang:error(Reason)\`.
-   - When \`ClassAtom =:= exit\` -> executes \`exit(Reason)\`.
+### 1. \`check_payment/1\`
+- **Input**: \`PaymentTuple\` — expected structure \`{payment, Amount, Currency}\`.
+- **Behavior**: Validates payment parameters and returns \`{approved, Amount, Currency}\` when valid:
+  - If \`Amount\` is not an integer: raises \`erlang:error(bad_amount_type)\`.
+  - If \`Amount < 0\`: throws \`throw(negative_amount)\`.
+  - If \`Amount =:= 0\`: deliberately terminates the flow via \`exit(zero_payment_abort)\`.
+  - If \`Currency\` is not an approved currency atom (\`usd\`, \`eur\`, or \`etb\`): throws \`throw({unsupported_currency, Currency})\`.
+  - If \`PaymentTuple\` does not match the 3-element payment tuple structure: raises \`erlang:error(invalid_payment_tuple)\`.
+- **Examples**:
+  - \`exception_classifier:check_payment({payment, 150, usd})\` returns \`{approved, 150, usd}\`.
+
+### 2. \`safe_check/1\`
+- **Input**: \`PaymentTuple\`.
+- **Behavior**: Evaluates \`check_payment(PaymentTuple)\` inside an isolated \`try ... catch\` expression, converting successes and each exception class into a standardized tagged return tuple:
+  - Successful validation: returns \`{approved, Amount, Currency}\`.
+  - On \`throw:Reason\`: returns \`{rejected, Reason}\`.
+  - On \`error:Reason\`: returns \`{bug_detected, Reason}\`.
+  - On \`exit:Reason\`: returns \`{process_aborted, Reason}\`.
+- **Examples**:
+  - \`exception_classifier:safe_check({payment, 200, usd})\` returns \`{approved, 200, usd}\`.
+  - \`exception_classifier:safe_check({payment, -10, usd})\` returns \`{rejected, negative_amount}\`.
+  - \`exception_classifier:safe_check({payment, "not_int", usd})\` returns \`{bug_detected, bad_amount_type}\`.
+  - \`exception_classifier:safe_check({payment, 0, usd})\` returns \`{process_aborted, zero_payment_abort}\`.
+  - \`exception_classifier:safe_check({payment, 50, gbp})\` returns \`{rejected, {unsupported_currency, gbp}}\`.
+
+### 3. \`trigger_class/2\`
+- **Input**: \`ClassAtom\` (one of \`throw\`, \`error\`, or \`exit\`), and \`Reason\` (any Erlang term).
+- **Behavior**: Directly invokes the requested exception primitive:
+  - When \`ClassAtom =:= throw\`: invokes \`throw(Reason)\`.
+  - When \`ClassAtom =:= error\`: invokes \`erlang:error(Reason)\`.
+  - When \`ClassAtom =:= exit\`: invokes \`exit(Reason)\`.
+- **Examples**:
+  - \`exception_classifier:trigger_class(throw, custom_reason)\` raises \`throw:custom_reason\`.
+  - \`exception_classifier:trigger_class(error, custom_err)\` raises \`error:custom_err\`.
+  - \`exception_classifier:trigger_class(exit, custom_exit)\` raises \`exit:custom_exit\`.
 
 ## Rules & Verification Constraints
 
@@ -213,24 +253,18 @@ end.`,
     trigger_class/2
 ]).
 
-%% @doc Validates incoming payment tuples, raising error, throw, or exit
-%% based on the domain rules specified in the lesson guide.
-check_payment(_PaymentTuple) ->
-    %% % TODO: Validate PaymentTuple against Amount type and value bounds,
-    %% % supported currencies, and return {approved, Amount, Currency}.
+%% @doc Validates incoming payment parameters, classifying anomalies using
+%% throw, error, or exit according to system reliability rules.
+check_payment(PaymentTuple) ->
     ok.
 
-%% @doc Evaluates check_payment/1 inside a try...catch expression,
-%% normalizing each distinct exception class (throw, error, exit).
-safe_check(_PaymentTuple) ->
-    %% % TODO: Execute check_payment/1 in a try...catch block, mapping
-    %% % success and each exception class to its canonical tagged tuple.
+%% @doc Evaluates payment validation inside an isolated try...catch boundary,
+%% normalizing successes and each exception class into safe tagged tuples.
+safe_check(PaymentTuple) ->
     ok.
 
-%% @doc Directly raises the requested exception class and reason.
-trigger_class(_ClassAtom, _Reason) ->
-    %% % TODO: Match on the class atom (throw, error, exit) and invoke
-    %% % the corresponding BEAM exception primitive.
+%% @doc Directly invokes the specified BEAM exception primitive.
+trigger_class(ClassAtom, Reason) ->
     ok.
 `,
     solutionCode: `-module(exception_classifier).
@@ -287,24 +321,17 @@ trigger_class(exit, Reason) ->
     trigger_class/2
 ]).
 
-%% Validates a payment tuple: {payment, Amount, Currency}
-%% - not is_integer(Amount) -> erlang:error(bad_amount_type)
-%% - Amount < 0 -> throw(negative_amount)
-%% - Amount =:= 0 -> exit(zero_payment_abort)
-%% - Currency not in [usd, eur, etb] -> throw({unsupported_currency, Currency})
-%% - Otherwise -> {approved, Amount, Currency}
+%% @doc Validates incoming payment parameters, classifying anomalies using
+%% throw, error, or exit according to system reliability rules.
 check_payment(PaymentTuple) ->
     ok.
 
-%% Evaluates check_payment inside try...catch, normalizing:
-%% - success -> {approved, Amount, Currency}
-%% - throw:Reason -> {rejected, Reason}
-%% - error:Reason -> {bug_detected, Reason}
-%% - exit:Reason -> {process_aborted, Reason}
+%% @doc Evaluates payment validation inside an isolated try...catch boundary,
+%% normalizing successes and each exception class into safe tagged tuples.
 safe_check(PaymentTuple) ->
     ok.
 
-%% Directly raises the requested exception class and reason
+%% @doc Directly invokes the specified BEAM exception primitive.
 trigger_class(ClassAtom, Reason) ->
     ok.
 `,
