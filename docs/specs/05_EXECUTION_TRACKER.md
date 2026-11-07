@@ -2252,6 +2252,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Verified live deployment: `https://beamforge-eight.vercel.app/learn/ch04-l08` returned `HTTP/1.1 200 OK`.
   - Verified live deployment: `https://beamforge-eight.vercel.app/syllabus` returned `HTTP/1.1 200 OK`.
 
+## Phase 119: Pedagogical Despoiling of Chapter 5 Lecture 1 (`ch05-l01`)
+- [x] **119.1: Audit & Refine Guided Demo in Lecture 5.1 (`ch05-l01`)**:
+  - Structured Assignment Specification into clean Boot.dev layout with dedicated `Functions Provided` blocks (`run/0`, `run_bench/1`, `inspect_process/1`) outlining `Input`, `Behavior`, `Output`, and `Examples` contracts.
+  - Audited parallel worked example `telemetry_probe.erl` (`probe_system/0`, `probe_worker/1`), confirming domain disjunction in the node ops monitoring probe domain.
+  - Refactored starter code and solution doc comments: replaced informal comments with formal EDoc `@doc` annotations on `run/0`, `run_bench/1`, and `inspect_process/1`, removing in-body commentary.
+- [x] **119.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
+
+
 
 
 
