@@ -2301,6 +2301,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Next.js 14 production build (`npm --prefix apps/web-ide run build`) passed with zero errors across all 8 routes.
   - Go orchestrator backend (`go build ./...`) passed with zero compilation errors.
 
+## Phase 123: Pedagogical Despoiling of Chapter 5 Lecture 5 (`ch05-l05`)
+- [x] **123.1: Domain Disjunction & Anti-Spoiler Decontamination (`ch05-l05`)**:
+  - Replaced parallel worked example `config_store.erl` with Active User Session Sentinel (`session_sentinel.erl`: `bootstrap_sentinel/0`, `touch_session/2`, `check_lease/1`, `decommission/0`, `sentinel_loop/1`), eliminating 1:1 map clone spoilers.
+  - Structured Assignment Specification into rigorous `Input`, `Behavior`, and `Output` contracts across `start_registered/0`, `put/2`, `get/1`, `stop/0`, and `loop/1` without raw Erlang code syntax or backtick formula leaks.
+- [x] **123.2: Starter Code Hygiene & Multi-Compiler Verification**:
+  - Stripped all `%% Architectural Requirement: ...` inline comments from function bodies in `files[0].content` and `starterCode`.
+  - Added clean EDoc annotations (`@doc`, `-spec`) and valid stub return values (`{error, already_started}`, `{error, not_running}`, `ok`).
+  - Verified starter and solution compilation via `erlc.exe` with zero errors or warnings.
+  - Verified registered atom lifecycle, map storage, and `make_ref/0` request correlation on OTP 29 with all test assertions passing (`ALL NAMED KV ACTOR TESTS PASSED`).
+  - Next.js 14 production build (`npm --prefix apps/web-ide run build`) passed with zero errors across all 8 routes.
+  - Go orchestrator backend (`go build ./...`) passed with zero compilation errors.
+
+
 
 
 

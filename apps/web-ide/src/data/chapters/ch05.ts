@@ -1490,73 +1490,92 @@ If a delayed reply from an earlier timed-out request arrives with an older refer
 
 ## Parallel Worked Example
 
-Consider a registered configuration store:
+Consider a registered session sentinel that tracks active user leases and coordinates expiry checks:
 
 \`\`\`erlang
--module(config_store).
--export([start/0, set/2, get/1, stop/0, loop/1]).
+-module(session_sentinel).
+-export([bootstrap_sentinel/0, touch_session/2, check_lease/1, decommission/0, sentinel_loop/1]).
 
-start() ->
-    case whereis(?MODULE) of
+%% Registers the session sentinel under atom session_sentinel
+bootstrap_sentinel() ->
+    case whereis(session_sentinel) of
         undefined ->
-            Pid = spawn(fun() -> loop(#{}) end),
-            register(?MODULE, Pid),
+            Pid = spawn(fun() -> sentinel_loop(#{}) end),
+            register(session_sentinel, Pid),
             {ok, Pid};
-        _Pid ->
+        _ActivePid ->
             {error, already_started}
     end.
 
-set(Key, Val) ->
-    case whereis(?MODULE) of
-        undefined -> {error, not_running};
-        Pid ->
+%% Updates or renews a user lease with a timestamp
+touch_session(UserId, LeaseDurationSec) ->
+    case whereis(session_sentinel) of
+        undefined ->
+            {error, not_running};
+        SentinelPid ->
             Ref = make_ref(),
-            Pid ! {set, Ref, self(), Key, Val},
+            SentinelPid ! {renew_lease, Ref, self(), UserId, LeaseDurationSec},
             receive
-                {reply, Ref, ok} -> ok
-            after 1000 -> {error, timeout}
+                {lease_ack, Ref, ok} ->
+                    ok
+            after 1000 ->
+                {error, timeout}
             end
     end.
 
-get(Key) ->
-    case whereis(?MODULE) of
-        undefined -> {error, not_running};
-        Pid ->
+%% Queries lease status for a specific user
+check_lease(UserId) ->
+    case whereis(session_sentinel) of
+        undefined ->
+            {error, not_running};
+        SentinelPid ->
             Ref = make_ref(),
-            Pid ! {get, Ref, self(), Key},
+            SentinelPid ! {query_lease, Ref, self(), UserId},
             receive
-                {reply, Ref, Res} -> Res
-            after 1000 -> {error, timeout}
+                {lease_ack, Ref, Status} ->
+                    Status
+            after 1000 ->
+                {error, timeout}
             end
     end.
 
-stop() ->
-    case whereis(?MODULE) of
-        undefined -> {error, not_running};
-        Pid ->
+%% Cleanly halts the sentinel and releases registration
+decommission() ->
+    case whereis(session_sentinel) of
+        undefined ->
+            {error, not_running};
+        SentinelPid ->
             Ref = make_ref(),
-            Pid ! {stop, Ref, self()},
+            SentinelPid ! {halt_sentinel, Ref, self()},
             receive
-                {reply, Ref, ok} -> ok
-            after 1000 -> {error, timeout}
+                {lease_ack, Ref, ok} ->
+                    ok
+            after 1000 ->
+                {error, timeout}
             end
     end.
 
-loop(StateMap) ->
+sentinel_loop(LeaseTable) ->
     receive
-        {set, Ref, From, Key, Val} ->
-            From ! {reply, Ref, ok},
-            loop(maps:put(Key, Val, StateMap));
-        {get, Ref, From, Key} ->
-            Result = case maps:find(Key, StateMap) of
-                {ok, Value} -> {ok, Value};
-                error -> {error, not_found}
+        {renew_lease, Ref, CallerPid, UserId, Duration} ->
+            Expiry = erlang:monotonic_time(second) + Duration,
+            CallerPid ! {lease_ack, Ref, ok},
+            sentinel_loop(maps:put(UserId, Expiry, LeaseTable));
+        {query_lease, Ref, CallerPid, UserId} ->
+            Reply = case maps:find(UserId, LeaseTable) of
+                {ok, Expiry} ->
+                    Now = erlang:monotonic_time(second),
+                    if Expiry > Now -> {active, Expiry - Now};
+                       true -> expired
+                    end;
+                error ->
+                    unregistered
             end,
-            From ! {reply, Ref, Result},
-            loop(StateMap);
-        {stop, Ref, From} ->
-            unregister(?MODULE),
-            From ! {reply, Ref, ok},
+            CallerPid ! {lease_ack, Ref, Reply},
+            sentinel_loop(LeaseTable);
+        {halt_sentinel, Ref, CallerPid} ->
+            unregister(session_sentinel),
+            CallerPid ! {lease_ack, Ref, ok},
             ok
     end.
 \`\`\`
@@ -1577,22 +1596,67 @@ make_ref() -> reference()
 
 ## Assignment Specification
 
-Implement \`src/named_kv_actor.erl\` registered under atom \`named_kv_actor\`:
+Implement the locally registered key-value actor in \`src/named_kv_actor.erl\`. The actor must register under the atom \`named_kv_actor\`, safely guard all calls against missing registrations, correlate requests with unique references, and export \`start_registered/0\`, \`put/2\`, \`get/1\`, \`stop/0\`, and \`loop/1\`.
 
-1. \`start_registered() -> {ok, pid()} | {error, already_started}\`:
-   - Checks if \`named_kv_actor\` is already registered via \`whereis/1\`. If so, returns \`{error, already_started}\`.
-   - If \`undefined\`, spawns \`loop(#{}) \`, registers it under \`named_kv_actor\`, and returns \`{ok, Pid}\`.
-2. \`put(Key, Value) -> ok | {error, not_running} | {error, timeout}\`:
-   - Safely checks \`whereis(named_kv_actor)\`. If \`undefined\`, returns \`{error, not_running}\`.
-   - Generates \`Ref = make_ref()\`, sends \`{put, Ref, self(), Key, Value}\`, and receives \`{reply, Ref, ok}\` with a 1,000ms timeout.
-3. \`get(Key) -> {ok, Value} | {error, not_found} | {error, not_running} | {error, timeout}\`:
-   - Safely checks \`whereis(named_kv_actor)\`. If \`undefined\`, returns \`{error, not_running}\`.
-   - Generates \`Ref = make_ref()\`, sends \`{get, Ref, self(), Key}\`, and receives \`{reply, Ref, Result}\` with a 1,000ms timeout.
-4. \`stop() -> ok | {error, not_running} | {error, timeout}\`:
-   - Safely checks \`whereis(named_kv_actor)\`. If \`undefined\`, returns \`{error, not_running}\`.
-   - Generates \`Ref = make_ref()\`, sends \`{stop, Ref, self()}\`, and receives \`{reply, Ref, ok}\`.
-5. \`loop(Map) -> ok\`:
-   - Handles \`put\`, \`get\`, and \`stop\` (unregistering the name before exiting).
+### 1. \`start_registered/0\`
+- **Input**: None.
+- **Behavior**:
+  - Inspects the local registry for an existing registration under \`named_kv_actor\`.
+  - If the name is already bound to a live process, returns an error.
+  - If no process is registered under \`named_kv_actor\`, spawns a new process executing \`loop/1\` with an empty map (\`#{}\`), registers that process under \`named_kv_actor\`, and returns success.
+- **Output**:
+  - Returns \`{ok, Pid}\` on successful spawn and registration.
+  - Returns \`{error, already_started}\` if the actor is already registered.
+
+### 2. \`put/2\`
+- **Input**:
+  - \`Key\`: An arbitrary Erlang term.
+  - \`Value\`: An arbitrary Erlang term.
+- **Behavior**:
+  - Verifies whether \`named_kv_actor\` is currently registered before sending. If unregistered, aborts without crashing.
+  - Generates a unique 128-bit request reference token using \`make_ref/0\`.
+  - Sends a synchronous storage request carrying the reference, the caller's PID (\`self()\`), \`Key\`, and \`Value\` to the registered actor.
+  - Selectively awaits a correlated reply carrying the matching reference token with a 1,000-millisecond timeout.
+- **Output**:
+  - Returns \`ok\` on successful write.
+  - Returns \`{error, not_running}\` if \`named_kv_actor\` is not currently registered.
+  - Returns \`{error, timeout}\` if no reply is received within 1,000 milliseconds.
+
+### 3. \`get/1\`
+- **Input**:
+  - \`Key\`: An arbitrary Erlang term to look up.
+- **Behavior**:
+  - Verifies whether \`named_kv_actor\` is registered. If unregistered, aborts safely.
+  - Generates a unique request reference token via \`make_ref/0\`.
+  - Sends a synchronous lookup request carrying the reference, caller PID, and \`Key\` to the actor.
+  - Selectively awaits a correlated reply carrying the matching reference token with a 1,000-millisecond timeout.
+- **Output**:
+  - Returns \`{ok, Value}\` if the key exists in the actor's map.
+  - Returns \`{error, not_found}\` if the key is not present in the map.
+  - Returns \`{error, not_running}\` if the actor is not registered.
+  - Returns \`{error, timeout}\` if the request expires after 1,000 milliseconds.
+
+### 4. \`stop/0\`
+- **Input**: None.
+- **Behavior**:
+  - Verifies whether \`named_kv_actor\` is registered. If unregistered, returns an error.
+  - Generates a unique reference token via \`make_ref/0\`.
+  - Sends a termination request with the reference and caller PID to the actor.
+  - Awaits an acknowledgment reply carrying the matching reference.
+- **Output**:
+  - Returns \`ok\` upon confirmed termination.
+  - Returns \`{error, not_running}\` if the actor is not registered.
+  - Returns \`{error, timeout}\` if no reply is received within 1,000 milliseconds.
+
+### 5. \`loop/1\`
+- **Input**:
+  - \`Map\`: A map holding key-value pairs.
+- **Behavior**:
+  - Operates as a tail-recursive message receive loop inside the spawned actor.
+  - On receiving a \`put\` request with reference, caller PID, key, and value: replies with a correlated acknowledgment to the caller, storing the pair in \`Map\` and tail-recursing.
+  - On receiving a \`get\` request with reference, caller PID, and key: looks up the key in \`Map\`, replies with \`{ok, Value}\` or \`{error, not_found}\` correlated by the reference, and tail-recursing with \`Map\`.
+  - On receiving a \`stop\` request with reference and caller PID: unregisters the atom \`named_kv_actor\` from the node registry, replies with a correlated acknowledgment to the caller, and terminates cleanly.
+- **Output**: Returns \`ok\` upon termination.
 
 ## Rules & Verification Constraints
 
@@ -1685,29 +1749,29 @@ named_service ! {ping, self()}. %% CRASHES sender with badarg!`,
         content: `-module(named_kv_actor).
 -export([start_registered/0, put/2, get/1, stop/0, loop/1]).
 
-%% Registers actor under atom named_kv_actor if not already registered
+%% @doc Spawns and registers the key-value actor under atom named_kv_actor.
+-spec start_registered() -> {ok, pid()} | {error, already_started}.
 start_registered() ->
-    %% Architectural Requirement: Check whereis, spawn loop(#{}) and register if undefined
-    ok.
+    {error, already_started}.
 
-%% Client API: writes Key -> Value via registered name with make_ref() correlation
-put(Key, Value) ->
-    %% Architectural Requirement: Check whereis, generate Ref, send request, wait for reply
-    ok.
+%% @doc Stores Key and Value in the registered actor using reference correlation.
+-spec put(term(), term()) -> ok | {error, not_running} | {error, timeout}.
+put(_Key, _Value) ->
+    {error, not_running}.
 
-%% Client API: reads Key via registered name with make_ref() correlation
-get(Key) ->
-    %% Architectural Requirement: Check whereis, generate Ref, send request, wait for reply
-    ok.
+%% @doc Retrieves Value associated with Key using reference correlation.
+-spec get(term()) -> {ok, term()} | {error, not_found} | {error, not_running} | {error, timeout}.
+get(_Key) ->
+    {error, not_running}.
 
-%% Client API: stops actor and unregisters name
+%% @doc Signals the registered actor to unregister and terminate cleanly.
+-spec stop() -> ok | {error, not_running} | {error, timeout}.
 stop() ->
-    %% Architectural Requirement: Check whereis, send stop, unregister name
-    ok.
+    {error, not_running}.
 
-%% Internal Actor Loop holding Map state
-loop(Map) ->
-    %% Architectural Requirement: Handle put, get, and stop messages using Ref matching
+%% @doc Tail-recursive loop maintaining Map state across correlated operations.
+-spec loop(map()) -> ok.
+loop(_Map) ->
     ok.
 `,
       },
@@ -1764,12 +1828,12 @@ stop() ->
 
 loop(Map) ->
     receive
-        {put, Ref, From, K, V} ->
+        {put, Ref, From, Key, Value} ->
             From ! {reply, Ref, ok},
-            loop(maps:put(K, V, Map));
-        {get, Ref, From, K} ->
-            Result = case maps:find(K, Map) of
-                {ok, Val} -> {ok, Val};
+            loop(maps:put(Key, Value, Map));
+        {get, Ref, From, Key} ->
+            Result = case maps:find(Key, Map) of
+                {ok, Value} -> {ok, Value};
                 error -> {error, not_found}
             end,
             From ! {reply, Ref, Result},
@@ -1784,29 +1848,29 @@ loop(Map) ->
     starterCode: `-module(named_kv_actor).
 -export([start_registered/0, put/2, get/1, stop/0, loop/1]).
 
-%% Registers actor under atom named_kv_actor if not already registered
+%% @doc Spawns and registers the key-value actor under atom named_kv_actor.
+-spec start_registered() -> {ok, pid()} | {error, already_started}.
 start_registered() ->
-    %% Architectural Requirement: Check whereis, spawn loop(#{}) and register if undefined
-    ok.
+    {error, already_started}.
 
-%% Client API: writes Key -> Value via registered name with make_ref() correlation
-put(Key, Value) ->
-    %% Architectural Requirement: Check whereis, generate Ref, send request, wait for reply
-    ok.
+%% @doc Stores Key and Value in the registered actor using reference correlation.
+-spec put(term(), term()) -> ok | {error, not_running} | {error, timeout}.
+put(_Key, _Value) ->
+    {error, not_running}.
 
-%% Client API: reads Key via registered name with make_ref() correlation
-get(Key) ->
-    %% Architectural Requirement: Check whereis, generate Ref, send request, wait for reply
-    ok.
+%% @doc Retrieves Value associated with Key using reference correlation.
+-spec get(term()) -> {ok, term()} | {error, not_found} | {error, not_running} | {error, timeout}.
+get(_Key) ->
+    {error, not_running}.
 
-%% Client API: stops actor and unregisters name
+%% @doc Signals the registered actor to unregister and terminate cleanly.
+-spec stop() -> ok | {error, not_running} | {error, timeout}.
 stop() ->
-    %% Architectural Requirement: Check whereis, send stop, unregister name
-    ok.
+    {error, not_running}.
 
-%% Internal Actor Loop holding Map state
-loop(Map) ->
-    %% Architectural Requirement: Handle put, get, and stop messages using Ref matching
+%% @doc Tail-recursive loop maintaining Map state across correlated operations.
+-spec loop(map()) -> ok.
+loop(_Map) ->
     ok.
 `,
     solutionCode: `-module(named_kv_actor).
@@ -1860,12 +1924,12 @@ stop() ->
 
 loop(Map) ->
     receive
-        {put, Ref, From, K, V} ->
+        {put, Ref, From, Key, Value} ->
             From ! {reply, Ref, ok},
-            loop(maps:put(K, V, Map));
-        {get, Ref, From, K} ->
-            Result = case maps:find(K, Map) of
-                {ok, Val} -> {ok, Val};
+            loop(maps:put(Key, Value, Map));
+        {get, Ref, From, Key} ->
+            Result = case maps:find(Key, Map) of
+                {ok, Value} -> {ok, Value};
                 error -> {error, not_found}
             end,
             From ! {reply, Ref, Result},
