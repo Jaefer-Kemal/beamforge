@@ -2267,7 +2267,7 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Neutralized concept breakdown: eliminated verbatim code leaks of `{ping, self(), <<"heartbeat">>}` and `{pong, self(), Payload}` in Section 2, replacing them with a neutral telemetry metric query domain (`WorkerPid ! {fetch_telemetry, self(), cpu_temp}` and `{telemetry_data, self(), MetricName, 72.5}`).
   - Replaced parallel worked example `notification_hub.erl` with an authentic telemetry audit sink `audit_sink.erl` (`start_sink/0`, `submit_event/3`, `fanout_alert/2`, `sink_loop/0`), achieving domain disjunction from ping/pong request tuples and responder loops.
   - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `start_responder/0`, `responder_loop/0`, `ping/2`, and `broadcast/2`, eliminating raw Erlang syntax dictation.
-  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and in-body comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations.
+  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and in-body comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations; stripped premature `-spec` type declarations to prevent return tuple shape spoilers and maintain strict consistency with Chapters 1–4.
 - [x] **120.2: Multi-Compiler & Backend Verification**:
   - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.

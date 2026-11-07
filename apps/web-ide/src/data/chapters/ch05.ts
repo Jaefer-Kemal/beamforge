@@ -579,22 +579,18 @@ WorkerPid ! {calculate_tax, self(), OrderTotal}.`,
 -export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
 
 %% @doc Spawn a concurrent responder actor executing responder_loop/0.
--spec start_responder() -> pid().
 start_responder() ->
     ok.
 
 %% @doc Receive loop handling ping requests and clean termination.
--spec responder_loop() -> ok.
 responder_loop() ->
     ok.
 
 %% @doc Asynchronously send a ping request to responder and await matching pong response.
--spec ping(pid(), term()) -> {ok, term()} | {error, timeout}.
 ping(_ResponderPid, _Payload) ->
     ok.
 
 %% @doc Asynchronously dispatch message to each PID and return dispatched count.
--spec broadcast([pid()], term()) -> {sent, non_neg_integer()}.
 broadcast(_PidsList, _Msg) ->
     ok.
 `,
@@ -634,22 +630,18 @@ broadcast(PidsList, Msg) ->
 -export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
 
 %% @doc Spawn a concurrent responder actor executing responder_loop/0.
--spec start_responder() -> pid().
 start_responder() ->
     ok.
 
 %% @doc Receive loop handling ping requests and clean termination.
--spec responder_loop() -> ok.
 responder_loop() ->
     ok.
 
 %% @doc Asynchronously send a ping request to responder and await matching pong response.
--spec ping(pid(), term()) -> {ok, term()} | {error, timeout}.
 ping(_ResponderPid, _Payload) ->
     ok.
 
 %% @doc Asynchronously dispatch message to each PID and return dispatched count.
--spec broadcast([pid()], term()) -> {sent, non_neg_integer()}.
 broadcast(_PidsList, _Msg) ->
     ok.
 `,
