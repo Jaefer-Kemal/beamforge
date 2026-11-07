@@ -2867,100 +2867,215 @@ loop(State = #{count := Count, total := Total}) ->
     visualScene: 'mailbox_selective_receive',
     conceptMarkdown: `## Why This Matters in Production
 
-In banking engines, payment gateways, and order matching systems, **Data Consistency** is existential. Consider two concurrent withdrawal requests against an account with a $100 balance:
-1. Request A checks the balance ($100 balance >= $80 requested) and approves an $80 withdrawal.
-2. Simultaneously, Request B checks the balance ($100 balance >= $50 requested) and approves a $50 withdrawal.
-3. Both deduct their amounts, leaving the final balance at -$30. This is the classic **Double-Spend Glitch**!
+In financial backends, payment switches, and high-frequency order books, **Data Consistency** is existential. Consider two concurrent withdrawal requests against an account with a $100 balance:
+1. Request A queries the balance ($100 \\ge $80 requested) and prepares to approve an $80 withdrawal.
+2. Simultaneously, Request B queries the balance ($100 \\ge $50 requested) and prepares to approve a $50 withdrawal.
+3. If executed concurrently without synchronization, both deduct their amounts, yielding a final balance of -$30. This is the catastrophic **Double-Spend Glitch**!
 
-In traditional multithreaded backends (Java, C++, Go), engineers combat this by introducing row-level database locks, distributed Redis locks, or mutexes. However, locks introduce severe architectural hazards: **Deadlocks** (User 1 transfers to User 2 while User 2 transfers to User 1), lock convoying, and thread starvation under high concurrent traffic.
+In shared-memory multithreaded systems (Java, C++, Go), engineers attempt to prevent double-spending by introducing database row locks, distributed Redis locks, or operating system mutexes. However, locks introduce severe architectural hazards: **Deadlocks** (Account 1 transfers to Account 2 while Account 2 transfers to Account 1), lock convoying under contention, and thread starvation.
 
-In the **Actor Model**, concurrency safety is solved mathematically without locks. A single \`ledger_actor\` process owns the bank accounts list. Because the actor's mailbox is **strictly sequential**, incoming deposits, withdrawals, and transfers are serialized one by one. The actor completes transaction $N$ and updates its state before it ever begins evaluating transaction $N+1$. Race conditions and deadlocks are **mathematically impossible**!
+In the **BEAM Actor Model**, concurrency safety is achieved through architectural serialization without locks. A single actor process owns the state collection. Because the actor's mailbox is **strictly sequential**, incoming requests are evaluated one at a time. The actor completes state evaluation for request $N$ and updates its loop state before it ever pops request $N+1$. Race conditions and deadlocks are **mathematically impossible**!
 
 ## Deep Concept Breakdown & Under the Hood
 
-### 1. Atomic State Transitions in Memory
-You will implement \`ledger_actor\`, maintaining account states in its tail-recursive loop:
+### 1. In-Memory State Serialization and Race Freedom
+Every BEAM process has a private, sequentially ordered message mailbox. When hundreds of concurrent client processes dispatch requests simultaneously to an actor:
+1. Each incoming request is appended to the tail of the actor's mailbox.
+2. The actor's \`loop/1\` evaluates the message at the head of the mailbox.
+3. The actor executes the transaction, produces a new state, and calls \`loop(NewState)\`.
+4. Only after this transition is complete does the actor dequeue the next message.
+Because no two transactions can execute concurrently within the same process boundary, operations on shared entities are completely free of dirty reads, phantom writes, and race conditions.
+
+### 2. Atomic Functional State Transformations & Rollback
+In Erlang, terms are **immutable**. Transitioning an actor's state from $S$ to $S'$ is accomplished by passing $S'$ as the argument to the recursive \`loop/1\` call.
+
+This functional property makes failure rollbacks instantaneous and zero-cost:
+- When a requested operation is valid, the helper produces \`{ok, Reply, NewState}\`. The actor returns \`Reply\` to the caller and recurses with \`loop(NewState)\`.
+- When an operation is invalid (such as an insufficient resource balance or non-existent entity), the helper returns \`{error, Reason}\`. The actor notifies the caller and recurses with the **unmodified state** \`loop(State)\`.
+Because no memory was mutated in-place, the actor's state remains pristine without requiring complex rollback logs, undo buffers, or compensations!
+
+### 3. Multi-Entity Coordination within a Single Message
+When a transaction affects multiple entities (such as moving balance or quota from Entity A to Entity B):
+- Both entities must be verified before either is modified.
+- If the source lacks sufficient quota, the transaction must abort.
+- If either entity does not exist, the transaction must abort.
+In an actor, this coordination is evaluated entirely within a single message receive clause. Because the actor cannot process any external messages during this clause, external callers can never observe a transient state where quota was deducted from Entity A but not yet credited to Entity B.
+
+### 4. Batch Operations via Tail-Recursive Dual Accumulators
+Production systems frequently receive batches of operations that must be evaluated sequentially. Rather than failing the entire batch on the first error, systems often apply all valid operations while reporting the exact counts of successful and rejected items:
 \`\`\`erlang
-{account, AccountId :: integer(), OwnerName :: binary(), Balance :: integer()}
+%% Conceptual batch evaluation with dual accumulators:
+run_batch([], State, Succeeded, Failed) ->
+    {Succeeded, Failed, State};
+run_batch([Task | Rest], State, Succeeded, Failed) ->
+    case execute_task(Task, State) of
+        {ok, _Reply, NewState} ->
+            run_batch(Rest, NewState, Succeeded + 1, Failed);
+        {error, _Reason} ->
+            run_batch(Rest, State, Succeeded, Failed + 1)
+    end.
 \`\`\`
-Because Erlang data structures are immutable, each transaction creates a new state list. If a transaction fails (e.g. \`insufficient_funds\` or \`not_found\`), the actor returns an error tuple and recurses with the **unmodified account list**, guaranteeing zero partial writes or balance corruption!
+This pattern preserves all valid operations in constant stack space ($O(1)$ memory).
 
-### 2. Multi-Account Atomic Transfers
-A transfer between Account A and Account B must be completely atomic:
-- If Account A lacks sufficient funds, Account B must NOT receive any money.
-- If either account is missing, neither account's balance may change.
-- In \`ledger_actor\`, this atomicity is trivial: the transaction is processed inside a single message clause, ensuring no other operation can interleave between deducting from Account A and adding to Account B!
-
-### 3. Batch Processing with Dual Accumulators
-The \`process_batch/2\` function receives a list of transactions, processing each item in sequence. It tracks both \`AppliedCount\` and \`RejectedCount\` using tail-recursive accumulators, applying valid transactions and skipping invalid ones without halting the batch.
-
-> [!warning] Production Concurrency Trap: Forgetting Timeouts on Financial Calls
-> Client calls querying financial ledger actors must always include a timeout. If a caller hangs waiting for a reply from an overloaded ledger, upstream payment gateways will timeout, leading to duplicate charges. Always use \`make_ref/0\` and \`receive ... after 1000\`.
+> [!warning] Production Concurrency Trap: Forgetting Timeouts on Synchronous Requests
+> Client queries to an actor should never hang indefinitely. If an actor crashes, becomes overloaded, or fails to reply, a client without a timeout will block forever, cascading connection pool exhaustion across upstream services. Always pair \`erlang:make_ref/0\` with a bounded \`after Timeout -> {error, timeout}\` clause!
 
 ## Parallel Worked Example
 
-Consider a concurrent seat reservation actor for an airline flight:
+Consider a cloud compute cluster resource manager that allocates and rebalances CPU cores across worker nodes:
 
 \`\`\`erlang
--module(flight_seat_actor).
--export([start/1, reserve_seat/3, get_available/1, loop/1]).
+-module(fleet_allocator).
+-export([
+    start/1,
+    query_capacity/2,
+    schedule_workload/2,
+    apply_schedule/2,
+    terminate/1,
+    loop/1
+]).
 
-start(InitialSeats) ->
-    spawn(fun() -> loop(InitialSeats) end).
+%% @doc Spawns the cluster allocator actor with an initial node capacity list.
+start(InitialNodes) ->
+    spawn(fun() -> loop(InitialNodes) end).
 
-reserve_seat(Pid, SeatNumber, PassengerName) ->
+%% @doc Queries available CPU cores on a given cluster node with a timeout guard.
+query_capacity(Pid, NodeId) ->
     Ref = make_ref(),
-    Pid ! {reserve, self(), Ref, SeatNumber, PassengerName},
+    Pid ! {query_capacity, self(), Ref, NodeId},
     receive
-        {reply, Ref, Res} -> Res
+        {reply, Ref, Result} -> Result
     after 1000 ->
         {error, timeout}
     end.
 
-get_available(Pid) ->
+%% @doc Atomically provisions, releases, or rebalances CPU core quotas.
+schedule_workload(Pid, TaskTuple) ->
     Ref = make_ref(),
-    Pid ! {get_available, self(), Ref},
+    Pid ! {schedule_workload, self(), Ref, TaskTuple},
     receive
-        {reply, Ref, Res} -> Res
+        {reply, Ref, Result} -> Result
     after 1000 ->
         {error, timeout}
     end.
 
-loop(SeatsMap) ->
+%% @doc Processes a list of allocation tasks, returning success and skip counts.
+apply_schedule(Pid, TaskList) ->
+    Ref = make_ref(),
+    Pid ! {apply_schedule, self(), Ref, TaskList},
     receive
-        {reserve, From, Ref, SeatNo, Passenger} ->
-            case maps:find(SeatNo, SeatsMap) of
-                {ok, available} ->
-                    NewSeats = maps:put(SeatNo, {reserved, Passenger}, SeatsMap),
-                    From ! {reply, Ref, {ok, reserved}},
-                    loop(NewSeats);
-                {ok, {reserved, Other}} ->
-                    From ! {reply, Ref, {error, {seat_taken, Other}}},
-                    loop(SeatsMap);
-                error ->
-                    From ! {reply, Ref, {error, invalid_seat}},
-                    loop(SeatsMap)
-            end;
-        {get_available, From, Ref} ->
-            Available = [S || {S, available} <- maps:to_list(SeatsMap)],
-            From ! {reply, Ref, {ok, Available}},
-            loop(SeatsMap)
+        {reply, Ref, Result} -> Result
+    after 2000 ->
+        {error, timeout}
     end.
-\`\`\`
 
-## Official Erlang Docs & Function Reference
-
-\`\`\`erlang
-%% Official OTP Concept: In-Memory Ledger Pattern
--record(account, {id, owner, balance}).
-
-%% Tail-recursive loop serialization:
-loop(Accounts) ->
+%% @doc Terminates the allocator process cleanly.
+terminate(Pid) ->
+    Ref = make_ref(),
+    Pid ! {terminate, self(), Ref},
     receive
-        {transaction, From, Ref, Tx} ->
-            {Result, NewAccounts} = apply_tx(Tx, Accounts),
+        {reply, Ref, ok} -> ok
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Main actor loop maintaining node capacity state across sequential requests.
+loop(Nodes) ->
+    receive
+        {query_capacity, From, Ref, NodeId} ->
+            Result = case find_node(NodeId, Nodes) of
+                {ok, {node, _, _, Cores}} -> {ok, Cores};
+                error -> {error, not_found}
+            end,
             From ! {reply, Ref, Result},
-            loop(NewAccounts)
+            loop(Nodes);
+
+        {schedule_workload, From, Ref, Task} ->
+            case execute_task(Task, Nodes) of
+                {ok, ReplyVal, NewNodes} ->
+                    From ! {reply, Ref, {ok, ReplyVal}},
+                    loop(NewNodes);
+                {error, Reason} ->
+                    From ! {reply, Ref, {error, Reason}},
+                    loop(Nodes)
+            end;
+
+        {apply_schedule, From, Ref, TaskList} ->
+            {Succeeded, Skipped, NewNodes} = run_schedule(TaskList, Nodes, 0, 0),
+            From ! {reply, Ref, {ok, Succeeded, Skipped}},
+            loop(NewNodes);
+
+        {terminate, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+%% ── Internal State Helpers ───────────────────────────────────────────────────
+
+find_node(_Id, []) -> error;
+find_node(Id, [{node, Id, Host, Cores} | _]) -> {ok, {node, Id, Host, Cores}};
+find_node(Id, [_ | Rest]) -> find_node(Id, Rest).
+
+execute_task({provision, NodeId, ReqCores}, Nodes) when ReqCores > 0 ->
+    case find_node(NodeId, Nodes) of
+        {ok, {node, Id, Host, Available}} when Available >= ReqCores ->
+            Remaining = Available - ReqCores,
+            NewNodes = replace_node({node, Id, Host, Remaining}, Nodes),
+            {ok, Remaining, NewNodes};
+        {ok, _} ->
+            {error, insufficient_capacity};
+        error ->
+            {error, not_found}
+    end;
+execute_task({release, NodeId, FreeCores}, Nodes) when FreeCores > 0 ->
+    case find_node(NodeId, Nodes) of
+        {ok, {node, Id, Host, Available}} ->
+            NewTotal = Available + FreeCores,
+            NewNodes = replace_node({node, Id, Host, NewTotal}, Nodes),
+            {ok, NewTotal, NewNodes};
+        error ->
+            {error, not_found}
+    end;
+execute_task({rebalance, FromId, ToId, Cores}, Nodes) when Cores > 0 ->
+    case {find_node(FromId, Nodes), find_node(ToId, Nodes)} of
+        {{ok, {node, FromId, FromHost, FromCores}}, {ok, {node, ToId, ToHost, ToCores}}} ->
+            if
+                FromCores >= Cores ->
+                    NewFrom = FromCores - Cores,
+                    NewTo = ToCores + Cores,
+                    N1 = replace_node({node, FromId, FromHost, NewFrom}, Nodes),
+                    N2 = replace_node({node, ToId, ToHost, NewTo}, N1),
+                    {ok, NewFrom, N2};
+                true ->
+                    {error, insufficient_capacity}
+            end;
+        _ ->
+            {error, not_found}
+    end;
+execute_task(_Invalid, _Nodes) ->
+    {error, invalid_task}.
+
+replace_node(NewNode, Nodes) ->
+    replace_node_tail(NewNode, Nodes, []).
+
+replace_node_tail({node, Id, _, _} = NewNode, [{node, Id, _, _} | Rest], Acc) ->
+    prepend_reverse(Acc, [NewNode | Rest]);
+replace_node_tail(NewNode, [Head | Rest], Acc) ->
+    replace_node_tail(NewNode, Rest, [Head | Acc]);
+replace_node_tail(_NewNode, [], Acc) ->
+    prepend_reverse(Acc, []).
+
+prepend_reverse([], Acc) -> Acc;
+prepend_reverse([H | T], Acc) -> prepend_reverse(T, [H | Acc]).
+
+run_schedule([], Nodes, Succeeded, Skipped) ->
+    {Succeeded, Skipped, Nodes};
+run_schedule([Task | Rest], Nodes, Succeeded, Skipped) ->
+    case execute_task(Task, Nodes) of
+        {ok, _Val, NewNodes} ->
+            run_schedule(Rest, NewNodes, Succeeded + 1, Skipped);
+        {error, _Reason} ->
+            run_schedule(Rest, Nodes, Succeeded, Skipped + 1)
     end.
 \`\`\`
 
@@ -2968,34 +3083,55 @@ loop(Accounts) ->
 
 Implement \`src/ledger_actor.erl\` exporting \`start/1\`, \`get_balance/2\`, \`process_transaction/2\`, \`process_batch/2\`, \`stop/1\`, and \`loop/1\`:
 
-1. \`start(InitialAccounts) -> pid()\`:
-   - Spawns \`loop(InitialAccounts)\` and returns the newly spawned actor's PID.
-2. \`get_balance(Pid, AccountId) -> {ok, integer()} | {error, not_found} | {error, timeout}\`:
-   - Uses \`Ref = make_ref()\`, sends \`{get_balance, self(), Ref, AccountId}\`, and waits up to 1,000ms for \`{reply, Ref, Result}\`.
-3. \`process_transaction(Pid, TxTuple) -> {ok, Result} | {error, Reason} | {error, timeout}\`:
-   - Uses \`Ref = make_ref()\`, sends \`{transaction, self(), Ref, TxTuple}\`, and waits up to 1,000ms for reply.
-   - Supports three atomic transactions:
-     - \`{deposit, AccountId, Amount}\` (\`Amount > 0\`): Increases balance, replies \`{ok, NewBalance}\`. Returns \`{error, not_found}\` if account does not exist.
-     - \`{withdraw, AccountId, Amount}\` (\`Amount > 0\`):
-       - If \`Balance >= Amount\`: deducts amount, replies \`{ok, NewBalance}\`.
-       - If \`Balance < Amount\`: replies \`{error, insufficient_funds}\` and leaves balance unchanged.
-       - If account missing: replies \`{error, not_found}\`.
-     - \`{transfer, FromId, ToId, Amount}\` (\`Amount > 0\`):
-       - Verifies **both** \`FromId\` and \`ToId\` exist. If either is missing, replies \`{error, not_found}\`.
-       - If \`FromBalance < Amount\`: replies \`{error, insufficient_funds}\`.
-       - If valid: atomically deducts \`Amount\` from \`FromId\` and adds \`Amount\` to \`ToId\`. Replies \`{ok, RemainingFromBalance}\`.
-4. \`process_batch(Pid, TransactionsList) -> {ok, AppliedCount, RejectedCount} | {error, timeout}\`:
-   - Uses \`Ref = make_ref()\`, sends \`{process_batch, self(), Ref, TransactionsList}\`, and waits up to 2,000ms for reply.
-   - Evaluates transactions in order, applying valid ones and skipping invalid ones. Updates state with all successful transactions.
-5. \`stop(Pid) -> ok | {error, timeout}\`:
-   - Uses \`Ref = make_ref()\`, sends \`{stop, self(), Ref}\`, replies \`{reply, Ref, ok}\`, and terminates cleanly.
+### 1. \`start/1\`
+- **Input**: \`InitialAccounts\` — a list of account tuples formatted as \`{account, AccountId, OwnerName, Balance}\`, where \`AccountId\` is an integer, \`OwnerName\` is a binary, and \`Balance\` is an integer.
+- **Behavior**: Spawns an actor executing \`loop(InitialAccounts)\` and returns its \`pid()\`.
+- **Examples**:
+  - \`Pid = ledger_actor:start([{account, 1, <<"Alice">>, 100}]).\`
+
+### 2. \`get_balance/2\`
+- **Input**: \`Pid\` (actor PID), \`AccountId\` (integer account identifier).
+- **Behavior**: Queries the ledger actor for the balance of \`AccountId\`. Returns \`{ok, Balance}\` if the account exists, \`{error, not_found}\` if missing, or \`{error, timeout}\` if no reply is received within 1,000ms.
+- **Examples**:
+  - \`ledger_actor:get_balance(Pid, 1)\` returns \`{ok, 100}\`.
+
+### 3. \`process_transaction/2\`
+- **Input**: \`Pid\` (actor PID), \`TxTuple\` (one of the following three transaction variants):
+  - \`{deposit, AccountId, Amount}\` (\`Amount > 0\`): Increases \`AccountId\` balance by \`Amount\`. Returns \`{ok, NewBalance}\`, or \`{error, not_found}\` if the account is missing.
+  - \`{withdraw, AccountId, Amount}\` (\`Amount > 0\`):
+    - If \`Balance >= Amount\`: deducts \`Amount\` and returns \`{ok, NewBalance}\`.
+    - If \`Balance < Amount\`: returns \`{error, insufficient_funds}\` and leaves the balance unchanged.
+    - If missing: returns \`{error, not_found}\`.
+  - \`{transfer, FromId, ToId, Amount}\` (\`Amount > 0\`):
+    - Verifies that both \`FromId\` and \`ToId\` exist. If either is missing, returns \`{error, not_found}\`.
+    - If \`FromBalance < Amount\`: returns \`{error, insufficient_funds}\`.
+    - If valid: atomically deducts \`Amount\` from \`FromId\` and credits \`Amount\` to \`ToId\`. Returns \`{ok, RemainingFromBalance}\`. Neither account's balance may change if validation fails.
+- **Behavior**: Synchronously dispatches the transaction to the ledger actor with a 1,000ms timeout guard, returning \`{error, timeout}\` on expiration.
+- **Examples**:
+  - \`ledger_actor:process_transaction(Pid, {deposit, 1, 50})\` returns \`{ok, 150}\`.
+  - \`ledger_actor:process_transaction(Pid, {withdraw, 1, 500})\` returns \`{error, insufficient_funds}\`.
+  - \`ledger_actor:process_transaction(Pid, {transfer, 1, 2, 30})\` returns \`{ok, 120}\`.
+
+### 4. \`process_batch/2\`
+- **Input**: \`Pid\` (actor PID), \`TransactionsList\` (a list of transaction tuples).
+- **Behavior**: Sequentially evaluates transactions against the ledger. Each valid transaction updates the state and increments an applied counter; invalid transactions leave state unchanged and increment a rejected counter. Returns \`{ok, AppliedCount, RejectedCount}\`, or \`{error, timeout}\` if no reply is received within 2,000ms.
+- **Examples**:
+  - \`ledger_actor:process_batch(Pid, [{deposit, 1, 20}, {withdraw, 2, 9999}])\` returns \`{ok, 1, 1}\`.
+
+### 5. \`stop/1\`
+- **Input**: \`Pid\` (actor PID).
+- **Behavior**: Requests clean actor termination, awaiting reply within 1,000ms. Returns \`ok\` or \`{error, timeout}\`.
+
+### 6. \`loop/1\`
+- **Input**: \`Accounts\` (list of account tuples).
+- **Behavior**: Tail-recursive message loop receiving and servicing requests, replying to callers with correlation references, and recurring with updated account state.
 
 ## Rules & Verification Constraints
 
-- \`loop/1\` and all batch/update helpers must be strictly tail-recursive.
+- \`loop/1\` and all list update helpers must be strictly tail-recursive.
 - Enforced by AST rule: \`requireTailRecursion: ["loop/1"]\`.
 - All client functions must use \`make_ref/0\` and \`receive ... after\` timeouts (\`requiredConstructs: ["receive_after"]\`).
-- Automated verification tests concurrent double-spend attacks with 10 parallel client workers!`,
+- Automated verification executes concurrent double-spend attacks with 10 parallel client processes to ensure zero race conditions!`,
     mentalModelCheck: {
       question: 'Why is an in-memory Erlang ledger actor immune to double-spend race conditions even when 1,000 concurrent client processes attempt to withdraw the same $100 balance simultaneously?',
       codeSnippet: `%% 1,000 client processes blasting simultaneous withdrawals:
@@ -3091,39 +3227,28 @@ Implement \`src/ledger_actor.erl\` exporting \`start/1\`, \`get_balance/2\`, \`p
     loop/1
 ]).
 
-%% Spawns the ledger actor initialized with InitialAccounts
+%% @doc Spawns the ledger actor initialized with a list of account tuples.
 start(InitialAccounts) ->
-    %% Architectural Requirement: Spawn loop(InitialAccounts) and return PID
     ok.
 
-%% Client API: queries account balance with 1000ms timeout
+%% @doc Queries the current balance for an account with a timeout guard.
 get_balance(Pid, AccountId) ->
-    %% Architectural Requirement: make_ref(), send {get_balance, self(), Ref, AccountId}, receive reply
     ok.
 
-%% Client API: processes single transaction: {deposit, Id, Amt} | {withdraw, Id, Amt} | {transfer, From, To, Amt}
+%% @doc Atomically executes a single deposit, withdrawal, or transfer transaction.
 process_transaction(Pid, TxTuple) ->
-    %% Architectural Requirement: make_ref(), send {transaction, self(), Ref, TxTuple}, receive reply
     ok.
 
-%% Client API: processes batch of transactions, returning {ok, AppliedCount, RejectedCount}
+%% @doc Sequentially processes a list of transactions, returning success and rejection counts.
 process_batch(Pid, TransactionsList) ->
-    %% Architectural Requirement: make_ref(), send {process_batch, self(), Ref, TransactionsList}, receive reply
     ok.
 
-%% Client API: stops actor cleanly
+%% @doc Terminates the ledger actor cleanly.
 stop(Pid) ->
-    %% Architectural Requirement: make_ref(), send {stop, self(), Ref}, receive reply
     ok.
 
-%% ── Internal Actor Loop ──────────────────────────────────────────────────────
+%% @doc Main actor loop maintaining account state across sequential transactions.
 loop(Accounts) ->
-    %% Architectural Requirement:
-    %% Implement tail-recursive receive loop handling:
-    %% 1. {get_balance, From, Ref, AccountId}
-    %% 2. {transaction, From, Ref, Tx}
-    %% 3. {process_batch, From, Ref, TxList}
-    %% 4. {stop, From, Ref}
     ok.
 `,
       },
@@ -3290,39 +3415,28 @@ run_batch([Tx | Rest], Accounts, Applied, Rejected) ->
     loop/1
 ]).
 
-%% Spawns the ledger actor initialized with InitialAccounts
+%% @doc Spawns the ledger actor initialized with a list of account tuples.
 start(InitialAccounts) ->
-    %% Architectural Requirement: Spawn loop(InitialAccounts) and return PID
     ok.
 
-%% Client API: queries account balance with 1000ms timeout
+%% @doc Queries the current balance for an account with a timeout guard.
 get_balance(Pid, AccountId) ->
-    %% Architectural Requirement: make_ref(), send {get_balance, self(), Ref, AccountId}, receive reply
     ok.
 
-%% Client API: processes single transaction: {deposit, Id, Amt} | {withdraw, Id, Amt} | {transfer, From, To, Amt}
+%% @doc Atomically executes a single deposit, withdrawal, or transfer transaction.
 process_transaction(Pid, TxTuple) ->
-    %% Architectural Requirement: make_ref(), send {transaction, self(), Ref, TxTuple}, receive reply
     ok.
 
-%% Client API: processes batch of transactions, returning {ok, AppliedCount, RejectedCount}
+%% @doc Sequentially processes a list of transactions, returning success and rejection counts.
 process_batch(Pid, TransactionsList) ->
-    %% Architectural Requirement: make_ref(), send {process_batch, self(), Ref, TransactionsList}, receive reply
     ok.
 
-%% Client API: stops actor cleanly
+%% @doc Terminates the ledger actor cleanly.
 stop(Pid) ->
-    %% Architectural Requirement: make_ref(), send {stop, self(), Ref}, receive reply
     ok.
 
-%% ── Internal Actor Loop ──────────────────────────────────────────────────────
+%% @doc Main actor loop maintaining account state across sequential transactions.
 loop(Accounts) ->
-    %% Architectural Requirement:
-    %% Implement tail-recursive receive loop handling:
-    %% 1. {get_balance, From, Ref, AccountId}
-    %% 2. {transaction, From, Ref, Tx}
-    %% 3. {process_batch, From, Ref, TxList}
-    %% 4. {stop, From, Ref}
     ok.
 `,
     solutionCode: `-module(ledger_actor).

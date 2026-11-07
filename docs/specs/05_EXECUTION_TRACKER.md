@@ -2317,6 +2317,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all incident triage stages (`S1_NoiseDrain` queue length 0 with accurate telemetry summary, `S2_TimeoutContract` error timeout handling within 1,000ms bounds).
 
+## Phase 126: Pedagogical Despoiling of Chapter 5 Lecture 8 (`ch05-l08`)
+- [x] **126.1: Audit & Eliminate Exercise Code Spoilers in Lecture 5.8 Problem Set (`ch05-l08`)**:
+  - Neutralized concept breakdown: eliminated direct leaks of `ledger_actor` loop and `apply_tx/2` in Sections 1-3 and removed the leaked `%% Official OTP Concept: In-Memory Ledger Pattern` snippet, replacing them with theoretical explanations of in-memory actor serialization, atomic functional state transforms, and multi-entity coordination.
+  - Replaced parallel worked example `flight_seat_actor.erl` with an authentic cloud compute cluster manager `fleet_allocator.erl` (`start/1`, `query_capacity/2`, `schedule_workload/2`, `apply_schedule/2`, `terminate/1`, `loop/1`), achieving complete domain disjunction while demonstrating atomic resource provisioning, releases, inter-node rebalancing, and dual-accumulator batch task execution.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `start/1`, `get_balance/2`, `process_transaction/2`, `process_batch/2`, `stop/1`, and `loop/1`, eliminating raw message pattern dictation.
+  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and in-body comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+- [x] **126.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 5 test stages (`S1_Ast` tail recursion & timeout audits, `S2_Transactions` deposit/withdraw validation, `S3_Transfers` atomic transfer consistency, `S4_Batch` dual accumulators, and `S5_RaceAudit` 10-worker double-spend race condition immunity).
+
+
 
 
 
