@@ -2288,6 +2288,20 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Next.js 14 production build (`npm --prefix apps/web-ide run build`) passed with zero errors across all 8 routes.
   - Go orchestrator backend (`go build ./...`) passed with zero compilation errors.
 
+## Phase 122: Pedagogical Despoiling of Chapter 5 Lecture 4 (`ch05-l04`)
+- [x] **122.1: Domain Disjunction & Anti-Spoiler Decontamination (`ch05-l04`)**:
+  - Neutralized Concept Breakdown Sections 1 & 3: replaced verbatim implementation of `counter_actor:loop/1` and `increment`/`get_value` with a climate control target temperature actor (`loop(TargetTemp)`: `{adjust_target, Offset}`, `{read_target, Caller}`, `power_down`).
+  - Replaced parallel worked example with Token-Bucket Rate Limiter (`token_bucket.erl`: `start/1`, `consume/2`, `refill/2`, `get_tokens/1`, `shutdown/1`, `loop/1`), eliminating thin clones of the counter actor.
+  - Structured Assignment Specification into rigorous `Input`, `Behavior`, and `Output` contracts across `start/1`, `increment/2`, `decrement/2`, `get_value/1`, `stop/1`, and `loop/1` without raw Erlang code syntax or backtick formula leaks.
+- [x] **122.2: Starter Code Hygiene & Multi-Compiler Verification**:
+  - Stripped all `%% Architectural Requirement: ...` inline comments from function bodies in `files[0].content` and `starterCode`.
+  - Added clean EDoc annotations (`@doc`, `-spec`) and valid stub return values (`self()`, `ok`, `{error, timeout}`).
+  - Verified starter and solution compilation via `erlc.exe` with zero errors or warnings.
+  - Verified concurrent state accumulation (`100 + 50 - 30 + 10 = 130`) on OTP 29 with all test assertions passing (`ALL COUNTER ACTOR TESTS PASSED`).
+  - Next.js 14 production build (`npm --prefix apps/web-ide run build`) passed with zero errors across all 8 routes.
+  - Go orchestrator backend (`go build ./...`) passed with zero compilation errors.
+
+
 
 
 
