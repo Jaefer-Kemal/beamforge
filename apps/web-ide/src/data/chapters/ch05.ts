@@ -706,7 +706,8 @@ Under the hood, every BEAM process maintains a **Mailbox** and an internal **Sav
 If no message matches, the process suspends. To prevent client processes from hanging indefinitely if a remote peer crashes or drops a request, Erlang supports timeouts:
 \`\`\`erlang
 receive
-    {reply, Result} -> {ok, Result}
+    {query_response, CorrelationId, Result} ->
+        {ok, Result}
 after 1000 ->
     {error, timeout}
 end.
@@ -717,27 +718,25 @@ The timer begins counting the moment the process begins waiting. If 1,000 millis
 A timeout of **\`after 0\`** instructs the BEAM runtime: *"Check the mailbox right now. If a matching message is already present, process it immediately. If not, do NOT suspend; evaluate the after block in 0ms!"*
 
 This zero-wait idiom has two critical production applications:
-1. **Priority Draining:** Checking for urgent messages before falling back to normal messages:
+1. **Priority Draining:** Checking for urgent signals before falling back to lower-priority messages:
    \`\`\`erlang
-   drain_urgent_then_normal() ->
+   drain_priority_signals() ->
        receive
-           {urgent, Msg} -> {urgent, Msg}
+           {emergency_stop, Source} -> {halt, Source}
        after 0 ->
            receive
-               {normal, Msg} -> {normal, Msg}
+               {status_ping, Source} -> {ping, Source}
            after 0 ->
-               empty
+               no_signals
            end
        end.
    \`\`\`
-2. **Mailbox Flushing (\`flush_mailbox/0\`):** Draining all pending messages currently sitting in the mailbox into a list for inspection or purging before starting a new stateful session:
+2. **Non-Blocking Queue Draining:** Draining pending messages into an accumulator list for batch processing without blocking:
    \`\`\`erlang
-   flush_mailbox() ->
-       flush_mailbox_acc([]).
-
-   flush_mailbox_acc(Acc) ->
+   collect_incoming_chunks(Acc) ->
        receive
-           Msg -> flush_mailbox_acc([Msg | Acc])
+           {stream_chunk, Bytes} ->
+               collect_incoming_chunks([Bytes | Acc])
        after 0 ->
            lists:reverse(Acc)
        end.
@@ -748,35 +747,46 @@ This zero-wait idiom has two critical production applications:
 
 ## Parallel Worked Example
 
-Consider a high-priority financial quote processor:
+Consider a hardware gateway that prioritizes critical alerts over telemetry samples and queries peripheral devices:
 
 \`\`\`erlang
--module(quote_arbiter).
--export([consume_quote/0, flush_pending_quotes/0]).
+-module(sensor_gateway).
+-export([poll_event_queue/0, query_device_sync/3, purge_buffer/0]).
 
-%% Consumes urgent margin calls ahead of standard pricing ticks
-consume_quote() ->
+%% Consumes critical hardware alerts ahead of ambient telemetry samples
+poll_event_queue() ->
     receive
-        {margin_call, Account, Amount} ->
-            {urgent, Account, Amount}
+        {hardware_fault, DeviceId, ErrCode} ->
+            {critical, DeviceId, ErrCode}
     after 0 ->
         receive
-            {price_tick, Symbol, Price} ->
-                {normal, Symbol, Price}
-        after 500 ->
-            {error, no_quotes_available}
+            {metric_sample, DeviceId, Value} ->
+                {standard, DeviceId, Value}
+        after 0 ->
+            empty_queue
         end
     end.
 
-%% Drains all pending quotes without suspending
-flush_pending_quotes() ->
-    drain_quotes([]).
-
-drain_quotes(Acc) ->
+%% Synchronously queries a peripheral device process with timeout protection
+query_device_sync(DevicePid, Command, TimeoutLimit) ->
+    DevicePid ! {exec_cmd, self(), Command},
     receive
-        Quote -> drain_quotes([Quote | Acc])
+        {cmd_response, Command, Data} ->
+            {ok, Data}
+    after TimeoutLimit ->
+        {error, device_timeout}
+    end.
+
+%% Drains pending packet events without blocking
+purge_buffer() ->
+    drain_buffer([]).
+
+drain_buffer(BufferAcc) ->
+    receive
+        {packet, PacketData} ->
+            drain_buffer([PacketData | BufferAcc])
     after 0 ->
-        lists:reverse(Acc)
+        lists:reverse(BufferAcc)
     end.
 \`\`\`
 
@@ -796,17 +806,26 @@ end
 
 Implement \`src/priority_mailbox.erl\` exporting \`receive_urgent_first/1\`, \`request_with_timeout/3\`, and \`flush_mailbox/0\`:
 
-1. \`receive_urgent_first(ExpectedCount) -> [Payload]\`:
-   - Drains exactly \`ExpectedCount\` messages from \`self()\`'s mailbox.
-   - For each extracted message, it attempts to match \`{urgent, Payload}\` using \`after 0\`. If no urgent message is present, it falls back to matching \`{normal, Payload}\`.
-   - Returns the payloads in priority order: all urgent messages appear before normal messages.
-2. \`request_with_timeout(TargetPid, RequestMsg, TimeoutMs) -> {ok, Result} | {error, timeout}\`:
-   - Sends \`{request, self(), RequestMsg}\` to \`TargetPid\`.
-   - Waits up to \`TimeoutMs\` milliseconds in a \`receive ... after TimeoutMs\` block for \`{reply, RequestMsg, Result}\`.
-   - Returns \`{ok, Result}\` on match, or \`{error, timeout}\` upon expiration.
-3. \`flush_mailbox() -> [term()]\`:
-   - Drains all pending messages currently in \`self()\`'s mailbox using a tail-recursive \`receive Msg -> ... after 0 -> ... end\` loop.
-   - Returns all flushed messages in FIFO arrival order.
+### 1. \`receive_urgent_first/1\`
+- **Input**: \`ExpectedCount\` (non-negative integer).
+- **Behavior**: Extracts up to \`ExpectedCount\` messages from the calling process's mailbox according to priority. For each message retrieved, it prioritizes extracting messages tagged with the atom \`urgent\` ahead of messages tagged with \`normal\`. If neither an urgent nor a normal message is currently available in the mailbox, it terminates draining without blocking. Returns a list containing the unpacked payload values of all extracted messages in priority-sorted order.
+- **Examples**:
+  - If mailbox contains \`{normal, 1}\`, \`{urgent, 99}\`, \`{normal, 2}\`, calling \`priority_mailbox:receive_urgent_first(3)\` returns \`[99, 1, 2]\`.
+  - Calling \`priority_mailbox:receive_urgent_first(0)\` returns \`[]\`.
+
+### 2. \`request_with_timeout/3\`
+- **Input**: \`TargetPid\` (valid process identifier), \`RequestMsg\` (arbitrary Erlang term), \`TimeoutMs\` (integer milliseconds).
+- **Behavior**: Asynchronously transmits a request tuple containing the atom \`request\`, the caller PID (\`self()\`), and \`RequestMsg\` to \`TargetPid\`. Awaits a matching reply tuple tagged with \`reply\`, the echoing \`RequestMsg\`, and the worker's result value. If a matching reply arrives before \`TimeoutMs\` milliseconds elapse, returns \`{ok, Result}\`. If the timer expires before a matching reply is received, returns \`{error, timeout}\` without crashing or hanging the caller.
+- **Examples**:
+  - \`priority_mailbox:request_with_timeout(WorkerPid, ping, 1000)\` returns \`{ok, pong}\` upon successful reply.
+  - \`priority_mailbox:request_with_timeout(UnresponsivePid, ping, 50)\` returns \`{error, timeout}\` after 50ms.
+
+### 3. \`flush_mailbox/0\`
+- **Input**: None.
+- **Behavior**: Drains all pending messages currently queued in the calling process's mailbox in a single non-blocking pass without suspending. Returns a list containing all extracted messages in their original FIFO arrival order. Once evaluated, the process mailbox is guaranteed to be completely empty.
+- **Examples**:
+  - If mailbox holds \`token_a\` followed by \`token_b\`, calling \`priority_mailbox:flush_mailbox()\` returns \`[token_a, token_b]\`.
+  - If the mailbox is already empty, calling \`priority_mailbox:flush_mailbox()\` returns \`[]\`.
 
 ## Rules & Verification Constraints
 
@@ -885,24 +904,16 @@ end.`,
         content: `-module(priority_mailbox).
 -export([receive_urgent_first/1, request_with_timeout/3, flush_mailbox/0]).
 
-%% Drains ExpectedCount messages, extracting {urgent, X} before {normal, Y}
-receive_urgent_first(ExpectedCount) ->
-    %% Architectural Requirement:
-    %% Drain up to ExpectedCount messages. For each, check {urgent, Payload} via after 0,
-    %% then fall back to {normal, Payload}. Return list of extracted payloads.
+%% @doc Drains up to ExpectedCount messages prioritizing urgent tags over normal tags.
+receive_urgent_first(_ExpectedCount) ->
     ok.
 
-%% Client API: sends {request, self(), RequestMsg} and waits up to TimeoutMs for {reply, RequestMsg, Result}
-request_with_timeout(TargetPid, RequestMsg, TimeoutMs) ->
-    %% Architectural Requirement:
-    %% Send request tuple, wait for reply matching RequestMsg within TimeoutMs,
-    %% return {ok, Result} or {error, timeout}.
+%% @doc Sends request tuple to TargetPid and awaits correlated reply with timeout fallback.
+request_with_timeout(_TargetPid, _RequestMsg, _TimeoutMs) ->
     ok.
 
-%% Drains all messages currently in the mailbox without blocking (after 0)
+%% @doc Flushes and returns all pending messages from the process mailbox in FIFO order.
 flush_mailbox() ->
-    %% Architectural Requirement:
-    %% Tail-recursively drain all pending mailbox messages and return them in FIFO order.
     ok.
 `,
       },
@@ -952,24 +963,16 @@ flush_loop(Acc) ->
     starterCode: `-module(priority_mailbox).
 -export([receive_urgent_first/1, request_with_timeout/3, flush_mailbox/0]).
 
-%% Drains ExpectedCount messages, extracting {urgent, X} before {normal, Y}
-receive_urgent_first(ExpectedCount) ->
-    %% Architectural Requirement:
-    %% Drain up to ExpectedCount messages. For each, check {urgent, Payload} via after 0,
-    %% then fall back to {normal, Payload}. Return list of extracted payloads.
+%% @doc Drains up to ExpectedCount messages prioritizing urgent tags over normal tags.
+receive_urgent_first(_ExpectedCount) ->
     ok.
 
-%% Client API: sends {request, self(), RequestMsg} and waits up to TimeoutMs for {reply, RequestMsg, Result}
-request_with_timeout(TargetPid, RequestMsg, TimeoutMs) ->
-    %% Architectural Requirement:
-    %% Send request tuple, wait for reply matching RequestMsg within TimeoutMs,
-    %% return {ok, Result} or {error, timeout}.
+%% @doc Sends request tuple to TargetPid and awaits correlated reply with timeout fallback.
+request_with_timeout(_TargetPid, _RequestMsg, _TimeoutMs) ->
     ok.
 
-%% Drains all messages currently in the mailbox without blocking (after 0)
+%% @doc Flushes and returns all pending messages from the process mailbox in FIFO order.
 flush_mailbox() ->
-    %% Architectural Requirement:
-    %% Tail-recursively drain all pending mailbox messages and return them in FIFO order.
     ok.
 `,
     solutionCode: `-module(priority_mailbox).

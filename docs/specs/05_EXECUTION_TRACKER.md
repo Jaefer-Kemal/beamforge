@@ -2273,6 +2273,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, verified AST analysis (`erlang:self/0` required call and `responder_loop/0` tail recursion) via `bf_ast_verifier`.
 
+## Phase 121: Pedagogical Despoiling of Chapter 5 Lecture 3 (`ch05-l03`)
+- [x] **121.1: Audit & Eliminate Exercise Code Spoilers in Lecture 5.3 (`ch05-l03`)**:
+  - Neutralized concept breakdown: eliminated verbatim code leaks of `flush_mailbox/0`, `flush_mailbox_acc/1`, and `{urgent, Msg}` in Section 3 ("The `after 0` Non-Blocking Idiom"), replacing them with an emergency signal priority drain (`drain_priority_signals/0`) and non-blocking streaming chunk drain (`collect_incoming_chunks/1`).
+  - Replaced parallel worked example `quote_arbiter.erl` with an authentic peripheral hardware gateway `sensor_gateway.erl` (`poll_event_queue/0`, `query_device_sync/3`, `purge_buffer/0`), achieving complete domain disjunction across non-blocking multi-level receive, synchronous timeout requests, and mailbox accumulator flushes.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `receive_urgent_first/1`, `request_with_timeout/3`, and `flush_mailbox/0`, eliminating code pattern and formula dictation.
+  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and in-body comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+- [x] **121.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all AST rules (`receive_after`), priority queue drains, timeout guarantees, and mailbox flush assertions.
+
 
 
 
