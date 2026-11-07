@@ -2275,6 +2275,20 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Next.js 14 production build (`npm --prefix apps/web-ide run build`) passed with zero errors across all 8 routes.
   - Go orchestrator backend (`go build ./...`) passed with zero compilation errors.
 
+## Phase 121: Pedagogical Despoiling of Chapter 5 Lecture 3 (`ch05-l03`)
+- [x] **121.1: Domain Disjunction & Anti-Spoiler Decontamination (`ch05-l03`)**:
+  - Neutralized Concept Breakdown Section 3: replaced verbatim implementations of assignment mailbox flusher and urgent/normal priority tags with generic tiered network traffic polling (`poll_network_traffic/0`: `{system_override, Cmd}`, `{stream_data, Chunk}`) and a domain-neutral buffer drainer (`drain_pending_events/1`).
+  - Replaced parallel worked example with Autonomous Vehicle Sensor Bus (`sensor_bus.erl`: `poll_critical_event/0`, `query_sensor_with_timeout/3`, `purge_sensor_backlog/0`), eliminating verbatim code leaks of `flush_mailbox` and `receive_urgent_first`.
+  - Structured Assignment Specification into rigorous `Input`, `Behavior`, and `Output` contracts across `receive_urgent_first/1`, `request_with_timeout/3`, and `flush_mailbox/0` without raw Erlang code syntax or backtick formula leaks.
+- [x] **121.2: Starter Code Hygiene & Multi-Compiler Verification**:
+  - Stripped all `%% Architectural Requirement: ...` inline comments from function bodies in `files[0].content` and `starterCode`.
+  - Added clean EDoc annotations (`@doc`, `-spec`) and valid stub return values (`[]`, `{error, timeout}`, `[]`).
+  - Verified starter and solution compilation via `erlc.exe` with zero errors or warnings.
+  - Verified priority reordering, timeout fallback, and non-blocking mailbox flush on OTP 29 with all test assertions passing (`ALL PRIORITY MAILBOX TESTS PASSED`).
+  - Next.js 14 production build (`npm --prefix apps/web-ide run build`) passed with zero errors across all 8 routes.
+  - Go orchestrator backend (`go build ./...`) passed with zero compilation errors.
+
+
 
 
 
