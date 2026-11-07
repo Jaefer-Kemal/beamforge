@@ -1879,41 +1879,51 @@ In production network services and distributed protocol engines, an actor's vali
 
 In traditional languages, developers attempt to model this with a single monolithic function stuffed with nested \`switch\` or \`if (state == LOCKED)\` branches. As features expand, this monolithic function degenerates into spaghetti code where invalid state transitions silently corrupt memory.
 
-In Erlang, before adopting the OTP \`gen_statem\` behaviour (taught in Chapter 7), the idiomatic way to model a Finite State Machine (FSM) is **Mutual Tail Recursion**: writing **one dedicated function per state** (\`locked/2\` and \`unlocked/1\`) that transition states by directly tail-calling each other!
+In Erlang, before adopting the OTP \`gen_statem\` behaviour (taught in Chapter 7), the idiomatic way to model a Finite State Machine (FSM) is **Mutual Tail Recursion**: writing **one dedicated function per state** that transition states by directly tail-calling each other!
 
 ## Deep Concept Breakdown & Under the Hood
 
 ### 1. Modeling States as Distinct Functions
-Instead of cramming all states into a single \`loop(State)\`, each state is its own function:
-- \`locked(SecretCode, FailedAttempts)\`: Contains a \`receive\` block that only understands operations valid while locked.
-- \`unlocked(SecretCode)\`: Contains a \`receive\` block that only understands operations valid while unlocked.
+Instead of cramming all states into a single \`loop(State)\`, each state is its own dedicated function:
+- State A contains a \`receive\` block that only handles operations valid during State A.
+- State B contains a \`receive\` block that only handles operations valid during State B.
 
-When a client enters the correct code:
+Consider a connection handler transitioning between \`connecting\` and \`connected\`:
 \`\`\`erlang
-%% Inside locked/2:
-receive
-    {enter_code, From, Ref, SecretCode} ->
-        From ! {reply, Ref, {ok, unlocked}},
-        unlocked(SecretCode);  %% <-- State Transition via Tail Call!
-    ...
-end.
+connecting(Host, Port) ->
+    receive
+        {socket_ready, Socket} ->
+            connected(Socket);  %% <-- State Transition via Tail Call!
+        {connect_failed, Reason} ->
+            {error, Reason}
+    end.
+
+connected(Socket) ->
+    receive
+        {send_data, Payload} ->
+            send_raw(Socket, Payload),
+            connected(Socket);
+        disconnect ->
+            close_socket(Socket),
+            ok
+    end.
 \`\`\`
 
 ### 2. Tail-Call Optimization Across Different Functions
 A common question from newcomers is: *"Does Tail-Call Optimization only work when a function recursively calls itself?"*
 **No!** In the BEAM VM, tail-call optimization applies to **any function call in the tail position**, even if Function A calls Function B!
-- When \`locked/2\` tail-calls \`unlocked/1\`, the compiler emits the \`call_only\` (or \`call_last\`) bytecode instruction.
-- The BEAM deallocates \`locked/2\`'s stack arguments, writes \`unlocked/1\`'s argument into the register, and jumps directly to \`unlocked/1\`.
-- **Zero additional stack frames are allocated!** An FSM actor can transition between \`locked\` and \`unlocked\` a billion times without consuming any extra memory!
+- When State Function A tail-calls State Function B, the compiler emits the \`call_only\` (or \`call_last\`) bytecode instruction.
+- The BEAM deallocates the caller's stack arguments, writes the target arguments into registers, and jumps directly to Function B.
+- **Zero additional stack frames are allocated!** An FSM actor can transition back and forth billions of times without consuming any extra memory!
 
 ### 3. Clear State-Specific Error Handling
 Because each state has its own \`receive\` block, handling invalid actions is crystal clear:
-- Attempting to unlock an already unlocked door doesn't crash; the \`unlocked/1\` function simply replies \`{ok, already_unlocked}\`.
-- Attempting to lock an already locked door returns \`ok\` without resetting the failed attempts counter.
-- Entering a wrong code in \`locked/2\` increments \`FailedAttempts + 1\` and remains in \`locked/2\`.
+- Actions valid in State A can return a helpful acknowledgement when called in State B without crashing.
+- State-specific counters (e.g., failed attempt counters) are only tracked in the state functions that require them.
+- Clean transitions reset or initialize state arguments explicitly on handoff.
 
 > [!warning] Production Concurrency Trap: State Leaks Across Transitions
-> When transitioning from State A to State B, be deliberate about which state variables carry over. For example, when unlocking the door, the \`FailedAttempts\` counter is discarded; when locking the door again, it re-enters \`locked(SecretCode, 0)\` with a freshly zeroed counter.
+> When transitioning from State A to State B, be deliberate about which state variables carry over. For example, when entering an active session, transient failure counters from the negotiation state should be discarded or reset to clean defaults.
 
 ## Parallel Worked Example
 
@@ -2007,36 +2017,67 @@ state_b(Arg) ->
 
 Implement \`src/door_lock_fsm.erl\` exporting \`start/1\`, \`enter_code/2\`, \`lock/1\`, \`get_state/1\`, \`stop/1\`, \`locked/2\`, and \`unlocked/1\`:
 
-1. \`start(SecretCode) -> pid()\`:
-   - Spawns the actor starting in state \`locked(SecretCode, 0)\`.
-2. \`enter_code(Pid, AttemptCode) -> {ok, Status} | {error, Reason} | {error, timeout}\`:
-   - Generates \`Ref = make_ref()\`, sends \`{enter_code, self(), Ref, AttemptCode}\`, and waits for reply.
-   - Behavior in \`locked(SecretCode, FailedAttempts)\`:
-     - If \`AttemptCode =:= SecretCode\`: replies \`{reply, Ref, {ok, unlocked}}\` and transitions to \`unlocked(SecretCode)\`.
-     - If \`AttemptCode =/= SecretCode\`: increments \`Failed = FailedAttempts + 1\`, replies \`{reply, Ref, {error, {wrong_code, Failed}}}\`, and remains in \`locked(SecretCode, Failed)\`.
-   - Behavior in \`unlocked(SecretCode)\`:
-     - Replies \`{reply, Ref, {ok, already_unlocked}}\` and remains in \`unlocked(SecretCode)\`.
-3. \`lock(Pid) -> ok | {error, timeout}\`:
-   - Generates \`Ref = make_ref()\`, sends \`{lock, self(), Ref}\`, and waits for reply.
-   - When in \`unlocked(SecretCode)\`: replies \`{reply, Ref, ok}\` and transitions to \`locked(SecretCode, 0)\` (resetting failed attempts).
-   - When already in \`locked(SecretCode, FailedAttempts)\`: replies \`{reply, Ref, ok}\` and remains in \`locked(SecretCode, FailedAttempts)\`.
-4. \`get_state(Pid) -> {locked, integer()} | unlocked | {error, timeout}\`:
-   - Generates \`Ref = make_ref()\`, sends \`{get_state, self(), Ref}\`, and returns \`{locked, FailedAttempts}\` or \`unlocked\`.
-5. \`stop(Pid) -> ok | {error, timeout}\`:
-   - Generates \`Ref = make_ref()\`, sends \`{stop, self(), Ref}\`, replies \`{reply, Ref, ok}\`, and terminates cleanly.
+### 1. \`start/1\`
+- **Input**: \`SecretCode\` (arbitrary Erlang term).
+- **Behavior**: Spawns a concurrent actor starting in state \`locked(SecretCode, 0)\` and returns its process identifier.
+- **Examples**:
+  - \`is_pid(door_lock_fsm:start(<<"4321">>))\` returns \`true\`.
+
+### 2. \`enter_code/2\`
+- **Input**: \`Pid\` (process identifier), \`AttemptCode\` (arbitrary Erlang term).
+- **Behavior**: Generates a correlation reference via \`make_ref/0\` and synchronously submits \`AttemptCode\` to \`Pid\`.
+  - When in \`locked(SecretCode, FailedAttempts)\`: if \`AttemptCode\` equals \`SecretCode\`, replies with \`{ok, unlocked}\` and transitions into \`unlocked(SecretCode)\`; if \`AttemptCode\` does not match, increments the failed attempts count by 1, replies with \`{error, {wrong_code, NewCount}}\`, and remains in \`locked(SecretCode, NewCount)\`.
+  - When in \`unlocked(SecretCode)\`: replies with \`{ok, already_unlocked}\` and remains in \`unlocked(SecretCode)\`.
+  - Waits up to 1,000 milliseconds for the reply.
+- **Examples**:
+  - \`door_lock_fsm:enter_code(P, <<"4321">>)\` returns \`{ok, unlocked}\`.
+  - \`door_lock_fsm:enter_code(P, <<"0000">>)\` returns \`{error, {wrong_code, 1}}\`.
+  - Calling \`enter_code/2\` on an already unlocked door returns \`{ok, already_unlocked}\`.
+
+### 3. \`lock/1\`
+- **Input**: \`Pid\` (process identifier).
+- **Behavior**: Generates a correlation reference and synchronously commands \`Pid\` to lock.
+  - When in \`unlocked(SecretCode)\`: replies with \`ok\` and transitions to \`locked(SecretCode, 0)\` (resetting the failed attempts counter to 0).
+  - When in \`locked(SecretCode, FailedAttempts)\`: replies with \`ok\` and remains in \`locked(SecretCode, FailedAttempts)\` without altering the existing counter.
+- **Examples**:
+  - \`door_lock_fsm:lock(P)\` returns \`ok\`.
+
+### 4. \`get_state/1\`
+- **Input**: \`Pid\` (process identifier).
+- **Behavior**: Generates a correlation reference and synchronously queries the current state of \`Pid\`. Returns \`{locked, FailedAttempts}\` when currently locked, or the atom \`unlocked\` when currently unlocked.
+- **Examples**:
+  - \`door_lock_fsm:get_state(P)\` returns \`{locked, 0}\` initially.
+  - \`door_lock_fsm:get_state(P)\` returns \`unlocked\` after code verification.
+
+### 5. \`stop/1\`
+- **Input**: \`Pid\` (process identifier).
+- **Behavior**: Generates a correlation reference and synchronously commands \`Pid\` to terminate. Replies with \`ok\` and terminates cleanly.
+- **Examples**:
+  - \`door_lock_fsm:stop(P)\` returns \`ok\`.
+
+### 6. \`locked/2\`
+- **Input**: \`SecretCode\` (term), \`FailedAttempts\` (non-negative integer).
+- **Behavior**: Mutual tail-recursive FSM state loop for the locked condition, handling code attempts, lock commands, state queries, and clean shutdown.
+- **Examples**:
+  - Transitions to \`unlocked(SecretCode)\` upon matching code entry.
+
+### 7. \`unlocked/1\`
+- **Input**: \`SecretCode\` (term).
+- **Behavior**: Mutual tail-recursive FSM state loop for the unlocked condition, handling redundant code attempts, lock commands (resetting failures to 0), state queries, and clean shutdown.
+- **Examples**:
+  - Transitions to \`locked(SecretCode, 0)\` upon lock command.
 
 ## Rules & Verification Constraints
 
 - Both \`locked/2\` and \`unlocked/1\` must be tail-recursive (enforced by AST rule \`requireTailRecursion: ["locked/2", "unlocked/1"]\`).
 - Must use \`make_ref/0\` for request-reply synchronization with 1,000ms timeouts.`,
     mentalModelCheck: {
-      question: 'Why does an actor alternating between `locked/2` and `unlocked/1` via mutual tail recursion never run out of stack memory even after billions of transitions?',
-      codeSnippet: `%% Transitioning from locked to unlocked:
-locked(Code, Attempts) ->
+      question: 'Why does an actor alternating between mutually recursive state functions never run out of stack memory even after billions of transitions?',
+      codeSnippet: `%% Mutually recursive tail call:
+state_a(Arg) ->
     receive
-        {enter_code, From, Ref, Code} ->
-            From ! {reply, Ref, {ok, unlocked}},
-            unlocked(Code)  %% Calling another function in tail position!
+        transition_to_b ->
+            state_b(Arg)  %% Tail-call to a completely different function!
     end.`,
       options: [
         {
@@ -2121,48 +2162,32 @@ locked(Code, Attempts) ->
     unlocked/1
 ]).
 
-%% Spawns the actor starting in locked(SecretCode, 0)
-start(SecretCode) ->
-    %% Architectural Requirement: Spawn actor into locked(SecretCode, 0) and return PID
+%% @doc Spawns the door lock FSM actor starting in the locked state.
+start(_SecretCode) ->
     ok.
 
-%% Client API: sends code attempt to door actor
-enter_code(Pid, AttemptCode) ->
-    %% Architectural Requirement: make_ref(), send request, wait for reply with 1000ms timeout
+%% @doc Submits a PIN attempt to the door lock actor.
+enter_code(_Pid, _AttemptCode) ->
     ok.
 
-%% Client API: commands door actor to lock
-lock(Pid) ->
-    %% Architectural Requirement: make_ref(), send lock request, wait for reply with 1000ms timeout
+%% @doc Commands the door lock actor to enter the locked state.
+lock(_Pid) ->
     ok.
 
-%% Client API: queries current door state
-get_state(Pid) ->
-    %% Architectural Requirement: make_ref(), send get_state request, wait for reply
+%% @doc Queries the current state of the door lock actor.
+get_state(_Pid) ->
     ok.
 
-%% Client API: stops door actor cleanly
-stop(Pid) ->
-    %% Architectural Requirement: make_ref(), send stop, wait for ok
+%% @doc Stops the door lock actor cleanly.
+stop(_Pid) ->
     ok.
 
-%% ── FSM State 1: LOCKED ───────────────────────────────────────────────────────
-locked(SecretCode, FailedAttempts) ->
-    %% Architectural Requirement:
-    %% If enter_code matches SecretCode -> reply {ok, unlocked}, tail-call unlocked(SecretCode)
-    %% If enter_code fails -> reply {error, {wrong_code, FailedAttempts + 1}}, tail-call locked(SecretCode, FailedAttempts + 1)
-    %% If lock -> reply ok, tail-call locked(SecretCode, FailedAttempts)
-    %% If get_state -> reply {locked, FailedAttempts}, tail-call locked(SecretCode, FailedAttempts)
-    %% If stop -> reply ok, return ok
+%% @doc FSM state function for the locked condition.
+locked(_SecretCode, _FailedAttempts) ->
     ok.
 
-%% ── FSM State 2: UNLOCKED ─────────────────────────────────────────────────────
-unlocked(SecretCode) ->
-    %% Architectural Requirement:
-    %% If enter_code -> reply {ok, already_unlocked}, tail-call unlocked(SecretCode)
-    %% If lock -> reply ok, tail-call locked(SecretCode, 0) (reset counter)
-    %% If get_state -> reply unlocked, tail-call unlocked(SecretCode)
-    %% If stop -> reply ok, return ok
+%% @doc FSM state function for the unlocked condition.
+unlocked(_SecretCode) ->
     ok.
 `,
       },
@@ -2266,48 +2291,32 @@ unlocked(SecretCode) ->
     unlocked/1
 ]).
 
-%% Spawns the actor starting in locked(SecretCode, 0)
-start(SecretCode) ->
-    %% Architectural Requirement: Spawn actor into locked(SecretCode, 0) and return PID
+%% @doc Spawns the door lock FSM actor starting in the locked state.
+start(_SecretCode) ->
     ok.
 
-%% Client API: sends code attempt to door actor
-enter_code(Pid, AttemptCode) ->
-    %% Architectural Requirement: make_ref(), send request, wait for reply with 1000ms timeout
+%% @doc Submits a PIN attempt to the door lock actor.
+enter_code(_Pid, _AttemptCode) ->
     ok.
 
-%% Client API: commands door actor to lock
-lock(Pid) ->
-    %% Architectural Requirement: make_ref(), send lock request, wait for reply with 1000ms timeout
+%% @doc Commands the door lock actor to enter the locked state.
+lock(_Pid) ->
     ok.
 
-%% Client API: queries current door state
-get_state(Pid) ->
-    %% Architectural Requirement: make_ref(), send get_state request, wait for reply
+%% @doc Queries the current state of the door lock actor.
+get_state(_Pid) ->
     ok.
 
-%% Client API: stops door actor cleanly
-stop(Pid) ->
-    %% Architectural Requirement: make_ref(), send stop, wait for ok
+%% @doc Stops the door lock actor cleanly.
+stop(_Pid) ->
     ok.
 
-%% ── FSM State 1: LOCKED ───────────────────────────────────────────────────────
-locked(SecretCode, FailedAttempts) ->
-    %% Architectural Requirement:
-    %% If enter_code matches SecretCode -> reply {ok, unlocked}, tail-call unlocked(SecretCode)
-    %% If enter_code fails -> reply {error, {wrong_code, FailedAttempts + 1}}, tail-call locked(SecretCode, FailedAttempts + 1)
-    %% If lock -> reply ok, tail-call locked(SecretCode, FailedAttempts)
-    %% If get_state -> reply {locked, FailedAttempts}, tail-call locked(SecretCode, FailedAttempts)
-    %% If stop -> reply ok, return ok
+%% @doc FSM state function for the locked condition.
+locked(_SecretCode, _FailedAttempts) ->
     ok.
 
-%% ── FSM State 2: UNLOCKED ─────────────────────────────────────────────────────
-unlocked(SecretCode) ->
-    %% Architectural Requirement:
-    %% If enter_code -> reply {ok, already_unlocked}, tail-call unlocked(SecretCode)
-    %% If lock -> reply ok, tail-call locked(SecretCode, 0) (reset counter)
-    %% If get_state -> reply unlocked, tail-call unlocked(SecretCode)
-    %% If stop -> reply ok, return ok
+%% @doc FSM state function for the unlocked condition.
+unlocked(_SecretCode) ->
     ok.
 `,
     solutionCode: `-module(door_lock_fsm).
