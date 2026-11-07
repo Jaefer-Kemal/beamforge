@@ -2306,16 +2306,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all AST rules (`make_ref/0`, `register/2`, `whereis/1` required calls, `loop/1` tail recursion) and registered map lifecycle assertions.
 
-## Phase 124: Pedagogical Despoiling of Chapter 5 Lecture 6 (`ch05-l06`)
-- [x] **124.1: Audit & Eliminate Exercise Code Spoilers in Lecture 5.6 (`ch05-l06`)**:
-  - Neutralized concept breakdown: eliminated verbatim code leaks of `locked/2` and `unlocked/1` clauses in Section 1 and Section 3, replacing them with a neutral connection handshake state machine (`connecting/2` and `connected/1`).
-  - Audited parallel worked example `vending_fsm.erl` (`start/0`, `insert_coin/2`, `select_item/1`, `refund/1`, `stop/1`, `idle/0`, `paid/1`), confirming domain disjunction in the coin-operated vending domain while demonstrating mutual tail recursion and `make_ref/0` request correlation.
-  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `start/1`, `enter_code/2`, `lock/1`, `get_state/1`, `stop/1`, `locked/2`, and `unlocked/1`, eliminating syntax and pattern dictation.
-  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and in-body comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
-- [x] **124.2: Multi-Compiler & Backend Verification**:
+## Phase 125: Pedagogical Despoiling of Chapter 5 Lecture 7 (`ch05-l07`)
+- [x] **125.1: Audit & Eliminate Exercise Code Spoilers in Lecture 5.7 Incident Triage (`ch05-l07`)**:
+  - Neutralized concept breakdown: eliminated verbatim leaky telemetry loop code and telemetry-specific Save Queue leaks in Section 1 and Section 2, replacing them with a neutral message broker (`broker_loop/1`) to illustrate unmatched message accumulation and defensive catch-all semantics.
+  - Replaced cloned parallel worked example `connection_auditor.erl` with an authentic network buffer actor `packet_cache.erl` (`start/0`, `cache_packet/2`, `fetch_packet/2`, `inspect_depth/1`, `stop/1`, `loop/1`), achieving domain disjunction from telemetry counters and sum aggregation while demonstrating wildcard receive hygiene and client timeout protection.
+  - Audited and de-spoiled Incident Triage Specification: structured requirements into professional `Diagnostic`, `Triage Objective`, `Verification Contract`, and `Examples` blocks for `start/0`, `record_metric/2`, `get_summary/1`, `inspect_queue_len/1`, `get_mailbox_len/1`, `stop/1`, and `loop/1`, eliminating direct code dictation.
+  - Refactored starter code doc comments: removed all in-body `% TODO` and implementation hints from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+- [x] **125.2: Multi-Compiler & Backend Verification**:
   - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
-  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all AST rules (`require_tail_recursion` on `locked/2` and `unlocked/1`) and FSM state transition assertions.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all incident triage stages (`S1_NoiseDrain` queue length 0 with accurate telemetry summary, `S2_TimeoutContract` error timeout handling within 1,000ms bounds).
+
 
 
 

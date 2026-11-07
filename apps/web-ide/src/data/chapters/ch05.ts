@@ -2422,8 +2422,8 @@ unlocked(SecretCode) ->
       severity: 'CRITICAL',
       serviceName: 'telemetry-aggregator-actor',
       symptom: 'Node memory consumption climbs from 120 MB to 14 GB over 2 hours; get_summary/1 latency degrades from 0.2ms to 4,800ms before OOM killer terminates the container.',
-      rootCauseHint: 'Legacy IoT sensors are broadcasting {legacy_heartbeat, Node, Ts} and {debug_trace, Bin} tuples to the telemetry actor. Because loop/2 only matches {record_metric, Val} and {get_summary, From, Ref}, unmatched messages accumulate in the BEAM Save Queue forever!',
-      fixObjective: 'Add a catch-all clause in loop/2 to discard unexpected noise messages without losing state, and add a 1,000ms timeout guard in get_summary/1.',
+      rootCauseHint: 'Legacy IoT sensors are broadcasting unexpected diagnostic and heartbeat tuples to the telemetry actor. Because loop/1 only matches expected protocol messages, unmatched terms accumulate in the BEAM Save Queue indefinitely.',
+      fixObjective: 'Defensively handle unexpected noise in loop/1 without losing state, and enforce a 1,000ms client timeout guard in get_summary/1.',
     },
     conceptMarkdown: `## Why This Matters in Production
 
@@ -2434,72 +2434,91 @@ Furthermore, client queries to \`get_summary/1\` had degraded from **0.2 millise
 ## Deep Concept Breakdown & Under the Hood
 
 ### 1. Root Cause Analysis: The Leaky Save Queue
-In Erlang, process mailboxes are **unbounded**. When an actor executes a \`receive\` block:
+In Erlang, process mailboxes are **unbounded**. Consider a message broker with an incomplete receive pattern:
 \`\`\`erlang
-%% BUGGY IMPLEMENTATION:
-loop(State = #{count := Count, total := Total}) ->
+%% INCOMPLETE RECEIVE IMPLEMENTATION:
+broker_loop(RoomState) ->
     receive
-        {record_metric, Val} ->
-            loop(State#{count => Count + 1, total => Total + Val});
-        {get_summary, From, Ref} ->
-            From ! {summary, Ref, State},
-            loop(State)
+        {broadcast, Msg} ->
+            dispatch_to_subscribers(RoomState, Msg),
+            broker_loop(RoomState);
+        {query_status, From, Ref} ->
+            From ! {status, Ref, RoomState},
+            broker_loop(RoomState)
         %% DANGER: Missing catch-all clause!
     end.
 \`\`\`
-1. Legacy hardware sensors and network monitors broadcast diagnostic tuples like \`{legacy_heartbeat, Node, Timestamp}\` and \`{debug_trace, Bin}\`.
-2. When the telemetry actor runs \`receive\`, neither \`{record_metric, ...}\` nor \`{get_summary, ...}\` matches \`{legacy_heartbeat, ...}\`.
-3. The BEAM places the heartbeat message into the actor's internal **Save Queue**.
-4. Because the actor never matches these messages, **they are never removed**.
-5. With 500 heartbeats arriving every second, the Save Queue grows by 1.8 million terms per hour.
-6. When a valid \`{get_summary, ...}\` request finally arrives at the tail of the mailbox, the BEAM must scan past **all 1.8 million unmatched terms in memory**, turning an $O(1)$ receive into a CPU-crushing $O(N)$ linear pointer traversal!
+1. Third-party monitoring probes and legacy sensors periodically dispatch unhandled diagnostic terms like \`{ping, Timestamp}\` or \`{probe_beacon, Node}\`.
+2. When the broker runs \`receive\`, neither \`{broadcast, ...}\` nor \`{query_status, ...}\` matches the incoming probe term.
+3. The BEAM runtime places the unmatched term into the actor's internal **Save Queue**.
+4. Because the actor never matches these terms, **they are never removed**.
+5. With hundreds of unhandled messages arriving every second, the Save Queue grows by millions of terms over hours.
+6. When a valid message finally arrives at the tail of the mailbox, the BEAM must scan past **millions of unmatched terms in memory**, turning an $O(1)$ receive into a CPU-crushing $O(N)$ linear pointer traversal!
 
 ### 2. The Solution: Defensive Mailbox Hygiene
 To eliminate mailbox leaks in production actors:
-1. **The Catch-All Wildcard Clause:** Always include a final wildcard clause in the \`receive\` block to discard unexpected messages and recurse with unchanged state:
+1. **The Catch-All Wildcard Clause:** Always include a final wildcard clause in the \`receive\` block to discard unexpected terms and recurse with unchanged state:
    \`\`\`erlang
-   _UnknownNoise ->
-       loop(State)
+   _UnexpectedNoise ->
+       broker_loop(RoomState)
    \`\`\`
-2. **Client-Side Timeout Guards:** Client API functions that await a response should **never block indefinitely**. Always add \`after 1000 -> {error, timeout}\` to protect the caller from freezing if the actor is slow or restarted.
+2. **Client-Side Timeout Guards:** Client API functions that await a response should **never block indefinitely**. Always add \`after 1000 -> {error, timeout}\` to protect the caller from freezing if the actor is slow, dead, or restarted.
 
 > [!warning] Production Concurrency Trap: Selective Receive Without Catch-All
 > In long-lived singleton actors (registries, routers, telemetry pools), omitting a catch-all clause is the #1 cause of silent memory leaks in Erlang systems. Even if your current modules only send valid messages, third-party libraries, exit signals, or legacy nodes will eventually send unexpected messages to your PID.
 
 ## Parallel Worked Example
 
-Consider a connection heartbeat auditor:
+Consider a packet cache worker with defensive mailbox hygiene:
 
 \`\`\`erlang
--module(connection_auditor).
--export([start/0, log_ping/1, get_stats/1, loop/1]).
+-module(packet_cache).
+-export([start/0, cache_packet/2, fetch_packet/2, inspect_depth/1, stop/1, loop/1]).
 
 start() ->
-    spawn(fun() -> loop(#{pings => 0}) end).
+    Pid = spawn(fun() -> loop(#{}) end),
+    {ok, Pid}.
 
-log_ping(Pid) ->
-    Pid ! ping,
+cache_packet(Pid, {Id, BinaryPayload}) ->
+    Pid ! {store, Id, BinaryPayload},
     ok.
 
-get_stats(Pid) ->
+fetch_packet(Pid, Id) ->
     Ref = make_ref(),
-    Pid ! {get_stats, self(), Ref},
+    Pid ! {fetch, self(), Ref, Id},
     receive
-        {stats, Ref, Stats} -> {ok, Stats}
+        {packet_data, Ref, Result} ->
+            Result
     after 1000 ->
         {error, timeout}
     end.
 
-loop(Stats = #{pings := Cnt}) ->
+inspect_depth(Pid) ->
+    case erlang:process_info(Pid, message_queue_len) of
+        {message_queue_len, Len} -> Len;
+        undefined -> 0
+    end.
+
+stop(Pid) ->
+    Pid ! stop,
+    ok.
+
+loop(Store) ->
     receive
-        ping ->
-            loop(Stats#{pings := Cnt + 1});
-        {get_stats, From, Ref} ->
-            From ! {stats, Ref, Stats},
-            loop(Stats);
-        %% Mailbox Hygiene: Discard unexpected socket noise
+        {store, Id, BinaryPayload} ->
+            loop(maps:put(Id, BinaryPayload, Store));
+        {fetch, From, Ref, Id} ->
+            Reply = case maps:find(Id, Store) of
+                {ok, Payload} -> {ok, Payload};
+                error -> {error, not_found}
+            end,
+            From ! {packet_data, Ref, Reply},
+            loop(Store);
+        stop ->
+            ok;
+        %% Mailbox Hygiene: Discard unexpected diagnostic/network noise
         _IgnoredNoise ->
-            loop(Stats)
+            loop(Store)
     end.
 \`\`\`
 
@@ -2507,21 +2526,34 @@ loop(Stats = #{pings := Cnt}) ->
 
 \`\`\`erlang
 %% Official OTP Signature (erts / erlang)
-erlang:process_info(Pid, message_queue_len) -> {message_queue_len, integer()} | undefined
+erlang:process_info(Pid, Item) -> {Item, Info} | undefined
+  Types:
+    Pid = pid()
+    Item = message_queue_len | memory | heap_size
 \`\`\`
 
 ## Assignment Specification
 
 Triage and fix \`src/incident_mailbox_leak.erl\`:
-1. Inspect the pre-loaded starter code. Notice that \`loop/1\` lacks a catch-all clause and \`get_summary/1\` lacks a timeout guard.
-2. In \`loop/1\`, add a catch-all clause:
-   \`\`\`erlang
-   _Unknown ->
-       loop(State)
-   \`\`\`
-3. In \`get_summary/1\`, add an \`after 1000 -> {error, timeout}\` fallback to prevent hanging callers when the target process is dead or slow.
-4. Export \`inspect_queue_len/1\` (and alias \`get_mailbox_len/1\`) using \`erlang:process_info(Pid, message_queue_len)\`.
-5. Export \`stop/1\` so the actor terminates cleanly on \`stop\`.
+
+### 1. \`get_summary/1\`
+- **Diagnostic**: Client calls to \`get_summary/1\` currently wait in an unprotected \`receive\` block without a timeout boundary. If the target actor is slow, unresponsive, or terminated, calling processes freeze indefinitely.
+- **Triage Objective**: Add an asynchronous timeout protection boundary that guarantees the caller receives \`{error, timeout}\` if no response arrives within 1,000 milliseconds.
+- **Examples**:
+  - \`incident_mailbox_leak:get_summary(DeadPid)\` returns \`{error, timeout}\` in ~1,000ms.
+
+### 2. \`loop/1\`
+- **Diagnostic**: Legacy diagnostic probes and network sensors are dispatching unhandled heartbeat messages (\`{legacy_heartbeat, ...}\`) to the actor's mailbox. Because \`loop/1\` only matches recognized protocol tuples, unmatched messages are permanently retained in the BEAM Save Queue, consuming gigabytes of heap memory.
+- **Triage Objective**: Implement a defensive catch-all clause in \`loop/1\` that purges any unrecognized noise messages from the mailbox and tail-recursively continues running with existing state intact.
+- **Verification Contract**:
+  - The process mailbox length must remain strictly \`0\` even after 300 unhandled heartbeat messages are sent to the actor.
+  - All recorded metrics must remain accurate (\`#{count => Count, total => Sum}\`).
+
+### 3. \`inspect_queue_len/1\` & \`get_mailbox_len/1\`
+- **Input**: \`Pid\` (process identifier).
+- **Behavior**: Queries the BEAM runtime for \`Pid\`'s current \`message_queue_len\` via \`erlang:process_info/2\`. Returns the integer queue length, or \`0\` if the process is undefined. \`get_mailbox_len/1\` provides an identical backward-compatible alias.
+- **Examples**:
+  - \`incident_mailbox_leak:inspect_queue_len(P)\` returns \`0\`.
 
 ## Rules & Verification Constraints
 
@@ -2602,44 +2634,42 @@ Triage and fix \`src/incident_mailbox_leak.erl\`:
     loop/1
 ]).
 
-%% Starts the telemetry actor
+%% @doc Starts the telemetry aggregator actor with initial zeroed state.
 start() ->
     Pid = spawn(fun() -> loop(#{count => 0, total => 0}) end),
     {ok, Pid}.
 
-%% Records a numeric metric value
+%% @doc Asynchronously records a numeric metric.
 record_metric(Pid, Val) ->
     Pid ! {record_metric, Val},
     ok.
 
-%% Retrieves summary statistics: #{count => N, total => Sum}
+%% @doc Retrieves aggregated summary metrics from the telemetry actor.
 get_summary(Pid) ->
     Ref = erlang:make_ref(),
     Pid ! {get_summary, self(), Ref},
     receive
         {summary, Ref, Summary} ->
             {ok, Summary}
-        %% % TODO [INC-101 Triage]: Protect callers from hanging indefinitely
-        %% % when the telemetry process is slow, crashing, or unreachable.
     end.
 
-%% Returns current message queue length for diagnostic checks
+%% @doc Returns the current message queue length of the process.
 inspect_queue_len(Pid) ->
     case erlang:process_info(Pid, message_queue_len) of
         {message_queue_len, Len} -> Len;
         undefined -> 0
     end.
 
-%% Backward-compatible alias
+%% @doc Backward-compatible alias for inspect_queue_len/1.
 get_mailbox_len(Pid) ->
     inspect_queue_len(Pid).
 
-%% Stops the actor cleanly
+%% @doc Asynchronously stops the telemetry actor process.
 stop(Pid) ->
     Pid ! stop,
     ok.
 
-%% Actor message loop
+%% @doc Main actor message loop accumulating telemetry count and total.
 loop(State = #{count := Count, total := Total}) ->
     receive
         {record_metric, Val} ->
@@ -2649,8 +2679,6 @@ loop(State = #{count := Count, total := Total}) ->
             loop(State);
         stop ->
             ok
-        %% % TODO [INC-101 Triage]: Defend against unbounded mailbox growth
-        %% % caused by unhandled diagnostic and heartbeat messages.
     end.
 `,
       },
@@ -2723,44 +2751,42 @@ loop(State = #{count := Count, total := Total}) ->
     loop/1
 ]).
 
-%% Starts the telemetry actor
+%% @doc Starts the telemetry aggregator actor with initial zeroed state.
 start() ->
     Pid = spawn(fun() -> loop(#{count => 0, total => 0}) end),
     {ok, Pid}.
 
-%% Records a numeric metric value
+%% @doc Asynchronously records a numeric metric.
 record_metric(Pid, Val) ->
     Pid ! {record_metric, Val},
     ok.
 
-%% Retrieves summary statistics: #{count => N, total => Sum}
+%% @doc Retrieves aggregated summary metrics from the telemetry actor.
 get_summary(Pid) ->
     Ref = erlang:make_ref(),
     Pid ! {get_summary, self(), Ref},
     receive
         {summary, Ref, Summary} ->
             {ok, Summary}
-        %% % TODO [INC-101 Triage]: Protect callers from hanging indefinitely
-        %% % when the telemetry process is slow, crashing, or unreachable.
     end.
 
-%% Returns current message queue length for diagnostic checks
+%% @doc Returns the current message queue length of the process.
 inspect_queue_len(Pid) ->
     case erlang:process_info(Pid, message_queue_len) of
         {message_queue_len, Len} -> Len;
         undefined -> 0
     end.
 
-%% Backward-compatible alias
+%% @doc Backward-compatible alias for inspect_queue_len/1.
 get_mailbox_len(Pid) ->
     inspect_queue_len(Pid).
 
-%% Stops the actor cleanly
+%% @doc Asynchronously stops the telemetry actor process.
 stop(Pid) ->
     Pid ! stop,
     ok.
 
-%% Actor message loop
+%% @doc Main actor message loop accumulating telemetry count and total.
 loop(State = #{count := Count, total := Total}) ->
     receive
         {record_metric, Val} ->
@@ -2770,8 +2796,6 @@ loop(State = #{count := Count, total := Total}) ->
             loop(State);
         stop ->
             ok
-        %% % TODO [INC-101 Triage]: Defend against unbounded mailbox growth
-        %% % caused by unhandled diagnostic and heartbeat messages.
     end.
 `,
     solutionCode: `-module(incident_mailbox_leak).
