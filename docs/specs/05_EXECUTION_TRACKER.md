@@ -2295,6 +2295,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all AST rules (`require_tail_recursion` on `loop/1`) and immutable state accumulation assertions.
 
+## Phase 123: Pedagogical Despoiling of Chapter 5 Lecture 5 (`ch05-l05`)
+- [x] **123.1: Audit & Eliminate Exercise Code Spoilers in Lecture 5.5 (`ch05-l05`)**:
+  - Neutralized concept breakdown: eliminated verbatim request tuple leaks in Section 3 ("Request Correlation with `make_ref/0`"), replacing them with a neutral compute task payload query pattern (`compute_task` / `task_result`).
+  - Replaced cloned parallel worked example `config_store.erl` with an authentic cluster seat manager `license_server.erl` (`start_server/1`, `checkout_seat/1`, `checkin_seat/1`, `query_available/0`, `shutdown/0`, `server_loop/2`), achieving complete domain disjunction from key-value map storage while faithfully teaching process registration, `whereis/1` guards, and `make_ref/0` correlation.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `start_registered/0`, `put/2`, `get/1`, `stop/0`, and `loop/1`, eliminating raw message tuple dictation.
+  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and in-body comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+- [x] **123.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all AST rules (`make_ref/0`, `register/2`, `whereis/1` required calls, `loop/1` tail recursion) and registered map lifecycle assertions.
+
 
 
 
