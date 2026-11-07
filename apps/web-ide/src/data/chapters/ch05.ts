@@ -1036,82 +1036,83 @@ The answer is **Tail-Recursive Process State Loops**. A long-running process mai
 ## Deep Concept Breakdown & Under the Hood
 
 ### 1. How Immutable Processes Hold State
-Consider an actor with an integer state:
+Consider a stateful actor maintaining an active connection count:
 \`\`\`erlang
-loop(Count) ->
+connection_loop(ActiveCount) ->
     receive
-        {increment, Delta} ->
-            loop(Count + Delta);
-        {get, Caller} ->
-            Caller ! {value, Count},
-            loop(Count);
-        stop ->
+        {client_connected, SocketId} ->
+            connection_loop(ActiveCount + 1);
+        {query_load, CallerPid} ->
+            CallerPid ! {current_load, ActiveCount},
+            connection_loop(ActiveCount);
+        terminate ->
             ok
     end.
 \`\`\`
-1. When started with \`loop(0)\`, the process's stack frame contains \`Count = 0\`.
-2. When an \`{increment, 5}\` message arrives, the process computes \`0 + 5 = 5\` and evaluates \`loop(5)\`.
-3. Because \`loop/1\` is in the **tail position** (the final expression of the clause), the BEAM executes the \`call_last\` opcode: it overwrites the current stack frame with \`Count = 5\` without pushing a new frame!
+1. When started with \`connection_loop(0)\`, the process's stack frame contains \`ActiveCount = 0\`.
+2. When a \`{client_connected, SocketId}\` message arrives, the process computes \`0 + 1 = 1\` and evaluates \`connection_loop(1)\`.
+3. Because \`connection_loop/1\` is in the **tail position** (the final expression of the clause), the BEAM executes the \`call_last\` opcode: it overwrites the current stack frame with \`ActiveCount = 1\` without pushing a new frame!
 4. The actor can run for years, handling billions of state transitions, while consuming a constant **~2.5 KB** of stack memory!
 
 ### 2. The Client-Server Abstraction Barrier
 A critical software engineering discipline in Erlang is separating **Client API Functions** from **Internal Server Callbacks**:
-- **The Anti-Pattern (Leaky Abstraction):** Forcing callers outside the module to manually write \`Pid ! {increment, 5}\` and \`Pid ! {get, self()}\`. If the internal tuple protocol ever changes, every single file in the codebase breaks!
+- **The Anti-Pattern (Leaky Abstraction):** Forcing callers outside the module to manually construct protocol tuples and send operators. If the internal message protocol ever changes, every file in the codebase breaks!
 - **The Erlang Pattern (Clean Abstraction Barrier):** Encapsulating both roles inside a single module:
-  - **Client API Functions (\`increment/2\`, \`get_value/1\`):** Execute inside the **caller's process** (\`self()\` is the caller!).
+  - **Client API Functions:** Execute inside the **caller's process** (\`self()\` is the caller!).
   - **Server Loop (\`loop/1\`):** Executes inside the **spawned actor process** (\`self()\` is the actor!).
 
 ### 3. Step-by-Step Message & Execution Flow
-1. **Asynchronous Cast (\`counter_actor:increment(Pid, 5)\`):**
-   - The caller evaluates \`Pid ! {increment, 5}\` and returns \`ok\` immediately without blocking.
-   - The message arrives at the tail of \`Pid\`'s private mailbox.
-   - The actor process awakens, matches \`{increment, Delta}\`, computes \`NextVal = CurrentVal + 5\`, and tail-calls \`loop(NextVal)\`.
-2. **Synchronous Call (\`counter_actor:get_value(Pid)\`):**
-   - The caller evaluates \`Pid ! {get, self()}\` and awaits a reply in a selective \`receive\` with a 1,000ms timeout guard.
-   - The actor process matches \`{get, Caller}\`, replies \`Caller ! {value, CurrentVal}\`, and tail-calls \`loop(CurrentVal)\`.
-   - The caller receives \`{value, V}\` and returns \`{ok, V}\`.
+1. **Asynchronous Cast (Non-Blocking):**
+   - The caller evaluates a client API function which sends an asynchronous message tuple via \`!\` and immediately returns \`ok\`.
+   - The message is appended to the actor's private mailbox queue.
+   - The actor process awakens, matches the cast tuple, computes the next state, and tail-calls its loop function.
+2. **Synchronous Call (Blocking Query with Timeout):**
+   - The caller evaluates a client query function which sends a tagged tuple containing \`self()\` as a return address.
+   - The caller immediately suspends in a selective \`receive\` block with a timeout guard.
+   - The actor receives the query, replies to the caller PID, and tail-calls its loop function with unchanged state.
+   - The caller unblocks upon receiving the reply tuple and returns the payload to its caller.
 
 > [!warning] Production Concurrency Trap: Forgetting Tail Position Breaks O(1) Memory
 > If you write \`io:format("Done~n"), loop(NextState)\` inside a clause, \`loop/1\` is STILL in tail position because \`io:format\` executes first. But if you write \`loop(NextState) + 1\`, the recursive call is NO LONGER in tail position! The BEAM must allocate a new stack frame for every single message, causing a memory exhaustion crash after a few thousand messages.
 
 ## Parallel Worked Example
 
-The following module implements a stateful bank vault actor maintaining a balance:
+The following module implements a streaming telemetry actor tracking transferred bytes:
 
 \`\`\`erlang
--module(vault_actor).
--export([start/1, deposit/2, get_balance/1, close/1, loop/1]).
+-module(network_stream).
+-export([start_stream/1, append_chunk/2, query_transferred/1, terminate_stream/1, stream_loop/1]).
 
 %% ── Client API (Executes in Caller Process) ───────────────────────────────────
-start(InitialBalance) ->
-    spawn(fun() -> loop(InitialBalance) end).
+start_stream(InitialBytes) ->
+    spawn(fun() -> stream_loop(InitialBytes) end).
 
-deposit(Pid, Amount) when Amount > 0 ->
-    Pid ! {deposit, Amount},
+append_chunk(StreamPid, ByteCount) when ByteCount > 0 ->
+    StreamPid ! {chunk_in, ByteCount},
     ok.
 
-get_balance(Pid) ->
-    Pid ! {get_balance, self()},
+query_transferred(StreamPid) ->
+    StreamPid ! {query_bytes, self()},
     receive
-        {balance, Balance} ->
-            {ok, Balance}
+        {transferred, Bytes} ->
+            {ok, Bytes}
     after 1000 ->
         {error, timeout}
     end.
 
-close(Pid) ->
-    Pid ! close,
+terminate_stream(StreamPid) ->
+    StreamPid ! stream_close,
     ok.
 
 %% ── Server Loop (Executes in Actor Process) ───────────────────────────────────
-loop(Balance) ->
+stream_loop(TotalBytes) ->
     receive
-        {deposit, Amount} ->
-            loop(Balance + Amount);
-        {get_balance, Caller} ->
-            Caller ! {balance, Balance},
-            loop(Balance);
-        close ->
+        {chunk_in, ChunkSize} ->
+            stream_loop(TotalBytes + ChunkSize);
+        {query_bytes, CallerPid} ->
+            CallerPid ! {transferred, TotalBytes},
+            stream_loop(TotalBytes);
+        stream_close ->
             ok
     end.
 \`\`\`
@@ -1133,23 +1134,45 @@ loop(State) ->
 
 Implement \`src/counter_actor.erl\` exporting \`start/1\`, \`increment/2\`, \`decrement/2\`, \`get_value/1\`, \`stop/1\`, and \`loop/1\`:
 
-1. \`start(InitialValue) -> pid()\`:
-   - Spawns \`loop(InitialValue)\` and returns the newly spawned actor's PID.
-2. \`increment(Pid, Delta) -> ok\`:
-   - Asynchronously sends \`{increment, Delta}\` to \`Pid\` and returns \`ok\` immediately without waiting for a reply.
-3. \`decrement(Pid, Delta) -> ok\`:
-   - Asynchronously sends \`{decrement, Delta}\` to \`Pid\` and returns \`ok\` immediately.
-4. \`get_value(Pid) -> {ok, integer()} | {error, timeout}\`:
-   - Sends \`{get, self()}\` to \`Pid\`.
-   - Selectively waits up to 1,000ms for \`{value, Val}\`, returning \`{ok, Val}\` or \`{error, timeout}\`.
-5. \`stop(Pid) -> ok\`:
-   - Asynchronously sends \`stop\` to \`Pid\` and returns \`ok\`.
-6. \`loop(CurrentVal) -> ok\`:
-   - Tail-recursive receive loop handling:
-     - \`{increment, Delta}\` -> recurses to \`loop(CurrentVal + Delta)\`.
-     - \`{decrement, Delta}\` -> recurses to \`loop(CurrentVal - Delta)\`.
-     - \`{get, Caller}\` -> sends \`Caller ! {value, CurrentVal}\` and recurses to \`loop(CurrentVal)\`.
-     - \`stop\` -> exits loop and returns \`ok\`.
+### 1. \`start/1\`
+- **Input**: \`InitialValue\` (integer).
+- **Behavior**: Spawns a concurrent stateful actor running \`loop(InitialValue)\` and returns its process identifier.
+- **Examples**:
+  - \`is_pid(counter_actor:start(100))\` returns \`true\`.
+
+### 2. \`increment/2\`
+- **Input**: \`Pid\` (process identifier), \`Delta\` (integer).
+- **Behavior**: Asynchronously dispatches an increment message tagged with the atom \`increment\` and \`Delta\` to \`Pid\` without blocking the caller. Evaluates immediately to \`ok\`.
+- **Examples**:
+  - \`counter_actor:increment(P, 50)\` returns \`ok\`.
+
+### 3. \`decrement/2\`
+- **Input**: \`Pid\` (process identifier), \`Delta\` (integer).
+- **Behavior**: Asynchronously dispatches a decrement message tagged with the atom \`decrement\` and \`Delta\` to \`Pid\` without blocking the caller. Evaluates immediately to \`ok\`.
+- **Examples**:
+  - \`counter_actor:decrement(P, 20)\` returns \`ok\`.
+
+### 4. \`get_value/1\`
+- **Input**: \`Pid\` (process identifier).
+- **Behavior**: Synchronously queries \`Pid\` by sending a request tuple containing the atom \`get\` and the caller's PID (\`self()\`). Awaits a matching reply tuple tagged with the atom \`value\` and the current state integer for up to 1,000 milliseconds. Returns \`{ok, CurrentVal}\` upon receipt, or \`{error, timeout}\` if no response arrives within 1,000 milliseconds.
+- **Examples**:
+  - \`counter_actor:get_value(P)\` returns \`{ok, 130}\`.
+
+### 5. \`stop/1\`
+- **Input**: \`Pid\` (process identifier).
+- **Behavior**: Asynchronously dispatches the atom \`stop\` to \`Pid\` and evaluates to \`ok\`.
+- **Examples**:
+  - \`counter_actor:stop(P)\` returns \`ok\`.
+
+### 6. \`loop/1\`
+- **Input**: \`CurrentVal\` (integer).
+- **Behavior**: Executes an infinite tail-recursive message loop handling four distinct message shapes:
+  - On receipt of \`{increment, Delta}\`: adds \`Delta\` to \`CurrentVal\` and tail-recursively resumes \`loop/1\` with the sum.
+  - On receipt of \`{decrement, Delta}\`: subtracts \`Delta\` from \`CurrentVal\` and tail-recursively resumes \`loop/1\` with the difference.
+  - On receipt of \`{get, Caller}\`: dispatches \`{value, CurrentVal}\` to \`Caller\` and tail-recursively resumes \`loop/1\` with \`CurrentVal\` unchanged.
+  - On receipt of \`stop\`: cleanly exits the loop and evaluates to \`ok\`.
+- **Examples**:
+  - Increments state from \`100\` to \`150\` upon handling \`{increment, 50}\`.
 
 ## Rules & Verification Constraints
 
@@ -1218,38 +1241,28 @@ Implement \`src/counter_actor.erl\` exporting \`start/1\`, \`increment/2\`, \`de
         content: `-module(counter_actor).
 -export([start/1, increment/2, decrement/2, get_value/1, stop/1, loop/1]).
 
-%% Spawns the counter actor with InitialValue
-start(InitialValue) ->
-    %% Architectural Requirement: Spawn loop(InitialValue) and return PID
+%% @doc Spawns a concurrent stateful counter actor initialized with InitialValue.
+start(_InitialValue) ->
     ok.
 
-%% Client API: sends {increment, Delta} asynchronously
-increment(Pid, Delta) ->
-    %% Architectural Requirement: Send {increment, Delta} asynchronously, return ok
+%% @doc Asynchronously dispatches an increment delta to the counter actor.
+increment(_Pid, _Delta) ->
     ok.
 
-%% Client API: sends {decrement, Delta} asynchronously
-decrement(Pid, Delta) ->
-    %% Architectural Requirement: Send {decrement, Delta} asynchronously, return ok
+%% @doc Asynchronously dispatches a decrement delta to the counter actor.
+decrement(_Pid, _Delta) ->
     ok.
 
-%% Client API: sends {get, self()} and waits up to 1000ms for {value, Val}
-get_value(Pid) ->
-    %% Architectural Requirement: Send {get, self()}, receive {value, Val} with 1000ms timeout
+%% @doc Synchronously queries the current counter value with timeout fallback.
+get_value(_Pid) ->
     ok.
 
-%% Client API: sends stop to the actor
-stop(Pid) ->
-    %% Architectural Requirement: Send stop, return ok
+%% @doc Asynchronously stops the counter actor process.
+stop(_Pid) ->
     ok.
 
-%% Internal Actor Loop: tail-recursive message handler
-loop(CurrentVal) ->
-    %% Architectural Requirement:
-    %% Handle {increment, Delta} -> recurse with CurrentVal + Delta
-    %% Handle {decrement, Delta} -> recurse with CurrentVal - Delta
-    %% Handle {get, Caller} -> send {value, CurrentVal} to Caller, recurse with CurrentVal
-    %% Handle stop -> return ok
+%% @doc Tail-recursive state loop maintaining current integer value.
+loop(_CurrentVal) ->
     ok.
 `,
       },
@@ -1299,38 +1312,28 @@ loop(CurrentVal) ->
     starterCode: `-module(counter_actor).
 -export([start/1, increment/2, decrement/2, get_value/1, stop/1, loop/1]).
 
-%% Spawns the counter actor with InitialValue
-start(InitialValue) ->
-    %% Architectural Requirement: Spawn loop(InitialValue) and return PID
+%% @doc Spawns a concurrent stateful counter actor initialized with InitialValue.
+start(_InitialValue) ->
     ok.
 
-%% Client API: sends {increment, Delta} asynchronously
-increment(Pid, Delta) ->
-    %% Architectural Requirement: Send {increment, Delta} asynchronously, return ok
+%% @doc Asynchronously dispatches an increment delta to the counter actor.
+increment(_Pid, _Delta) ->
     ok.
 
-%% Client API: sends {decrement, Delta} asynchronously
-decrement(Pid, Delta) ->
-    %% Architectural Requirement: Send {decrement, Delta} asynchronously, return ok
+%% @doc Asynchronously dispatches a decrement delta to the counter actor.
+decrement(_Pid, _Delta) ->
     ok.
 
-%% Client API: sends {get, self()} and waits up to 1000ms for {value, Val}
-get_value(Pid) ->
-    %% Architectural Requirement: Send {get, self()}, receive {value, Val} with 1000ms timeout
+%% @doc Synchronously queries the current counter value with timeout fallback.
+get_value(_Pid) ->
     ok.
 
-%% Client API: sends stop to the actor
-stop(Pid) ->
-    %% Architectural Requirement: Send stop, return ok
+%% @doc Asynchronously stops the counter actor process.
+stop(_Pid) ->
     ok.
 
-%% Internal Actor Loop: tail-recursive message handler
-loop(CurrentVal) ->
-    %% Architectural Requirement:
-    %% Handle {increment, Delta} -> recurse with CurrentVal + Delta
-    %% Handle {decrement, Delta} -> recurse with CurrentVal - Delta
-    %% Handle {get, Caller} -> send {value, CurrentVal} to Caller, recurse with CurrentVal
-    %% Handle stop -> return ok
+%% @doc Tail-recursive state loop maintaining current integer value.
+loop(_CurrentVal) ->
     ok.
 `,
     solutionCode: `-module(counter_actor).

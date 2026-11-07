@@ -2284,6 +2284,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all AST rules (`receive_after`), priority queue drains, timeout guarantees, and mailbox flush assertions.
 
+## Phase 122: Pedagogical Despoiling of Chapter 5 Lecture 4 (`ch05-l04`)
+- [x] **122.1: Audit & Eliminate Exercise Code Spoilers in Lecture 5.4 (`ch05-l04`)**:
+  - Neutralized concept breakdown: eliminated verbatim code leaks of `counter_actor`'s `loop/1` implementation in Section 1 and verbatim API messages in Section 3, replacing them with a neutral active connection load tracker (`connection_loop/1`) and general cast/call flow mechanics.
+  - Replaced parallel worked example `vault_actor.erl` with an authentic streaming telemetry actor `network_stream.erl` (`start_stream/1`, `append_chunk/2`, `query_transferred/1`, `terminate_stream/1`, `stream_loop/1`), achieving domain disjunction from counter increments, decrements, and value queries.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `start/1`, `increment/2`, `decrement/2`, `get_value/1`, `stop/1`, and `loop/1`, eliminating syntax and pattern dictation.
+  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and in-body comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+- [x] **122.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all AST rules (`require_tail_recursion` on `loop/1`) and immutable state accumulation assertions.
+
 
 
 
