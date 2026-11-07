@@ -393,13 +393,13 @@ When Process A evaluates \`Pid ! Message\`:
 ### 2. Identifying Callers with \`self/0\`
 An actor has no built-in way of knowing who sent a message. Unlike TCP sockets with source IP headers, raw messages do not carry implicit return addresses. If a caller expects a response, it **must explicitly include its own PID** (\`self()\`) inside a tagged tuple:
 \`\`\`erlang
-%% Caller sends request with its own PID for routing:
-WorkerPid ! {query_balance, self(), <<"acct_8492">>}.
+%% Caller sends request tagged with self() as return address:
+WorkerPid ! {fetch_telemetry, self(), cpu_temp}.
 
-%% Worker pattern-matches CallerPid and replies:
+%% Worker pattern-matches CallerPid and dispatches response:
 receive
-    {query_balance, CallerPid, AccountId} ->
-        CallerPid ! {balance_result, self(), AccountId, 250000}
+    {fetch_telemetry, CallerPid, MetricName} ->
+        CallerPid ! {telemetry_data, self(), MetricName, 72.5}
 end.
 \`\`\`
 
@@ -415,40 +415,37 @@ Erlang provides two ways to spawn processes:
 
 ## Parallel Worked Example
 
-Consider a distributed telemetry ingestion hub that accepts metric events from workers and delivers periodic synchronization pulses:
+Consider a distributed audit sink that records telemetry metrics:
 
 \`\`\`erlang
--module(sensor_gateway).
--export([start_hub/0, push_metric/3, fanout_telemetry/2, gateway_loop/0]).
+-module(audit_sink).
+-export([start_sink/0, submit_event/3, fanout_alert/2, sink_loop/0]).
 
-%% Spawns the telemetry gateway actor
-start_hub() ->
-    spawn(?MODULE, gateway_loop, []).
+%% Spawns the sink actor using MFA spawn for hot-code reload compatibility
+start_sink() ->
+    spawn(?MODULE, sink_loop, []).
 
-%% Client API: sends a telemetry metric and waits for confirmation
-push_metric(HubPid, MetricName, Value) ->
-    HubPid ! {record_metric, self(), MetricName, Value},
+%% Client API: sends telemetry event and awaits confirmation
+submit_event(SinkPid, DeviceId, Metric) ->
+    SinkPid ! {record_metric, self(), DeviceId, Metric},
     receive
-        {metric_ack, HubPid, MetricName} ->
-            {ok, MetricName}
+        {recorded, SinkPid, DeviceId} ->
+            {ok, DeviceId}
     after 1000 ->
         {error, timeout}
     end.
 
-%% Client API: fans out a sync pulse to listening collector processes
-fanout_telemetry(Collectors, SyncPulse) ->
-    DeliveredCount = lists:foldl(fun(Pid, Acc) ->
-        Pid ! {telemetry_pulse, SyncPulse},
-        Acc + 1
-    end, 0, Collectors),
-    {dispatched, DeliveredCount}.
+%% Client API: fans out an emergency notification to observer processes
+fanout_alert(ObserverPids, Alert) ->
+    [Pid ! {emergency_notice, Alert} || Pid <- ObserverPids],
+    {sent, length(ObserverPids)}.
 
 %% Internal actor loop: executes inside the spawned process
-gateway_loop() ->
+sink_loop() ->
     receive
-        {record_metric, CallerPid, MetricName, _Val} ->
-            CallerPid ! {metric_ack, self(), MetricName},
-            gateway_loop();
+        {record_metric, CallerPid, DeviceId, _Metric} ->
+            CallerPid ! {recorded, self(), DeviceId},
+            sink_loop();
         shutdown ->
             ok
     end.
@@ -471,40 +468,37 @@ Dest ! Message -> Message
 
 ## Assignment Specification
 
-Implement the concurrent ping-pong actor and messaging interface in \`src/ping_actor.erl\`. The module must export \`start_responder/0\`, \`responder_loop/0\`, \`ping/2\`, and \`broadcast/2\`.
+Implement \`src/ping_actor.erl\` exporting \`start_responder/0\`, \`responder_loop/0\`, \`ping/2\`, and \`broadcast/2\`:
 
 ### 1. \`start_responder/0\`
 - **Input**: None.
-- **Behavior**: Spawns a concurrent process executing \`responder_loop/0\` and returns its process identifier.
-- **Output**: Returns the \`pid()\` of the spawned responder actor.
+- **Behavior**: Spawns a concurrent process running \`responder_loop/0\` and returns its process identifier.
+- **Examples**:
+  - \`is_pid(ping_actor:start_responder())\` returns \`true\`.
 
 ### 2. \`responder_loop/0\`
-- **Input**: None (runs as a long-lived process).
-- **Behavior**:
-  - Enters a tail-recursive message receipt loop.
-  - When receiving a 3-tuple tagged with the atom \`ping\`, containing the caller process identifier and an arbitrary payload, it replies to the caller with a 3-tuple tagged with \`pong\` containing its own process identifier and the identical payload, then tail-recurses into \`responder_loop/0\`.
-  - When receiving the atom \`stop\`, it terminates the loop cleanly.
-- **Output**: Returns the atom \`ok\` upon termination.
+- **Input**: None (called inside the spawned process).
+- **Behavior**: Executes an infinite tail-recursive message loop waiting for incoming messages:
+  - On receipt of a ping request tuple containing the atom \`ping\`, the caller PID, and an arbitrary payload term: asynchronously sends a reply tuple containing the atom \`pong\`, the responder's own PID (\`self()\`), and the echoing payload back to the caller, then tail-recursively resumes \`responder_loop/0\`.
+  - On receipt of the atom \`stop\`: terminates the loop cleanly and evaluates to \`ok\`.
+- **Examples**:
+  - Handles \`{ping, CallerPid, <<"syn">>}\` by sending \`{pong, self(), <<"syn">>}\` to \`CallerPid\`.
+  - Handles \`stop\` by exiting cleanly with \`ok\`.
 
 ### 3. \`ping/2\`
-- **Input**:
-  - \`ResponderPid\`: The process identifier of a running responder actor.
-  - \`Payload\`: An arbitrary Erlang term.
-- **Behavior**:
-  - Sends a ping request tuple to \`ResponderPid\` containing its own process identifier and \`Payload\`.
-  - Selectively awaits a matching pong reply from \`ResponderPid\` carrying the matching payload with a 1,000-millisecond timeout.
-- **Output**:
-  - Returns \`{ok, Payload}\` when the corresponding reply is received within 1,000 milliseconds.
-  - Returns \`{error, timeout}\` if no matching reply arrives within 1,000 milliseconds.
+- **Input**: \`ResponderPid\` (valid process identifier), \`Payload\` (arbitrary Erlang term).
+- **Behavior**: Transmits an asynchronous request tuple containing the atom \`ping\`, the calling process's PID (\`self()\`), and \`Payload\` to \`ResponderPid\`. Waits up to 1,000 milliseconds in a selective receive block for a matching response tuple containing the atom \`pong\`, \`ResponderPid\`, and \`Payload\`. Returns a tagged success tuple wrapping \`Payload\` if received, or a timeout error tuple if 1,000 milliseconds elapse without a response.
+- **Examples**:
+  - \`ping_actor:ping(Pid, <<"syn">>)\` returns \`{ok, <<"syn">>}\`.
+  - \`ping_actor:ping(Pid, {metric, 42})\` returns \`{ok, {metric, 42}}\`.
+  - Calling \`ping/2\` against an unresponsive PID returns \`{error, timeout}\` after 1,000ms.
 
 ### 4. \`broadcast/2\`
-- **Input**:
-  - \`PidsList\`: A list of process identifiers.
-  - \`Msg\`: An arbitrary Erlang term to deliver.
-- **Behavior**:
-  - Asynchronously sends \`Msg\` to every process identifier in \`PidsList\`.
-  - Computes the total count of recipient processes messaged.
-- **Output**: Returns a 2-tuple \`{sent, Count}\` where Count represents the total number of recipient processes messaged.
+- **Input**: \`PidsList\` (list of process identifiers), \`Msg\` (arbitrary Erlang term).
+- **Behavior**: Iterates over \`PidsList\` and asynchronously dispatches \`Msg\` to every recipient process without blocking. Returns a tagged tuple reporting the total count of recipient processes to which the message was dispatched.
+- **Examples**:
+  - \`ping_actor:broadcast([P1, P2], stop)\` returns \`{sent, 2}\`.
+  - \`ping_actor:broadcast([], stop)\` returns \`{sent, 0}\`.
 
 ## Rules & Verification Constraints
 
@@ -582,33 +576,33 @@ WorkerPid ! {calculate_tax, self(), OrderTotal}.`,
         name: 'ping_actor.erl',
         path: 'src/ping_actor.erl',
         content: `-module(ping_actor).
--export([start_responder/0, responder_loop/0, ping/2, broadcast/2]).
+-export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
 
-%% @doc Spawns a new concurrent responder actor executing responder_loop/0.
+%% @doc Spawn a concurrent responder actor executing responder_loop/0.
 -spec start_responder() -> pid().
 start_responder() ->
-    self().
+    ok.
 
-%% @doc Tail-recursive actor loop handling ping requests and termination.
+%% @doc Receive loop handling ping requests and clean termination.
 -spec responder_loop() -> ok.
 responder_loop() ->
     ok.
 
-%% @doc Dispatches a ping payload to ResponderPid and awaits a correlated pong.
+%% @doc Asynchronously send a ping request to responder and await matching pong response.
 -spec ping(pid(), term()) -> {ok, term()} | {error, timeout}.
 ping(_ResponderPid, _Payload) ->
-    {error, timeout}.
+    ok.
 
-%% @doc Asynchronously delivers Msg to all processes in PidsList.
+%% @doc Asynchronously dispatch message to each PID and return dispatched count.
 -spec broadcast([pid()], term()) -> {sent, non_neg_integer()}.
 broadcast(_PidsList, _Msg) ->
-    {sent, 0}.
+    ok.
 `,
       },
     ],
     solutionFiles: {
       'src/ping_actor.erl': `-module(ping_actor).
--export([start_responder/0, responder_loop/0, ping/2, broadcast/2]).
+-export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
 
 start_responder() ->
     spawn(fun() -> responder_loop() end).
@@ -637,30 +631,30 @@ broadcast(PidsList, Msg) ->
 `,
     },
     starterCode: `-module(ping_actor).
--export([start_responder/0, responder_loop/0, ping/2, broadcast/2]).
+-export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
 
-%% @doc Spawns a new concurrent responder actor executing responder_loop/0.
+%% @doc Spawn a concurrent responder actor executing responder_loop/0.
 -spec start_responder() -> pid().
 start_responder() ->
-    self().
+    ok.
 
-%% @doc Tail-recursive actor loop handling ping requests and termination.
+%% @doc Receive loop handling ping requests and clean termination.
 -spec responder_loop() -> ok.
 responder_loop() ->
     ok.
 
-%% @doc Dispatches a ping payload to ResponderPid and awaits a correlated pong.
+%% @doc Asynchronously send a ping request to responder and await matching pong response.
 -spec ping(pid(), term()) -> {ok, term()} | {error, timeout}.
 ping(_ResponderPid, _Payload) ->
-    {error, timeout}.
+    ok.
 
-%% @doc Asynchronously delivers Msg to all processes in PidsList.
+%% @doc Asynchronously dispatch message to each PID and return dispatched count.
 -spec broadcast([pid()], term()) -> {sent, non_neg_integer()}.
 broadcast(_PidsList, _Msg) ->
-    {sent, 0}.
+    ok.
 `,
     solutionCode: `-module(ping_actor).
--export([start_responder/0, responder_loop/0, ping/2, broadcast/2]).
+-export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
 
 start_responder() ->
     spawn(fun() -> responder_loop() end).
@@ -731,24 +725,27 @@ The timer begins counting the moment the process begins waiting. If 1,000 millis
 A timeout of **\`after 0\`** instructs the BEAM runtime: *"Check the mailbox right now. If a matching message is already present, process it immediately. If not, do NOT suspend; evaluate the after block in 0ms!"*
 
 This zero-wait idiom has two critical production applications:
-1. **Tiered Priority Polling:** Checking for high-priority commands before falling back to bulk traffic:
+1. **Priority Draining:** Checking for urgent messages before falling back to normal messages:
    \`\`\`erlang
-   poll_network_traffic() ->
+   drain_urgent_then_normal() ->
        receive
-           {system_override, Cmd} -> {override, Cmd}
+           {urgent, Msg} -> {urgent, Msg}
        after 0 ->
            receive
-               {stream_data, Chunk} -> {data, Chunk}
+               {normal, Msg} -> {normal, Msg}
            after 0 ->
-               no_traffic
+               empty
            end
        end.
    \`\`\`
-2. **Non-Blocking Inbox Draining:** Gathering all pending messages currently sitting in the mailbox into an accumulator without suspending the caller:
+2. **Mailbox Flushing (\`flush_mailbox/0\`):** Draining all pending messages currently sitting in the mailbox into a list for inspection or purging before starting a new stateful session:
    \`\`\`erlang
-   drain_pending_events(Acc) ->
+   flush_mailbox() ->
+       flush_mailbox_acc([]).
+
+   flush_mailbox_acc(Acc) ->
        receive
-           Event -> drain_pending_events([Event | Acc])
+           Msg -> flush_mailbox_acc([Msg | Acc])
        after 0 ->
            lists:reverse(Acc)
        end.
@@ -759,44 +756,33 @@ This zero-wait idiom has two critical production applications:
 
 ## Parallel Worked Example
 
-Consider an autonomous vehicle sensor bus that prioritizes collision hazards over ordinary telemetry packets and flushes stale readings:
+Consider a high-priority financial quote processor:
 
 \`\`\`erlang
--module(sensor_bus).
--export([poll_critical_event/0, query_sensor_with_timeout/3, purge_sensor_backlog/0]).
+-module(quote_arbiter).
+-export([consume_quote/0, flush_pending_quotes/0]).
 
-%% Selectively pulls collision hazards ahead of normal telemetry
-poll_critical_event() ->
+%% Consumes urgent margin calls ahead of standard pricing ticks
+consume_quote() ->
     receive
-        {hazard, Level, Sector} ->
-            {critical, Level, Sector}
+        {margin_call, Account, Amount} ->
+            {urgent, Account, Amount}
     after 0 ->
         receive
-            {telemetry, Metric, Val} ->
-                {info, Metric, Val}
-        after 250 ->
-            {error, no_events}
+            {price_tick, Symbol, Price} ->
+                {normal, Symbol, Price}
+        after 500 ->
+            {error, no_quotes_available}
         end
     end.
 
-%% Dispatches a diagnostic check to a sensor controller with a bounded timeout
-query_sensor_with_timeout(ControllerPid, ProbeKey, TimeoutLimit) ->
-    ControllerPid ! {diagnostic_probe, self(), ProbeKey},
-    receive
-        {diagnostic_ack, ProbeKey, Reading} ->
-            {ok, Reading}
-    after TimeoutLimit ->
-        {error, probe_timeout}
-    end.
+%% Drains all pending quotes without suspending
+flush_pending_quotes() ->
+    drain_quotes([]).
 
-%% Purges stale telemetry packets currently sitting in the inbox
-purge_sensor_backlog() ->
-    purge_loop([]).
-
-purge_loop(Acc) ->
+drain_quotes(Acc) ->
     receive
-        {telemetry, _Metric, _Val} = Msg ->
-            purge_loop([Msg | Acc])
+        Quote -> drain_quotes([Quote | Acc])
     after 0 ->
         lists:reverse(Acc)
     end.
@@ -816,42 +802,25 @@ end
 
 ## Assignment Specification
 
-Implement the priority mailbox consumer and timeout request interface in \`src/priority_mailbox.erl\`. The module must export \`receive_urgent_first/1\`, \`request_with_timeout/3\`, and \`flush_mailbox/0\`.
+Implement \`src/priority_mailbox.erl\` exporting \`receive_urgent_first/1\`, \`request_with_timeout/3\`, and \`flush_mailbox/0\`:
 
-### 1. \`receive_urgent_first/1\`
-- **Input**:
-  - \`ExpectedCount\`: A non-negative integer specifying the maximum number of items to harvest from the current process mailbox.
-- **Behavior**:
-  - Successively drains messages from \`self()\`'s mailbox until either \`ExpectedCount\` items are collected or no further matching messages are available.
-  - Prioritizes messages matching 2-tuples tagged with the atom \`urgent\`. If an urgent message is immediately available in the mailbox, its payload is harvested.
-  - If no urgent message is immediately available, non-blockingly checks for messages matching 2-tuples tagged with the atom \`normal\`.
-  - Terminates the extraction loop without blocking when neither category is present or when \`ExpectedCount\` messages have been harvested.
-- **Output**: Returns a list of the extracted payloads, ordered such that all urgent payloads precede normal payloads, preserving FIFO arrival order within each priority tier.
-- **Example**:
-  Given a process mailbox containing \`{normal, 1}\`, \`{urgent, 99}\`, and \`{normal, 2}\`, calling \`receive_urgent_first(3)\` returns \`[99, 1, 2]\`.
-
-### 2. \`request_with_timeout/3\`
-- **Input**:
-  - \`TargetPid\`: The process identifier of the target actor.
-  - \`RequestMsg\`: An arbitrary Erlang term representing the payload of the request.
-  - \`TimeoutMs\`: A non-negative integer representing the maximum time window in milliseconds to await a response.
-- **Behavior**:
-  - Asynchronously dispatches a 3-tuple request to \`TargetPid\` containing the atom \`request\`, the caller's own PID (\`self()\`), and \`RequestMsg\`.
-  - Selectively awaits a matching 3-tuple reply from \`TargetPid\` tagged with the atom \`reply\`, carrying the identical \`RequestMsg\` and a result term.
-- **Output**:
-  - Returns \`{ok, Result}\` if the correlated reply arrives before \`TimeoutMs\` elapses.
-  - Returns \`{error, timeout}\` if the timeout expires before a matching reply is received.
-
-### 3. \`flush_mailbox/0\`
-- **Input**: None.
-- **Behavior**: Non-blockingly drains all messages currently awaiting processing in the current process mailbox without suspending.
-- **Output**: Returns a list containing all drained messages in their original FIFO arrival order.
+1. \`receive_urgent_first(ExpectedCount) -> [Payload]\`:
+   - Drains exactly \`ExpectedCount\` messages from \`self()\`'s mailbox.
+   - For each extracted message, it attempts to match \`{urgent, Payload}\` using \`after 0\`. If no urgent message is present, it falls back to matching \`{normal, Payload}\`.
+   - Returns the payloads in priority order: all urgent messages appear before normal messages.
+2. \`request_with_timeout(TargetPid, RequestMsg, TimeoutMs) -> {ok, Result} | {error, timeout}\`:
+   - Sends \`{request, self(), RequestMsg}\` to \`TargetPid\`.
+   - Waits up to \`TimeoutMs\` milliseconds in a \`receive ... after TimeoutMs\` block for \`{reply, RequestMsg, Result}\`.
+   - Returns \`{ok, Result}\` on match, or \`{error, timeout}\` upon expiration.
+3. \`flush_mailbox() -> [term()]\`:
+   - Drains all pending messages currently in \`self()\`'s mailbox using a tail-recursive \`receive Msg -> ... after 0 -> ... end\` loop.
+   - Returns all flushed messages in FIFO arrival order.
 
 ## Rules & Verification Constraints
 
-- Must employ the \`receive ... after\` construct to prevent deadlock.
-- Mailbox draining in \`flush_mailbox/0\` and fallback checks in \`receive_urgent_first/1\` must never block when no matching messages exist.
-- Must preserve FIFO arrival order among messages sharing the same priority tier.`,
+- Must use the \`receive ... after\` construct (enforced by AST rule \`requiredConstructs: ["receive_after"]\`).
+- \`receive_urgent_first/1\` must never block if fewer than \`ExpectedCount\` messages exist (fall back to whatever is available or use \`after 0\`).
+- Must preserve FIFO order within the same priority level.`,
     mentalModelCheck: {
       question: 'What happens to messages in an actor’s mailbox that fail to match any pattern in the currently executing `receive` block?',
       codeSnippet: `%% Mailbox contains: [{normal, 1}, {urgent, 99}]
@@ -924,20 +893,25 @@ end.`,
         content: `-module(priority_mailbox).
 -export([receive_urgent_first/1, request_with_timeout/3, flush_mailbox/0]).
 
-%% @doc Drains up to ExpectedCount messages prioritizing urgent payloads over normal.
--spec receive_urgent_first(non_neg_integer()) -> [term()].
-receive_urgent_first(_ExpectedCount) ->
-    [].
+%% Drains ExpectedCount messages, extracting {urgent, X} before {normal, Y}
+receive_urgent_first(ExpectedCount) ->
+    %% Architectural Requirement:
+    %% Drain up to ExpectedCount messages. For each, check {urgent, Payload} via after 0,
+    %% then fall back to {normal, Payload}. Return list of extracted payloads.
+    ok.
 
-%% @doc Dispatches RequestMsg to TargetPid and awaits correlated reply within TimeoutMs.
--spec request_with_timeout(pid(), term(), non_neg_integer()) -> {ok, term()} | {error, timeout}.
-request_with_timeout(_TargetPid, _RequestMsg, _TimeoutMs) ->
-    {error, timeout}.
+%% Client API: sends {request, self(), RequestMsg} and waits up to TimeoutMs for {reply, RequestMsg, Result}
+request_with_timeout(TargetPid, RequestMsg, TimeoutMs) ->
+    %% Architectural Requirement:
+    %% Send request tuple, wait for reply matching RequestMsg within TimeoutMs,
+    %% return {ok, Result} or {error, timeout}.
+    ok.
 
-%% @doc Drains all pending messages from the current mailbox without blocking.
--spec flush_mailbox() -> [term()].
+%% Drains all messages currently in the mailbox without blocking (after 0)
 flush_mailbox() ->
-    [].
+    %% Architectural Requirement:
+    %% Tail-recursively drain all pending mailbox messages and return them in FIFO order.
+    ok.
 `,
       },
     ],
@@ -986,20 +960,25 @@ flush_loop(Acc) ->
     starterCode: `-module(priority_mailbox).
 -export([receive_urgent_first/1, request_with_timeout/3, flush_mailbox/0]).
 
-%% @doc Drains up to ExpectedCount messages prioritizing urgent payloads over normal.
--spec receive_urgent_first(non_neg_integer()) -> [term()].
-receive_urgent_first(_ExpectedCount) ->
-    [].
+%% Drains ExpectedCount messages, extracting {urgent, X} before {normal, Y}
+receive_urgent_first(ExpectedCount) ->
+    %% Architectural Requirement:
+    %% Drain up to ExpectedCount messages. For each, check {urgent, Payload} via after 0,
+    %% then fall back to {normal, Payload}. Return list of extracted payloads.
+    ok.
 
-%% @doc Dispatches RequestMsg to TargetPid and awaits correlated reply within TimeoutMs.
--spec request_with_timeout(pid(), term(), non_neg_integer()) -> {ok, term()} | {error, timeout}.
-request_with_timeout(_TargetPid, _RequestMsg, _TimeoutMs) ->
-    {error, timeout}.
+%% Client API: sends {request, self(), RequestMsg} and waits up to TimeoutMs for {reply, RequestMsg, Result}
+request_with_timeout(TargetPid, RequestMsg, TimeoutMs) ->
+    %% Architectural Requirement:
+    %% Send request tuple, wait for reply matching RequestMsg within TimeoutMs,
+    %% return {ok, Result} or {error, timeout}.
+    ok.
 
-%% @doc Drains all pending messages from the current mailbox without blocking.
--spec flush_mailbox() -> [term()].
+%% Drains all messages currently in the mailbox without blocking (after 0)
 flush_mailbox() ->
-    [].
+    %% Architectural Requirement:
+    %% Tail-recursively drain all pending mailbox messages and return them in FIFO order.
+    ok.
 `,
     solutionCode: `-module(priority_mailbox).
 -export([receive_urgent_first/1, request_with_timeout/3, flush_mailbox/0]).
@@ -1062,88 +1041,82 @@ The answer is **Tail-Recursive Process State Loops**. A long-running process mai
 ## Deep Concept Breakdown & Under the Hood
 
 ### 1. How Immutable Processes Hold State
-Consider an actor with an integer state representing target temperature in a climate control system:
+Consider an actor with an integer state:
 \`\`\`erlang
-loop(TargetTemp) ->
+loop(Count) ->
     receive
-        {adjust_target, Offset} ->
-            loop(TargetTemp + Offset);
-        {read_target, Caller} ->
-            Caller ! {current_target, TargetTemp},
-            loop(TargetTemp);
-        power_down ->
+        {increment, Delta} ->
+            loop(Count + Delta);
+        {get, Caller} ->
+            Caller ! {value, Count},
+            loop(Count);
+        stop ->
             ok
     end.
 \`\`\`
-1. When started with \`loop(20)\`, the process's stack frame contains \`TargetTemp = 20\`.
-2. When an \`{adjust_target, 2}\` message arrives, the process computes \`20 + 2 = 22\` and evaluates \`loop(22)\`.
-3. Because \`loop/1\` is in the **tail position** (the final expression of the clause), the BEAM executes the \`call_last\` opcode: it overwrites the current stack frame with \`TargetTemp = 22\` without pushing a new frame!
+1. When started with \`loop(0)\`, the process's stack frame contains \`Count = 0\`.
+2. When an \`{increment, 5}\` message arrives, the process computes \`0 + 5 = 5\` and evaluates \`loop(5)\`.
+3. Because \`loop/1\` is in the **tail position** (the final expression of the clause), the BEAM executes the \`call_last\` opcode: it overwrites the current stack frame with \`Count = 5\` without pushing a new frame!
 4. The actor can run for years, handling billions of state transitions, while consuming a constant **~2.5 KB** of stack memory!
 
 ### 2. The Client-Server Abstraction Barrier
 A critical software engineering discipline in Erlang is separating **Client API Functions** from **Internal Server Callbacks**:
-- **The Anti-Pattern (Leaky Abstraction):** Forcing callers outside the module to manually write \`Pid ! {adjust_target, 2}\` and \`Pid ! {read_target, self()}\`. If the internal tuple protocol ever changes, every single file in the codebase breaks!
+- **The Anti-Pattern (Leaky Abstraction):** Forcing callers outside the module to manually write \`Pid ! {increment, 5}\` and \`Pid ! {get, self()}\`. If the internal tuple protocol ever changes, every single file in the codebase breaks!
 - **The Erlang Pattern (Clean Abstraction Barrier):** Encapsulating both roles inside a single module:
-  - **Client API Functions (\`adjust/2\`, \`read/1\`):** Execute inside the **caller's process** (\`self()\` is the caller!).
+  - **Client API Functions (\`increment/2\`, \`get_value/1\`):** Execute inside the **caller's process** (\`self()\` is the caller!).
   - **Server Loop (\`loop/1\`):** Executes inside the **spawned actor process** (\`self()\` is the actor!).
 
 ### 3. Step-by-Step Message & Execution Flow
-1. **Asynchronous Cast (\`thermostat:adjust(Pid, 2)\`):**
-   - The caller evaluates \`Pid ! {adjust_target, 2}\` and returns \`ok\` immediately without blocking.
+1. **Asynchronous Cast (\`counter_actor:increment(Pid, 5)\`):**
+   - The caller evaluates \`Pid ! {increment, 5}\` and returns \`ok\` immediately without blocking.
    - The message arrives at the tail of \`Pid\`'s private mailbox.
-   - The actor process awakens, matches \`{adjust_target, Offset}\`, computes \`NextTemp = CurrentTemp + 2\`, and tail-calls \`loop(NextTemp)\`.
-2. **Synchronous Call (\`thermostat:read(Pid)\`):**
-   - The caller evaluates \`Pid ! {read_target, self()}\` and awaits a reply in a selective \`receive\` with a 1,000ms timeout guard.
-   - The actor process matches \`{read_target, Caller}\`, replies \`Caller ! {current_target, CurrentTemp}\`, and tail-calls \`loop(CurrentTemp)\`.
-   - The caller receives \`{current_target, T}\` and returns \`{ok, T}\`.
+   - The actor process awakens, matches \`{increment, Delta}\`, computes \`NextVal = CurrentVal + 5\`, and tail-calls \`loop(NextVal)\`.
+2. **Synchronous Call (\`counter_actor:get_value(Pid)\`):**
+   - The caller evaluates \`Pid ! {get, self()}\` and awaits a reply in a selective \`receive\` with a 1,000ms timeout guard.
+   - The actor process matches \`{get, Caller}\`, replies \`Caller ! {value, CurrentVal}\`, and tail-calls \`loop(CurrentVal)\`.
+   - The caller receives \`{value, V}\` and returns \`{ok, V}\`.
 
 > [!warning] Production Concurrency Trap: Forgetting Tail Position Breaks O(1) Memory
 > If you write \`io:format("Done~n"), loop(NextState)\` inside a clause, \`loop/1\` is STILL in tail position because \`io:format\` executes first. But if you write \`loop(NextState) + 1\`, the recursive call is NO LONGER in tail position! The BEAM must allocate a new stack frame for every single message, causing a memory exhaustion crash after a few thousand messages.
 
 ## Parallel Worked Example
 
-The following module implements a stateful token-bucket rate limiter actor maintaining available capacity:
+The following module implements a stateful bank vault actor maintaining a balance:
 
 \`\`\`erlang
--module(token_bucket).
--export([start/1, consume/2, refill/2, get_tokens/1, shutdown/1, loop/1]).
+-module(vault_actor).
+-export([start/1, deposit/2, get_balance/1, close/1, loop/1]).
 
 %% ── Client API (Executes in Caller Process) ───────────────────────────────────
-start(MaxTokens) ->
-    spawn(fun() -> loop(MaxTokens) end).
+start(InitialBalance) ->
+    spawn(fun() -> loop(InitialBalance) end).
 
-consume(Pid, Count) ->
-    Pid ! {consume, Count},
+deposit(Pid, Amount) when Amount > 0 ->
+    Pid ! {deposit, Amount},
     ok.
 
-refill(Pid, Count) ->
-    Pid ! {refill, Count},
-    ok.
-
-get_tokens(Pid) ->
-    Pid ! {fetch_tokens, self()},
+get_balance(Pid) ->
+    Pid ! {get_balance, self()},
     receive
-        {tokens_available, Tokens} ->
-            {ok, Tokens}
+        {balance, Balance} ->
+            {ok, Balance}
     after 1000 ->
         {error, timeout}
     end.
 
-shutdown(Pid) ->
-    Pid ! shutdown,
+close(Pid) ->
+    Pid ! close,
     ok.
 
 %% ── Server Loop (Executes in Actor Process) ───────────────────────────────────
-loop(Tokens) ->
+loop(Balance) ->
     receive
-        {consume, Count} ->
-            loop(max(0, Tokens - Count));
-        {refill, Count} ->
-            loop(Tokens + Count);
-        {fetch_tokens, Caller} ->
-            Caller ! {tokens_available, Tokens},
-            loop(Tokens);
-        shutdown ->
+        {deposit, Amount} ->
+            loop(Balance + Amount);
+        {get_balance, Caller} ->
+            Caller ! {balance, Balance},
+            loop(Balance);
+        close ->
             ok
     end.
 \`\`\`
@@ -1163,55 +1136,25 @@ loop(State) ->
 
 ## Assignment Specification
 
-Implement the stateful counter process in \`src/counter_actor.erl\`. The module must cleanly separate client API functions from internal actor server loops, exporting \`start/1\`, \`increment/2\`, \`decrement/2\`, \`get_value/1\`, \`stop/1\`, and \`loop/1\`.
+Implement \`src/counter_actor.erl\` exporting \`start/1\`, \`increment/2\`, \`decrement/2\`, \`get_value/1\`, \`stop/1\`, and \`loop/1\`:
 
-### 1. \`start/1\`
-- **Input**:
-  - \`InitialValue\`: An integer representing the baseline state of the counter.
-- **Behavior**: Spawns a concurrent process running \`loop/1\` initialized with \`InitialValue\`.
-- **Output**: Returns the \`pid()\` of the spawned counter actor.
-
-### 2. \`increment/2\`
-- **Input**:
-  - \`Pid\`: The process identifier of the target counter actor.
-  - \`Delta\`: An integer value to add to the counter state.
-- **Behavior**: Asynchronously casts an increment request tuple tagged with the atom \`increment\` and carrying \`Delta\` to \`Pid\`. Returns immediately without blocking.
-- **Output**: Returns the atom \`ok\`.
-
-### 3. \`decrement/2\`
-- **Input**:
-  - \`Pid\`: The process identifier of the target counter actor.
-  - \`Delta\`: An integer value to subtract from the counter state.
-- **Behavior**: Asynchronously casts a decrement request tuple tagged with the atom \`decrement\` and carrying \`Delta\` to \`Pid\`. Returns immediately without blocking.
-- **Output**: Returns the atom \`ok\`.
-
-### 4. \`get_value/1\`
-- **Input**:
-  - \`Pid\`: The process identifier of the target counter actor.
-- **Behavior**:
-  - Sends a synchronous query tuple tagged with the atom \`get\` containing the caller process identifier to \`Pid\`.
-  - Selectively awaits a 2-tuple reply tagged with the atom \`value\` containing the current integer counter value.
-  - Enforces a 1,000-millisecond timeout window.
-- **Output**:
-  - Returns \`{ok, Value}\` when the reply arrives within 1,000 milliseconds.
-  - Returns \`{error, timeout}\` upon expiration.
-
-### 5. \`stop/1\`
-- **Input**:
-  - \`Pid\`: The process identifier of the target counter actor.
-- **Behavior**: Asynchronously sends the termination signal atom \`stop\` to \`Pid\`.
-- **Output**: Returns the atom \`ok\`.
-
-### 6. \`loop/1\`
-- **Input**:
-  - \`CurrentVal\`: An integer representing the current accumulated state.
-- **Behavior**:
-  - Operates as a tail-recursive message receive loop within the spawned actor process.
-  - On receiving an \`increment\` tuple, computes the sum of the current state and delta, tail-recursing into \`loop/1\` with the new sum.
-  - On receiving a \`decrement\` tuple, computes the difference between current state and delta, tail-recursing into \`loop/1\` with the new difference.
-  - On receiving a \`get\` tuple, transmits a reply tuple tagged with \`value\` containing \`CurrentVal\` back to the requesting process, tail-recursing with \`CurrentVal\`.
-  - On receiving the atom \`stop\`, terminates the loop.
-- **Output**: Returns the atom \`ok\` upon termination.
+1. \`start(InitialValue) -> pid()\`:
+   - Spawns \`loop(InitialValue)\` and returns the newly spawned actor's PID.
+2. \`increment(Pid, Delta) -> ok\`:
+   - Asynchronously sends \`{increment, Delta}\` to \`Pid\` and returns \`ok\` immediately without waiting for a reply.
+3. \`decrement(Pid, Delta) -> ok\`:
+   - Asynchronously sends \`{decrement, Delta}\` to \`Pid\` and returns \`ok\` immediately.
+4. \`get_value(Pid) -> {ok, integer()} | {error, timeout}\`:
+   - Sends \`{get, self()}\` to \`Pid\`.
+   - Selectively waits up to 1,000ms for \`{value, Val}\`, returning \`{ok, Val}\` or \`{error, timeout}\`.
+5. \`stop(Pid) -> ok\`:
+   - Asynchronously sends \`stop\` to \`Pid\` and returns \`ok\`.
+6. \`loop(CurrentVal) -> ok\`:
+   - Tail-recursive receive loop handling:
+     - \`{increment, Delta}\` -> recurses to \`loop(CurrentVal + Delta)\`.
+     - \`{decrement, Delta}\` -> recurses to \`loop(CurrentVal - Delta)\`.
+     - \`{get, Caller}\` -> sends \`Caller ! {value, CurrentVal}\` and recurses to \`loop(CurrentVal)\`.
+     - \`stop\` -> exits loop and returns \`ok\`.
 
 ## Rules & Verification Constraints
 
@@ -1280,34 +1223,38 @@ Implement the stateful counter process in \`src/counter_actor.erl\`. The module 
         content: `-module(counter_actor).
 -export([start/1, increment/2, decrement/2, get_value/1, stop/1, loop/1]).
 
-%% @doc Spawns a new counter actor process initialized to InitialValue.
--spec start(integer()) -> pid().
-start(_InitialValue) ->
-    self().
-
-%% @doc Asynchronously casts an increment delta to the counter actor.
--spec increment(pid(), integer()) -> ok.
-increment(_Pid, _Delta) ->
+%% Spawns the counter actor with InitialValue
+start(InitialValue) ->
+    %% Architectural Requirement: Spawn loop(InitialValue) and return PID
     ok.
 
-%% @doc Asynchronously casts a decrement delta to the counter actor.
--spec decrement(pid(), integer()) -> ok.
-decrement(_Pid, _Delta) ->
+%% Client API: sends {increment, Delta} asynchronously
+increment(Pid, Delta) ->
+    %% Architectural Requirement: Send {increment, Delta} asynchronously, return ok
     ok.
 
-%% @doc Synchronously fetches the current value of the counter actor.
--spec get_value(pid()) -> {ok, integer()} | {error, timeout}.
-get_value(_Pid) ->
-    {error, timeout}.
-
-%% @doc Asynchronously signals the counter actor to terminate.
--spec stop(pid()) -> ok.
-stop(_Pid) ->
+%% Client API: sends {decrement, Delta} asynchronously
+decrement(Pid, Delta) ->
+    %% Architectural Requirement: Send {decrement, Delta} asynchronously, return ok
     ok.
 
-%% @doc Tail-recursive state handler maintaining CurrentVal across message dispatches.
--spec loop(integer()) -> ok.
-loop(_CurrentVal) ->
+%% Client API: sends {get, self()} and waits up to 1000ms for {value, Val}
+get_value(Pid) ->
+    %% Architectural Requirement: Send {get, self()}, receive {value, Val} with 1000ms timeout
+    ok.
+
+%% Client API: sends stop to the actor
+stop(Pid) ->
+    %% Architectural Requirement: Send stop, return ok
+    ok.
+
+%% Internal Actor Loop: tail-recursive message handler
+loop(CurrentVal) ->
+    %% Architectural Requirement:
+    %% Handle {increment, Delta} -> recurse with CurrentVal + Delta
+    %% Handle {decrement, Delta} -> recurse with CurrentVal - Delta
+    %% Handle {get, Caller} -> send {value, CurrentVal} to Caller, recurse with CurrentVal
+    %% Handle stop -> return ok
     ok.
 `,
       },
@@ -1357,34 +1304,38 @@ loop(CurrentVal) ->
     starterCode: `-module(counter_actor).
 -export([start/1, increment/2, decrement/2, get_value/1, stop/1, loop/1]).
 
-%% @doc Spawns a new counter actor process initialized to InitialValue.
--spec start(integer()) -> pid().
-start(_InitialValue) ->
-    self().
-
-%% @doc Asynchronously casts an increment delta to the counter actor.
--spec increment(pid(), integer()) -> ok.
-increment(_Pid, _Delta) ->
+%% Spawns the counter actor with InitialValue
+start(InitialValue) ->
+    %% Architectural Requirement: Spawn loop(InitialValue) and return PID
     ok.
 
-%% @doc Asynchronously casts a decrement delta to the counter actor.
--spec decrement(pid(), integer()) -> ok.
-decrement(_Pid, _Delta) ->
+%% Client API: sends {increment, Delta} asynchronously
+increment(Pid, Delta) ->
+    %% Architectural Requirement: Send {increment, Delta} asynchronously, return ok
     ok.
 
-%% @doc Synchronously fetches the current value of the counter actor.
--spec get_value(pid()) -> {ok, integer()} | {error, timeout}.
-get_value(_Pid) ->
-    {error, timeout}.
-
-%% @doc Asynchronously signals the counter actor to terminate.
--spec stop(pid()) -> ok.
-stop(_Pid) ->
+%% Client API: sends {decrement, Delta} asynchronously
+decrement(Pid, Delta) ->
+    %% Architectural Requirement: Send {decrement, Delta} asynchronously, return ok
     ok.
 
-%% @doc Tail-recursive state handler maintaining CurrentVal across message dispatches.
--spec loop(integer()) -> ok.
-loop(_CurrentVal) ->
+%% Client API: sends {get, self()} and waits up to 1000ms for {value, Val}
+get_value(Pid) ->
+    %% Architectural Requirement: Send {get, self()}, receive {value, Val} with 1000ms timeout
+    ok.
+
+%% Client API: sends stop to the actor
+stop(Pid) ->
+    %% Architectural Requirement: Send stop, return ok
+    ok.
+
+%% Internal Actor Loop: tail-recursive message handler
+loop(CurrentVal) ->
+    %% Architectural Requirement:
+    %% Handle {increment, Delta} -> recurse with CurrentVal + Delta
+    %% Handle {decrement, Delta} -> recurse with CurrentVal - Delta
+    %% Handle {get, Caller} -> send {value, CurrentVal} to Caller, recurse with CurrentVal
+    %% Handle stop -> return ok
     ok.
 `,
     solutionCode: `-module(counter_actor).
@@ -1490,92 +1441,73 @@ If a delayed reply from an earlier timed-out request arrives with an older refer
 
 ## Parallel Worked Example
 
-Consider a registered session sentinel that tracks active user leases and coordinates expiry checks:
+Consider a registered configuration store:
 
 \`\`\`erlang
--module(session_sentinel).
--export([bootstrap_sentinel/0, touch_session/2, check_lease/1, decommission/0, sentinel_loop/1]).
+-module(config_store).
+-export([start/0, set/2, get/1, stop/0, loop/1]).
 
-%% Registers the session sentinel under atom session_sentinel
-bootstrap_sentinel() ->
-    case whereis(session_sentinel) of
+start() ->
+    case whereis(?MODULE) of
         undefined ->
-            Pid = spawn(fun() -> sentinel_loop(#{}) end),
-            register(session_sentinel, Pid),
+            Pid = spawn(fun() -> loop(#{}) end),
+            register(?MODULE, Pid),
             {ok, Pid};
-        _ActivePid ->
+        _Pid ->
             {error, already_started}
     end.
 
-%% Updates or renews a user lease with a timestamp
-touch_session(UserId, LeaseDurationSec) ->
-    case whereis(session_sentinel) of
-        undefined ->
-            {error, not_running};
-        SentinelPid ->
+set(Key, Val) ->
+    case whereis(?MODULE) of
+        undefined -> {error, not_running};
+        Pid ->
             Ref = make_ref(),
-            SentinelPid ! {renew_lease, Ref, self(), UserId, LeaseDurationSec},
+            Pid ! {set, Ref, self(), Key, Val},
             receive
-                {lease_ack, Ref, ok} ->
-                    ok
-            after 1000 ->
-                {error, timeout}
+                {reply, Ref, ok} -> ok
+            after 1000 -> {error, timeout}
             end
     end.
 
-%% Queries lease status for a specific user
-check_lease(UserId) ->
-    case whereis(session_sentinel) of
-        undefined ->
-            {error, not_running};
-        SentinelPid ->
+get(Key) ->
+    case whereis(?MODULE) of
+        undefined -> {error, not_running};
+        Pid ->
             Ref = make_ref(),
-            SentinelPid ! {query_lease, Ref, self(), UserId},
+            Pid ! {get, Ref, self(), Key},
             receive
-                {lease_ack, Ref, Status} ->
-                    Status
-            after 1000 ->
-                {error, timeout}
+                {reply, Ref, Res} -> Res
+            after 1000 -> {error, timeout}
             end
     end.
 
-%% Cleanly halts the sentinel and releases registration
-decommission() ->
-    case whereis(session_sentinel) of
-        undefined ->
-            {error, not_running};
-        SentinelPid ->
+stop() ->
+    case whereis(?MODULE) of
+        undefined -> {error, not_running};
+        Pid ->
             Ref = make_ref(),
-            SentinelPid ! {halt_sentinel, Ref, self()},
+            Pid ! {stop, Ref, self()},
             receive
-                {lease_ack, Ref, ok} ->
-                    ok
-            after 1000 ->
-                {error, timeout}
+                {reply, Ref, ok} -> ok
+            after 1000 -> {error, timeout}
             end
     end.
 
-sentinel_loop(LeaseTable) ->
+loop(StateMap) ->
     receive
-        {renew_lease, Ref, CallerPid, UserId, Duration} ->
-            Expiry = erlang:monotonic_time(second) + Duration,
-            CallerPid ! {lease_ack, Ref, ok},
-            sentinel_loop(maps:put(UserId, Expiry, LeaseTable));
-        {query_lease, Ref, CallerPid, UserId} ->
-            Reply = case maps:find(UserId, LeaseTable) of
-                {ok, Expiry} ->
-                    Now = erlang:monotonic_time(second),
-                    if Expiry > Now -> {active, Expiry - Now};
-                       true -> expired
-                    end;
-                error ->
-                    unregistered
+        {set, Ref, From, Key, Val} ->
+            From ! {reply, Ref, ok},
+            loop(maps:put(Key, Val, StateMap));
+        {get, Ref, From, Key} ->
+            Result = case maps:find(Key, StateMap) of
+                {ok, Value} -> {ok, Value};
+                error -> {error, not_found}
             end,
-            CallerPid ! {lease_ack, Ref, Reply},
-            sentinel_loop(LeaseTable);
-        {halt_sentinel, Ref, CallerPid} ->
-            unregister(session_sentinel),
-            CallerPid ! {lease_ack, Ref, ok},
+            From ! {reply, Ref, Result},
+            loop(StateMap);
+        {stop, Ref, From} ->
+            unregister(?MODULE),
+            From ! {reply, Ref, ok},
             ok
     end.
 \`\`\`
@@ -1596,67 +1528,22 @@ make_ref() -> reference()
 
 ## Assignment Specification
 
-Implement the locally registered key-value actor in \`src/named_kv_actor.erl\`. The actor must register under the atom \`named_kv_actor\`, safely guard all calls against missing registrations, correlate requests with unique references, and export \`start_registered/0\`, \`put/2\`, \`get/1\`, \`stop/0\`, and \`loop/1\`.
+Implement \`src/named_kv_actor.erl\` registered under atom \`named_kv_actor\`:
 
-### 1. \`start_registered/0\`
-- **Input**: None.
-- **Behavior**:
-  - Inspects the local registry for an existing registration under \`named_kv_actor\`.
-  - If the name is already bound to a live process, returns an error.
-  - If no process is registered under \`named_kv_actor\`, spawns a new process executing \`loop/1\` with an empty map (\`#{}\`), registers that process under \`named_kv_actor\`, and returns success.
-- **Output**:
-  - Returns \`{ok, Pid}\` on successful spawn and registration.
-  - Returns \`{error, already_started}\` if the actor is already registered.
-
-### 2. \`put/2\`
-- **Input**:
-  - \`Key\`: An arbitrary Erlang term.
-  - \`Value\`: An arbitrary Erlang term.
-- **Behavior**:
-  - Verifies whether \`named_kv_actor\` is currently registered before sending. If unregistered, aborts without crashing.
-  - Generates a unique 128-bit request reference token using \`make_ref/0\`.
-  - Sends a synchronous storage request carrying the reference, the caller's PID (\`self()\`), \`Key\`, and \`Value\` to the registered actor.
-  - Selectively awaits a correlated reply carrying the matching reference token with a 1,000-millisecond timeout.
-- **Output**:
-  - Returns \`ok\` on successful write.
-  - Returns \`{error, not_running}\` if \`named_kv_actor\` is not currently registered.
-  - Returns \`{error, timeout}\` if no reply is received within 1,000 milliseconds.
-
-### 3. \`get/1\`
-- **Input**:
-  - \`Key\`: An arbitrary Erlang term to look up.
-- **Behavior**:
-  - Verifies whether \`named_kv_actor\` is registered. If unregistered, aborts safely.
-  - Generates a unique request reference token via \`make_ref/0\`.
-  - Sends a synchronous lookup request carrying the reference, caller PID, and \`Key\` to the actor.
-  - Selectively awaits a correlated reply carrying the matching reference token with a 1,000-millisecond timeout.
-- **Output**:
-  - Returns \`{ok, Value}\` if the key exists in the actor's map.
-  - Returns \`{error, not_found}\` if the key is not present in the map.
-  - Returns \`{error, not_running}\` if the actor is not registered.
-  - Returns \`{error, timeout}\` if the request expires after 1,000 milliseconds.
-
-### 4. \`stop/0\`
-- **Input**: None.
-- **Behavior**:
-  - Verifies whether \`named_kv_actor\` is registered. If unregistered, returns an error.
-  - Generates a unique reference token via \`make_ref/0\`.
-  - Sends a termination request with the reference and caller PID to the actor.
-  - Awaits an acknowledgment reply carrying the matching reference.
-- **Output**:
-  - Returns \`ok\` upon confirmed termination.
-  - Returns \`{error, not_running}\` if the actor is not registered.
-  - Returns \`{error, timeout}\` if no reply is received within 1,000 milliseconds.
-
-### 5. \`loop/1\`
-- **Input**:
-  - \`Map\`: A map holding key-value pairs.
-- **Behavior**:
-  - Operates as a tail-recursive message receive loop inside the spawned actor.
-  - On receiving a \`put\` request with reference, caller PID, key, and value: replies with a correlated acknowledgment to the caller, storing the pair in \`Map\` and tail-recursing.
-  - On receiving a \`get\` request with reference, caller PID, and key: looks up the key in \`Map\`, replies with \`{ok, Value}\` or \`{error, not_found}\` correlated by the reference, and tail-recursing with \`Map\`.
-  - On receiving a \`stop\` request with reference and caller PID: unregisters the atom \`named_kv_actor\` from the node registry, replies with a correlated acknowledgment to the caller, and terminates cleanly.
-- **Output**: Returns \`ok\` upon termination.
+1. \`start_registered() -> {ok, pid()} | {error, already_started}\`:
+   - Checks if \`named_kv_actor\` is already registered via \`whereis/1\`. If so, returns \`{error, already_started}\`.
+   - If \`undefined\`, spawns \`loop(#{}) \`, registers it under \`named_kv_actor\`, and returns \`{ok, Pid}\`.
+2. \`put(Key, Value) -> ok | {error, not_running} | {error, timeout}\`:
+   - Safely checks \`whereis(named_kv_actor)\`. If \`undefined\`, returns \`{error, not_running}\`.
+   - Generates \`Ref = make_ref()\`, sends \`{put, Ref, self(), Key, Value}\`, and receives \`{reply, Ref, ok}\` with a 1,000ms timeout.
+3. \`get(Key) -> {ok, Value} | {error, not_found} | {error, not_running} | {error, timeout}\`:
+   - Safely checks \`whereis(named_kv_actor)\`. If \`undefined\`, returns \`{error, not_running}\`.
+   - Generates \`Ref = make_ref()\`, sends \`{get, Ref, self(), Key}\`, and receives \`{reply, Ref, Result}\` with a 1,000ms timeout.
+4. \`stop() -> ok | {error, not_running} | {error, timeout}\`:
+   - Safely checks \`whereis(named_kv_actor)\`. If \`undefined\`, returns \`{error, not_running}\`.
+   - Generates \`Ref = make_ref()\`, sends \`{stop, Ref, self()}\`, and receives \`{reply, Ref, ok}\`.
+5. \`loop(Map) -> ok\`:
+   - Handles \`put\`, \`get\`, and \`stop\` (unregistering the name before exiting).
 
 ## Rules & Verification Constraints
 
@@ -1749,29 +1636,29 @@ named_service ! {ping, self()}. %% CRASHES sender with badarg!`,
         content: `-module(named_kv_actor).
 -export([start_registered/0, put/2, get/1, stop/0, loop/1]).
 
-%% @doc Spawns and registers the key-value actor under atom named_kv_actor.
--spec start_registered() -> {ok, pid()} | {error, already_started}.
+%% Registers actor under atom named_kv_actor if not already registered
 start_registered() ->
-    {error, already_started}.
+    %% Architectural Requirement: Check whereis, spawn loop(#{}) and register if undefined
+    ok.
 
-%% @doc Stores Key and Value in the registered actor using reference correlation.
--spec put(term(), term()) -> ok | {error, not_running} | {error, timeout}.
-put(_Key, _Value) ->
-    {error, not_running}.
+%% Client API: writes Key -> Value via registered name with make_ref() correlation
+put(Key, Value) ->
+    %% Architectural Requirement: Check whereis, generate Ref, send request, wait for reply
+    ok.
 
-%% @doc Retrieves Value associated with Key using reference correlation.
--spec get(term()) -> {ok, term()} | {error, not_found} | {error, not_running} | {error, timeout}.
-get(_Key) ->
-    {error, not_running}.
+%% Client API: reads Key via registered name with make_ref() correlation
+get(Key) ->
+    %% Architectural Requirement: Check whereis, generate Ref, send request, wait for reply
+    ok.
 
-%% @doc Signals the registered actor to unregister and terminate cleanly.
--spec stop() -> ok | {error, not_running} | {error, timeout}.
+%% Client API: stops actor and unregisters name
 stop() ->
-    {error, not_running}.
+    %% Architectural Requirement: Check whereis, send stop, unregister name
+    ok.
 
-%% @doc Tail-recursive loop maintaining Map state across correlated operations.
--spec loop(map()) -> ok.
-loop(_Map) ->
+%% Internal Actor Loop holding Map state
+loop(Map) ->
+    %% Architectural Requirement: Handle put, get, and stop messages using Ref matching
     ok.
 `,
       },
@@ -1828,12 +1715,12 @@ stop() ->
 
 loop(Map) ->
     receive
-        {put, Ref, From, Key, Value} ->
+        {put, Ref, From, K, V} ->
             From ! {reply, Ref, ok},
-            loop(maps:put(Key, Value, Map));
-        {get, Ref, From, Key} ->
-            Result = case maps:find(Key, Map) of
-                {ok, Value} -> {ok, Value};
+            loop(maps:put(K, V, Map));
+        {get, Ref, From, K} ->
+            Result = case maps:find(K, Map) of
+                {ok, Val} -> {ok, Val};
                 error -> {error, not_found}
             end,
             From ! {reply, Ref, Result},
@@ -1848,29 +1735,29 @@ loop(Map) ->
     starterCode: `-module(named_kv_actor).
 -export([start_registered/0, put/2, get/1, stop/0, loop/1]).
 
-%% @doc Spawns and registers the key-value actor under atom named_kv_actor.
--spec start_registered() -> {ok, pid()} | {error, already_started}.
+%% Registers actor under atom named_kv_actor if not already registered
 start_registered() ->
-    {error, already_started}.
+    %% Architectural Requirement: Check whereis, spawn loop(#{}) and register if undefined
+    ok.
 
-%% @doc Stores Key and Value in the registered actor using reference correlation.
--spec put(term(), term()) -> ok | {error, not_running} | {error, timeout}.
-put(_Key, _Value) ->
-    {error, not_running}.
+%% Client API: writes Key -> Value via registered name with make_ref() correlation
+put(Key, Value) ->
+    %% Architectural Requirement: Check whereis, generate Ref, send request, wait for reply
+    ok.
 
-%% @doc Retrieves Value associated with Key using reference correlation.
--spec get(term()) -> {ok, term()} | {error, not_found} | {error, not_running} | {error, timeout}.
-get(_Key) ->
-    {error, not_running}.
+%% Client API: reads Key via registered name with make_ref() correlation
+get(Key) ->
+    %% Architectural Requirement: Check whereis, generate Ref, send request, wait for reply
+    ok.
 
-%% @doc Signals the registered actor to unregister and terminate cleanly.
--spec stop() -> ok | {error, not_running} | {error, timeout}.
+%% Client API: stops actor and unregisters name
 stop() ->
-    {error, not_running}.
+    %% Architectural Requirement: Check whereis, send stop, unregister name
+    ok.
 
-%% @doc Tail-recursive loop maintaining Map state across correlated operations.
--spec loop(map()) -> ok.
-loop(_Map) ->
+%% Internal Actor Loop holding Map state
+loop(Map) ->
+    %% Architectural Requirement: Handle put, get, and stop messages using Ref matching
     ok.
 `,
     solutionCode: `-module(named_kv_actor).
@@ -1924,12 +1811,12 @@ stop() ->
 
 loop(Map) ->
     receive
-        {put, Ref, From, Key, Value} ->
+        {put, Ref, From, K, V} ->
             From ! {reply, Ref, ok},
-            loop(maps:put(Key, Value, Map));
-        {get, Ref, From, Key} ->
-            Result = case maps:find(Key, Map) of
-                {ok, Value} -> {ok, Value};
+            loop(maps:put(K, V, Map));
+        {get, Ref, From, K} ->
+            Result = case maps:find(K, Map) of
+                {ok, Val} -> {ok, Val};
                 error -> {error, not_found}
             end,
             From ! {reply, Ref, Result},

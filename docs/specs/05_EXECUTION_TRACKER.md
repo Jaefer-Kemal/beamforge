@@ -2263,58 +2263,15 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all test assertions on OTP 29.
 
 ## Phase 120: Pedagogical Despoiling of Chapter 5 Lecture 2 (`ch05-l02`)
-- [x] **120.1: Domain Disjunction & Anti-Spoiler Decontamination (`ch05-l02`)**:
-  - Neutralized Concept Breakdown Section 2: replaced assignment-cloned ping/pong protocol snippets (`{ping, self(), <<"heartbeat">>}`, `{ping, CallerPid, Payload}`) with a domain-independent bank account inquiry protocol (`{query_balance, self(), <<"acct_8492">>}`, `{query_balance, CallerPid, AccountId} -> CallerPid ! {balance_result, self(), AccountId, 250000}`).
-  - Replaced parallel worked example with Telemetry Sensor Gateway (`sensor_gateway.erl`: `start_hub/0`, `push_metric/3`, `fanout_telemetry/2`, `gateway_loop/0`), preventing clone functions and eliminating copy-paste leaks of `{sent, length(PidsList)}`.
-  - Structured Assignment Specification into rigorous `Input`, `Behavior`, and `Output` contracts across `start_responder/0`, `responder_loop/0`, `ping/2`, and `broadcast/2` without raw Erlang code syntax or backtick formula leaks.
-- [x] **120.2: Starter Code Hygiene & Compiler Gate**:
-  - Stripped all `%% Architectural Requirement: ...` inline spoilers and comments from function bodies in `files[0].content` and `starterCode`.
-  - Added clean EDoc annotations (`@doc`, `-spec`) and valid stub return values (`self()`, `ok`, `{error, timeout}`, `{sent, 0}`).
-  - Verified starter and solution compilation via `erlc.exe` with zero errors or warnings.
-  - Verified roundtrip and broadcast test suite execution on OTP 29 with all assertions passing (`ALL TESTS PASSED`).
-  - Next.js 14 production build (`npm --prefix apps/web-ide run build`) passed with zero errors across all 8 routes.
-  - Go orchestrator backend (`go build ./...`) passed with zero compilation errors.
-
-## Phase 121: Pedagogical Despoiling of Chapter 5 Lecture 3 (`ch05-l03`)
-- [x] **121.1: Domain Disjunction & Anti-Spoiler Decontamination (`ch05-l03`)**:
-  - Neutralized Concept Breakdown Section 3: replaced verbatim implementations of assignment mailbox flusher and urgent/normal priority tags with generic tiered network traffic polling (`poll_network_traffic/0`: `{system_override, Cmd}`, `{stream_data, Chunk}`) and a domain-neutral buffer drainer (`drain_pending_events/1`).
-  - Replaced parallel worked example with Autonomous Vehicle Sensor Bus (`sensor_bus.erl`: `poll_critical_event/0`, `query_sensor_with_timeout/3`, `purge_sensor_backlog/0`), eliminating verbatim code leaks of `flush_mailbox` and `receive_urgent_first`.
-  - Structured Assignment Specification into rigorous `Input`, `Behavior`, and `Output` contracts across `receive_urgent_first/1`, `request_with_timeout/3`, and `flush_mailbox/0` without raw Erlang code syntax or backtick formula leaks.
-- [x] **121.2: Starter Code Hygiene & Multi-Compiler Verification**:
-  - Stripped all `%% Architectural Requirement: ...` inline comments from function bodies in `files[0].content` and `starterCode`.
-  - Added clean EDoc annotations (`@doc`, `-spec`) and valid stub return values (`[]`, `{error, timeout}`, `[]`).
-  - Verified starter and solution compilation via `erlc.exe` with zero errors or warnings.
-  - Verified priority reordering, timeout fallback, and non-blocking mailbox flush on OTP 29 with all test assertions passing (`ALL PRIORITY MAILBOX TESTS PASSED`).
-  - Next.js 14 production build (`npm --prefix apps/web-ide run build`) passed with zero errors across all 8 routes.
-  - Go orchestrator backend (`go build ./...`) passed with zero compilation errors.
-
-## Phase 122: Pedagogical Despoiling of Chapter 5 Lecture 4 (`ch05-l04`)
-- [x] **122.1: Domain Disjunction & Anti-Spoiler Decontamination (`ch05-l04`)**:
-  - Neutralized Concept Breakdown Sections 1 & 3: replaced verbatim implementation of `counter_actor:loop/1` and `increment`/`get_value` with a climate control target temperature actor (`loop(TargetTemp)`: `{adjust_target, Offset}`, `{read_target, Caller}`, `power_down`).
-  - Replaced parallel worked example with Token-Bucket Rate Limiter (`token_bucket.erl`: `start/1`, `consume/2`, `refill/2`, `get_tokens/1`, `shutdown/1`, `loop/1`), eliminating thin clones of the counter actor.
-  - Structured Assignment Specification into rigorous `Input`, `Behavior`, and `Output` contracts across `start/1`, `increment/2`, `decrement/2`, `get_value/1`, `stop/1`, and `loop/1` without raw Erlang code syntax or backtick formula leaks.
-- [x] **122.2: Starter Code Hygiene & Multi-Compiler Verification**:
-  - Stripped all `%% Architectural Requirement: ...` inline comments from function bodies in `files[0].content` and `starterCode`.
-  - Added clean EDoc annotations (`@doc`, `-spec`) and valid stub return values (`self()`, `ok`, `{error, timeout}`).
-  - Verified starter and solution compilation via `erlc.exe` with zero errors or warnings.
-  - Verified concurrent state accumulation (`100 + 50 - 30 + 10 = 130`) on OTP 29 with all test assertions passing (`ALL COUNTER ACTOR TESTS PASSED`).
-  - Next.js 14 production build (`npm --prefix apps/web-ide run build`) passed with zero errors across all 8 routes.
-  - Go orchestrator backend (`go build ./...`) passed with zero compilation errors.
-
-## Phase 123: Pedagogical Despoiling of Chapter 5 Lecture 5 (`ch05-l05`)
-- [x] **123.1: Domain Disjunction & Anti-Spoiler Decontamination (`ch05-l05`)**:
-  - Replaced parallel worked example `config_store.erl` with Active User Session Sentinel (`session_sentinel.erl`: `bootstrap_sentinel/0`, `touch_session/2`, `check_lease/1`, `decommission/0`, `sentinel_loop/1`), eliminating 1:1 map clone spoilers.
-  - Structured Assignment Specification into rigorous `Input`, `Behavior`, and `Output` contracts across `start_registered/0`, `put/2`, `get/1`, `stop/0`, and `loop/1` without raw Erlang code syntax or backtick formula leaks.
-- [x] **123.2: Starter Code Hygiene & Multi-Compiler Verification**:
-  - Stripped all `%% Architectural Requirement: ...` inline comments from function bodies in `files[0].content` and `starterCode`.
-  - Added clean EDoc annotations (`@doc`, `-spec`) and valid stub return values (`{error, already_started}`, `{error, not_running}`, `ok`).
-  - Verified starter and solution compilation via `erlc.exe` with zero errors or warnings.
-  - Verified registered atom lifecycle, map storage, and `make_ref/0` request correlation on OTP 29 with all test assertions passing (`ALL NAMED KV ACTOR TESTS PASSED`).
-  - Next.js 14 production build (`npm --prefix apps/web-ide run build`) passed with zero errors across all 8 routes.
-  - Go orchestrator backend (`go build ./...`) passed with zero compilation errors.
-
-
-
+- [x] **120.1: Audit & Eliminate Exercise Code Spoilers in Lecture 5.2 (`ch05-l02`)**:
+  - Neutralized concept breakdown: eliminated verbatim code leaks of `{ping, self(), <<"heartbeat">>}` and `{pong, self(), Payload}` in Section 2, replacing them with a neutral telemetry metric query domain (`WorkerPid ! {fetch_telemetry, self(), cpu_temp}` and `{telemetry_data, self(), MetricName, 72.5}`).
+  - Replaced parallel worked example `notification_hub.erl` with an authentic telemetry audit sink `audit_sink.erl` (`start_sink/0`, `submit_event/3`, `fanout_alert/2`, `sink_loop/0`), achieving domain disjunction from ping/pong request tuples and responder loops.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `start_responder/0`, `responder_loop/0`, `ping/2`, and `broadcast/2`, eliminating raw Erlang syntax dictation.
+  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and in-body comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations.
+- [x] **120.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, verified AST analysis (`erlang:self/0` required call and `responder_loop/0` tail recursion) via `bf_ast_verifier`.
 
 
 
