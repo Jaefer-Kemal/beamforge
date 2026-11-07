@@ -2339,6 +2339,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 3 test stages (`S1_Ast` try_catch construct audit, `S2_DomainChecks` payment validation error/throw/exit mappings, and `S3_TriggerClass` direct exception raising verification).
 
+## Phase 128: Pedagogical Despoiling of Chapter 6 Lecture 2 (`ch06-l02`)
+- [x] **128.1: Audit & Eliminate Exercise Code Spoilers in Lecture 6.2 (`ch06-l02`)**:
+  - Neutralized concept breakdown: eliminated the verbatim leaked `validate_checkout` pipeline calling `validate_email`, `check_amount`, and `safe_divide` from Section 2, and replaced the `domain_validator:check_amount` leak from Section 1 with a neutral order validation pipeline.
+  - Replaced parallel worked example `profile_validator.erl` with an authentic network interface configuration gate `network_interface_validator.erl` (`safe_bandwidth_split/2`, `check_mtu/1`, `validate_mac_address/1`, `configure_interface_input/3`), achieving domain disjunction while demonstrating tagged tuple error handling, numeric validation guards, binary format matching, and pipeline composition.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `safe_divide/2`, `check_amount/1`, `validate_email/1`, and `process_checkout_input/3`, eliminating raw guard syntax dictation.
+  - Refactored starter code doc comments: removed all in-body pseudocode lines from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+- [x] **128.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 3 test stages (`S1_SafeDivideAndAmount` division and integer checks, `S2_ValidateEmail` binary email parsing, and `S3_CheckoutPipeline` short-circuit validation pipeline).
+
+
 
 
 

@@ -410,7 +410,7 @@ In Erlang, the community established a clear, unambiguous **Golden Rule of API D
 When a function returns \`{ok, Result} | {error, Reason}\`, callers cannot accidentally ignore failures. The caller naturally uses pattern matching:
 
 \`\`\`erlang
-case domain_validator:check_amount(UserInput) of
+case payment_gateway:validate_amount(UserInput) of
     {ok, ValidAmount} ->
         proceed_with_charge(ValidAmount);
     {error, Reason} ->
@@ -418,25 +418,28 @@ case domain_validator:check_amount(UserInput) of
 end
 \`\`\`
 
-### 2. Composing Validation Pipelines with \`case\` or Local \`throw\`
-When an operation requires multiple sequential validations (e.g., validating an email, checking a balance, and splitting a total across participants), nested \`case ... of\` ladders can become verbose.
-
-Erlang engineers frequently use a clean pipeline pattern where helper functions return tagged tuples, or an internal private helper uses \`throw\` inside a localized \`try\` block to short-circuit upon the first validation failure:
+### 2. Composing Validation Pipelines with \`case\`
+When an operation requires multiple sequential validations (such as validating user credentials, verifying inventory availability, and calculating final shipping fees), nested \`case ... of\` ladders ensure that each step verifies prerequisites before subsequent calculations proceed:
 
 \`\`\`erlang
-validate_checkout(Email, Total, Splits) ->
-    try
-        ValidEmail = unwrap(validate_email(Email)),
-        ValidTotal = unwrap(check_amount(Total)),
-        ValidShare = unwrap(safe_divide(ValidTotal, Splits)),
-        {ok, #{email => ValidEmail, share => ValidShare}}
-    catch
-        throw:{validation_error, Reason} ->
-            {error, Reason}
+%% Idiomatic nested case composition with early return on error:
+execute_order(InputData) ->
+    case validate_credentials(InputData) of
+        {ok, User} ->
+            case check_inventory(InputData) of
+                {ok, Item} ->
+                    case calculate_shipping(User, Item) of
+                        {ok, Total} ->
+                            {ok, #{user => User, total => Total}};
+                        {error, ShippingErr} ->
+                            {error, ShippingErr}
+                    end;
+                {error, InventoryErr} ->
+                    {error, InventoryErr}
+            end;
+        {error, AuthErr} ->
+            {error, AuthErr}
     end.
-
-unwrap({ok, Val}) -> Val;
-unwrap({error, Reason}) -> throw({validation_error, Reason}).
 \`\`\`
 
 > [!warning] Fault-Tolerance Trap: Never Crash on User Input
@@ -444,54 +447,120 @@ unwrap({error, Reason}) -> throw({validation_error, Reason}).
 
 ## Parallel Worked Example
 
-Consider a user profile updater validating username and age:
+The following module configures and validates virtual network interfaces, verifying MAC formatting and bandwidth channels with safe return tuples:
 
 \`\`\`erlang
--module(profile_validator).
--export([check_age/1, check_username/1, create_profile/2]).
+-module(network_interface_validator).
+-export([
+    safe_bandwidth_split/2,
+    check_mtu/1,
+    validate_mac_address/1,
+    configure_interface_input/3
+]).
 
-check_age(Age) when is_integer(Age), Age >= 18 -> {ok, Age};
-check_age(Age) when is_integer(Age)            -> {error, under_age};
-check_age(_)                                   -> {error, invalid_age_type}.
+%% @doc Divides total bandwidth in Mbps safely across virtual channels.
+safe_bandwidth_split(TotalMbps, Channels) when is_number(TotalMbps), is_number(Channels) ->
+    if
+        Channels == 0 -> {error, zero_channels};
+        true          -> {ok, TotalMbps / Channels}
+    end;
+safe_bandwidth_split(_Total, _Channels) ->
+    {error, non_numeric}.
 
-check_username(Name) when is_binary(Name), byte_size(Name) >= 3 -> {ok, Name};
-check_username(Name) when is_binary(Name)                       -> {error, username_too_short};
-check_username(_)                                               -> {error, invalid_username_type}.
+%% @doc Validates integer MTU (Maximum Transmission Unit) within standard bounds.
+check_mtu(Mtu) when is_integer(Mtu) ->
+    if
+        Mtu >= 576 andalso Mtu =< 9000 -> {ok, Mtu};
+        true                           -> {error, invalid_mtu_range}
+    end;
+check_mtu(_Other) ->
+    {error, invalid_type}.
 
-create_profile(Name, Age) ->
-    case check_username(Name) of
-        {ok, ValidName} ->
-            case check_age(Age) of
-                {ok, ValidAge} ->
-                    {ok, #{username => ValidName, age => ValidAge}};
-                {error, AgeErr} ->
-                    {error, AgeErr}
+%% @doc Validates a binary MAC address representation containing colon delimiters.
+validate_mac_address(MacBin) when is_binary(MacBin) ->
+    case binary:split(MacBin, <<":">>, [global]) of
+        Parts when length(Parts) =:= 6 ->
+            case lists:all(fun(P) -> byte_size(P) =:= 2 end, Parts) of
+                true  -> {ok, MacBin};
+                false -> {error, invalid_mac}
             end;
-        {error, NameErr} ->
-            {error, NameErr}
+        _ ->
+            {error, invalid_mac}
+    end;
+validate_mac_address(_Other) ->
+    {error, invalid_mac}.
+
+%% @doc Coordinates validation of interface parameters with short-circuit failure.
+configure_interface_input(MacBin, TotalMbps, Channels) ->
+    case validate_mac_address(MacBin) of
+        {ok, ValidMac} ->
+            case safe_bandwidth_split(TotalMbps, Channels) of
+                {ok, ChannelRate} ->
+                    {ok, #{mac => ValidMac, channel_rate => ChannelRate}};
+                {error, SplitErr} ->
+                    {error, SplitErr}
+            end;
+        {error, MacErr} ->
+            {error, MacErr}
     end.
+\`\`\`
+
+## Official Erlang Docs & Function Reference
+
+\`\`\`erlang
+%% BIFs: binary (stdlib)
+binary:split(Subject, Pattern) -> [binary()]
+binary:split(Subject, Pattern, Options) -> [binary()]
+binary:match(Subject, Pattern) -> {Pos, Len} | nomatch
 \`\`\`
 
 ## Assignment Specification
 
 Implement \`src/domain_validator.erl\` exporting \`safe_divide/2\`, \`check_amount/1\`, \`validate_email/1\`, and \`process_checkout_input/3\`:
 
-1. \`safe_divide(Numerator, Denominator)\`:
-   - If \`not (is_number(Numerator) andalso is_number(Denominator))\` -> returns \`{error, non_numeric}\`.
-   - If \`Denominator == 0\` -> returns \`{error, division_by_zero}\`.
-   - Otherwise -> returns \`{ok, Numerator / Denominator}\`.
-2. \`check_amount(Amount)\`:
-   - If \`is_integer(Amount) andalso Amount > 0\` -> returns \`{ok, Amount}\`.
-   - If \`is_integer(Amount) andalso Amount =< 0\` -> returns \`{error, non_positive_amount}\`.
-   - Otherwise -> returns \`{error, invalid_type}\`.
-3. \`validate_email(EmailBin)\`:
-   - Checks that \`EmailBin\` is a binary containing exactly one \`@\` symbol with non-empty username and domain parts, and that the domain contains at least one dot (\`.\`).
-   - If valid -> returns \`{ok, EmailBin}\`.
-   - If invalid or not a binary -> returns \`{error, invalid_email}\`.
-4. \`process_checkout_input(EmailBin, TotalAmount, SplitCount)\`:
-   - Validates all three parameters using the helpers above.
-   - If any validation fails, immediately returns \`{error, Reason}\` for the first failing field (order: email first, amount second, split count third).
-   - If all succeed -> returns \`{ok, #{email => EmailBin, per_person => Share}}\`.
+### 1. \`safe_divide/2\`
+- **Input**: \`Numerator\` (number), \`Denominator\` (number).
+- **Behavior**: Safely divides \`Numerator\` by \`Denominator\`.
+  - If either argument is not numeric, returns \`{error, non_numeric}\`.
+  - If \`Denominator == 0\`, returns \`{error, division_by_zero}\`.
+  - If valid, returns \`{ok, Numerator / Denominator}\` (float result).
+- **Examples**:
+  - \`domain_validator:safe_divide(100, 4)\` returns \`{ok, 25.0}\`.
+  - \`domain_validator:safe_divide(10, 0)\` returns \`{error, division_by_zero}\`.
+  - \`domain_validator:safe_divide("10", 2)\` returns \`{error, non_numeric}\`.
+
+### 2. \`check_amount/1\`
+- **Input**: \`Amount\` (integer).
+- **Behavior**: Verifies that an amount is a strictly positive integer.
+  - If \`Amount\` is an integer $> 0$, returns \`{ok, Amount}\`.
+  - If \`Amount\` is an integer $\le 0$, returns \`{error, non_positive_amount}\`.
+  - If \`Amount\` is not an integer, returns \`{error, invalid_type}\`.
+- **Examples**:
+  - \`domain_validator:check_amount(500)\` returns \`{ok, 500}\`.
+  - \`domain_validator:check_amount(-50)\` returns \`{error, non_positive_amount}\`.
+  - \`domain_validator:check_amount(<<"500">>)\` returns \`{error, invalid_type}\`.
+
+### 3. \`validate_email/1\`
+- **Input**: \`EmailBin\` (binary).
+- **Behavior**: Verifies that \`EmailBin\` contains a username, exactly one \`@\` character, and a domain containing at least one dot (\`.\`).
+  - If valid, returns \`{ok, EmailBin}\`.
+  - If not a binary, missing \`@\`, having empty user or domain parts, or domain lacking a dot, returns \`{error, invalid_email}\`.
+- **Examples**:
+  - \`domain_validator:validate_email(<<"alice@beamforge.org">>)\` returns \`{ok, <<"alice@beamforge.org">>}\`.
+  - \`domain_validator:validate_email(<<"noatsign.com">>)\` returns \`{error, invalid_email}\`.
+  - \`domain_validator:validate_email(<<"user@nodot">>)\` returns \`{error, invalid_email}\`.
+
+### 4. \`process_checkout_input/3\`
+- **Input**: \`EmailBin\` (binary), \`TotalAmount\` (integer), \`SplitCount\` (number).
+- **Behavior**: Coordinates checkout input validation in strict order:
+  1. Validates \`EmailBin\` with \`validate_email/1\`.
+  2. Validates \`TotalAmount\` with \`check_amount/1\`.
+  3. Divides \`TotalAmount\` by \`SplitCount\` with \`safe_divide/2\`.
+  - If any validation fails, immediately returns \`{error, Reason}\` for the first failing field without evaluating remaining steps.
+  - If all succeed, returns \`{ok, #{email => EmailBin, per_person => PerPersonShare}}\`.
+- **Examples**:
+  - \`domain_validator:process_checkout_input(<<"alice@beamforge.org">>, 300, 3)\` returns \`{ok, #{email => <<"alice@beamforge.org">>, per_person => 100.0}}\`.
+  - \`domain_validator:process_checkout_input(<<"bad_email">>, 300, 3)\` returns \`{error, invalid_email}\`.
 
 ## Rules & Verification Constraints
 
@@ -578,29 +647,19 @@ validate(Amount) -> {error, invalid_amount}.`,
     process_checkout_input/3
 ]).
 
-%% Divides Numerator by Denominator safely
-%% - non-numeric -> {error, non_numeric}
-%% - Denominator == 0 -> {error, division_by_zero}
-%% - otherwise -> {ok, Numerator / Denominator}
+%% @doc Safely divides Numerator by Denominator without crashing on zero or invalid inputs.
 safe_divide(Numerator, Denominator) ->
     ok.
 
-%% Checks positive integer amount
-%% - integer > 0 -> {ok, Amount}
-%% - integer =< 0 -> {error, non_positive_amount}
-%% - otherwise -> {error, invalid_type}
+%% @doc Validates that an amount is a strictly positive integer.
 check_amount(Amount) ->
     ok.
 
-%% Validates email binary has non-empty username, '@', and domain with '.'
-%% - valid -> {ok, EmailBin}
-%% - invalid -> {error, invalid_email}
+%% @doc Validates that an email binary adheres to basic user@domain.tld formatting.
 validate_email(EmailBin) ->
     ok.
 
-%% Composes email, amount, and split validation into a checkout summary
-%% - on any error -> {error, FirstReason}
-%% - all valid -> {ok, #{email => EmailBin, per_person => Share}}
+%% @doc Orchestrates checkout validation pipeline, returning per-person share or early error.
 process_checkout_input(EmailBin, TotalAmount, SplitCount) ->
     ok.
 `,
@@ -671,29 +730,19 @@ process_checkout_input(EmailBin, TotalAmount, SplitCount) ->
     process_checkout_input/3
 ]).
 
-%% Divides Numerator by Denominator safely
-%% - non-numeric -> {error, non_numeric}
-%% - Denominator == 0 -> {error, division_by_zero}
-%% - otherwise -> {ok, Numerator / Denominator}
+%% @doc Safely divides Numerator by Denominator without crashing on zero or invalid inputs.
 safe_divide(Numerator, Denominator) ->
     ok.
 
-%% Checks positive integer amount
-%% - integer > 0 -> {ok, Amount}
-%% - integer =< 0 -> {error, non_positive_amount}
-%% - otherwise -> {error, invalid_type}
+%% @doc Validates that an amount is a strictly positive integer.
 check_amount(Amount) ->
     ok.
 
-%% Validates email binary has non-empty username, '@', and domain with '.'
-%% - valid -> {ok, EmailBin}
-%% - invalid -> {error, invalid_email}
+%% @doc Validates that an email binary adheres to basic user@domain.tld formatting.
 validate_email(EmailBin) ->
     ok.
 
-%% Composes email, amount, and split validation into a checkout summary
-%% - on any error -> {error, FirstReason}
-%% - all valid -> {ok, #{email => EmailBin, per_person => Share}}
+%% @doc Orchestrates checkout validation pipeline, returning per-person share or early error.
 process_checkout_input(EmailBin, TotalAmount, SplitCount) ->
     ok.
 `,
