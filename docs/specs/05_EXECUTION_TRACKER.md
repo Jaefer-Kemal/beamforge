@@ -2362,6 +2362,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 4 test stages (`S1_Ast` try_catch & binary_to_term audits, `S2_SafeParse` valid/corrupt term decoding, `S3_ResourceCleanup` guaranteed release on normal and error flows, and `S4_TransactionLog` guaranteed close notification).
 
+## Phase 130: Pedagogical Despoiling of Chapter 6 Lecture 4 (`ch06-l04`)
+- [x] **130.1: Audit & Eliminate Exercise Code Spoilers in Lecture 6.4 (`ch06-l04`)**:
+  - Neutralized concept breakdown: maintained strict variable neutrality and domain independence across link mechanics, atomic `spawn_link` race prevention, and the fundamental contrast between `normal` exits and abnormal exits.
+  - Replaced clone parallel worked example `pipeline_pair.erl` with an authentic IoT sensor calibration and aggregation pair `sensor_ingestion_pair.erl` (`start_sensor_pair/0`, `poll_reading/2`, `retire_reader_clean/1`, `abort_reader_fault/2`, `reader_loop/1`, `aggregator_loop/0`), achieving complete domain disjunction from math doubling/squaring pipelines while demonstrating symmetric links, two-stage forwarding, and exit signal mechanics.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `start_linked_pipeline/0`, `compute/2`, `stop_stage1_normal/1`, `crash_stage1/2`, `worker1_loop/1`, and `worker2_loop/0`, eliminating direct code and message syntax dictation.
+  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and in-body comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+- [x] **130.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 4 test stages (`S1_Ast` spawn_link & link call audits, `S2_Compute` two-stage calculation, `S3_NormalExit` normal exit isolation leaving peer alive, and `S4_CascadingExit` abnormal crash exit signal propagation).
+
+
 
 
 
