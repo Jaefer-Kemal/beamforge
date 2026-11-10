@@ -3067,47 +3067,108 @@ code_change(OldVsn, State, Extra) -> {ok, NewState}.
 
 ## Parallel Worked Example
 
-The following is an audit event logger that tracks system warnings:
+## Parallel Worked Example: The Latency Monitor Event Handler
+
+The following \`latency_monitor_handler\` module demonstrates the architecture of OTP's \`gen_event\` behaviour.
+It dynamically attaches to an event manager process, receives broadcasted request timing events without coupling to the event producers, tracks latency spikes exceeding a configured threshold, and answers synchronous queries via \`gen_event:call/3\`:
 
 \`\`\`erlang
--module(warning_logger).
+-module(latency_monitor_handler).
 -behaviour(gen_event).
--export([add_handler/1, get_warnings/1]).
--export([init/1, handle_event/2, handle_call/2, handle_info/2, terminate/2, code_change/3]).
 
-add_handler(Mgr) -> gen_event:add_handler(Mgr, ?MODULE, []).
-get_warnings(Mgr) -> gen_event:call(Mgr, ?MODULE, get_warnings).
+%% Client API
+-export([
+    add_to_manager/2,
+    get_spike_count/1
+]).
 
-init([]) -> {ok, []}.
+%% gen_event Callbacks
+-export([
+    init/1,
+    handle_event/2,
+    handle_call/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
-handle_event({warning, Msg}, Warnings) ->
-    {ok, [Msg | Warnings]};
-handle_event(_Other, Warnings) ->
-    {ok, Warnings}.
+%% =============================================================================
+%% Client API
+%% =============================================================================
 
-handle_call(get_warnings, Warnings) ->
-    {ok, lists:reverse(Warnings), Warnings}.
+%% @doc Register the latency monitor handler with an event manager.
+add_to_manager(ManagerPid, LatencyThresholdMs) when is_integer(LatencyThresholdMs), LatencyThresholdMs > 0 ->
+    gen_event:add_handler(ManagerPid, ?MODULE, LatencyThresholdMs).
 
-handle_info(_Info, State) -> {ok, State}.
-terminate(_Reason, _State) -> ok.
-code_change(_Old, State, _Extra) -> {ok, State}.
+%% @doc Query the total count of high-latency events detected.
+get_spike_count(ManagerPid) ->
+    gen_event:call(ManagerPid, ?MODULE, get_spike_count).
+
+%% =============================================================================
+%% gen_event Callbacks
+%% =============================================================================
+
+init(LatencyThresholdMs) ->
+    {ok, #{threshold => LatencyThresholdMs, spikes => 0}}.
+
+%% Process incoming request timing broadcast events
+handle_event({request_timing, _Route, LatencyMs}, State = #{threshold := Threshold, spikes := Spikes}) ->
+    NewSpikes = if
+        LatencyMs > Threshold -> Spikes + 1;
+        true -> Spikes
+    end,
+    {ok, State#{spikes := NewSpikes}};
+handle_event(_OtherEvent, State) ->
+    {ok, State}.
+
+%% Synchronously query the handler's internal metrics
+handle_call(get_spike_count, State = #{spikes := Spikes}) ->
+    {ok, {ok, Spikes}, State};
+handle_call(_Request, State) ->
+    {ok, {error, unknown_call}, State}.
+
+handle_info(_Info, State) ->
+    {ok, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
 \`\`\`
 
 ## Assignment Specification
 
-Implement \`src/security_audit_handler.erl\` tracking brute-force IP login attacks:
-1. \`add_to_manager(ManagerPid, MaxAttempts) -> ok\`:
-   - Attaches \`?MODULE\` to \`ManagerPid\` with initial state \`#{max => MaxAttempts, tracker => #{}}\`.
-2. \`handle_event({login_failed, IpBinary}, State = #{max := Max, tracker := Tracker})\`:
-   - Increments the failed attempt counter for \`IpBinary\`.
-   - If \`NewCount >= Max\`, records \`alert => true\` for that IP.
-   - Returns \`{ok, UpdatedState}\`.
-3. \`handle_event({login_success, IpBinary}, State = #{tracker := Tracker})\`:
-   - Clears previous failures for \`IpBinary\` (setting \`attempts => 0, alert => false\`).
-   - Returns \`{ok, UpdatedState}\`.
-4. \`get_ip_status(ManagerPid, IpBinary) -> {ok, #{attempts => non_neg_integer(), alert => boolean()}}\`:
-   - Uses \`gen_event:call(ManagerPid, ?MODULE, {get_status, IpBinary})\`.
-   - Replies with the status map for that IP (defaulting to \`attempts => 0, alert => false\` if IP was never seen).
+Implement \`src/security_audit_handler.erl\` as a decoupled \`gen_event\` handler module that tracks repeated login failures per IP address and triggers security alerts when brute-force thresholds are exceeded.
+
+### Client API
+
+#### \`add_to_manager/2\`
+- **Input**: \`ManagerPid\` (pid of the running \`gen_event\` manager process), \`MaxAttempts\` (positive integer specifying the failed attempt threshold before triggering an alert).
+- **Behavior**: Registers the \`security_audit_handler\` callback module with the specified event manager process via \`gen_event:add_handler/3\`, passing \`MaxAttempts\` as configuration arguments to \`init/1\`. Returns \`ok\`.
+- **Examples**:
+  - \`security_audit_handler:add_to_manager(Mgr, 3)\` returns \`ok\`.
+
+#### \`get_ip_status/2\`
+- **Input**: \`ManagerPid\` (pid of the running \`gen_event\` manager process), \`IpBinary\` (binary IP address identifier).
+- **Behavior**: Synchronously queries the installed \`security_audit_handler\` on \`ManagerPid\` via \`gen_event:call/3\` for the tracking status of \`IpBinary\`. Returns \`{ok, StatusMap}\`, where \`StatusMap\` contains non-negative integer \`attempts\` and boolean \`alert\`. If the IP has never been observed, defaults to zero attempts and false alert.
+- **Examples**:
+  - \`security_audit_handler:get_ip_status(Mgr, <<"10.0.0.1">>)\` returns \`{ok, #{attempts => 1, alert => false}}\`.
+  - \`security_audit_handler:get_ip_status(Mgr, <<"10.0.0.2">>)\` returns \`{ok, #{attempts => 3, alert => true}}\`.
+
+### Callback Invariants
+
+#### \`init/1\`
+- Receives \`MaxAttempts\` and initializes handler state map with the threshold and an empty IP tracking map. Returns \`{ok, State}\`.
+
+#### \`handle_event/2\`
+- For \`{login_failed, IpBinary}\` events: Increments the failed attempt count for \`IpBinary\`. If the updated tally meets or exceeds \`MaxAttempts\`, sets \`alert\` to \`true\`. Returns \`{ok, UpdatedState}\`.
+- For \`{login_success, IpBinary}\` events: Clears previous failures for \`IpBinary\`, resetting its count to zero and alert flag to \`false\`. Returns \`{ok, UpdatedState}\`.
+- For any other unhandled event: Preserves state unchanged. Returns \`{ok, State}\`.
+
+#### \`handle_call/2\`
+- For \`{get_status, IpBinary}\` queries: Retrieves the recorded map for \`IpBinary\` (defaulting to zero attempts and false alert if unseen) and returns \`{ok, {ok, StatusMap}, State}\`.
+- For unknown queries: Returns \`{ok, {error, unknown_call}, State}\`.
 
 ## Rules & Verification Constraints
 
@@ -3179,29 +3240,37 @@ Implement \`src/security_audit_handler.erl\` tracking brute-force IP login attac
     code_change/3
 ]).
 
-%% Client API
+%% @doc Register the security audit handler with an event manager process.
 add_to_manager(ManagerPid, MaxAttempts) ->
     ok.
 
+%% @doc Synchronously retrieve the current security status map for an IP address.
 get_ip_status(ManagerPid, IpBinary) ->
     ok.
 
 %% gen_event Callbacks
+
+%% @doc Initialize handler state with failure threshold and an empty tracker map.
 init(MaxAttempts) ->
     {ok, #{max => MaxAttempts, tracker => #{}}}.
 
+%% @doc Process broadcast security events.
 handle_event(_Event, State) ->
     {ok, State}.
 
+%% @doc Handle synchronous queries directed to this handler module.
 handle_call(_Req, State) ->
     {ok, ok, State}.
 
+%% @doc Handle unhandled process messages.
 handle_info(_Info, State) ->
     {ok, State}.
 
+%% @doc Clean up handler resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -3285,29 +3354,37 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Register the security audit handler with an event manager process.
 add_to_manager(ManagerPid, MaxAttempts) ->
     ok.
 
+%% @doc Synchronously retrieve the current security status map for an IP address.
 get_ip_status(ManagerPid, IpBinary) ->
     ok.
 
 %% gen_event Callbacks
+
+%% @doc Initialize handler state with failure threshold and an empty tracker map.
 init(MaxAttempts) ->
     {ok, #{max => MaxAttempts, tracker => #{}}}.
 
+%% @doc Process broadcast security events.
 handle_event(_Event, State) ->
     {ok, State}.
 
+%% @doc Handle synchronous queries directed to this handler module.
 handle_call(_Req, State) ->
     {ok, ok, State}.
 
+%% @doc Handle unhandled process messages.
 handle_info(_Info, State) ->
     {ok, State}.
 
+%% @doc Clean up handler resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
