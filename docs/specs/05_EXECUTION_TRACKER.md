@@ -2544,6 +2544,14 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go test -v -run TestChapter7Verification ./internal/bridge`: 8/8 lessons passed 100% (`ch07-l01` through `ch07-l08` in 13.27s).
   - `erlc.exe -Wall`: Compiled `rate_limiter_srv.erl` and `download_budget_srv.erl` cleanly with 0 warnings/errors.
   - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
+- [x] **145.3: Batched Chapter 7 Production Vercel Deployment**:
+  - Deployed entire Chapter 7 (Lessons 7.1 – 7.8) to Vercel production: `https://beamforge-5xcfj1w74-jaefer-kemals-projects.vercel.app` aliased to `https://beamforge-eight.vercel.app`.
+  - Verified live deployment endpoints via HTTP HEAD requests:
+    - `https://beamforge-eight.vercel.app/syllabus` (`HTTP/1.1 200 OK`)
+    - `https://beamforge-eight.vercel.app/learn/ch07-l01` (`HTTP/1.1 200 OK`)
+    - `https://beamforge-eight.vercel.app/learn/ch07-l05` (`HTTP/1.1 200 OK`)
+    - `https://beamforge-eight.vercel.app/learn/ch07-l07` (`HTTP/1.1 200 OK`)
+    - `https://beamforge-eight.vercel.app/learn/ch07-l08` (`HTTP/1.1 200 OK`)
 
 
 
