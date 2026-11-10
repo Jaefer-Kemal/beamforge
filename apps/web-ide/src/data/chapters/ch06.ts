@@ -2150,52 +2150,74 @@ In the BEAM:
 
 ## Parallel Worked Example
 
-The following module executes an asynchronous task with a monitor-backed timeout:
+The following module executes a remote RPC service call with monitor isolation and hard deadline enforcement:
 
 \`\`\`erlang
--module(async_task_watcher).
--export([run_task/2]).
+-module(service_endpoint_watcher).
+-export([
+    dispatch_timed_call/3,
+    check_service_health/1
+]).
 
-run_task(Fun, TimeoutMs) ->
+%% @doc Dispatches a remote RPC service call with monitor isolation and hard deadline.
+dispatch_timed_call(EndpointUrl, Payload, DeadlineMs) ->
     Caller = self(),
-    {Pid, MRef} = spawn_monitor(fun() ->
-        Res = Fun(),
-        Caller ! {res, MRef, Res}
+    {WorkerPid, MRef} = spawn_monitor(fun() ->
+        Response = mock_http_post(EndpointUrl, Payload),
+        Caller ! {rpc_reply, MRef, Response}
     end),
     receive
-        {res, MRef, Res} ->
+        {rpc_reply, MRef, Response} ->
             erlang:demonitor(MRef, [flush]),
-            {ok, Res};
-        {'DOWN', MRef, process, Pid, Reason} ->
-            {error, {crashed, Reason}}
-    after TimeoutMs ->
-        exit(Pid, kill),
+            {ok, Response};
+        {'DOWN', MRef, process, WorkerPid, Reason} ->
+            {error, {service_failed, Reason}}
+    after DeadlineMs ->
+        exit(WorkerPid, kill),
         erlang:demonitor(MRef, [flush]),
-        {error, timeout}
+        {error, deadline_exceeded}
     end.
+
+%% @doc Probes whether a service worker process is active or already dead.
+check_service_health(ServicePid) ->
+    MRef = erlang:monitor(process, ServicePid),
+    receive
+        {'DOWN', MRef, process, ServicePid, Reason} ->
+            {down, Reason}
+    after 50 ->
+        erlang:demonitor(MRef, [flush]),
+        up
+    end.
+
+mock_http_post(_Url, Payload) ->
+    #{status => 200, echoed => Payload}.
 \`\`\`
 
 ## Assignment Specification
 
 Implement \`src/worker_watcher.erl\` exporting \`run_monitored_task/2\` and \`probe_pid_status/1\`:
 
-1. \`run_monitored_task(TaskFun, TimeoutMs) -> {ok, Result} | {error, {crashed, Reason}} | {error, timeout}\`:
-   - Uses \`spawn_monitor/1\` to run \`TaskFun\`.
-   - On completion -> \`demonitor(MRef, [flush])\`, returns \`{ok, Result}\`.
-   - On worker crash -> receives \`{'DOWN', MRef, process, WorkerPid, Reason}\`, returns \`{error, {crashed, Reason}}\`.
-   - On timeout -> kills worker via \`exit(WorkerPid, kill)\`, flushes monitor, returns \`{error, timeout}\`.
-2. \`probe_pid_status(TargetPid) -> alive | {dead, Reason}\`:
-   - Monitors \`TargetPid\` via \`MRef = erlang:monitor(process, TargetPid)\`.
-   - Uses non-blocking check:
-     \`\`\`erlang
-     receive
-         {'DOWN', MRef, process, TargetPid, Reason} -> {dead, Reason}
-     after 20 ->
-         erlang:demonitor(MRef, [flush]),
-         alive
-     end
-     \`\`\`
-   - If \`TargetPid\` is already dead, returns \`{dead, noproc}\` immediately.
+### 1. \`run_monitored_task/2\`
+- **Input**: \`TaskFun\` (a 0-arity function executing the computation), \`TimeoutMs\` (non-negative integer millisecond deadline).
+- **Behavior**:
+  - Spawns a dedicated worker process running \`TaskFun\` and establishes an atomic unidirectional monitor via \`spawn_monitor/1\`.
+  - When the worker finishes and sends back its result before \`TimeoutMs\`, flushes the monitor via \`erlang:demonitor(MRef, [flush])\` and returns \`{ok, Result}\`.
+  - If the worker crashes (e.g. division by zero, throw, or abnormal exit), receives the \`'DOWN'\` notification, normalizes the exit reason (extracting the raw tag from \`{Reason, Stack}\` tuples if formatted as an error), and returns \`{error, {crashed, NormalizedReason}}\`. The caller survives completely unharmed without needing to trap exits.
+  - If \`TimeoutMs\` elapses before completion, terminates the runaway worker process with an untrappable \`kill\` signal (\`exit(WorkerPid, kill)\`), flushes the monitor, and returns \`{error, timeout}\`.
+- **Examples**:
+  - \`worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000)\` -> \`{ok, 42}\`
+  - \`worker_watcher:run_monitored_task(fun() -> 1 / 0 end, 1000)\` -> \`{error, {crashed, badarith}}\`
+  - \`worker_watcher:run_monitored_task(fun() -> receive after infinity -> ok end end, 80)\` -> \`{error, timeout}\`
+
+### 2. \`probe_pid_status/1\`
+- **Input**: \`TargetPid\` (pid of the process to inspect).
+- **Behavior**:
+  - Dynamically monitors \`TargetPid\` using \`erlang:monitor(process, TargetPid)\`.
+  - If the process has already terminated (or crashes within a 20ms window), captures the \`'DOWN'\` notification and returns \`{dead, Reason}\` (returning \`{dead, noproc}\` if the process was already dead prior to monitoring).
+  - If no \`'DOWN'\` notification arrives within 20ms, demonitors \`TargetPid\` using \`erlang:demonitor(MRef, [flush])\` and returns \`alive\`.
+- **Examples**:
+  - \`worker_watcher:probe_pid_status(DeadPid)\` -> \`{dead, noproc}\`
+  - \`worker_watcher:probe_pid_status(LivePid)\` -> \`alive\`
 
 ## Rules & Verification Constraints
 
@@ -2291,18 +2313,11 @@ MRef = erlang:monitor(process, DeadPid).`,
     probe_pid_status/1
 ]).
 
-%% Architectural Requirement:
-%% Atomically spawn and monitor TaskFun via spawn_monitor/1.
-%% - Success: receive {task_result, WorkerPid, Result} -> demonitor(MRef, [flush]), return {ok, Result}.
-%% - Crash: receive {'DOWN', MRef, process, WorkerPid, Reason} -> return {error, {crashed, NormalizedReason}}.
-%% - Timeout: after TimeoutMs -> exit(WorkerPid, kill), demonitor(MRef, [flush]), return {error, timeout}.
+%% @doc Executes a task under a unidirectional monitor with crash isolation and timeout.
 run_monitored_task(TaskFun, TimeoutMs) ->
     ok.
 
-%% Architectural Requirement:
-%% Attach temporary monitor to TargetPid (erlang:monitor(process, TargetPid)).
-%% - If {'DOWN', MRef, process, TargetPid, noproc} is immediately received -> return {dead, noproc}.
-%% - If no message arrives after 20ms -> demonitor(MRef, [flush]), return alive.
+%% @doc Probes whether a process is alive or dead, demonstrating the noproc invariant.
 probe_pid_status(TargetPid) ->
     ok.
 `,
@@ -2354,18 +2369,11 @@ probe_pid_status(TargetPid) when is_pid(TargetPid) ->
     probe_pid_status/1
 ]).
 
-%% Architectural Requirement:
-%% Atomically spawn and monitor TaskFun via spawn_monitor/1.
-%% - Success: receive {task_result, WorkerPid, Result} -> demonitor(MRef, [flush]), return {ok, Result}.
-%% - Crash: receive {'DOWN', MRef, process, WorkerPid, Reason} -> return {error, {crashed, NormalizedReason}}.
-%% - Timeout: after TimeoutMs -> exit(WorkerPid, kill), demonitor(MRef, [flush]), return {error, timeout}.
+%% @doc Executes a task under a unidirectional monitor with crash isolation and timeout.
 run_monitored_task(TaskFun, TimeoutMs) ->
     ok.
 
-%% Architectural Requirement:
-%% Attach temporary monitor to TargetPid (erlang:monitor(process, TargetPid)).
-%% - If {'DOWN', MRef, process, TargetPid, noproc} is immediately received -> return {dead, noproc}.
-%% - If no message arrives after 20ms -> demonitor(MRef, [flush]), return alive.
+%% @doc Probes whether a process is alive or dead, demonstrating the noproc invariant.
 probe_pid_status(TargetPid) ->
     ok.
 `,

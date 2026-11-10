@@ -2384,6 +2384,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 4 test stages (`S1_Ast` process_flag & spawn_link audits, `S2_Supervised` automatic respawn on abnormal crash, `S3_KillSignal` untrappable kill handling, and `S4_TruthTable` full 6-permutation verification).
 
+## Phase 132: Pedagogical Despoiling of Chapter 6 Lecture 6 (`ch06-l06`)
+- [x] **132.1: Audit & Eliminate Exercise Code Spoilers in Lecture 6.6 (`ch06-l06`)**:
+  - Neutralized concept breakdown: maintained strict variable neutrality and domain independence across unidirectional monitors (`erlang:monitor/2`, `spawn_monitor/1`), crash isolation without exit trapping, `'DOWN'` 5-element mailbox messages, and the atomic `noproc` dead-PID invariant preventing check-then-act race conditions.
+  - Replaced clone parallel worked example `async_task_watcher.erl` with an authentic, production-grade RPC service watcher `service_endpoint_watcher.erl` (`dispatch_timed_call/3`, `check_service_health/1`), demonstrating both `spawn_monitor/1` with timeout worker termination and liveness probing of existing PIDs with `erlang:monitor/2`.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `run_monitored_task/2` and `probe_pid_status/1`, eliminating full Erlang code receive blocks and implementation spoon-feeding.
+  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and pseudocode comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+- [x] **132.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 5 test stages (`S1_Ast` spawn_monitor, demonitor, and receive_after audits, `S2_Success` calculation execution & demonitor flush, `S3_Crash` caller survival on division by zero, `S4_Timeout` runaway task kill and demonitor flush, and `S5_NoprocProbe` dead-PID immediate noproc return).
+
 
 
 
