@@ -1902,71 +1902,153 @@ When a new message arrives, the BEAM automatically wakes the process without any
 > [!warning] Production OTP Trap: Forgetting to Reply from the Spawned Worker
 > If you spawn a worker to handle a call and that worker crashes or exits before calling \`gen_server:reply(From, ...)\`, the client process will hang until its 5,000ms call timeout expires! In production, wrap the worker computation in \`try...catch\` to guarantee that \`gen_server:reply(From, {error, worker_crashed})\` is always invoked.
 
-## Parallel Worked Example
+## Parallel Worked Example: The Payload Hasher Coordinator
 
-The following image processor coordinator demonstrates async worker offloading with \`gen_server:reply/2\`:
+The following \`payload_hasher\` module demonstrates how a \`gen_server\` offloads CPU-intensive hashing jobs to background workers using \`gen_server:reply/2\`, completely preventing Head-of-Line blocking for quick queries, and how it enters memory-compacted hibernation when idle:
 
 \`\`\`erlang
--module(image_coordinator).
+-module(payload_hasher).
 -behaviour(gen_server).
--export([start_link/0, resize_image/3, get_metrics/1, sleep_idle/1, stop/1]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
-start_link() -> gen_server:start_link(?MODULE, [], []).
-resize_image(Pid, ImgId, ResizeFun) -> gen_server:call(Pid, {resize, ImgId, ResizeFun}, 5000).
-get_metrics(Pid) -> gen_server:call(Pid, get_metrics).
-sleep_idle(Pid) -> gen_server:call(Pid, sleep_idle).
-stop(Pid) -> gen_server:stop(Pid).
+%% Client API
+-export([
+    start_link/0,
+    digest/3,
+    get_metrics/1,
+    hibernate_idle/1,
+    stop/1
+]).
 
-init([]) -> {ok, #{active => 0, done => 0}}.
+%% gen_server Callbacks
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
-handle_call({resize, ImgId, ResizeFun}, From, State = #{active := Active}) ->
-    Self = self(),
+%% =============================================================================
+%% Client API
+%% =============================================================================
+
+%% @doc Start and link the payload hasher server.
+start_link() ->
+    gen_server:start_link(?MODULE, [], []).
+
+%% @doc Synchronously request a cryptographic digest computed in a background worker.
+digest(Pid, Algorithm, BinaryPayload) when is_atom(Algorithm), is_binary(BinaryPayload) ->
+    gen_server:call(Pid, {digest, Algorithm, BinaryPayload}, 5000).
+
+%% @doc Synchronously retrieve the current job throughput counters.
+get_metrics(Pid) ->
+    gen_server:call(Pid, get_metrics).
+
+%% @doc Request the server to perform memory compaction and enter idle hibernation.
+hibernate_idle(Pid) ->
+    gen_server:call(Pid, hibernate_idle).
+
+%% @doc Gracefully terminate the server.
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+%% =============================================================================
+%% gen_server Callbacks
+%% =============================================================================
+
+init([]) ->
+    {ok, #{dispatched => 0, completed => 0}}.
+
+%% Offload CPU-bound hash computation to an ephemeral worker process
+handle_call({digest, Algorithm, BinaryPayload}, From, State = #{dispatched := Dispatched}) ->
+    Coordinator = self(),
     spawn(fun() ->
-        Res = ResizeFun(),
-        gen_server:reply(From, {ok, ImgId, Res}),
-        Self ! {task_done, ImgId}
+        %% Compute digest off-process so coordinator mailbox remains unblocked
+        Digest = crypto:hash(Algorithm, BinaryPayload),
+        %% Directly unblock the waiting caller via the From token
+        gen_server:reply(From, {ok, Digest}),
+        %% Notify the coordinator that this computation finished
+        Coordinator ! digest_completed
     end),
-    {noreply, State#{active := Active + 1}};
-handle_call(get_metrics, _From, State = #{active := A, done := D}) ->
-    {reply, #{active => A, done => D}, State};
-handle_call(sleep_idle, _From, State) ->
-    {reply, sleeping, State, hibernate}.
+    %% Return in microseconds to continue processing incoming queries
+    {noreply, State#{dispatched := Dispatched + 1}};
 
-handle_cast(_Msg, State) -> {noreply, State}.
+handle_call(get_metrics, _From, State) ->
+    {reply, {ok, State}, State};
 
-handle_info({task_done, _ImgId}, State = #{active := A, done := D}) ->
-    {noreply, State#{active := A - 1, done := D + 1}};
-handle_info(_Info, State) -> {noreply, State}.
+%% Instruct the BEAM VM to compact heap and hibernate until the next message
+handle_call(hibernate_idle, _From, State) ->
+    {reply, ok, State, hibernate};
 
-terminate(_R, _S) -> ok.
-code_change(_O, S, _E) -> {ok, S}.
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(digest_completed, State = #{completed := Completed}) ->
+    {noreply, State#{completed := Completed + 1}};
+handle_info(_Unknown, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
 \`\`\`
 
 ## Assignment Specification
 
-Implement \`src/async_report_server.erl\` managing background computational reports without blocking client traffic:
-1. \`start_link() -> {ok, Pid}\`:
-   - Initializes with state \`#{in_flight => 0, completed => 0}\`.
-2. \`generate_report(Pid, JobId, ComputeFun) -> {ok, JobId, Result}\`:
-   - Synchronous call \`gen_server:call(Pid, {generate_report, JobId, ComputeFun}, 3000)\`.
-   - In \`handle_call/3\`:
-     - Spawns a background worker executing \`Result = ComputeFun()\`.
-     - The worker invokes \`gen_server:reply(From, {ok, JobId, Result})\` directly to unblock the caller.
-     - The worker informs the server via \`ServerPid ! {job_finished, JobId}\`.
-     - Immediately returns \`{noreply, State#{in_flight := InFlight + 1}}\`.
-3. \`handle_info({job_finished, _JobId}, State)\`:
-   - Decrements \`in_flight - 1\` and increments \`completed + 1\`. Returns \`{noreply, NewState}\`.
-4. \`get_completed_count(Pid) -> {ok, #{in_flight => non_neg_integer(), completed => non_neg_integer()}}\`:
-   - Synchronous call returning the current in-flight and completed counters.
-5. \`hibernate_idle(Pid) -> hibernated\`:
-   - Calls \`gen_server:call(Pid, hibernate_now)\` whose \`handle_call\` returns \`{reply, hibernated, State, hibernate}\`.
-6. \`stop(Pid) -> ok\`.
+Implement \`src/async_report_server.erl\` as an asynchronous OTP coordinator that offloads heavy computational reports to background workers without blocking quick queries in its mailbox.
+
+### Client API
+
+#### \`start_link/0\`
+- **Input**: None.
+- **Behavior**: Spawns and links the \`async_report_server\` coordinator process. Initializes internal state tracking active in-flight jobs and completed job counts, both initialized to zero. Returns \`{ok, Pid}\`.
+- **Examples**:
+  - \`async_report_server:start_link()\` returns \`{ok, Pid}\`.
+
+#### \`generate_report/3\`
+- **Input**: \`Pid\` (pid of the running server), \`JobId\` (binary report identifier), \`ComputeFun\` (nullary function of type \`fun(() -> term())\`).
+- **Behavior**: Submits a report generation job as a synchronous call with a 3,000 millisecond timeout. The coordinator captures the caller's continuation token, spawns an ephemeral worker to evaluate \`ComputeFun\`, and returns immediately so its message loop is never blocked. Once the calculation completes, the worker directly unblocks the waiting caller with \`{ok, JobId, Result}\` and notifies the coordinator that the job has finished.
+- **Examples**:
+  - \`async_report_server:generate_report(Pid, <<"q1_sales">>, fun() -> 100 end)\` returns \`{ok, <<"q1_sales">>, 100}\`.
+
+#### \`get_completed_count/1\`
+- **Input**: \`Pid\` (pid of the running server).
+- **Behavior**: Synchronously retrieves a map containing the current count of active in-flight jobs and successfully completed jobs.
+- **Examples**:
+  - \`async_report_server:get_completed_count(Pid)\` returns \`{ok, #{in_flight => 0, completed => 1}}\`.
+
+#### \`hibernate_idle/1\`
+- **Input**: \`Pid\` (pid of the running server).
+- **Behavior**: Synchronously commands the coordinator to enter BEAM process hibernation, triggering immediate heap compaction and garbage collection until the next mailbox message arrives. Returns \`hibernated\`.
+- **Examples**:
+  - \`async_report_server:hibernate_idle(Pid)\` returns \`hibernated\`.
+
+#### \`stop/1\`
+- **Input**: \`Pid\` (pid of the running server).
+- **Behavior**: Gracefully terminates the \`gen_server\` process via \`gen_server:stop/1\`. Returns \`ok\`.
+- **Examples**:
+  - \`async_report_server:stop(Pid)\` returns \`ok\`.
+
+### Callback Invariants
+
+#### \`handle_call/3\`
+- For report generation requests, captures the \`From\` token and coordinator pid, spawns an ephemeral worker to evaluate \`ComputeFun\`, delivers \`{ok, JobId, Result}\` directly to \`From\` via \`gen_server:reply/2\`, and increments the \`in_flight\` counter while returning \`{noreply, UpdatedState}\` immediately.
+- For hibernation requests, returns \`hibernated\` with the \`hibernate\` action atom in the 4-element return tuple.
+- For metric queries, synchronously returns the current counter map wrapped in \`{ok, ...}\`.
+
+#### \`handle_info/2\`
+- When notified of job completion by an offloaded worker, decrements \`in_flight\` and increments \`completed\`. Includes a defensive catch-all clause.
 
 ## Rules & Verification Constraints
 
 - Must export \`start_link/0\`, \`generate_report/3\`, \`get_completed_count/1\`, \`hibernate_idle/1\`, and \`stop/1\`.
-- \`handle_call\` for \`generate_report\` must return \`{noreply, ...}\` and use \`gen_server:reply/2\` from the worker.
+- \`handle_call\` for report requests must return \`{noreply, ...}\` and use \`gen_server:reply/2\` from the worker.
 - Must support \`hibernate\` return tuple in \`hibernate_idle/1\`.
 `,
     mentalModelCheck: {
@@ -2032,38 +2114,49 @@ Implement \`src/async_report_server.erl\` managing background computational repo
     code_change/3
 ]).
 
-%% Client API
+%% @doc Start and link the asynchronous report coordinator.
 start_link() ->
     gen_server:start_link(?MODULE, [], []).
 
+%% @doc Offload report generation to a worker and unblock caller upon completion.
 generate_report(Pid, JobId, ComputeFun) ->
     ok.
 
+%% @doc Query the current count of in-flight and completed report jobs.
 get_completed_count(Pid) ->
     ok.
 
+%% @doc Command the coordinator process to enter memory-compacted idle hibernation.
 hibernate_idle(Pid) ->
     ok.
 
+%% @doc Gracefully terminate the server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
 %% gen_server Callbacks
+
+%% @doc Initialize in-flight and completed job counters to zero.
 init([]) ->
     {ok, #{in_flight => 0, completed => 0}}.
 
+%% @doc Handle synchronous calls.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous casts.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle worker completion notifications.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up server resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -2165,38 +2258,49 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Start and link the asynchronous report coordinator.
 start_link() ->
     gen_server:start_link(?MODULE, [], []).
 
+%% @doc Offload report generation to a worker and unblock caller upon completion.
 generate_report(Pid, JobId, ComputeFun) ->
     ok.
 
+%% @doc Query the current count of in-flight and completed report jobs.
 get_completed_count(Pid) ->
     ok.
 
+%% @doc Command the coordinator process to enter memory-compacted idle hibernation.
 hibernate_idle(Pid) ->
     ok.
 
+%% @doc Gracefully terminate the server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
 %% gen_server Callbacks
+
+%% @doc Initialize in-flight and completed job counters to zero.
 init([]) ->
     {ok, #{in_flight => 0, completed => 0}}.
 
+%% @doc Handle synchronous calls.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous casts.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle worker completion notifications.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up server resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,

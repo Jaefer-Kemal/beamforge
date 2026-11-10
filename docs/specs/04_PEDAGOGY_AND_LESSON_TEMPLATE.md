@@ -22,6 +22,7 @@ Every lesson's markdown guide MUST include these 5 sections:
 4. **`## Parallel Worked Example`**:
    - Complete, runnable Erlang modules (`-module(...)`, full exports, realistic production flow) are welcome and encouraged, provided they maintain strict domain disjunction and avoid 1:1 functional mirroring.
    - Every example must be clearly understandable: divided into digestible sections or annotated with clear prose so the learner understands *what the BEAM is doing* at each phase.
+   - **Proportional Simplicity**: Never overcomplicate or make parallel examples "over the top". Avoid bloated secondary domains or extraneous nested models; demonstrate the target BEAM/OTP pattern in the cleanest, most direct, and elegant manner possible.
    - For Capstones & complex Problem Sets, prioritize chunked architectural references or deeply explained modules that guide composition without spoiling the assignment's exact arity or endpoints.
 5. **`## Assignment Specification`** (for coding lessons & problem sets):
    - Exact module name and `-export([...])` list.

@@ -25,6 +25,10 @@ Every lecture must be strictly audited and certified against all four pillars:
   - It is completely acceptable and beneficial to provide a complete, runnable Erlang module (including `-module(...)`, full `-export([...])`, API wrappers, and internal state helpers) in parallel worked examples.
   - Complete modules provide authentic reference value, showing learners how production Erlang files are structured from top to bottom.
   - **The Understandability Invariant**: Every complete module MUST be accompanied by clear pedagogical explanations or step-by-step section headers explaining *what the BEAM is doing* at each phase. Never dump raw, uncommented code blocks that create cognitive fatigue or confusion.
+- **Proportional Simplicity (Anti-Overengineering Rule)**:
+  - Parallel worked examples must **never be overcomplicated or 'over the top'**.
+  - Do not introduce bloated secondary domain models, excessive nested maps/records, or unnecessary ancillary helpers that distract from the core objective.
+  - Keep the module direct, elegant, and proportionally simple: illustrate the target OTP behaviour, concurrency pattern, or VM primitive in the clearest possible way so the learner immediately absorbs the mental model without wading through extraneous code.
 - **No Parallel Clones (The Anti-Transliteration Rule)**:
   - Never mirror the assignment's exact function names, argument shapes, or API arity.
   - Never mirror the assignment's internal expression structure (e.g., if the exercise requires `IsAdmin =:= true orelse (Used >= 0 andalso Used =< Limit)`, the parallel example must NOT have `Override =:= true orelse (Temp >= 0 andalso Temp =< Max)`).

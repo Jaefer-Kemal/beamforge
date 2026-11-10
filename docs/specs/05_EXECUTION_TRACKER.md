@@ -2481,6 +2481,20 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `erlc.exe`: Compiled `device_lease_manager.erl` cleanly with 0 warnings/errors.
   - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
 
+## Phase 140: Pedagogical Despoiling of Chapter 7 Lecture 4 (`ch07-l04`) & Proportional Simplicity Rule
+- [x] **140.1: Codify Proportional Simplicity Rule in Specs 08 & 04**:
+  - Updated `docs/specs/08_PEDAGOGICAL_AUDIT_AND_ANTI_SPOILER_PROTOCOL.md` and `docs/specs/04_PEDAGOGY_AND_LESSON_TEMPLATE.md` with the *Proportional Simplicity (Anti-Overengineering Rule)*, guaranteeing that parallel worked examples remain direct, clean, and focused on core BEAM/OTP mechanics without bloated secondary models or "over the top" complexity.
+- [x] **140.2: Audit & Eliminate Spoilers in Lecture 7.4 (`ch07-l04`)**:
+  - Authored a focused parallel worked example `payload_hasher.erl` (`start_link/0`, `digest/3`, `get_metrics/1`, `hibernate_idle/1`, `stop/1`, and callbacks), demonstrating worker offloading via `gen_server:reply/2`, non-blocking `{noreply, State}` dispatch, and process memory compaction via `hibernate` without 1:1 mirroring of report closures.
+  - Audited and de-spoiled `Assignment Specification`: structured all functions (`start_link/0`, `generate_report/3`, `get_completed_count/1`, `hibernate_idle/1`, `stop/1`) and callback invariants into clean `Input`, `Behavior`, and `Examples` blocks without Erlang syntax or tuple dictations in prompt prose.
+  - Added clean EDoc `@doc` comments across starter code, `files[0].content`, `solutionCode`, and `solutionFiles['src/async_report_server.erl']`, strictly maintaining zero `-spec` declarations and zero in-body comments or hints.
+- [x] **140.3: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `npx tsc --noEmit`: 0 TypeScript errors across the web-ide workspace.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Compiled `payload_hasher.erl` cleanly with 0 warnings/errors.
+  - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
+
 
 
 
