@@ -2417,6 +2417,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 4 test stages (`S1_Ast` monitor/demonitor/receive_after audits, `S2_DecisionMatrix` full scenario matching, `S3_Protocol` OTP gen_server callback execution, and `S4_ZeroLatency` instant crash detection in 0ms).
 
+## Phase 135: Pedagogical Despoiling of Chapter 6 Lecture 9 (`ch06-l09`)
+- [x] **135.1: Audit & Eliminate Exercise Code Spoilers in Lecture 6.9 (`ch06-l09`)**:
+  - Validated Incident Alert Banner metadata: verified `incidentId` (INC-102), `severity` (CRITICAL), `serviceName` (checkout-pricing-rpc), `symptom`, `rootCauseHint`, and refined `fixObjective` to emphasize ephemeral monitor integration and clean mailbox flushing without spoon-feeding literal syntax.
+  - Authored an authentic parallel worked example `fraud_check_client.erl` (`evaluate_transaction/2`), demonstrating how client actor calls pair ephemeral monitors with request dispatching to eliminate blind timeouts during unexpected worker crashes.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Diagnostic`, `Triage Objective`, and `Examples` blocks for `call_pricing_worker/2`, `start_pricing_worker/0`, `start_worker/0`, and `worker_loop/0`, eliminating step-by-step code dictation.
+  - Refactored starter code comments: preserved buggy incident baseline while replacing `% TODO` and hints with clean EDoc `@doc` triage annotations, strictly maintaining zero `-spec` declarations.
+- [x] **135.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all incident test stages (`S1_SuccessCall` normal quote delivery and `S2_FastFail` zero-latency <100ms crash detection).
+
 
 
 

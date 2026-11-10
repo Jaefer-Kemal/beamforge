@@ -3160,7 +3160,7 @@ loop(CallbackMod, State) ->
       serviceName: 'checkout-pricing-rpc',
       symptom: 'Whenever a malformed SKU triggers a badarith crash inside pricing_worker, 100% of calling HTTP checkout handlers freeze for 5,000ms before timing out, exhausting the web connection pool.',
       rootCauseHint: 'call_pricing_worker/2 uses raw make_ref() and receive ... after 5000 without monitoring the worker PID. When the worker crashes 1ms into the request, no reply is ever sent and the caller sits blind until the 5s timer expires.',
-      fixObjective: 'Attach MRef = erlang:monitor(process, WorkerPid) before sending the request, demonitor with [flush] on reply, and handle {\'DOWN\', MRef, process, WorkerPid, Reason} to return {error, {worker_down, Reason}} in <10ms.',
+      fixObjective: 'Eliminate blind timeouts by attaching a process monitor in call_pricing_worker/2, handling instant worker exit notifications, and flushing the monitor on normal reply to achieve <100ms error recovery.',
     },
     conceptMarkdown: `## Why This Matters in Production
 
@@ -3188,19 +3188,60 @@ call_pricing_worker(WorkerPid, Item) ->
 4. Client has no link and no monitor attached to \`WorkerPid\`. The client is completely blind to the crash!
 5. Client remains suspended until the 5,000ms timeout expires.
 
-### The Remedy: Attach Monitor for 0ms Crash Notification
-To fix this production vulnerability:
-1. Call \`MRef = erlang:monitor(process, WorkerPid)\` before sending the request.
-2. In \`receive\`, match on \`{price, MRef, Price}\` (or correlated ref), flushing the monitor on reply.
-3. Add a clause for \`{'DOWN', MRef, process, WorkerPid, Reason}\` that unblocks the caller immediately with \`{error, {worker_down, Reason}}\`.
+### The Remedy: Ephemeral Monitor Integration
+To eliminate blind timeouts in synchronous actor communication:
+1. **Unidirectional Observation**: The caller establishes a temporary monitor on \`WorkerPid\` immediately before sending the request.
+2. **Correlated Dispatches**: Passing the monitor reference as the message correlation tag ensures the worker replies with that exact reference.
+3. **Immediate Crash Signal**: If \`WorkerPid\` crashes mid-request, the BEAM delivers a \`'DOWN'\` notification to the caller's mailbox within microseconds, allowing the client to unblock instantly with an error.
+4. **Mailbox Hygiene**: When the worker replies successfully, the caller invokes \`erlang:demonitor(MRef, [flush])\` to purge any potential race-condition exit messages from its mailbox.
+
+## Parallel Worked Example
+
+The following module coordinates requests against a fraud assessment worker, pairing temporary monitors with query dispatching to avoid blind timeouts:
+
+\`\`\`erlang
+-module(fraud_check_client).
+-export([evaluate_transaction/2]).
+
+%% @doc Submits transaction telemetry to a fraud worker with monitor crash protection.
+evaluate_transaction(WorkerPid, TxData) ->
+    MRef = erlang:monitor(process, WorkerPid),
+    WorkerPid ! {assess_fraud, self(), MRef, TxData},
+    receive
+        {assessment_score, MRef, Score} ->
+            erlang:demonitor(MRef, [flush]),
+            {ok, Score};
+        {'DOWN', MRef, process, WorkerPid, Reason} ->
+            {error, {fraud_detector_crashed, Reason}}
+    after 5000 ->
+        erlang:demonitor(MRef, [flush]),
+        {error, timeout}
+    end.
+\`\`\`
 
 ## Assignment Specification
 
-Triage and fix \`src/incident_hanging_call.erl\`:
-1. In \`call_pricing_worker/2\`, attach \`erlang:monitor(process, WorkerPid)\`.
-2. When the worker replies normally, call \`erlang:demonitor(MRef, [flush])\` and return \`{ok, Price}\`.
-3. When the worker crashes mid-request, catch \`{'DOWN', MRef, process, WorkerPid, Reason}\` and return \`{error, {worker_down, Reason}}\` immediately (< 50ms).
-4. Preserve export \`start_pricing_worker/0\` (and backward-compatible alias \`start_worker/0\`).
+Triage and remediate the production outage in \`src/incident_hanging_call.erl\`:
+
+### 1. \`call_pricing_worker/2\`
+- **Input**: \`WorkerPid\` (pid of pricing worker), \`Item\` (atom or tuple identifier of product item).
+- **Diagnostic**: Dispatches requests with a raw \`make_ref()\` and waits in an unprotected \`receive ... after 5000\` block. When \`WorkerPid\` encounters \`poison_item\` and terminates with \`badarith\`, no reply is dispatched, forcing the caller to hang for 5 full seconds.
+- **Triage Objective**:
+  - Dynamically monitor \`WorkerPid\` via \`MRef = erlang:monitor(process, WorkerPid)\` before dispatching \`{get_price, self(), MRef, Item}\`.
+  - On normal reply: match \`{price, MRef, Price}\`, flush the monitor via \`erlang:demonitor(MRef, [flush])\`, and return \`{ok, Price}\`.
+  - On worker crash: intercept \`{'DOWN', MRef, process, WorkerPid, Reason}\` with zero latency, normalize the exit reason (unwrapping single-element reason tuples if necessary), and return \`{error, {worker_down, Reason}}\` in < 100ms.
+  - On timeout: demonitor with \`[flush]\` and return \`{error, timeout}\`.
+- **Examples**:
+  - \`incident_hanging_call:call_pricing_worker(W, widget_a)\` returns \`{ok, 49.99}\`.
+  - \`incident_hanging_call:call_pricing_worker(W, poison_item)\` returns \`{error, {worker_down, badarith}}\` in < 100ms.
+
+### 2. \`start_pricing_worker/0\` & \`start_worker/0\`
+- **Behavior**: Spawns an ephemeral pricing worker running \`worker_loop/0\` and returns \`{ok, WorkerPid}\`. \`start_worker/0\` provides a backward-compatible alias.
+- **Examples**:
+  - \`incident_hanging_call:start_pricing_worker()\` returns \`{ok, WorkerPid}\`.
+
+### 3. \`worker_loop/0\`
+- **Behavior**: Tail-recursive loop handling item pricing queries (\`widget_a\` -> \`49.99\`, \`widget_b\` -> \`19.99\`, \`poison_item\` -> deliberate crash \`1 / 0\`, \`stop\` -> clean exit).
 
 ## Rules & Verification Constraints
 
@@ -3282,10 +3323,8 @@ start_pricing_worker() ->
 start_worker() ->
     start_pricing_worker().
 
-%% % TODO [INC-102 Triage]:
-%% The caller hangs for 5,000ms when the worker process crashes mid-request.
-%% Eliminate blind timeouts by attaching a process monitor before sending,
-%% handling instant 'DOWN' notifications, and demonitoring on success.
+%% @doc Dispatches a synchronous pricing query to the worker actor.
+%% Remediates Incident INC-102: eliminates blind timeouts by monitoring the worker.
 call_pricing_worker(WorkerPid, Item) ->
     Ref = make_ref(),
     WorkerPid ! {get_price, self(), Ref, Item},
@@ -3378,10 +3417,8 @@ start_pricing_worker() ->
 start_worker() ->
     start_pricing_worker().
 
-%% % TODO [INC-102 Triage]:
-%% The caller hangs for 5,000ms when the worker process crashes mid-request.
-%% Eliminate blind timeouts by attaching a process monitor before sending,
-%% handling instant 'DOWN' notifications, and demonitoring on success.
+%% @doc Dispatches a synchronous pricing query to the worker actor.
+%% Remediates Incident INC-102: eliminates blind timeouts by monitoring the worker.
 call_pricing_worker(WorkerPid, Item) ->
     Ref = make_ref(),
     WorkerPid ! {get_price, self(), Ref, Item},
