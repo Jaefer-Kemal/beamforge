@@ -1237,67 +1237,208 @@ handle_info(cleanup_tick, State) ->
 > \`handle_info(_Unknown, State) -> {noreply, State}.\`
 > If an unexpected message (such as a delayed monitor \`'DOWN'\` or an OS signal) arrives and no clause matches, your \`gen_server\` will immediately crash with a \`function_clause\` runtime error!
 
-## Parallel Worked Example
+## Parallel Worked Example: The Device Lease Coordinator
 
-The following cache module hydrates default items after startup and purges expired entries using \`handle_info\`:
+The following production-style \`device_lease_manager\` module manages temporary edge-node hardware leases. It demonstrates two foundational OTP architectural patterns:
+1. **Non-blocking boot**: Returning \`{ok, State, {continue, Term}}\` from \`init/1\` so the parent supervisor unblocks immediately, followed by post-boot warmup in \`handle_continue/2\`.
+2. **Periodic background maintenance**: Using \`erlang:send_after/3\` to deliver background timer ticks to \`handle_info/2\` for automated lease auditing and eviction.
 
 \`\`\`erlang
--module(temp_cache).
+-module(device_lease_manager).
 -behaviour(gen_server).
--export([start_link/0, put/2, get/1]).
--export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
-start_link() -> gen_server:start_link(?MODULE, [], []).
-put(Pid, Key) -> gen_server:cast(Pid, {put, Key, erlang:system_time(second)}).
-get(Pid) -> gen_server:call(Pid, get_all).
+%% Client API
+-export([
+    start_link/1,
+    acquire_lease/3,
+    is_leased/2,
+    active_count/1,
+    release_lease/2,
+    stop/1
+]).
 
-init([]) ->
-    {ok, #{items => #{}}, {continue, seed_cache}}.
+%% gen_server Callbacks
+-export([
+    init/1,
+    handle_continue/2,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
-handle_continue(seed_cache, State) ->
-    erlang:send_after(500, self(), tick),
-    {noreply, State#{items => #{default => erlang:system_time(second)}}}.
+%% =============================================================================
+%% 1. Client API & Interface Wrappers
+%% =============================================================================
 
-handle_call(get_all, _From, State = #{items := Items}) ->
-    {reply, Items, State}.
+%% @doc Start and link the lease manager process with a lease duration in seconds.
+start_link(LeaseTimeoutSeconds) when is_integer(LeaseTimeoutSeconds), LeaseTimeoutSeconds > 0 ->
+    gen_server:start_link(?MODULE, LeaseTimeoutSeconds, []).
 
-handle_cast({put, K, V}, State = #{items := Items}) ->
-    {noreply, State#{items := maps:put(K, V, Items)}}.
+%% @doc Synchronously request a hardware lease for a specific device and operator.
+acquire_lease(Pid, DeviceId, Operator) ->
+    gen_server:call(Pid, {acquire, DeviceId, Operator}).
 
-handle_info(tick, State) ->
-    erlang:send_after(500, self(), tick),
+%% @doc Synchronously verify whether a given device currently holds an active lease.
+is_leased(Pid, DeviceId) ->
+    gen_server:call(Pid, {is_leased, DeviceId}).
+
+%% @doc Query the total number of currently registered leases.
+active_count(Pid) ->
+    gen_server:call(Pid, active_count).
+
+%% @doc Synchronously relinquish an existing device lease.
+release_lease(Pid, DeviceId) ->
+    gen_server:call(Pid, {release, DeviceId}).
+
+%% @doc Gracefully terminate the server.
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+%% =============================================================================
+%% 2. Non-Blocking Startup & Post-Init Continuation
+%% =============================================================================
+
+init(LeaseTimeoutSeconds) ->
+    InitialState = #{
+        timeout => LeaseTimeoutSeconds,
+        leases => #{}
+    },
+    %% Unblocks gen_server:start_link immediately while queueing warmup
+    {ok, InitialState, {continue, warmup_master_controller}}.
+
+handle_continue(warmup_master_controller, State = #{leases := Leases}) ->
+    Now = erlang:system_time(second),
+    DefaultReservation = #{
+        operator => <<"system_kernel">>,
+        acquired_at => Now
+    },
+    UpdatedLeases = maps:put(<<"edge_master_01">>, DefaultReservation, Leases),
+    %% Schedule first periodic audit tick to self in 1,000ms
+    erlang:send_after(1000, self(), audit_leases),
+    {noreply, State#{leases := UpdatedLeases}}.
+
+%% =============================================================================
+%% 3. Synchronous Callbacks (Requests & State Queries)
+%% =============================================================================
+
+handle_call({acquire, DeviceId, Operator}, _From, State = #{leases := Leases}) ->
+    Now = erlang:system_time(second),
+    LeaseRecord = #{
+        operator => Operator,
+        acquired_at => Now
+    },
+    NewLeases = maps:put(DeviceId, LeaseRecord, Leases),
+    {reply, ok, State#{leases := NewLeases}};
+
+handle_call({is_leased, DeviceId}, _From, State = #{timeout := Timeout, leases := Leases}) ->
+    Now = erlang:system_time(second),
+    IsActive = case maps:find(DeviceId, Leases) of
+        {ok, #{acquired_at := AcquiredAt}} ->
+            (Now - AcquiredAt) =< Timeout;
+        error ->
+            false
+    end,
+    {reply, IsActive, State};
+
+handle_call(active_count, _From, State = #{leases := Leases}) ->
+    {reply, maps:size(Leases), State};
+
+handle_call({release, DeviceId}, _From, State = #{leases := Leases}) ->
+    {reply, ok, State#{leases := maps:remove(DeviceId, Leases)}};
+
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+%% =============================================================================
+%% 4. Asynchronous Casts & Periodic Maintenance in handle_info
+%% =============================================================================
+
+handle_cast(_Msg, State) ->
     {noreply, State}.
 
-terminate(_R, _S) -> ok.
-code_change(_Old, S, _E) -> {ok, S}.
+%% Timer signals from erlang:send_after/3 arrive unwrapped here
+handle_info(audit_leases, State = #{timeout := Timeout, leases := Leases}) ->
+    Now = erlang:system_time(second),
+    ValidLeases = maps:filter(
+        fun(_DevId, #{acquired_at := AcquiredAt}) ->
+            (Now - AcquiredAt) =< Timeout
+        end,
+        Leases
+    ),
+    %% Re-arm periodic timer for the next maintenance window
+    erlang:send_after(1000, self(), audit_leases),
+    {noreply, State#{leases := ValidLeases}};
+
+%% Defensive catch-all prevents unhandled monitor/OS signals from crashing process
+handle_info(_UnknownInfo, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
 \`\`\`
 
 ## Assignment Specification
 
-Implement \`src/session_ttl_server.erl\` managing in-memory user sessions with automated TTL expiration:
-1. \`start_link(TtlSeconds) -> {ok, Pid}\`:
-   - Returns immediately with \`{ok, #{ttl => TtlSeconds, sessions => #{}}, {continue, hydrate_defaults}}\`.
-2. \`handle_continue(hydrate_defaults, State)\`:
-   - Seeds a default guest session: \`<<"guest">> => erlang:system_time(second)\`.
-   - Schedules the first expiration tick: \`erlang:send_after(1000, self(), cleanup_tick)\`.
-   - Returns \`{noreply, StateWithGuest}\`.
-3. \`create_session(Pid, SessionId)\`:
-   - Synchronously associates \`SessionId => erlang:system_time(second)\` in the sessions map. Returns \`ok\`.
-4. \`is_valid(Pid, SessionId) -> boolean()\`:
-   - Checks if \`SessionId\` exists and \`(Now - CreatedAt) =< TtlSeconds\`.
-5. \`get_active_count(Pid) -> non_neg_integer()\`:
-   - Returns the count of currently stored sessions in the map.
-6. \`handle_info(cleanup_tick, State)\`:
-   - Purges all sessions where \`Now - CreatedAt > TtlSeconds\`.
-   - Re-arms the timer via \`erlang:send_after(1000, self(), cleanup_tick)\`.
-   - Returns \`{noreply, PurgedState}\`.
-7. \`stop(Pid) -> ok\`.
+Implement \`src/session_ttl_server.erl\` as a production-grade OTP \`gen_server\` that stores active user session tokens and automatically purges expired records using periodic background timers.
+
+### Client API
+
+#### \`start_link/1\`
+- **Input**: \`TtlSeconds\` (positive integer representing session time-to-live in seconds).
+- **Behavior**: Spawns and links the \`session_ttl_server\` process. Unblocks the caller immediately by deferring guest session hydration to \`handle_continue/2\` using the continuation term \`hydrate_defaults\`. Initializes state with the specified TTL and an empty session store.
+- **Examples**:
+  - \`session_ttl_server:start_link(60)\` returns \`{ok, Pid}\`.
+
+#### \`create_session/2\`
+- **Input**: \`Pid\` (pid of the running server), \`SessionId\` (binary session token).
+- **Behavior**: Synchronously records the session token paired with the current system time in seconds. If the session already exists, updates its timestamp to the current time. Returns \`ok\`.
+- **Examples**:
+  - \`session_ttl_server:create_session(Pid, <<"sess_alpha">>)\` returns \`ok\`.
+
+#### \`is_valid/2\`
+- **Input**: \`Pid\` (pid of the running server), \`SessionId\` (binary session token).
+- **Behavior**: Synchronously determines whether \`SessionId\` exists in the active session store and whether the elapsed seconds since its creation are less than or equal to the configured TTL threshold.
+- **Examples**:
+  - \`session_ttl_server:is_valid(Pid, <<"sess_alpha">>)\` returns \`true\` (within TTL).
+  - \`session_ttl_server:is_valid(Pid, <<"sess_unknown">>)\` returns \`false\`.
+
+#### \`get_active_count/1\`
+- **Input**: \`Pid\` (pid of the running server).
+- **Behavior**: Synchronously queries the total number of sessions currently stored in the server state.
+- **Examples**:
+  - \`session_ttl_server:get_active_count(Pid)\` returns \`1\` (immediately post-init with guest session).
+
+#### \`stop/1\`
+- **Input**: \`Pid\` (pid of the running server).
+- **Behavior**: Gracefully terminates the \`gen_server\` process via \`gen_server:stop/1\`. Returns \`ok\`.
+- **Examples**:
+  - \`session_ttl_server:stop(Pid)\` returns \`ok\`.
+
+### Callback Specifications
+
+#### \`init/1\`
+- **Input**: \`TtlSeconds\` (positive integer).
+- **Behavior**: Returns a 3-element tuple containing \`ok\`, the initial state map holding \`ttl\` and an empty \`sessions\` map, and the continuation action \`{continue, hydrate_defaults}\`.
+
+#### \`handle_continue/2\`
+- **Input**: Continuation term \`hydrate_defaults\`, \`State\`.
+- **Behavior**: Populates a default session with binary identifier \`<<"guest">>\` timestamped at the current system time in seconds. Arms the first background expiration timer to deliver \`cleanup_tick\` to \`self()\` after 1,000 milliseconds via \`erlang:send_after/3\`. Returns \`{noreply, UpdatedState}\`.
+
+#### \`handle_info/2\`
+- **Input**: Info message \`cleanup_tick\`, \`State\`.
+- **Behavior**: Filters the session store to retain only records whose elapsed time from creation is within the configured TTL. Re-arms the 1,000 millisecond timer with \`cleanup_tick\` via \`erlang:send_after/3\`. Returns \`{noreply, PurgedState}\`. Includes a defensive catch-all clause for any unhandled messages.
 
 ## Rules & Verification Constraints
 
-- Must export \`handle_continue/2\` and return \`{continue, hydrate_defaults}\` from \`init/1\`.
-- Must use \`erlang:send_after/3\` to schedule \`cleanup_tick\`.
-- All timestamps must be generated using \`erlang:system_time(second)\`.
+- Must export all required client functions and OTP callbacks.
+- Must execute non-blocking post-init hydration via \`handle_continue(hydrate_defaults, State)\`.
+- Must schedule periodic sweeps using \`erlang:send_after(1000, self(), cleanup_tick)\`.
+- Must generate timestamps using \`erlang:system_time(second)\`.
 `,
     mentalModelCheck: {
       question: 'Why does returning {ok, State, {continue, Term}} prevent supervisor boot timeouts?',
@@ -1366,42 +1507,53 @@ Implement \`src/session_ttl_server.erl\` managing in-memory user sessions with a
     code_change/3
 ]).
 
-%% Client API
+%% @doc Start and link the session TTL server with a given time-to-live in seconds.
 start_link(TtlSeconds) when is_integer(TtlSeconds), TtlSeconds > 0 ->
     gen_server:start_link(?MODULE, TtlSeconds, []).
 
+%% @doc Synchronously record a session timestamped at the current system time.
 create_session(Pid, SessionId) ->
     ok.
 
+%% @doc Synchronously check if a session exists and has not exceeded its TTL.
 is_valid(Pid, SessionId) ->
     false.
 
+%% @doc Synchronously query the total count of active sessions.
 get_active_count(Pid) ->
     0.
 
+%% @doc Gracefully terminate the server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
 %% gen_server Callbacks
+
+%% @doc Initialize state and defer guest hydration via handle_continue.
 init(TtlSeconds) ->
-    %% Return 3-element tuple with continue
     {ok, #{ttl => TtlSeconds, sessions => #{}}, {continue, hydrate_defaults}}.
 
+%% @doc Perform post-init hydration and arm the periodic sweep timer.
 handle_continue(hydrate_defaults, State) ->
     {noreply, State}.
 
+%% @doc Handle synchronous calls.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous casts.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle timer messages and out-of-band signals.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up server resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -1515,42 +1667,53 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Start and link the session TTL server with a given time-to-live in seconds.
 start_link(TtlSeconds) when is_integer(TtlSeconds), TtlSeconds > 0 ->
     gen_server:start_link(?MODULE, TtlSeconds, []).
 
+%% @doc Synchronously record a session timestamped at the current system time.
 create_session(Pid, SessionId) ->
     ok.
 
+%% @doc Synchronously check if a session exists and has not exceeded its TTL.
 is_valid(Pid, SessionId) ->
     false.
 
+%% @doc Synchronously query the total count of active sessions.
 get_active_count(Pid) ->
     0.
 
+%% @doc Gracefully terminate the server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
 %% gen_server Callbacks
+
+%% @doc Initialize state and defer guest hydration via handle_continue.
 init(TtlSeconds) ->
-    %% Return 3-element tuple with continue
     {ok, #{ttl => TtlSeconds, sessions => #{}}, {continue, hydrate_defaults}}.
 
+%% @doc Perform post-init hydration and arm the periodic sweep timer.
 handle_continue(hydrate_defaults, State) ->
     {noreply, State}.
 
+%% @doc Handle synchronous calls.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous casts.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle timer messages and out-of-band signals.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up server resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,

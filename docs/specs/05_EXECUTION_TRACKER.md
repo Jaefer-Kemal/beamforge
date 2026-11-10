@@ -2469,6 +2469,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `erlc.exe`: Compiled both `wallet_server.erl` and `cloud_storage_bucket.erl` cleanly with 0 warnings/errors.
   - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
 
+## Phase 139: Pedagogical Despoiling of Chapter 7 Lecture 3 (`ch07-l03`)
+- [x] **139.1: Audit & Eliminate Spoilers in Lecture 7.3 (`ch07-l03`)**:
+  - Authored a complete, fully runnable parallel worked example `device_lease_manager.erl` (`start_link/1`, `acquire_lease/3`, `is_leased/2`, `active_count/1`, `release_lease/2`, `stop/1`, and full `gen_server` callbacks), demonstrating non-blocking initialization via `{continue, warmup_master_controller}`, post-boot hydration in `handle_continue/2`, and periodic lease expiration sweeping via `erlang:send_after/3` in `handle_info/2` in a realistic edge device lease domain.
+  - Audited and de-spoiled `Assignment Specification`: structured all functions (`start_link/1`, `create_session/2`, `is_valid/2`, `get_active_count/1`, `stop/1`) and callback invariants (`init/1`, `handle_continue/2`, `handle_info/2`) into clean `Input`, `Behavior`, and `Examples` blocks without Erlang syntax or tuple spoilers in prompt prose.
+  - Added clean EDoc `@doc` comments across starter code, `files[0].content`, `solutionCode`, and `solutionFiles['src/session_ttl_server.erl']`, strictly maintaining zero `-spec` declarations and zero in-body comments or hints.
+- [x] **139.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `npx tsc --noEmit`: 0 TypeScript errors across the web-ide workspace.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Compiled `device_lease_manager.erl` cleanly with 0 warnings/errors.
+  - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
+
 
 
 
