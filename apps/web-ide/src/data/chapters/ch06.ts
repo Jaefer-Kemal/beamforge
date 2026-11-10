@@ -3537,19 +3537,26 @@ The coordinator manages the child worker using unidirectional monitors:
 
 ## Parallel Worked Example: The Durable Job Sentinel (job_sentinel.erl)
 
-To understand how a long-lived coordinator maintains state continuity while supervising a volatile worker, consider \`job_sentinel.erl\`. This sentinel coordinates background jobs, ensuring completed tasks are never repeated (idempotency) and that completed results survive worker faults.
+To understand how a long-lived coordinator maintains state continuity while supervising a volatile worker, consider the complete, runnable \`job_sentinel.erl\` module below. This sentinel coordinates background computational jobs, ensuring completed tasks are never repeated (idempotency) and that committed results survive worker faults.
 
-Rather than an overwhelming monolithic module, this architecture is composed of three core interaction patterns:
-
-### 1. State Initialization & Atomic Process Monitoring
-The coordinator initializes its internal state map holding both its durable ledger (\`history\`) and the current worker's identity (\`worker_pid\` and \`worker_mref\`). Using \`spawn_monitor/1\` guarantees no race condition occurs between process creation and monitoring:
+Notice how the module exports its client API, maintains an internal state map holding both its durable ledger (\`history\`) and the current worker's identity (\`worker_pid\`, \`worker_mref\`), and traps \`'DOWN'\` to replace dead workers seamlessly:
 
 \`\`\`erlang
-%% @doc Spawns coordinator sentinel and initial monitored worker.
+-module(job_sentinel).
+-export([
+    start_sentinel/0,
+    submit_job/3,
+    query_archive/1,
+    stop_sentinel/1,
+    sentinel_loop/1,
+    worker_loop/0
+]).
+
+%% @doc Spawns the coordinator sentinel and initial monitored worker.
 start_sentinel() ->
     InitRef = make_ref(),
     Parent = self(),
-    Pid = spawn(fun() ->
+    _Pid = spawn(fun() ->
         {WorkerPid, MRef} = spawn_monitor(fun() -> worker_loop() end),
         State = #{
             worker_pid => WorkerPid,
@@ -3564,15 +3571,43 @@ start_sentinel() ->
     after 1000 ->
         {error, timeout}
     end.
-\`\`\`
 
-### 2. The Idempotency Gate (Lookup Before Dispatch)
-When a job submission arrives, the coordinator first inspects \`history\`. If the job was already completed, it returns the cached result immediately. Only unseen jobs are forwarded to the disposable worker:
+%% @doc Submits a job with an idempotency key to avoid duplicate execution.
+submit_job(SentinelPid, JobId, Payload) ->
+    Ref = make_ref(),
+    SentinelPid ! {submit_job, self(), Ref, JobId, Payload},
+    receive
+        {reply, Ref, Result} -> Result
+    after 2000 ->
+        {error, timeout}
+    end.
 
-\`\`\`erlang
+%% @doc Returns all completed jobs preserved in the sentinel's durable history.
+query_archive(SentinelPid) ->
+    Ref = make_ref(),
+    SentinelPid ! {query_archive, self(), Ref},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        #{}
+    end.
+
+%% @doc Cleanly stops the sentinel coordinator and terminates the active worker.
+stop_sentinel(SentinelPid) ->
+    Ref = make_ref(),
+    SentinelPid ! {stop, self(), Ref},
+    receive
+        {reply, Ref, ok} -> ok
+    after 1000 ->
+        ok
+    end.
+
+%% ── Coordinator & Worker Loops ───────────────────────────────────────────────
+
 %% @doc Tail-recursive coordinator message loop.
 sentinel_loop(State = #{worker_pid := Worker, worker_mref := MRef, history := History}) ->
     receive
+        %% Pattern 1: Idempotency Gate (Lookup Before Dispatch)
         {submit_job, From, Ref, JobId, Payload} ->
             case maps:find(JobId, History) of
                 {ok, CachedResult} ->
@@ -3591,24 +3626,34 @@ sentinel_loop(State = #{worker_pid := Worker, worker_mref := MRef, history := Hi
                     after 1000 ->
                         From ! {reply, Ref, {error, worker_timeout}},
                         sentinel_loop(State)
-                    end
+                    end;
+                error ->
+                    From ! {reply, Ref, {error, no_worker}},
+                    sentinel_loop(State)
             end;
-\`\`\`
 
-### 3. Failure Isolation & State Preservation (\`'DOWN'\` Recovery)
-If the worker crashes due to bad data or unhandled exceptions, the BEAM runtime enqueues a \`'DOWN'\` message in the coordinator's mailbox. The coordinator spawns a clean replacement worker and updates its loop state—leaving the \`history\` map completely intact:
+        {query_archive, From, Ref} ->
+            From ! {reply, Ref, History},
+            sentinel_loop(State);
 
-\`\`\`erlang
+        %% Pattern 2: Crash Isolation & State Preservation ('DOWN' Recovery)
         {'DOWN', MRef, process, Worker, _Reason} ->
-            %% Spawn pristine replacement worker and update state
             {NewWorker, NewMRef} = spawn_monitor(fun() -> worker_loop() end),
             sentinel_loop(State#{
                 worker_pid => NewWorker,
                 worker_mref => NewMRef
-            })
+            });
+
+        {stop, From, Ref} ->
+            if
+                is_pid(Worker) -> exit(Worker, shutdown);
+                true -> ok
+            end,
+            From ! {reply, Ref, ok},
+            ok
     end.
 
-%% @doc Disposable worker executing computationally intensive or risky tasks.
+%% @doc Disposable worker executing computationally intensive tasks.
 worker_loop() ->
     receive
         {execute, From, Ref, _JobId, Payload} when is_binary(Payload) ->
@@ -3617,9 +3662,16 @@ worker_loop() ->
             worker_loop();
         {execute, From, Ref, _JobId, _InvalidPayload} ->
             From ! {worker_reply, Ref, {error, invalid_payload}},
-            worker_loop()
+            worker_loop();
+        stop ->
+            ok
     end.
 \`\`\`
+
+### Key Architectural Takeaways
+1. **Separation of Volatile vs. Durable State:** The worker holds zero long-term memory. It performs the risky task and dies if it encounters corrupted data. The coordinator owns the \`history\` map and guarantees state continuity.
+2. **Atomic Monitoring:** Calling \`spawn_monitor/1\` during initialization and in the \`'DOWN'\` handler guarantees no race window where the worker dies before a monitor can be established.
+3. **Idempotency Gate:** Evaluating \`maps:find/2\` before forwarding messages ensures repeated client retries return the cached result instantly with zero worker overhead.
 
 ## Assignment Specification
 
