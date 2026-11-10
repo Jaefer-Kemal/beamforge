@@ -3480,8 +3480,8 @@ code_change(_OldVsn, State, _Extra) ->
       serviceName: 'firewall-rule-hydrator',
       symptom: 'During rolling deployments, the root supervisor times out and aborts boot whenever the firewall rule list exceeds 5,000 entries.',
       impact: 'Cluster nodes fail health checks and get killed by Kubernetes during rolling updates, causing service outages.',
-      rootCauseHint: 'incident_blocking_init:init/1 performs synchronous rule compilation and normalization directly inside init/1 before returning {ok, State}, blocking gen_server:start_link/3.',
-      fixObjective: 'Refactor init/1 to return {ok, #{status => booting, raw => SeedRules, rules => #{}}, {continue, {hydrate, SeedRules}}} immediately, and move rule compilation into handle_continue({hydrate, SeedRules}, State) setting status => ready.',
+      rootCauseHint: 'Synchronous rule compilation and normalization inside init/1 blocks gen_server:start_link/3, exceeding supervisor child startup timeouts during cluster deployment.',
+      fixObjective: 'Refactor initialization using the OTP {continue, Term} protocol: return immediately from init/1 in booting status, and execute rule compilation in handle_continue/2 to transition status to ready.',
     },
     conceptMarkdown: `## Incident Triage: Root Supervisor Boot Timeout (INC-103)
 
@@ -3498,31 +3498,149 @@ The root OTP supervisor aborted startup with the following error log:
 \`\`\`
 
 ### Root-Cause Inspection
-Inspecting \`src/incident_blocking_init.erl\` reveals that the server attempts to compile, normalize, and parse all firewall rules synchronously inside \`init/1\`:
+Inspecting \`src/incident_blocking_init.erl\` reveals that the server attempts to compile, normalize, and parse all firewall rules synchronously inside \`init/1\`.
+Because \`gen_server:start_link/3\` blocks the parent supervisor process until \`init/1\` returns, heavy rule sets exceeding 5,000 entries cause the supervisor to hit its default 5,000ms child startup timeout and abort the node boot!
+
+## Parallel Worked Example: The Geo IP Database
+
+The following \`geo_ip_database\` module demonstrates how a high-volume service resolves slow startup blocking by decoupling initial registration from heavy parsing using OTP's non-blocking \`{continue, Term}\` protocol:
+
 \`\`\`erlang
-%% BROKEN IMPLEMENTATION:
-init(SeedRules) ->
-    %% Heavy CPU loop compiling 5,000 rules blocks the caller for 6,200ms!
-    CompiledMap = compile_all_rules(SeedRules),
-    {ok, #{status => ready, rules => CompiledMap}}.
+-module(geo_ip_database).
+-behaviour(gen_server).
+
+%% Client API
+-export([
+    start_link/1,
+    lookup_country/2,
+    get_status/1,
+    stop/1
+]).
+
+%% gen_server Callbacks
+-export([
+    init/1,
+    handle_continue/2,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+%% =============================================================================
+%% Client API
+%% =============================================================================
+
+%% @doc Start and link the geo database with a raw list of IP ranges.
+start_link(RawRanges) ->
+    gen_server:start_link(?MODULE, RawRanges, []).
+
+%% @doc Query the country code for an IP address.
+lookup_country(Pid, Ip) ->
+    gen_server:call(Pid, {lookup_country, Ip}).
+
+%% @doc Query the current lifecycle status of the database.
+get_status(Pid) ->
+    gen_server:call(Pid, get_status).
+
+%% @doc Gracefully stop the database server.
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+%% =============================================================================
+%% gen_server Callbacks
+%% =============================================================================
+
+%% @doc Return immediately to unblock supervisor; defer compilation to continue.
+init(RawRanges) ->
+    InitialState = #{
+        status => booting,
+        raw => RawRanges,
+        ranges => #{}
+    },
+    {ok, InitialState, {continue, {compile_ranges, RawRanges}}}.
+
+%% @doc Process heavy range compilation before mailbox messages are dispatched.
+handle_continue({compile_ranges, RawRanges}, State) ->
+    CompiledMap = maps:from_list(RawRanges),
+    UpdatedState = State#{
+        status := ready,
+        ranges := CompiledMap
+    },
+    {noreply, UpdatedState}.
+
+handle_call({lookup_country, _Ip}, _From, #{status := booting} = State) ->
+    {reply, {error, still_booting}, State};
+handle_call({lookup_country, Ip}, _From, #{status := ready, ranges := Ranges} = State) ->
+    Reply = case maps:find(Ip, Ranges) of
+        {ok, Country} -> {ok, Country};
+        error -> {error, not_found}
+    end,
+    {reply, Reply, State};
+handle_call(get_status, _From, #{status := Status} = State) ->
+    {reply, Status, State};
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
 \`\`\`
 
-Because \`gen_server:start_link/3\` blocks the parent supervisor until \`init/1\` returns, the supervisor reached its 5,000ms child startup timeout and killed the process!
+## Assignment Specification
 
-### Your Fix Objective
-Refactor \`incident_blocking_init.erl\` using the modern OTP 21+ **\`{continue, Term}\`** pattern:
-1. \`init/1\` must return immediately in **< 1ms**:
-   \`\`\`erlang
-   {ok, #{status => booting, raw => SeedRules, rules => #{}}, {continue, {hydrate, SeedRules}}}
-   \`\`\`
-2. Move rule compilation into **\`handle_continue({hydrate, SeedRules}, State)\`**:
-   - Compile \`SeedRules\` into the rules map: \`maps:from_list(SeedRules)\`.
-   - Update internal state: \`State#{status := ready, rules := CompiledRules}\`.
-   - Return \`{noreply, State}\`.
-3. \`lookup_rule(Pid, Port)\`:
-   - If \`status =:= ready\`, returns \`{ok, Action}\` if found, \`{error, not_found}\` otherwise.
-   - If \`status =:= booting\`, returns \`{error, still_booting}\`.
-4. Ensure \`get_status(Pid)\` returns \`ready\` after hydration completes.
+Refactor \`src/incident_blocking_init.erl\` using the modern OTP 21+ \`{continue, Term}\` pattern to eliminate supervisor boot timeouts during cluster deployments.
+
+### Functional Requirements
+
+#### \`start_link/1\`
+- **Input**: \`SeedRules\` (list of key-value pairs representing raw firewall rules or catalog entries).
+- **Behavior**: Spawns and links the \`incident_blocking_init\` server process. Unblocks immediately in sub-millisecond time.
+- **Examples**:
+  - \`incident_blocking_init:start_link([{"http", 80}])\` returns \`{ok, Pid}\`.
+
+#### \`init/1\`
+- **Input**: \`SeedRules\` (list of raw rule pairs).
+- **Behavior**: Must return immediately without executing rule compilation. Returns a 3-element tuple containing \`ok\`, an initial state map recording status as \`booting\` and an empty \`rules\` map, and the continuation action with tag \`hydrate\` paired with \`SeedRules\`.
+- **Examples**:
+  - \`incident_blocking_init:init([{"k1", 100}])\` returns \`{ok, #{status => booting, ...}, {continue, {hydrate, [{"k1", 100}]}}}\`.
+
+#### \`handle_continue/2\`
+- **Input**: Continuation term matching \`{hydrate, SeedRules}\`, \`State\`.
+- **Behavior**: Converts \`SeedRules\` into the compiled map using map conversion, transitions the \`status\` flag to \`ready\`, and stores the compiled rules. Returns \`{noreply, UpdatedState}\`.
+
+#### \`lookup_rule/2\` and \`get_item/2\`
+- **Input**: \`Pid\` (running server pid), \`Port\` or \`Key\` (search term).
+- **Behavior**: Synchronously retrieves the rule or item value from the compiled map. If \`status\` is \`ready\`, returns \`{ok, Value}\` when found or \`{error, not_found}\` when missing. If \`status\` is \`booting\`, replies with \`{error, still_booting}\`.
+- **Examples**:
+  - \`incident_blocking_init:lookup_rule(Pid, "product_a")\` returns \`{ok, 29.99}\`.
+
+#### \`get_status/1\`
+- **Input**: \`Pid\` (running server pid).
+- **Behavior**: Synchronously queries the current lifecycle status atom (\`booting\` or \`ready\`).
+- **Examples**:
+  - \`incident_blocking_init:get_status(Pid)\` returns \`ready\` (after hydration).
+
+#### \`stop/1\`
+- **Input**: \`Pid\` (running server pid).
+- **Behavior**: Gracefully terminates the \`gen_server\` process via \`gen_server:stop/1\`. Returns \`ok\`.
+- **Examples**:
+  - \`incident_blocking_init:stop(Pid)\` returns \`ok\`.
+
+## Rules & Verification Constraints
+
+- Must export \`handle_continue/2\` from \`incident_blocking_init\`.
+- \`init/1\` must return a 3-element tuple with \`{continue, {hydrate, SeedRules}}\`.
+- \`handle_continue/2\` must transition internal status to \`ready\`.
 `,
     mentalModelCheck: {
       question: 'Why does moving heavy startup logic into handle_continue/2 fix supervisor timeout crashes?',
@@ -3582,31 +3700,38 @@ Refactor \`incident_blocking_init.erl\` using the modern OTP 21+ **\`{continue, 
     code_change/3
 ]).
 
-%% Client API
+%% @doc Start and link the firewall rule hydrator with a seed rules list.
 start_link(SeedRules) ->
     gen_server:start_link(?MODULE, SeedRules, []).
 
+%% @doc Lookup a firewall rule action for a given port.
 lookup_rule(Pid, Port) ->
     gen_server:call(Pid, {lookup_rule, Port}).
 
+%% @doc Lookup an item value by key.
 get_item(Pid, Key) ->
     gen_server:call(Pid, {get_item, Key}).
 
+%% @doc Query the current lifecycle status of the server.
 get_status(Pid) ->
     gen_server:call(Pid, get_status).
 
+%% @doc Gracefully terminate the server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
 %% gen_server Callbacks
+
+%% @doc Initialize the server. Synchronous rule compilation blocks supervisor boot.
 init(SeedRules) ->
-    %% BUGGY BLOCKING IMPLEMENTATION:
     Compiled = maps:from_list(SeedRules),
     {ok, #{status => ready, rules => Compiled, items => Compiled}}.
 
+%% @doc Post-init continuation callback.
 handle_continue(_Continue, State) ->
     {noreply, State}.
 
+%% @doc Handle synchronous calls.
 handle_call({lookup_rule, Port}, _From, #{status := ready, rules := Rules} = State) ->
     case maps:find(Port, Rules) of
         {ok, Action} -> {reply, {ok, Action}, State};
@@ -3622,15 +3747,19 @@ handle_call(get_status, _From, #{status := Status} = State) ->
 handle_call(_Req, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+%% @doc Handle asynchronous casts.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band process messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up server resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -3656,30 +3785,38 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Start and link the firewall rule hydrator with a seed rules list.
 start_link(SeedRules) ->
     gen_server:start_link(?MODULE, SeedRules, []).
 
+%% @doc Lookup a firewall rule action for a given port.
 lookup_rule(Pid, Port) ->
     gen_server:call(Pid, {lookup_rule, Port}).
 
+%% @doc Lookup an item value by key.
 get_item(Pid, Key) ->
     gen_server:call(Pid, {get_item, Key}).
 
+%% @doc Query the current lifecycle status of the server.
 get_status(Pid) ->
     gen_server:call(Pid, get_status).
 
+%% @doc Gracefully terminate the server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
 %% gen_server Callbacks
+
+%% @doc Initialize the server immediately and defer rule hydration to handle_continue.
 init(SeedRules) ->
     {ok, #{status => booting, raw => SeedRules, rules => #{}, items => #{}}, {continue, {hydrate, SeedRules}}}.
 
+%% @doc Asynchronously compile seed rules before client calls are processed.
 handle_continue({hydrate, SeedRules}, State) ->
     Compiled = maps:from_list(SeedRules),
     {noreply, State#{status := ready, rules := Compiled, items := Compiled}}.
 
+%% @doc Handle synchronous calls.
 handle_call({lookup_rule, _Port}, _From, #{status := booting} = State) ->
     {reply, {error, still_booting}, State};
 handle_call({lookup_rule, Port}, _From, #{status := ready, rules := Rules} = State) ->
@@ -3699,15 +3836,19 @@ handle_call(get_status, _From, #{status := Status} = State) ->
 handle_call(_Req, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+%% @doc Handle asynchronous casts.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band process messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up server resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -3737,31 +3878,38 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Start and link the firewall rule hydrator with a seed rules list.
 start_link(SeedRules) ->
     gen_server:start_link(?MODULE, SeedRules, []).
 
+%% @doc Lookup a firewall rule action for a given port.
 lookup_rule(Pid, Port) ->
     gen_server:call(Pid, {lookup_rule, Port}).
 
+%% @doc Lookup an item value by key.
 get_item(Pid, Key) ->
     gen_server:call(Pid, {get_item, Key}).
 
+%% @doc Query the current lifecycle status of the server.
 get_status(Pid) ->
     gen_server:call(Pid, get_status).
 
+%% @doc Gracefully terminate the server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
 %% gen_server Callbacks
+
+%% @doc Initialize the server. Synchronous rule compilation blocks supervisor boot.
 init(SeedRules) ->
-    %% BUGGY BLOCKING IMPLEMENTATION:
     Compiled = maps:from_list(SeedRules),
     {ok, #{status => ready, rules => Compiled, items => Compiled}}.
 
+%% @doc Post-init continuation callback.
 handle_continue(_Continue, State) ->
     {noreply, State}.
 
+%% @doc Handle synchronous calls.
 handle_call({lookup_rule, Port}, _From, #{status := ready, rules := Rules} = State) ->
     case maps:find(Port, Rules) of
         {ok, Action} -> {reply, {ok, Action}, State};
@@ -3777,15 +3925,19 @@ handle_call(get_status, _From, #{status := Status} = State) ->
 handle_call(_Req, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+%% @doc Handle asynchronous casts.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band process messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up server resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -3814,30 +3966,38 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Start and link the firewall rule hydrator with a seed rules list.
 start_link(SeedRules) ->
     gen_server:start_link(?MODULE, SeedRules, []).
 
+%% @doc Lookup a firewall rule action for a given port.
 lookup_rule(Pid, Port) ->
     gen_server:call(Pid, {lookup_rule, Port}).
 
+%% @doc Lookup an item value by key.
 get_item(Pid, Key) ->
     gen_server:call(Pid, {get_item, Key}).
 
+%% @doc Query the current lifecycle status of the server.
 get_status(Pid) ->
     gen_server:call(Pid, get_status).
 
+%% @doc Gracefully terminate the server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
 %% gen_server Callbacks
+
+%% @doc Initialize the server immediately and defer rule hydration to handle_continue.
 init(SeedRules) ->
     {ok, #{status => booting, raw => SeedRules, rules => #{}, items => #{}}, {continue, {hydrate, SeedRules}}}.
 
+%% @doc Asynchronously compile seed rules before client calls are processed.
 handle_continue({hydrate, SeedRules}, State) ->
     Compiled = maps:from_list(SeedRules),
     {noreply, State#{status := ready, rules := Compiled, items := Compiled}}.
 
+%% @doc Handle synchronous calls.
 handle_call({lookup_rule, _Port}, _From, #{status := booting} = State) ->
     {reply, {error, still_booting}, State};
 handle_call({lookup_rule, Port}, _From, #{status := ready, rules := Rules} = State) ->
@@ -3857,15 +4017,19 @@ handle_call(get_status, _From, #{status := Status} = State) ->
 handle_call(_Req, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+%% @doc Handle asynchronous casts.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band process messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up server resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
