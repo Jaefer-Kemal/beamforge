@@ -2724,24 +2724,16 @@ init({Threshold, TimeoutMs}) ->
     {ok, closed, Data}.
 
 %% @doc Closed state: normal execution, increments failures on error and trips to open.
-closed({call, From}, get_state_name, Data) ->
-    {keep_state, Data, [{reply, From, closed}]};
-closed({call, From}, _Msg, Data) ->
-    {keep_state, Data, [{reply, From, ok}]}.
+closed(_EventType, _EventContent, Data) ->
+    {keep_state, Data}.
 
 %% @doc Open state: immediately fast-fails calls and awaits state_timeout.
-open({call, From}, get_state_name, Data) ->
-    {keep_state, Data, [{reply, From, open}]};
-open({call, From}, _Msg, Data) ->
-    {keep_state, Data, [{reply, From, {error, circuit_open}}]};
-open(state_timeout, _Event, Data) ->
-    {next_state, half_open, Data}.
+open(_EventType, _EventContent, Data) ->
+    {keep_state, Data}.
 
 %% @doc Half-open state: trial probe, heals to closed on success or trips back to open on error.
-half_open({call, From}, get_state_name, Data) ->
-    {keep_state, Data, [{reply, From, half_open}]};
-half_open({call, From}, _Msg, Data) ->
-    {keep_state, Data, [{reply, From, ok}]}.
+half_open(_EventType, _EventContent, Data) ->
+    {keep_state, Data}.
 
 %% @doc Clean up state machine resources on shutdown.
 terminate(_Reason, _State, _Data) ->
@@ -2888,24 +2880,16 @@ init({Threshold, TimeoutMs}) ->
     {ok, closed, Data}.
 
 %% @doc Closed state: normal execution, increments failures on error and trips to open.
-closed({call, From}, get_state_name, Data) ->
-    {keep_state, Data, [{reply, From, closed}]};
-closed({call, From}, _Msg, Data) ->
-    {keep_state, Data, [{reply, From, ok}]}.
+closed(_EventType, _EventContent, Data) ->
+    {keep_state, Data}.
 
 %% @doc Open state: immediately fast-fails calls and awaits state_timeout.
-open({call, From}, get_state_name, Data) ->
-    {keep_state, Data, [{reply, From, open}]};
-open({call, From}, _Msg, Data) ->
-    {keep_state, Data, [{reply, From, {error, circuit_open}}]};
-open(state_timeout, _Event, Data) ->
-    {next_state, half_open, Data}.
+open(_EventType, _EventContent, Data) ->
+    {keep_state, Data}.
 
 %% @doc Half-open state: trial probe, heals to closed on success or trips back to open on error.
-half_open({call, From}, get_state_name, Data) ->
-    {keep_state, Data, [{reply, From, half_open}]};
-half_open({call, From}, _Msg, Data) ->
-    {keep_state, Data, [{reply, From, ok}]}.
+half_open(_EventType, _EventContent, Data) ->
+    {keep_state, Data}.
 
 %% @doc Clean up state machine resources on shutdown.
 terminate(_Reason, _State, _Data) ->

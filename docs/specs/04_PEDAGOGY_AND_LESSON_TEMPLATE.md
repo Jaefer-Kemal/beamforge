@@ -33,7 +33,8 @@ Every lesson's markdown guide MUST include these 5 sections:
 
 ## 2. Right-Pane Starter Template, Visible Test Cases & Solution
 Every lesson object MUST provide:
-- **`starterFiles`**: Ready-to-edit Erlang module template with `-module(...)`, `-export([...])`, helpful type/record comments, and clear function skeletons so the learner can start coding immediately without boilerplate friction.
+- **`starterFiles` & `starterCode`**: Ready-to-edit Erlang module template with `-module(...)`, `-export([...])`, professional EDoc `@doc` comments, and clean function skeletons.
+  - **No Pre-Solved Core Logic**: Skeletons must provide neutral minimal return stubs (e.g. `ok.`, `{noreply, State}`, `{keep_state, Data}`). Never pre-solve core state transitions, fast-fails, or event matching clauses that give away the assignment's central challenge.
 - **`visibleTestCases`**: Array of `{ id, title, erlangCall, expectedOutput, explanation }` displayed in the **`🧪 Test Cases`** drawer and executed when clicking **`▷ Run`**.
 - **`astRules`**: Structured rule spec passed to `bf_ast_verifier:verify_rules/3` when clicking **`▶ Submit`**:
   - `requireTailRecursion: string[]` (e.g., `["process_order/2", "calculate_order_total/2", "restock/2"]`)

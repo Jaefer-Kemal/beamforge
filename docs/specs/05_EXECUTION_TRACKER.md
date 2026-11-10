@@ -2507,6 +2507,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `erlc.exe`: Compiled `session_probe_statem.erl` cleanly with 0 warnings/errors.
   - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
 
+## Phase 142: Codify Anti-Pre-Solved Starter Code Rule & Audit `ch07-l05` Starter Skeletons
+- [x] **142.1: Codify Anti-Pre-Solved Starter Code Rule in Specs 08 & 04**:
+  - Updated `docs/specs/08_PEDAGOGICAL_AUDIT_AND_ANTI_SPOILER_PROTOCOL.md` (Pillar 3) and `docs/specs/04_PEDAGOGY_AND_LESSON_TEMPLATE.md` with the *Anti-Pre-Solved Starter Code Invariant*, strictly forbidding starter templates from pre-solving state transitions, error return shapes, or event handling clauses.
+- [x] **142.2: De-Spoil `ch07-l05` Starter Code**:
+  - Replaced pre-solved `open/3` fast-fail (`{error, circuit_open}`) and pre-solved `state_timeout` transitions in both `starterCode` and `files[0].content` with clean, neutral fallback skeletons (`{keep_state, Data}`), requiring learners to genuinely construct the `gen_statem` event clauses and state machine transitions.
+- [x] **142.3: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `npx tsc --noEmit`: 0 TypeScript errors across the web-ide workspace.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Compiled starter template and solution cleanly with 0 warnings/errors.
+  - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
+
 
 
 

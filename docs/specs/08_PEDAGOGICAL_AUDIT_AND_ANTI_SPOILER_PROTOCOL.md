@@ -48,7 +48,7 @@ Every function in the `## Assignment Specification` must follow this exact 3-par
 - **Zero Syntax Spoilers in Prompt Text**:
   - **NEVER** write Erlang expressions in backticks in the prompt bullets (e.g., strictly forbid `using the cons operator [Item | List]` or `returns (Bytes * 8) div Seconds`).
 
-### Pillar 3: Professional `@doc` Comments in Starter Code
+### Pillar 3: Professional `@doc` Comments & Anti-Pre-Solved Starter Code
 - Starter templates (`files[0].content` and `starterCode`) must contain only standard, clean EDoc/rebar3 style documentation:
   ```erlang
   %% @doc Return whole integer bits per second given byte count and elapsed seconds.
@@ -56,6 +56,12 @@ Every function in the `## Assignment Specification` must follow this exact 3-par
       ok.
   ```
 - **Forbidden**: Step-by-step implementation hints or code comments inside function bodies (e.g., `%% Convert Bytes to bits and compute whole integer bits per second using div.` or `%% Use =:= to check equality`).
+- **The "Anti-Pre-Solved Starter Code" Invariant (No Free Rides)**:
+  - Starter templates must provide genuine, un-spoiled scaffolding (module/behaviour declarations, export lists, function heads, and neutral minimal return stubs like `ok.`, `{noreply, State}`, or `{keep_state, Data}`).
+  - **Strictly Forbidden in Starter Code**:
+    - Pre-solving core state transitions or event handling clauses (e.g., pre-filling `open(state_timeout, ...) -> {next_state, half_open, Data}` or pre-writing error return shapes like `{error, circuit_open}`).
+    - Pre-wiring domain business logic in callback clauses that robs the learner of formulating the event handling pattern themselves.
+  - Every lecture audit must explicitly audit `starterCode` and `files[0].content` to guarantee that the core pedagogical challenge has not been pre-solved.
 
 ### Pillar 4: Concept Notes Variable Neutrality
 - General syntax explanations in `conceptMarkdown` must use neutral, generic variable names (e.g., `[A, B | Tail]` instead of `[First, Second | Rest]`).
