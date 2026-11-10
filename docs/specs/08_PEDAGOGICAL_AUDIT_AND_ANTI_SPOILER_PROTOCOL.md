@@ -21,9 +21,15 @@ Every lecture must be strictly audited and certified against all four pillars:
 
 ### Pillar 1: Parallel Worked Example Domain Disjunction
 - **Domain Independence**: Must use a realistic production domain distinct from the assignment.
-- **No Parallel Clones**:
-  - Never mirror the assignment's exact function names or argument shapes.
+- **No Parallel Clones (The Anti-Transliteration Rule)**:
+  - Never mirror the assignment's exact function names, argument shapes, or API arity.
   - Never mirror the assignment's internal expression structure (e.g., if the exercise requires `IsAdmin =:= true orelse (Used >= 0 andalso Used =< Limit)`, the parallel example must NOT have `Override =:= true orelse (Temp >= 0 andalso Temp =< Max)`).
+  - Never mirror all assignment endpoints 1-for-1 (e.g. providing matching test hooks, crash triggers, and identical clause counts). This degrades the lesson into mechanical transliteration (find-and-replace) rather than architectural synthesis.
+- **Chunked Reference Architecture for Problem Sets & Capstones**:
+  - In Capstones, Mini-Capstones, and complex multi-feature Problem Sets, **NEVER** dump a monolithic 100–200+ line code replica. Massive code walls induce cognitive fatigue and tempt students to copy blindly.
+  - Instead, provide a **Compact, Chunked Reference (~40–60 lines total)** divided into 2–3 annotated architectural sections (e.g., *1. State Initialization & Atomic Monitoring*, *2. Idempotency Gate / Routing*, *3. Failure Recovery & State Preservation*).
+  - Each section must be preceded by 2–3 sentences of clear pedagogical prose explaining *why* the BEAM behaves this way and how the pattern functions.
+  - This equips learners with an authentic, illuminating reference when stuck without giving away the specific assignment solution.
 - **Demonstrate Mechanics, Not Answers**:
   Show how the syntax, operator, or pattern behaves in isolation so the learner understands the tool, but must apply it creatively.
 

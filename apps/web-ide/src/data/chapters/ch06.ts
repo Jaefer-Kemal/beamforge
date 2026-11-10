@@ -3535,239 +3535,89 @@ The coordinator manages the child worker using unidirectional monitors:
 - **Restart Budget Management:** The coordinator maintains a budget of remaining restarts. If the budget is greater than zero, it decrements the remaining allowance, increments a restart counter, and spawns a replacement worker. If the budget is exhausted, it transitions into a degraded state, refusing further restart attempts.
 - **State Invariance:** Because all committed entries reside exclusively in the coordinator's loop variables, a child worker crash can never corrupt or erase accumulated history.
 
-## Parallel Worked Example: The Resilient Sensor Ingestion Sentinel (telemetry_sentinel.erl)
+## Parallel Worked Example: The Durable Job Sentinel (job_sentinel.erl)
 
-The following production-grade module demonstrates a resilient telemetry ingestion sentinel. The sentinel coordinates calibrated sensor measurements, indexes historical readings in memory to reject duplicate sample tokens, and supervises a disposable calibrator worker with automatic crash recovery and restart budgeting.
+To understand how a long-lived coordinator maintains state continuity while supervising a volatile worker, consider \`job_sentinel.erl\`. This sentinel coordinates background jobs, ensuring completed tasks are never repeated (idempotency) and that completed results survive worker faults.
+
+Rather than an overwhelming monolithic module, this architecture is composed of three core interaction patterns:
+
+### 1. State Initialization & Atomic Process Monitoring
+The coordinator initializes its internal state map holding both its durable ledger (\`history\`) and the current worker's identity (\`worker_pid\` and \`worker_mref\`). Using \`spawn_monitor/1\` guarantees no race condition occurs between process creation and monitoring:
 
 \`\`\`erlang
--module(telemetry_sentinel).
--export([
-    start_sentinel/1,
-    record_reading/3,
-    trigger_sensor_fault/1,
-    get_active_calibrator/1,
-    get_archive/1,
-    stop_sentinel/1,
-    sentinel_loop/1,
-    calibrator_loop/0
-]).
-
-%% @doc Spawns the sentinel coordinator actor and initial monitored calibrator worker.
-start_sentinel(MaxRetries) when is_integer(MaxRetries), MaxRetries >= 0 ->
+%% @doc Spawns coordinator sentinel and initial monitored worker.
+start_sentinel() ->
     InitRef = make_ref(),
     Parent = self(),
-    _SentinelPid = spawn(fun() ->
-        {CalibratorPid, MRef} = spawn_monitor(fun() -> calibrator_loop() end),
+    Pid = spawn(fun() ->
+        {WorkerPid, MRef} = spawn_monitor(fun() -> worker_loop() end),
         State = #{
-            calibrator_pid => CalibratorPid,
-            calibrator_mref => MRef,
-            retries_left => MaxRetries,
-            retry_count => 0,
-            archive_map => #{}
+            worker_pid => WorkerPid,
+            worker_mref => MRef,
+            history => #{}
         },
         Parent ! {InitRef, ok, self()},
         sentinel_loop(State)
     end),
     receive
-        {InitRef, ok, Pid} -> {ok, Pid}
+        {InitRef, ok, SentinelPid} -> {ok, SentinelPid}
     after 1000 ->
         {error, timeout}
     end.
+\`\`\`
 
-%% @doc Submits an idempotent sensor reading for calibration and archival.
-record_reading(SentinelPid, SampleId, Measurement) ->
-    Ref = make_ref(),
-    SentinelPid ! {record_reading, self(), Ref, SampleId, Measurement},
-    receive
-        {reply, Ref, Result} -> Result
-    after 2000 ->
-        {error, timeout}
-    end.
+### 2. The Idempotency Gate (Lookup Before Dispatch)
+When a job submission arrives, the coordinator first inspects \`history\`. If the job was already completed, it returns the cached result immediately. Only unseen jobs are forwarded to the disposable worker:
 
-%% @doc Simulates a sensor calibration crash to verify coordinator resilience.
-trigger_sensor_fault(SentinelPid) ->
-    Ref = make_ref(),
-    SentinelPid ! {trigger_sensor_fault, self(), Ref},
+\`\`\`erlang
+%% @doc Tail-recursive coordinator message loop.
+sentinel_loop(State = #{worker_pid := Worker, worker_mref := MRef, history := History}) ->
     receive
-        {reply, Ref, Result} -> Result
-    after 2000 ->
-        {error, timeout}
-    end.
-
-%% @doc Returns the active calibrator PID and accumulated retry count.
-get_active_calibrator(SentinelPid) ->
-    Ref = make_ref(),
-    SentinelPid ! {get_active_calibrator, self(), Ref},
-    receive
-        {reply, Ref, Result} -> Result
-    after 1000 ->
-        {error, timeout}
-    end.
-
-%% @doc Returns the archive map containing all calibrated sensor readings.
-get_archive(SentinelPid) ->
-    Ref = make_ref(),
-    SentinelPid ! {get_archive, self(), Ref},
-    receive
-        {reply, Ref, Result} -> Result
-    after 1000 ->
-        #{}
-    end.
-
-%% @doc Cleanly stops the sentinel coordinator and terminates the calibrator worker.
-stop_sentinel(SentinelPid) ->
-    Ref = make_ref(),
-    SentinelPid ! {stop, self(), Ref},
-    receive
-        {reply, Ref, ok} -> ok
-    after 1000 ->
-        ok
-    end.
-
-%% @doc Tail-recursive coordinator loop managing state, idempotency, and crash recovery.
-sentinel_loop(State = #{calibrator_pid := CalibratorPid,
-                        calibrator_mref := CalibratorMRef,
-                        retries_left := RetriesLeft,
-                        retry_count := RetryCount,
-                        archive_map := ArchiveMap}) ->
-    receive
-        {record_reading, From, Ref, SampleId, Measurement} ->
-            case maps:find(SampleId, ArchiveMap) of
-                {ok, ExistingSample} ->
-                    From ! {reply, Ref, {ok, {already_archived, ExistingSample}}},
+        {submit_job, From, Ref, JobId, Payload} ->
+            case maps:find(JobId, History) of
+                {ok, CachedResult} ->
+                    From ! {reply, Ref, {ok, {cached, CachedResult}}},
                     sentinel_loop(State);
-                error when is_pid(CalibratorPid) ->
-                    CalibratorPid ! {calibrate, self(), Ref, SampleId, Measurement},
+                error when is_pid(Worker) ->
+                    Worker ! {execute, self(), Ref, JobId, Payload},
                     receive
-                        {calibrator_reply, Ref, {ok, Sample}} ->
-                            NewArchive = maps:put(SampleId, Sample, ArchiveMap),
-                            From ! {reply, Ref, {ok, Sample}},
-                            sentinel_loop(State#{archive_map => NewArchive});
-                        {calibrator_reply, Ref, {error, Reason}} ->
+                        {worker_reply, Ref, {ok, Result}} ->
+                            NewHistory = maps:put(JobId, Result, History),
+                            From ! {reply, Ref, {ok, Result}},
+                            sentinel_loop(State#{history => NewHistory});
+                        {worker_reply, Ref, {error, Reason}} ->
                             From ! {reply, Ref, {error, Reason}},
                             sentinel_loop(State)
                     after 1000 ->
-                        From ! {reply, Ref, {error, calibrator_timeout}},
+                        From ! {reply, Ref, {error, worker_timeout}},
                         sentinel_loop(State)
-                    end;
-                error ->
-                    From ! {reply, Ref, {error, no_active_calibrator}},
-                    sentinel_loop(State)
+                    end
             end;
+\`\`\`
 
-        {trigger_sensor_fault, From, Ref} ->
-            if
-                is_pid(CalibratorPid) andalso RetriesLeft > 0 ->
-                    OldPid = CalibratorPid,
-                    CalibratorPid ! sensor_fault,
-                    receive
-                        {'DOWN', CalibratorMRef, process, OldPid, _Reason} ->
-                            {NewPid, NewMRef} = spawn_monitor(fun() -> calibrator_loop() end),
-                            NewState = State#{
-                                calibrator_pid => NewPid,
-                                calibrator_mref => NewMRef,
-                                retries_left => RetriesLeft - 1,
-                                retry_count => RetryCount + 1
-                            },
-                            From ! {reply, Ref, {ok, OldPid, NewPid}},
-                            sentinel_loop(NewState)
-                    after 1000 ->
-                        From ! {reply, Ref, {error, fault_timeout}},
-                        sentinel_loop(State)
-                    end;
-                is_pid(CalibratorPid) ->
-                    OldPid = CalibratorPid,
-                    CalibratorPid ! sensor_fault,
-                    receive
-                        {'DOWN', CalibratorMRef, process, OldPid, _Reason} ->
-                            NewState = State#{
-                                calibrator_pid => undefined,
-                                calibrator_mref => undefined,
-                                retries_left => 0,
-                                retry_count => RetryCount + 1
-                            },
-                            From ! {reply, Ref, {error, retry_limit_reached}},
-                            sentinel_loop(NewState)
-                    after 1000 ->
-                        From ! {reply, Ref, {error, fault_timeout}},
-                        sentinel_loop(State)
-                    end;
-                true ->
-                    From ! {reply, Ref, {error, no_active_calibrator}},
-                    sentinel_loop(State)
-            end;
+### 3. Failure Isolation & State Preservation (\`'DOWN'\` Recovery)
+If the worker crashes due to bad data or unhandled exceptions, the BEAM runtime enqueues a \`'DOWN'\` message in the coordinator's mailbox. The coordinator spawns a clean replacement worker and updates its loop state—leaving the \`history\` map completely intact:
 
-        {'DOWN', CalibratorMRef, process, CalibratorPid, _CrashReason} ->
-            if
-                RetriesLeft > 0 ->
-                    {NewPid, NewMRef} = spawn_monitor(fun() -> calibrator_loop() end),
-                    sentinel_loop(State#{
-                        calibrator_pid => NewPid,
-                        calibrator_mref => NewMRef,
-                        retries_left => RetriesLeft - 1,
-                        retry_count => RetryCount + 1
-                    });
-                true ->
-                    sentinel_loop(State#{
-                        calibrator_pid => undefined,
-                        calibrator_mref => undefined,
-                        retries_left => 0
-                    })
-            end;
-
-        {get_active_calibrator, From, Ref} ->
-            if
-                is_pid(CalibratorPid) ->
-                    From ! {reply, Ref, {ok, CalibratorPid, RetryCount}};
-                true ->
-                    From ! {reply, Ref, {error, no_active_calibrator}}
-            end,
-            sentinel_loop(State);
-
-        {get_archive, From, Ref} ->
-            From ! {reply, Ref, ArchiveMap},
-            sentinel_loop(State);
-
-        {stop, From, Ref} ->
-            if
-                is_pid(CalibratorPid) ->
-                    exit(CalibratorPid, shutdown);
-                true ->
-                    ok
-            end,
-            From ! {reply, Ref, ok},
-            ok
+\`\`\`erlang
+        {'DOWN', MRef, process, Worker, _Reason} ->
+            %% Spawn pristine replacement worker and update state
+            {NewWorker, NewMRef} = spawn_monitor(fun() -> worker_loop() end),
+            sentinel_loop(State#{
+                worker_pid => NewWorker,
+                worker_mref => NewMRef
+            })
     end.
 
-%% @doc Tail-recursive worker loop performing sensor validation and calibration.
-calibrator_loop() ->
+%% @doc Disposable worker executing computationally intensive or risky tasks.
+worker_loop() ->
     receive
-        {calibrate, From, Ref, SampleId, {SensorType, RawValue}} ->
-            ValidSensor = (SensorType =:= temperature orelse SensorType =:= humidity orelse SensorType =:= pressure),
-            ValidVal = (is_integer(RawValue) orelse is_float(RawValue)) andalso RawValue >= 0,
-            if
-                not ValidSensor ->
-                    From ! {calibrator_reply, Ref, {error, uncalibrated_sensor}},
-                    calibrator_loop();
-                not ValidVal ->
-                    From ! {calibrator_reply, Ref, {error, invalid_reading}},
-                    calibrator_loop();
-                true ->
-                    Sample = #{
-                        sample_id => SampleId,
-                        sensor => SensorType,
-                        value => RawValue,
-                        status => calibrated
-                    },
-                    From ! {calibrator_reply, Ref, {ok, Sample}},
-                    calibrator_loop()
-            end;
-
-        sensor_fault ->
-            exit(simulated_calibrator_fault);
-
-        stop ->
-            ok
+        {execute, From, Ref, _JobId, Payload} when is_binary(Payload) ->
+            Result = #{processed_bytes => byte_size(Payload), status => completed},
+            From ! {worker_reply, Ref, {ok, Result}},
+            worker_loop();
+        {execute, From, Ref, _JobId, _InvalidPayload} ->
+            From ! {worker_reply, Ref, {error, invalid_payload}},
+            worker_loop()
     end.
 \`\`\`
 

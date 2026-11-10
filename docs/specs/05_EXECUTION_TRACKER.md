@@ -2428,13 +2428,16 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all incident test stages (`S1_SuccessCall` normal quote delivery and `S2_FastFail` zero-latency <100ms crash detection).
 
-## Phase 136: Pedagogical Despoiling of Chapter 6 Lecture 10 (`ch06-l10`) Mini-Capstone
+## Phase 136: Pedagogical Despoiling of Chapter 6 Lecture 10 (`ch06-l10`) Mini-Capstone & Capstone Protocol Codification
 - [x] **136.1: Audit & Eliminate Exercise Code Spoilers in Lecture 6.10 (`ch06-l10`)**:
-  - Authored an authentic parallel worked example `telemetry_sentinel.erl` (`start_sentinel/1`, `record_reading/3`, `trigger_sensor_fault/1`, `get_active_calibrator/1`, `get_archive/1`, `stop_sentinel/1`, `sentinel_loop/1`, `calibrator_loop/0`), demonstrating the complete durable coordinator + monitored worker architecture with idempotency archiving, restart budgeting, and monitor crash recovery in a realistic sensor telemetry domain.
+  - Replaced monolithic mirror code with a compact, chunked architectural reference `job_sentinel.erl` (~55 lines total) split across 3 annotated pedagogical sections: *1. State Initialization & Atomic Process Monitoring*, *2. The Idempotency Gate (Lookup Before Dispatch)*, and *3. Failure Isolation & State Preservation (`'DOWN'` Recovery)*. Eliminates the 1:1 transliteration trap while providing learners with an authentic structural reference.
   - Audited and de-spoiled Assignment Specification: structured each function (`start_system/1`, `charge/4`, `trigger_crash_test/1`, `get_active_worker/1`, `get_processed_txs/1`, `stop_system/1`, `watcher_loop/1`, `worker_loop/0`) into clean `Input`, `Behavior`, and `Examples` blocks without leaking Erlang syntax or internal message tuples in prompt prose.
   - Refactored starter code comments in both `starterCode` and `files[0].content`: purged all `%% Architectural Requirement:` implementation hints and message dictations; introduced clean EDoc `@doc` annotations; strictly maintained zero `-spec` declarations.
   - Verified variable neutrality and domain independence in `conceptMarkdown` concept notes.
-- [x] **136.2: Multi-Compiler & Backend Verification**:
+- [x] **136.2: Codify Anti-Transliteration & Chunked Reference Rules in Pedagogical Specs**:
+  - Updated `docs/specs/08_PEDAGOGICAL_AUDIT_AND_ANTI_SPOILER_PROTOCOL.md` (Pillar 1) codifying the "Anti-Transliteration Rule" (forbidding 1:1 functional clones) and the "Chunked Reference Architecture" rule (requiring ~40–60 line modular sections with prose explanations for Capstones and Problem Sets).
+  - Updated `docs/specs/04_PEDAGOGY_AND_LESSON_TEMPLATE.md` to mandate the chunked reference layout across all future Capstones and Problem Sets.
+- [x] **136.3: Multi-Compiler & Backend Verification**:
   - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
   - `npx tsc --noEmit`: 0 TypeScript errors across the web-ide workspace.
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
