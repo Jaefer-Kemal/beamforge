@@ -2406,6 +2406,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all test stages (`S1_Ast` demonitor call audit and `S2_RaceAndFlush` verifying 0 lingering downs post-execution).
 
+## Phase 134: Pedagogical Despoiling of Chapter 6 Lecture 8 (`ch06-l08`)
+- [x] **134.1: Audit & Eliminate Exercise Code Spoilers in Lecture 6.8 (`ch06-l08`)**:
+  - Neutralized concept breakdown: maintained strict variable neutrality and domain independence across the Architectural Decision Matrix (`link`, `link` with `trap_exit`, `monitor`) and the mechanics of pairing ephemeral monitors with synchronous calls to achieve instant (<1ms) server crash awareness without hanging for timeout durations.
+  - Authored a dedicated parallel worked example `cluster_gateway_client.erl` (`evaluate_topology_primitive/1`, `sync_query_gateway/3`, `async_notify_gateway/2`), demonstrating link vs monitor topology strategies, monitor-backed synchronous query protocols with instant error delivery, and asynchronous notifications with zero variable or signature cloning.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `choose_primitive/1`, `start/2`, `call/3`, `cast/2`, `stop/1`, and `loop/2`, eliminating internal receive and loop transition dictation.
+  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and pseudocode comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+- [x] **134.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 4 test stages (`S1_Ast` monitor/demonitor/receive_after audits, `S2_DecisionMatrix` full scenario matching, `S3_Protocol` OTP gen_server callback execution, and `S4_ZeroLatency` instant crash detection in 0ms).
+
 
 
 
