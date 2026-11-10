@@ -20,8 +20,9 @@ Every lesson's markdown guide MUST include these 5 sections:
      ```
    - Followed by a brief note explaining how to read the type spec and a pointer to the attached `references` card.
 4. **`## Parallel Worked Example`**:
-   - For standard single-concept lessons: A concise, realistic production example in a distinct domain demonstrating the syntax/mechanics in isolation.
-   - For Problem Sets & Capstones: A **Compact, Chunked Reference (~40–60 lines total)** split across 2–3 annotated architectural steps (e.g. State & Monitoring, Idempotency/Routing, Crash Recovery). Never dump a 100+ line 1:1 mirror of the assignment.
+   - Complete, runnable Erlang modules (`-module(...)`, full exports, realistic production flow) are welcome and encouraged, provided they maintain strict domain disjunction and avoid 1:1 functional mirroring.
+   - Every example must be clearly understandable: divided into digestible sections or annotated with clear prose so the learner understands *what the BEAM is doing* at each phase.
+   - For Capstones & complex Problem Sets, prioritize chunked architectural references or deeply explained modules that guide composition without spoiling the assignment's exact arity or endpoints.
 5. **`## Assignment Specification`** (for coding lessons & problem sets):
    - Exact module name and `-export([...])` list.
    - Structured 3-part layout (`Input`, `Behavior`, `Examples`) for every function.

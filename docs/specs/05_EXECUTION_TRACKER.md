@@ -2443,6 +2443,20 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-6].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
 
+## Phase 137: Pedagogical Despoiling & Specification Audit of Chapter 7 Lecture 1 (`ch07-l01`)
+- [x] **137.1: Codify Understandable Complete Module Guidelines in Specs**:
+  - Updated `docs/specs/08_PEDAGOGICAL_AUDIT_AND_ANTI_SPOILER_PROTOCOL.md` and `docs/specs/04_PEDAGOGY_AND_LESSON_TEMPLATE.md` to welcome complete, runnable Erlang modules (`-module(...)`, full exports, and callbacks) in parallel worked examples, mandating clean annotations, high understandability, and strict anti-transliteration (no 1:1 functional clones).
+- [x] **137.2: Audit & Eliminate Spoilers in Lecture 7.1 (`ch07-l01`)**:
+  - Replaced redundant counter demo with an authentic, production-grade IoT device telemetry module `device_telemetry.erl` (`start_link/1`, `record_packet/2`, `query_status/1`, `stop/1`, and full `gen_server` callbacks), demonstrating Inversion of Control and live `sys:get_state/1` inspection in a distinct domain.
+  - Refactored `Assignment Specification`: added structured functional breakdowns (`Input`, `Behavior`, `Examples`) for `start_link/0`, `increment/2`, `get_count/1`, `stop/1`, and `run_demo/0`.
+  - Added clean EDoc `@doc` comments across starter code, `files[0].content`, `solutionCode`, and `solutionFiles['src/otp_intro_demo.erl']`, strictly maintaining zero `-spec` declarations and zero in-body comments.
+- [x] **137.3: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `npx tsc --noEmit`: 0 TypeScript errors across the web-ide workspace.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Compiled both `otp_intro_demo.erl` and `device_telemetry.erl` cleanly with 0 warnings/errors.
+  - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
+
 
 
 

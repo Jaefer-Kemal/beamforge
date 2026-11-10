@@ -21,15 +21,17 @@ Every lecture must be strictly audited and certified against all four pillars:
 
 ### Pillar 1: Parallel Worked Example Domain Disjunction
 - **Domain Independence**: Must use a realistic production domain distinct from the assignment.
+- **Completeness & Understandability (Full Modules Welcome)**:
+  - It is completely acceptable and beneficial to provide a complete, runnable Erlang module (including `-module(...)`, full `-export([...])`, API wrappers, and internal state helpers) in parallel worked examples.
+  - Complete modules provide authentic reference value, showing learners how production Erlang files are structured from top to bottom.
+  - **The Understandability Invariant**: Every complete module MUST be accompanied by clear pedagogical explanations or step-by-step section headers explaining *what the BEAM is doing* at each phase. Never dump raw, uncommented code blocks that create cognitive fatigue or confusion.
 - **No Parallel Clones (The Anti-Transliteration Rule)**:
   - Never mirror the assignment's exact function names, argument shapes, or API arity.
   - Never mirror the assignment's internal expression structure (e.g., if the exercise requires `IsAdmin =:= true orelse (Used >= 0 andalso Used =< Limit)`, the parallel example must NOT have `Override =:= true orelse (Temp >= 0 andalso Temp =< Max)`).
-  - Never mirror all assignment endpoints 1-for-1 (e.g. providing matching test hooks, crash triggers, and identical clause counts). This degrades the lesson into mechanical transliteration (find-and-replace) rather than architectural synthesis.
-- **Chunked Reference Architecture for Problem Sets & Capstones**:
-  - In Capstones, Mini-Capstones, and complex multi-feature Problem Sets, **NEVER** dump a monolithic 100–200+ line code replica. Massive code walls induce cognitive fatigue and tempt students to copy blindly.
-  - Instead, provide a **Compact, Chunked Reference (~40–60 lines total)** divided into 2–3 annotated architectural sections (e.g., *1. State Initialization & Atomic Monitoring*, *2. Idempotency Gate / Routing*, *3. Failure Recovery & State Preservation*).
-  - Each section must be preceded by 2–3 sentences of clear pedagogical prose explaining *why* the BEAM behaves this way and how the pattern functions.
-  - This equips learners with an authentic, illuminating reference when stuck without giving away the specific assignment solution.
+  - Never mirror all assignment endpoints 1-for-1 (e.g., providing matching test hooks, crash triggers, and identical clause counts). This degrades the lesson into mechanical transliteration (find-and-replace) rather than architectural synthesis.
+- **Chunked Reference Architecture for Complex Capstones**:
+  - In Capstones, Mini-Capstones, and complex multi-feature Problem Sets, break large multi-component architectures into 2–3 annotated sections (e.g., *1. State Initialization & Atomic Monitoring*, *2. Idempotency Gate / Routing*, *3. Failure Recovery & State Preservation*), or ensure complete modules are deeply explained in digestible steps.
+  - This equips learners with an authentic, illuminating reference when stuck—allowing them to understand how to compose the architecture without spoiling the specific assignment.
 - **Demonstrate Mechanics, Not Answers**:
   Show how the syntax, operator, or pattern behaves in isolation so the learner understands the tool, but must apply it creatively.
 

@@ -82,41 +82,139 @@ The \`gen_server\` engine intercepts the system message, extracts its current in
 > [!warning] Production OTP Trap: Never Block Inside gen_server Callbacks
 > Because a \`gen_server\` processes its mailbox sequentially, calling a slow external API (e.g. \`httpc:request\`) or sleeping with \`timer:sleep/1\` inside \`handle_call/3\` freezes the entire server. All subsequent client calls get stuck in the mailbox and will eventually crash with \`{timeout, {gen_server, call, ...}}\` after 5,000ms!
 
-## Parallel Worked Example
+## Parallel Worked Example: The IoT Telemetry Monitor (device_telemetry.erl)
 
-The following runnable demo implements a simple operational counter that demonstrates \`init/1\`, \`handle_call/3\`, \`handle_cast/2\`, and live introspection with \`sys:get_state/1\`:
+To see how an OTP behaviour separates client API wrappers from internal callback evaluation, consider \`device_telemetry.erl\`. This server monitors an IoT edge node: tracking battery percentage, counting transmitted packets asynchronously, and allowing synchronous status queries and live operator inspection with \`sys:get_state/1\`.
+
+Notice how the module exports both the **Client API** (invoked by external processes) and the **gen_server Callbacks** (invoked internally by the OTP engine):
 
 \`\`\`erlang
--module(counter_demo).
+-module(device_telemetry).
 -behaviour(gen_server).
--export([start_link/0, inc/2, get/1, stop/1]).
+
+%% Client API
+-export([start_link/1, record_packet/2, query_status/1, stop/1]).
+
+%% gen_server Callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
-start_link() -> gen_server:start_link(?MODULE, [], []).
-inc(Pid, N) -> gen_server:cast(Pid, {inc, N}).
-get(Pid)    -> gen_server:call(Pid, get_value).
-stop(Pid)   -> gen_server:stop(Pid).
+%% @doc Starts and links the telemetry monitor gen_server with initial battery percentage.
+start_link(InitialBattery) ->
+    gen_server:start_link(?MODULE, [InitialBattery], []).
 
-init([]) -> {ok, #{count => 0}}.
-handle_call(get_value, _From, State = #{count := C}) -> {reply, C, State}.
-handle_cast({inc, N}, State = #{count := C}) -> {noreply, State#{count := C + N}}.
-handle_info(_Info, State) -> {noreply, State}.
-terminate(_Reason, _State) -> ok.
-code_change(_Old, State, _Extra) -> {ok, State}.
+%% @doc Asynchronously records transmitted telemetry packet bytes without blocking caller.
+record_packet(Pid, ByteCount) when is_integer(ByteCount), ByteCount > 0 ->
+    gen_server:cast(Pid, {record_packet, ByteCount}).
+
+%% @doc Synchronously queries the current telemetry metrics from the server.
+query_status(Pid) ->
+    gen_server:call(Pid, get_status).
+
+%% @doc Synchronously requests clean termination of the telemetry server.
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+%% ── gen_server Callbacks ─────────────────────────────────────────────────────
+
+%% @doc Initializes internal state map with initial battery and zeroed packet counts.
+init([InitialBattery]) ->
+    InitialState = #{
+        battery_pct => InitialBattery,
+        packets_sent => 0,
+        total_bytes => 0
+    },
+    {ok, InitialState}.
+
+%% @doc Handles synchronous call requests.
+handle_call(get_status, _From, State) ->
+    {reply, {ok, State}, State};
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+%% @doc Handles asynchronous fire-and-forget cast messages.
+handle_cast({record_packet, ByteCount}, State = #{packets_sent := Pkts, total_bytes := Bytes}) ->
+    NewState = State#{
+        packets_sent := Pkts + 1,
+        total_bytes := Bytes + ByteCount
+    },
+    {noreply, NewState};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+%% @doc Handles out-of-band signals and raw process messages.
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+%% @doc Cleans up server resources upon termination.
+terminate(_Reason, _State) ->
+    ok.
+
+%% @doc Transforms state across hot code releases.
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+\`\`\`
+
+### Inspecting Live State in Production
+Because \`device_telemetry\` implements the standard \`gen_server\` behaviour, operators in an Erlang shell or telemetry dashboard can inspect its live metrics at any time without disturbing active packet streams:
+
+\`\`\`erlang
+%% In the Erlang shell:
+{ok, Pid} = device_telemetry:start_link(95),
+device_telemetry:record_packet(Pid, 128),
+LiveState = sys:get_state(Pid).
+%% => #{battery_pct => 95, packets_sent => 1, total_bytes => 128}
 \`\`\`
 
 ## Assignment Specification
 
-This is a **Guided Runnable Demo**. No code changes are required!
+This is a **Guided Runnable Demo**. The code in the editor is already fully operational.
 1. Inspect the pre-written \`otp_intro_demo\` module in the editor.
-2. Click **\`Run\`** below to execute the demo.
-3. Observe how the server initializes with state \`#{counter => 0, ops => 0}\`, executes synchronous calls and asynchronous casts, and uses \`sys:get_state/1\` to query the live internal map!
+2. Review the structured function definitions below.
+3. Click **\`Run\`** below to execute the demo and observe the live lifecycle!
+
+### 1. \`start_link/0\`
+- **Input**: None.
+- **Behavior**: Starts and links a \`gen_server\` process executing the \`otp_intro_demo\` callback module. Initializes internal state with \`counter\` set to \`0\` and \`ops\` tally set to \`0\`.
+- **Examples**:
+  - \`otp_intro_demo:start_link()\` returns \`{ok, <0.210.0>}\`.
+
+### 2. \`increment/2\`
+- **Input**: Process identifier \`Pid\`, integer \`Amount\`.
+- **Behavior**: Asynchronously casts an increment message to \`Pid\`, increasing the internal \`counter\` by \`Amount\` and incrementing the \`ops\` count by 1 without blocking the caller.
+- **Examples**:
+  - \`otp_intro_demo:increment(Pid, 10)\` returns \`ok\`.
+
+### 3. \`get_count/1\`
+- **Input**: Process identifier \`Pid\`.
+- **Behavior**: Synchronously queries the current integer \`counter\` value via \`gen_server:call/2\`, incrementing the internal \`ops\` tally by 1.
+- **Examples**:
+  - \`otp_intro_demo:get_count(Pid)\` returns \`35\`.
+
+### 4. \`stop/1\`
+- **Input**: Process identifier \`Pid\`.
+- **Behavior**: Synchronously commands the server to terminate cleanly via \`gen_server:stop/1\`.
+- **Examples**:
+  - \`otp_intro_demo:stop(Pid)\` returns \`ok\`.
+
+### 5. \`run_demo/0\`
+- **Input**: None.
+- **Behavior**: Orchestrates the complete demonstration lifecycle:
+  1. Starts the server via \`start_link/0\`.
+  2. Issues two asynchronous increments: \`increment(Pid, 10)\` and \`increment(Pid, 25)\`.
+  3. Pauses briefly (15ms) to permit asynchronous casts to settle in the server mailbox.
+  4. Queries the count with \`get_count(Pid)\`.
+  5. Inspects live internal state using \`sys:get_state/1\`.
+  6. Stops the server with \`stop(Pid)\`.
+  7. Returns a summary map containing \`final_count\` and \`live_state\`.
+- **Examples**:
+  - \`otp_intro_demo:run_demo()\` returns \`#{final_count => 35, live_state => #{counter => 35, ops => 3}}\`.
 
 ## Rules & Verification Constraints
 
 - Must export \`start_link/0\`, \`increment/2\`, \`get_count/1\`, \`stop/1\`, and \`run_demo/0\`.
-- Must export all 6 mandatory \`gen_server\` callbacks.
+- Must export all 6 mandatory \`gen_server\` callbacks: \`init/1\`, \`handle_call/3\`, \`handle_cast/2\`, \`handle_info/2\`, \`terminate/2\`, and \`code_change/3\`.
 - Must verify live state using \`sys:get_state/1\`.
+- Must invoke \`gen_server:start_link/3\`, \`gen_server:call/2\`, and \`gen_server:cast/2\`.
 `,
     mentalModelCheck: {
       question: 'Why is writing raw spawn and receive loops considered an anti-pattern in production Erlang systems?',
@@ -185,20 +283,23 @@ loop(State) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Starts and links the OTP intro demo gen_server.
 start_link() ->
     gen_server:start_link(?MODULE, [], []).
 
+%% @doc Asynchronously casts an increment amount to the server.
 increment(Pid, Amount) when is_integer(Amount) ->
     gen_server:cast(Pid, {increment, Amount}).
 
+%% @doc Synchronously queries the current counter value.
 get_count(Pid) ->
     gen_server:call(Pid, get_count).
 
+%% @doc Synchronously requests clean termination of the gen_server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
-%% Demonstrates full lifecycle and live sys:get_state/1 introspection
+%% @doc Demonstrates the full server lifecycle and live sys:get_state/1 introspection.
 run_demo() ->
     {ok, Pid} = start_link(),
     increment(Pid, 10),
@@ -209,26 +310,31 @@ run_demo() ->
     stop(Pid),
     #{final_count => Count, live_state => LiveState}.
 
-%% gen_server Callbacks
+%% @doc Initializes the server with counter and operations tally set to zero.
 init([]) ->
     {ok, #{counter => 0, ops => 0}}.
 
+%% @doc Handles synchronous call requests.
 handle_call(get_count, _From, State = #{counter := Count, ops := Ops}) ->
     {reply, Count, State#{ops := Ops + 1}};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+%% @doc Handles asynchronous cast messages.
 handle_cast({increment, Amount}, State = #{counter := Count, ops := Ops}) ->
     {noreply, State#{counter := Count + Amount, ops := Ops + 1}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handles out-of-band signals and raw messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Cleans up server resources upon termination.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handles state transformations across hot code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -253,20 +359,23 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Starts and links the OTP intro demo gen_server.
 start_link() ->
     gen_server:start_link(?MODULE, [], []).
 
+%% @doc Asynchronously casts an increment amount to the server.
 increment(Pid, Amount) when is_integer(Amount) ->
     gen_server:cast(Pid, {increment, Amount}).
 
+%% @doc Synchronously queries the current counter value.
 get_count(Pid) ->
     gen_server:call(Pid, get_count).
 
+%% @doc Synchronously requests clean termination of the gen_server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
-%% Demonstrates full lifecycle and live sys:get_state/1 introspection
+%% @doc Demonstrates the full server lifecycle and live sys:get_state/1 introspection.
 run_demo() ->
     {ok, Pid} = start_link(),
     increment(Pid, 10),
@@ -277,26 +386,31 @@ run_demo() ->
     stop(Pid),
     #{final_count => Count, live_state => LiveState}.
 
-%% gen_server Callbacks
+%% @doc Initializes the server with counter and operations tally set to zero.
 init([]) ->
     {ok, #{counter => 0, ops => 0}}.
 
+%% @doc Handles synchronous call requests.
 handle_call(get_count, _From, State = #{counter := Count, ops := Ops}) ->
     {reply, Count, State#{ops := Ops + 1}};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+%% @doc Handles asynchronous cast messages.
 handle_cast({increment, Amount}, State = #{counter := Count, ops := Ops}) ->
     {noreply, State#{counter := Count + Amount, ops := Ops + 1}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handles out-of-band signals and raw messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Cleans up server resources upon termination.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handles state transformations across hot code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -325,20 +439,23 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Starts and links the OTP intro demo gen_server.
 start_link() ->
     gen_server:start_link(?MODULE, [], []).
 
+%% @doc Asynchronously casts an increment amount to the server.
 increment(Pid, Amount) when is_integer(Amount) ->
     gen_server:cast(Pid, {increment, Amount}).
 
+%% @doc Synchronously queries the current counter value.
 get_count(Pid) ->
     gen_server:call(Pid, get_count).
 
+%% @doc Synchronously requests clean termination of the gen_server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
-%% Demonstrates full lifecycle and live sys:get_state/1 introspection
+%% @doc Demonstrates the full server lifecycle and live sys:get_state/1 introspection.
 run_demo() ->
     {ok, Pid} = start_link(),
     increment(Pid, 10),
@@ -349,26 +466,31 @@ run_demo() ->
     stop(Pid),
     #{final_count => Count, live_state => LiveState}.
 
-%% gen_server Callbacks
+%% @doc Initializes the server with counter and operations tally set to zero.
 init([]) ->
     {ok, #{counter => 0, ops => 0}}.
 
+%% @doc Handles synchronous call requests.
 handle_call(get_count, _From, State = #{counter := Count, ops := Ops}) ->
     {reply, Count, State#{ops := Ops + 1}};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+%% @doc Handles asynchronous cast messages.
 handle_cast({increment, Amount}, State = #{counter := Count, ops := Ops}) ->
     {noreply, State#{counter := Count + Amount, ops := Ops + 1}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handles out-of-band signals and raw messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Cleans up server resources upon termination.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handles state transformations across hot code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -396,20 +518,23 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Starts and links the OTP intro demo gen_server.
 start_link() ->
     gen_server:start_link(?MODULE, [], []).
 
+%% @doc Asynchronously casts an increment amount to the server.
 increment(Pid, Amount) when is_integer(Amount) ->
     gen_server:cast(Pid, {increment, Amount}).
 
+%% @doc Synchronously queries the current counter value.
 get_count(Pid) ->
     gen_server:call(Pid, get_count).
 
+%% @doc Synchronously requests clean termination of the gen_server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
-%% Demonstrates full lifecycle and live sys:get_state/1 introspection
+%% @doc Demonstrates the full server lifecycle and live sys:get_state/1 introspection.
 run_demo() ->
     {ok, Pid} = start_link(),
     increment(Pid, 10),
@@ -420,26 +545,31 @@ run_demo() ->
     stop(Pid),
     #{final_count => Count, live_state => LiveState}.
 
-%% gen_server Callbacks
+%% @doc Initializes the server with counter and operations tally set to zero.
 init([]) ->
     {ok, #{counter => 0, ops => 0}}.
 
+%% @doc Handles synchronous call requests.
 handle_call(get_count, _From, State = #{counter := Count, ops := Ops}) ->
     {reply, Count, State#{ops := Ops + 1}};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+%% @doc Handles asynchronous cast messages.
 handle_cast({increment, Amount}, State = #{counter := Count, ops := Ops}) ->
     {noreply, State#{counter := Count + Amount, ops := Ops + 1}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handles out-of-band signals and raw messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Cleans up server resources upon termination.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handles state transformations across hot code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
