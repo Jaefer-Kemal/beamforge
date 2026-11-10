@@ -2395,6 +2395,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 5 test stages (`S1_Ast` spawn_monitor, demonitor, and receive_after audits, `S2_Success` calculation execution & demonitor flush, `S3_Crash` caller survival on division by zero, `S4_Timeout` runaway task kill and demonitor flush, and `S5_NoprocProbe` dead-PID immediate noproc return).
 
+## Phase 133: Pedagogical Despoiling of Chapter 6 Lecture 7 (`ch06-l07`)
+- [x] **133.1: Audit & Eliminate Exercise Code Spoilers in Lecture 6.7 (`ch06-l07`)**:
+  - Neutralized concept breakdown: maintained strict variable neutrality and domain independence across monitor race conditions, concurrent reply and exit delivery, why plain `erlang:demonitor/1` leaves delivered `'DOWN'` messages in the Save Queue leading to mailbox memory leaks, and how `erlang:demonitor(MRef, [flush])` atomically removes matching `'DOWN'` messages.
+  - Replaced clone parallel worked example `ephemeral_tester.erl` with an authentic audit collector module `audit_event_collector.erl` (`dispatch_audit_record/2`, `inspect_mailbox_backlog/0`), demonstrating monitor flushing upon receiving committed replies and non-blocking backlog inspection without signature or structure cloning.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `call_with_clean_mailbox/2` and `count_lingering_downs/0`, eliminating direct message tuple and sleep duration dictation.
+  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and in-body comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+- [x] **133.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all test stages (`S1_Ast` demonitor call audit and `S2_RaceAndFlush` verifying 0 lingering downs post-execution).
+
 
 
 

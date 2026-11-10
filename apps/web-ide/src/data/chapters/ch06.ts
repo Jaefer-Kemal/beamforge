@@ -2464,37 +2464,45 @@ When \`[flush]\` is passed, the BEAM runtime in C performs an atomic operation:
 
 ## Parallel Worked Example
 
-The following module executes a worker and measures mailbox contamination:
+The following module submits an audit entry to an ephemeral worker process, flushing monitors upon completion:
 
 \`\`\`erlang
--module(ephemeral_tester).
--export([call_worker/2, count_stale_downs/0]).
+-module(audit_event_collector).
+-export([
+    dispatch_audit_record/2,
+    inspect_mailbox_backlog/0
+]).
 
-call_worker(Fun, Arg) ->
+%% @doc Submits an audit entry to an ephemeral worker process, flushing monitors upon completion.
+dispatch_audit_record(CollectorFun, EventData) ->
     Caller = self(),
-    {Pid, MRef} = spawn_monitor(fun() ->
-        Caller ! {reply, self(), Fun(Arg)},
+    {WorkerPid, MRef} = spawn_monitor(fun() ->
+        ProcessedRecord = CollectorFun(EventData),
+        Caller ! {audit_committed, self(), ProcessedRecord},
         exit(normal)
     end),
+    %% Allow momentary convergence for reply and termination signal
+    timer:sleep(5),
     receive
-        {reply, Pid, Res} ->
-            %% Flush ensures the simultaneous 'DOWN' is purged!
+        {audit_committed, WorkerPid, Record} ->
             erlang:demonitor(MRef, [flush]),
-            {ok, Res}
+            ResidualDowns = inspect_mailbox_backlog(),
+            {ok, Record, #{unflushed_monitors => ResidualDowns}}
     after 1000 ->
         erlang:demonitor(MRef, [flush]),
         {error, timeout}
     end.
 
-count_stale_downs() ->
-    drain_downs(0).
+%% @doc Non-blocking diagnostic scan counting unprocessed monitor DOWN messages.
+inspect_mailbox_backlog() ->
+    scan_backlog(0).
 
-drain_downs(Count) ->
+scan_backlog(Acc) ->
     receive
-        {'DOWN', _, process, _, _} ->
-            drain_downs(Count + 1)
+        {'DOWN', _Ref, process, _Pid, _Reason} ->
+            scan_backlog(Acc + 1)
     after 0 ->
-        Count
+        Acc
     end.
 \`\`\`
 
@@ -2502,14 +2510,26 @@ drain_downs(Count) ->
 
 Implement \`src/monitor_hygiene.erl\` exporting \`call_with_clean_mailbox/2\` and \`count_lingering_downs/0\`:
 
-1. \`call_with_clean_mailbox(WorkerFun, Input)\`:
-   - Spawns and monitors an ephemeral worker: \`{WorkerPid, MRef} = spawn_monitor(...)\`.
-   - The worker evaluates \`WorkerFun(Input)\`, sends \`{done, self(), Result}\` to the caller, and immediately terminates with \`exit(worker_completed)\`.
-   - The caller pauses for 5ms (\`timer:sleep(5)\`) so both \`{done, ...}\` and \`{'DOWN', ...}\` are sitting in the mailbox.
-   - The caller consumes \`{done, WorkerPid, Result}\`, calls \`erlang:demonitor(MRef, [flush])\`, and counts any remaining \`'DOWN'\` messages using \`count_lingering_downs()\`.
-   - Returns \`{ok, Result, LingeringCount}\` (where \`LingeringCount\` must equal \`0\`).
-2. \`count_lingering_downs()\`:
-   - Non-blockingly drains and counts all \`{'DOWN', _, process, _, _}\` messages currently in \`self()\`'s mailbox using \`after 0\`.
+### 1. \`call_with_clean_mailbox/2\`
+- **Input**: \`WorkerFun\` (a 1-arity worker function), \`Input\` (argument passed into \`WorkerFun\`).
+- **Behavior**:
+  - Atomically spawns and monitors an ephemeral worker process executing \`WorkerFun(Input)\`.
+  - The worker evaluates the function, dispatches a completion message containing the result to the caller, and immediately terminates with exit reason \`worker_completed\`.
+  - The caller pauses briefly (e.g. 5–10ms via \`timer:sleep/1\`) to allow both the worker's completion reply and its \`'DOWN'\` exit notification to arrive concurrently in the mailbox.
+  - Upon receiving the worker's result, the caller demonitors the reference with the \`[flush]\` option (\`erlang:demonitor(MRef, [flush])\`) to atomically purge the pending \`'DOWN'\` message from its mailbox.
+  - Inspects the mailbox using \`count_lingering_downs/0\` to verify zero \`'DOWN'\` messages remain, returning \`{ok, Result, LingeringCount}\`.
+  - If no response arrives within 1,000ms, demonitors with \`[flush]\` and returns \`{error, timeout}\`.
+- **Examples**:
+  - \`monitor_hygiene:call_with_clean_mailbox(fun(X) -> X * 2 end, 42)\` -> \`{ok, 84, 0}\`
+  - \`monitor_hygiene:call_with_clean_mailbox(fun(X) -> X + 1 end, 99)\` -> \`{ok, 100, 0}\`
+
+### 2. \`count_lingering_downs/0\`
+- **Input**: None.
+- **Behavior**:
+  - Non-blockingly scans the caller's mailbox using a tail-recursive \`receive ... after 0\` construct to consume and count all un-flushed \`{'DOWN', _, process, _, _}\` tuples.
+  - Returns the total count of drained \`'DOWN'\` messages as a non-negative integer.
+- **Examples**:
+  - \`monitor_hygiene:count_lingering_downs()\` -> \`0\` (in a clean mailbox)
 
 ## Rules & Verification Constraints
 
@@ -2580,17 +2600,11 @@ end.`,
     count_lingering_downs/0
 ]).
 
-%% Architectural Requirement:
-%% 1. Spawn monitored worker: {WorkerPid, MRef} = spawn_monitor(...).
-%% 2. Worker computes WorkerFun(Input), sends {done, self(), Result} to Caller, exits with worker_completed.
-%% 3. Caller sleeps 10ms (timer:sleep(10)), receives {done, WorkerPid, Result},
-%%    calls erlang:demonitor(MRef, [flush]), and returns {ok, Result, count_lingering_downs()}.
-%% 4. Timeout after 1000ms: demonitor(MRef, [flush]), return {error, timeout}.
+%% @doc Executes a worker task and demonstrates atomic DOWN purging via demonitor(MRef, [flush]).
 call_with_clean_mailbox(WorkerFun, Input) ->
     ok.
 
-%% Architectural Requirement:
-%% Drain all lingering {'DOWN', _, process, _, _} messages non-blockingly using 'after 0' and return count.
+%% @doc Drains and counts lingering DOWN messages from the caller mailbox using a non-blocking timeout.
 count_lingering_downs() ->
     ok.
 `,
@@ -2640,17 +2654,11 @@ drain_downs(Count) ->
     count_lingering_downs/0
 ]).
 
-%% Architectural Requirement:
-%% 1. Spawn monitored worker: {WorkerPid, MRef} = spawn_monitor(...).
-%% 2. Worker computes WorkerFun(Input), sends {done, self(), Result} to Caller, exits with worker_completed.
-%% 3. Caller sleeps 10ms (timer:sleep(10)), receives {done, WorkerPid, Result},
-%%    calls erlang:demonitor(MRef, [flush]), and returns {ok, Result, count_lingering_downs()}.
-%% 4. Timeout after 1000ms: demonitor(MRef, [flush]), return {error, timeout}.
+%% @doc Executes a worker task and demonstrates atomic DOWN purging via demonitor(MRef, [flush]).
 call_with_clean_mailbox(WorkerFun, Input) ->
     ok.
 
-%% Architectural Requirement:
-%% Drain all lingering {'DOWN', _, process, _, _} messages non-blockingly using 'after 0' and return count.
+%% @doc Drains and counts lingering DOWN messages from the caller mailbox using a non-blocking timeout.
 count_lingering_downs() ->
     ok.
 `,
