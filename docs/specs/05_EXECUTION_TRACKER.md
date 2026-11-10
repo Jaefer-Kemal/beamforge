@@ -2373,6 +2373,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...`: Go orchestrator backend compiled with 0 errors.
   - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 4 test stages (`S1_Ast` spawn_link & link call audits, `S2_Compute` two-stage calculation, `S3_NormalExit` normal exit isolation leaving peer alive, and `S4_CascadingExit` abnormal crash exit signal propagation).
 
+## Phase 131: Pedagogical Despoiling of Chapter 6 Lecture 5 (`ch06-l05`)
+- [x] **131.1: Audit & Eliminate Exercise Code Spoilers in Lecture 6.5 (`ch06-l05`)**:
+  - Neutralized concept breakdown: maintained strict variable neutrality and domain independence across exit trapping mechanisms (`process_flag(trap_exit, true)`), signal-to-message conversion into the process mailbox (`{'EXIT', Pid, Reason}`), the complete 6-state Exit Signal Truth Table, and why the untrappable `kill` signal is rewritten to `killed` for linked peers.
+  - Replaced clone parallel worked example `worker_guardian.erl` with an authentic, stateful queue consumer supervisor `queue_consumer_sentinel.erl` (`start_sentinel/1`, `query_active_consumer/1`, `abort_consumer/2`, `sentinel_loop/3`), achieving complete domain disjunction while demonstrating exit trapping, telemetry status querying, abnormal restart incrementation, and clean retirement.
+  - Audited and de-spoiled Assignment Specification: converted prompt into clean `Input`, `Behavior`, and `Examples` blocks for `start_supervised/1`, `get_worker_pid/1`, `kill_worker/2`, `simulate_exit_truth_table/2`, and `supervisor_loop/2`, eliminating internal message protocol and implementation dictation.
+  - Refactored starter code doc comments: removed all `%% Architectural Requirement:` and in-body comments from `files[0].content` and `starterCode`, providing clean EDoc `@doc` annotations without `-spec` type declarations.
+- [x] **131.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Module compiled cleanly with 0 warnings/errors, passing all 4 test stages (`S1_Ast` process_flag & spawn_link audits, `S2_Supervised` automatic respawn on abnormal crash, `S3_KillSignal` untrappable kill handling, and `S4_TruthTable` full 6-permutation verification).
+
 
 
 
