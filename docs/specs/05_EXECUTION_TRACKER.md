@@ -2532,6 +2532,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `erlc.exe -Wall`: Compiled `incident_blocking_init.erl` and `geo_ip_database.erl` cleanly with 0 warnings/errors.
   - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
 
+## Phase 145: Pedagogical Despoiling & Audit of Chapter 7 Capstone Problem Set 8 (`ch07-l08`)
+- [x] **145.1: Audit & Eliminate Spoilers in Problem Set 7.8 (`ch07-l08`)**:
+  - Authored a direct, focused parallel worked example `download_budget_srv.erl` (`start_link/2`, `consume_mb/3`, `replenish_all/1`, `reset_user/2`, `stop/1`, and standard `gen_server` callbacks), illustrating per-client resource allocation, fallback default values with `maps:get/3`, batch map replenishment via `maps:map/2`, and asynchronous user reset via `gen_server:cast/2`.
+  - Formatted the Assignment Specification strictly into clean `Input`, `Behavior`, and `Examples` blocks across `start_link/2`, `check_request/3`, `refill_all/1`, `reset_client/2`, `get_stats/1`, and `stop/1`, removing raw code clauses and tuple hints from prompt prose.
+  - Added clean EDoc `@doc` comments across starter code, `files[0].content`, `solutionCode`, and `solutionFiles['src/rate_limiter_srv.erl']`, strictly maintaining zero `-spec` declarations, zero in-body comments, and neutral scaffolding in accordance with the Anti-Pre-Solved Starter Code rule.
+- [x] **145.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `npx tsc --noEmit`: 0 TypeScript errors across the web-ide workspace.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `go test -v -run TestChapter7Verification ./internal/bridge`: 8/8 lessons passed 100% (`ch07-l01` through `ch07-l08` in 13.27s).
+  - `erlc.exe -Wall`: Compiled `rate_limiter_srv.erl` and `download_budget_srv.erl` cleanly with 0 warnings/errors.
+  - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
+
 
 
 

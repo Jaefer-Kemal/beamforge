@@ -4078,43 +4078,140 @@ The gold standard for API throttling is the **Token-Bucket Algorithm**:
 
 In this Capstone Problem Set for Chapter 7, you will engineer a high-throughput, production-grade **Token-Bucket Rate Limiter Server** using \`gen_server\`!
 
-## Deep Concept Breakdown & Under the Hood
+## Parallel Worked Example: The Download Budget Server
+
+The following \`download_budget_srv\` module demonstrates how a \`gen_server\` tracks dynamic per-client resource balances, enforces quotas with fallback defaults, executes batch replenishments, and accepts asynchronous reset casts:
+
+\`\`\`erlang
+-module(download_budget_srv).
+-behaviour(gen_server).
+
+%% Client API
+-export([
+    start_link/2,
+    consume_mb/3,
+    replenish_all/1,
+    reset_user/2,
+    stop/1
+]).
+
+%% gen_server Callbacks
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+%% =============================================================================
+%% Client API
+%% =============================================================================
+
+%% @doc Start and link the budget server with maximum MB capacity and refill rate.
+start_link(MaxMb, ReplenishMb) ->
+    gen_server:start_link(?MODULE, {MaxMb, ReplenishMb}, []).
+
+%% @doc Synchronously request and consume megabytes from a user allowance.
+consume_mb(Pid, UserId, Mb) ->
+    gen_server:call(Pid, {consume_mb, UserId, Mb}).
+
+%% @doc Synchronously replenish all user budgets up to maximum capacity.
+replenish_all(Pid) ->
+    gen_server:call(Pid, replenish_all).
+
+%% @doc Asynchronously reset a user budget back to full capacity.
+reset_user(Pid, UserId) ->
+    gen_server:cast(Pid, {reset_user, UserId}).
+
+%% @doc Stop the budget server.
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+%% =============================================================================
+%% gen_server Callbacks
+%% =============================================================================
+
+%% @doc Initialize the server with capacity limits and empty balances map.
+init({MaxMb, ReplenishMb}) ->
+    InitialState = #{
+        max_mb => MaxMb,
+        replenish_mb => ReplenishMb,
+        budgets => #{}
+    },
+    {ok, InitialState}.
+
+%% @doc Handle synchronous calls for consumption and replenishment.
+handle_call({consume_mb, UserId, Mb}, _From, #{max_mb := Max, budgets := Budgets} = State) ->
+    CurrentMb = maps:get(UserId, Budgets, Max),
+    if
+        CurrentMb >= Mb ->
+            Remaining = CurrentMb - Mb,
+            NewBudgets = maps:put(UserId, Remaining, Budgets),
+            {reply, {ok, Remaining}, State#{budgets := NewBudgets}};
+        true ->
+            {reply, {error, limit_exceeded}, State}
+    end;
+handle_call(replenish_all, _From, #{max_mb := Max, replenish_mb := Add, budgets := Budgets} = State) ->
+    UpdatedBudgets = maps:map(fun(_User, Balance) ->
+        min(Balance + Add, Max)
+    end, Budgets),
+    {reply, ok, State#{budgets := UpdatedBudgets}};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+%% @doc Handle asynchronous casts for user resets.
+handle_cast({reset_user, UserId}, #{max_mb := Max, budgets := Budgets} = State) ->
+    NewBudgets = maps:put(UserId, Max, Budgets),
+    {noreply, State#{budgets := NewBudgets}};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+\`\`\`
+
+## Architecture & Under the Hood
 
 ### State Architecture
 
-Your \`gen_server\` maintains state as a map holding configuration, dynamic client balances, and global telemetry:
+Your \`rate_limiter_srv\` maintains state as a map holding configuration, dynamic client balances, and global telemetry:
 
 \`\`\`erlang
 #{
-    max_tokens => MaxTokens,         %% Maximum capacity per bucket (pos_integer())
-    refill_amount => RefillAmount,   %% Tokens added per refill cycle (pos_integer())
-    clients => #{                    %% Dynamic client token buckets (map())
+    max_tokens => MaxTokens,
+    refill_amount => RefillAmount,
+    clients => #{
         <<"client_1">> => 7,
         <<"client_2">> => 10
     },
-    total_allowed => 0,              %% Global counter of approved requests (integer())
-    total_rejected => 0              %% Global counter of rejected requests (integer())
+    total_allowed => 0,
+    total_rejected => 0
 }
 \`\`\`
 
 ### Dynamic On-Demand Client Bucket Creation
-When a request arrives for a previously unseen \`ClientId\`, your server must **automatically provision a fresh bucket with full \`MaxTokens\` capacity** before deducting the requested cost.
+When a request arrives for a previously unseen \`ClientId\`, your server provisions a fresh bucket initialized to \`MaxTokens\` before deducting the requested cost.
 
 ### Capped Batch Refills
-When \`refill_all(Pid)\` is executed, every existing client bucket in \`clients\` receives \`RefillAmount\` additional tokens, capped at \`max_tokens\`:
-\`\`\`erlang
-NewTokens = min(CurrentTokens + RefillAmount, MaxTokens)
-\`\`\`
+When \`refill_all(Pid)\` is executed, every existing client bucket in \`clients\` receives \`RefillAmount\` additional tokens, capped strictly at \`max_tokens\`.
 
 ### Live Introspection via \`sys:get_state/1\`
-Because your module implements standard \`gen_server\` callbacks, production operators can inspect the exact internal balances and counters in real time using \`sys:get_state(Pid)\`!
+Because your module implements standard \`gen_server\` callbacks, production operators can inspect internal balances and counters in real time using \`sys:get_state(Pid)\`.
 
 > [!warning] Production OTP Trap: Map Allocation Leaks on Infinite Clients
 > In a production gateway handling millions of ephemeral IP addresses, inserting an entry into \`clients\` for every unique IP will eventually exhaust memory. In production systems (as we will explore in Chapter 9), client buckets are backed by off-heap ETS tables with automatic TTL evictions (\`select_delete\`).
 
 ## Assignment Specification
 
-Implement \`src/rate_limiter_srv.erl\` with the following exports:
+Implement \`src/rate_limiter_srv.erl\` with the following client API and OTP callbacks:
 
 \`\`\`erlang
 -module(rate_limiter_srv).
@@ -4130,36 +4227,51 @@ Implement \`src/rate_limiter_srv.erl\` with the following exports:
 ]).
 \`\`\`
 
-1. \`start_link(MaxTokens, RefillAmount) -> {ok, Pid}\`:
-   - Spawns and links the \`gen_server\`. Initial state:
-     \`#{max_tokens => MaxTokens, refill_amount => RefillAmount, clients => #{}, total_allowed => 0, total_rejected => 0}\`.
-2. \`check_request(Pid, ClientId, Cost) -> {allow, Remaining} | {deny, Remaining}\`:
-   - Synchronous \`call\`.
-   - If \`ClientId\` is new, initial balance is \`MaxTokens\`.
-   - If \`Balance >= Cost\`:
-     - Decrements balance by \`Cost\`.
-     - Increments \`total_allowed + 1\`.
-     - Returns \`{allow, NewBalance}\`.
-   - If \`Balance < Cost\`:
-     - Balance remains unchanged.
-     - Increments \`total_rejected + 1\`.
-     - Returns \`{deny, Balance}\`.
-3. \`refill_all(Pid) -> ok\`:
-   - Synchronous \`call\` (or \`cast\`).
-   - For every entry in \`clients\`, updates tokens to \`min(Tokens + RefillAmount, MaxTokens)\`. Returns \`ok\`.
-4. \`reset_client(Pid, ClientId) -> ok\`:
-   - Asynchronous \`cast\`. Resets \`ClientId\`'s balance directly to full \`MaxTokens\`. Returns \`ok\`.
-5. \`get_stats(Pid) -> #{total_allowed => integer(), total_rejected => integer(), active_clients => integer()}\`:
-   - Synchronous \`call\` returning aggregate metrics. \`active_clients\` is the number of keys in \`clients\`.
-6. \`stop(Pid) -> ok\`:
-   - Stops the server gracefully via \`gen_server:stop(Pid)\`.
+### Functional Requirements
+
+#### \`start_link/2\`
+- **Input**: \`MaxTokens\` (positive integer capacity), \`RefillAmount\` (positive integer added per refill).
+- **Behavior**: Spawns and links the \`rate_limiter_srv\` gen_server. Initializes state map with \`max_tokens\`, \`refill_amount\`, an empty \`clients\` map, \`total_allowed => 0\`, and \`total_rejected => 0\`.
+- **Examples**:
+  - \`rate_limiter_srv:start_link(10, 3)\` returns \`{ok, Pid}\`.
+
+#### \`check_request/3\`
+- **Input**: \`Pid\` (server pid), \`ClientId\` (binary client identifier), \`Cost\` (positive integer tokens required).
+- **Behavior**: Synchronously verifies if \`ClientId\` has sufficient tokens. If \`ClientId\` is new, its starting balance is \`MaxTokens\`. If balance is greater than or equal to \`Cost\`, deducts \`Cost\`, increments \`total_allowed\`, and replies with \`{allow, Remaining}\`. If balance is less than \`Cost\`, leaves balance unchanged, increments \`total_rejected\`, and replies with \`{deny, Balance}\`.
+- **Examples**:
+  - \`rate_limiter_srv:check_request(Pid, <<"client_a">>, 3)\` returns \`{allow, 7}\` (from 10 capacity).
+  - \`rate_limiter_srv:check_request(Pid, <<"client_a">>, 8)\` returns \`{deny, 7}\` (when 7 remain).
+
+#### \`refill_all/1\`
+- **Input**: \`Pid\` (server pid).
+- **Behavior**: Synchronously adds \`RefillAmount\` tokens to every registered client bucket in \`clients\`, capping each balance at \`MaxTokens\`. Returns \`ok\`.
+- **Examples**:
+  - \`rate_limiter_srv:refill_all(Pid)\` returns \`ok\`.
+
+#### \`reset_client/2\`
+- **Input**: \`Pid\` (server pid), \`ClientId\` (binary client identifier).
+- **Behavior**: Asynchronously resets \`ClientId\`'s token balance directly to full \`MaxTokens\` capacity via \`gen_server:cast/2\`. Returns \`ok\` immediately.
+- **Examples**:
+  - \`rate_limiter_srv:reset_client(Pid, <<"client_a">>)\` returns \`ok\`.
+
+#### \`get_stats/1\`
+- **Input**: \`Pid\` (server pid).
+- **Behavior**: Synchronously returns a map containing global counters and active client count: \`#{total_allowed => integer(), total_rejected => integer(), active_clients => integer()}\`.
+- **Examples**:
+  - \`rate_limiter_srv:get_stats(Pid)\` returns \`#{total_allowed => 2, total_rejected => 1, active_clients => 1}\`.
+
+#### \`stop/1\`
+- **Input**: \`Pid\` (server pid).
+- **Behavior**: Gracefully stops the server process via \`gen_server:stop/1\`. Returns \`ok\`.
+- **Examples**:
+  - \`rate_limiter_srv:stop(Pid)\` returns \`ok\`.
 
 ## Rules & Verification Constraints
 
 - Must export \`start_link/2\`, \`check_request/3\`, \`refill_all/1\`, \`reset_client/2\`, \`get_stats/1\`, and \`stop/1\`.
-- Must export all 6 mandatory \`gen_server\` callbacks.
+- Must export all 6 standard \`gen_server\` callbacks.
 - \`reset_client/2\` must use \`gen_server:cast/2\`.
-- \`check_request/3\` and \`get_stats/1\` must use \`gen_server:call/2\`.
+- \`check_request/3\`, \`refill_all/1\`, and \`get_stats/1\` must use \`gen_server:call/2\`.
 - Token balances must never exceed \`MaxTokens\`.
 `,
     mentalModelCheck: {
@@ -4168,7 +4280,7 @@ Implement \`src/rate_limiter_srv.erl\` with the following exports:
       options: [
         {
           id: 'A',
-          label: 'To prevent clients from accumulating infinite credits during idle periods and subsequently overwhelming the downstream service with an uncontrolled burst.',
+          label: 'To prevent clients from accumulating infinite credits during idle periods and subsequently overwhelming downstream services with uncontrolled bursts.',
           isCorrect: true,
           explanation: 'Correct! Without capping at MaxTokens, a client idle for 24 hours would accumulate millions of tokens and bypass all throttling protections.',
         },
@@ -4219,26 +4331,33 @@ Implement \`src/rate_limiter_srv.erl\` with the following exports:
     code_change/3
 ]).
 
-%% Client API
+%% @doc Start and link the rate limiter server with capacity and refill parameters.
 start_link(MaxTokens, RefillAmount) when is_integer(MaxTokens), is_integer(RefillAmount) ->
     gen_server:start_link(?MODULE, {MaxTokens, RefillAmount}, []).
 
+%% @doc Request tokens for a client. Returns {allow, Remaining} or {deny, Current}.
 check_request(Pid, ClientId, Cost) when is_integer(Cost), Cost > 0 ->
     ok.
 
+%% @doc Refill all active client buckets up to maximum token capacity.
 refill_all(Pid) ->
     ok.
 
+%% @doc Asynchronously reset a client bucket to full capacity.
 reset_client(Pid, ClientId) ->
     ok.
 
+%% @doc Query aggregate server metrics and active client count.
 get_stats(Pid) ->
     ok.
 
+%% @doc Gracefully terminate the rate limiter server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
 %% gen_server Callbacks
+
+%% @doc Initialize the rate limiter state with configuration and telemetry counters.
 init({MaxTokens, RefillAmount}) ->
     State = #{
         max_tokens => MaxTokens,
@@ -4249,18 +4368,23 @@ init({MaxTokens, RefillAmount}) ->
     },
     {ok, State}.
 
+%% @doc Handle synchronous calls.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous casts.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band process messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up server resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -4286,26 +4410,33 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Start and link the rate limiter server with capacity and refill parameters.
 start_link(MaxTokens, RefillAmount) when is_integer(MaxTokens), is_integer(RefillAmount) ->
     gen_server:start_link(?MODULE, {MaxTokens, RefillAmount}, []).
 
+%% @doc Request tokens for a client. Returns {allow, Remaining} or {deny, Current}.
 check_request(Pid, ClientId, Cost) when is_integer(Cost), Cost > 0 ->
     gen_server:call(Pid, {check_request, ClientId, Cost}).
 
+%% @doc Refill all active client buckets up to maximum token capacity.
 refill_all(Pid) ->
     gen_server:call(Pid, refill_all).
 
+%% @doc Asynchronously reset a client bucket to full capacity.
 reset_client(Pid, ClientId) ->
     gen_server:cast(Pid, {reset_client, ClientId}).
 
+%% @doc Query aggregate server metrics and active client count.
 get_stats(Pid) ->
     gen_server:call(Pid, get_stats).
 
+%% @doc Gracefully terminate the rate limiter server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
 %% gen_server Callbacks
+
+%% @doc Initialize the rate limiter state with configuration and telemetry counters.
 init({MaxTokens, RefillAmount}) ->
     State = #{
         max_tokens => MaxTokens,
@@ -4316,7 +4447,8 @@ init({MaxTokens, RefillAmount}) ->
     },
     {ok, State}.
 
-handle_call({check_request, ClientId, Cost}, _From, State = #{max_tokens := Max, clients := Clients, total_allowed := Allowed, total_rejected := Rejected}) ->
+%% @doc Handle synchronous calls for token checking, batch refills, and stats.
+handle_call({check_request, ClientId, Cost}, _From, #{max_tokens := Max, clients := Clients, total_allowed := Allowed, total_rejected := Rejected} = State) ->
     CurrentTokens = maps:get(ClientId, Clients, Max),
     if
         CurrentTokens >= Cost ->
@@ -4326,36 +4458,37 @@ handle_call({check_request, ClientId, Cost}, _From, State = #{max_tokens := Max,
         true ->
             {reply, {deny, CurrentTokens}, State#{total_rejected := Rejected + 1}}
     end;
-
-handle_call(refill_all, _From, State = #{max_tokens := Max, refill_amount := Refill, clients := Clients}) ->
+handle_call(refill_all, _From, #{max_tokens := Max, refill_amount := Refill, clients := Clients} = State) ->
     RefilledClients = maps:map(fun(_Id, Tokens) ->
         min(Tokens + Refill, Max)
     end, Clients),
     {reply, ok, State#{clients := RefilledClients}};
-
-handle_call(get_stats, _From, State = #{clients := Clients, total_allowed := Allowed, total_rejected := Rejected}) ->
+handle_call(get_stats, _From, #{clients := Clients, total_allowed := Allowed, total_rejected := Rejected} = State) ->
     Stats = #{
         total_allowed => Allowed,
         total_rejected => Rejected,
         active_clients => maps:size(Clients)
     },
     {reply, Stats, State};
-
 handle_call(_Req, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
-handle_cast({reset_client, ClientId}, State = #{max_tokens := Max, clients := Clients}) ->
+%% @doc Handle asynchronous casts for resetting client buckets.
+handle_cast({reset_client, ClientId}, #{max_tokens := Max, clients := Clients} = State) ->
     NewClients = maps:put(ClientId, Max, Clients),
     {noreply, State#{clients := NewClients}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band process messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up server resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -4385,26 +4518,33 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Start and link the rate limiter server with capacity and refill parameters.
 start_link(MaxTokens, RefillAmount) when is_integer(MaxTokens), is_integer(RefillAmount) ->
     gen_server:start_link(?MODULE, {MaxTokens, RefillAmount}, []).
 
+%% @doc Request tokens for a client. Returns {allow, Remaining} or {deny, Current}.
 check_request(Pid, ClientId, Cost) when is_integer(Cost), Cost > 0 ->
     ok.
 
+%% @doc Refill all active client buckets up to maximum token capacity.
 refill_all(Pid) ->
     ok.
 
+%% @doc Asynchronously reset a client bucket to full capacity.
 reset_client(Pid, ClientId) ->
     ok.
 
+%% @doc Query aggregate server metrics and active client count.
 get_stats(Pid) ->
     ok.
 
+%% @doc Gracefully terminate the rate limiter server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
 %% gen_server Callbacks
+
+%% @doc Initialize the rate limiter state with configuration and telemetry counters.
 init({MaxTokens, RefillAmount}) ->
     State = #{
         max_tokens => MaxTokens,
@@ -4415,18 +4555,23 @@ init({MaxTokens, RefillAmount}) ->
     },
     {ok, State}.
 
+%% @doc Handle synchronous calls.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous casts.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band process messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up server resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -4455,26 +4600,33 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Start and link the rate limiter server with capacity and refill parameters.
 start_link(MaxTokens, RefillAmount) when is_integer(MaxTokens), is_integer(RefillAmount) ->
     gen_server:start_link(?MODULE, {MaxTokens, RefillAmount}, []).
 
+%% @doc Request tokens for a client. Returns {allow, Remaining} or {deny, Current}.
 check_request(Pid, ClientId, Cost) when is_integer(Cost), Cost > 0 ->
     gen_server:call(Pid, {check_request, ClientId, Cost}).
 
+%% @doc Refill all active client buckets up to maximum token capacity.
 refill_all(Pid) ->
     gen_server:call(Pid, refill_all).
 
+%% @doc Asynchronously reset a client bucket to full capacity.
 reset_client(Pid, ClientId) ->
     gen_server:cast(Pid, {reset_client, ClientId}).
 
+%% @doc Query aggregate server metrics and active client count.
 get_stats(Pid) ->
     gen_server:call(Pid, get_stats).
 
+%% @doc Gracefully terminate the rate limiter server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
 %% gen_server Callbacks
+
+%% @doc Initialize the rate limiter state with configuration and telemetry counters.
 init({MaxTokens, RefillAmount}) ->
     State = #{
         max_tokens => MaxTokens,
@@ -4485,7 +4637,8 @@ init({MaxTokens, RefillAmount}) ->
     },
     {ok, State}.
 
-handle_call({check_request, ClientId, Cost}, _From, State = #{max_tokens := Max, clients := Clients, total_allowed := Allowed, total_rejected := Rejected}) ->
+%% @doc Handle synchronous calls for token checking, batch refills, and stats.
+handle_call({check_request, ClientId, Cost}, _From, #{max_tokens := Max, clients := Clients, total_allowed := Allowed, total_rejected := Rejected} = State) ->
     CurrentTokens = maps:get(ClientId, Clients, Max),
     if
         CurrentTokens >= Cost ->
@@ -4495,36 +4648,37 @@ handle_call({check_request, ClientId, Cost}, _From, State = #{max_tokens := Max,
         true ->
             {reply, {deny, CurrentTokens}, State#{total_rejected := Rejected + 1}}
     end;
-
-handle_call(refill_all, _From, State = #{max_tokens := Max, refill_amount := Refill, clients := Clients}) ->
+handle_call(refill_all, _From, #{max_tokens := Max, refill_amount := Refill, clients := Clients} = State) ->
     RefilledClients = maps:map(fun(_Id, Tokens) ->
         min(Tokens + Refill, Max)
     end, Clients),
     {reply, ok, State#{clients := RefilledClients}};
-
-handle_call(get_stats, _From, State = #{clients := Clients, total_allowed := Allowed, total_rejected := Rejected}) ->
+handle_call(get_stats, _From, #{clients := Clients, total_allowed := Allowed, total_rejected := Rejected} = State) ->
     Stats = #{
         total_allowed => Allowed,
         total_rejected => Rejected,
         active_clients => maps:size(Clients)
     },
     {reply, Stats, State};
-
 handle_call(_Req, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
-handle_cast({reset_client, ClientId}, State = #{max_tokens := Max, clients := Clients}) ->
+%% @doc Handle asynchronous casts for resetting client buckets.
+handle_cast({reset_client, ClientId}, #{max_tokens := Max, clients := Clients} = State) ->
     NewClients = maps:put(ClientId, Max, Clients),
     {noreply, State#{clients := NewClients}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band process messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up server resources on shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
