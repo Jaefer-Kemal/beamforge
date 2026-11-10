@@ -3509,38 +3509,271 @@ worker_loop() ->
     visualScene: 'links_monitors_signals',
     conceptMarkdown: `## Why This Matters in Production
 
-In financial technology and high-volume transaction gateways, two requirements are absolute:
-1. **Zero Double-Charges (Idempotency):** Network timeouts and retries must never cause a customer's credit card to be charged twice for the same purchase.
-2. **Crash Resilience Without State Loss:** If a payment worker process encounters a poison pill payload or hardware fault and crashes, all previously settled transaction records must remain 100% durable in memory!
+In financial technology, distributed backends, and high-volume transaction gateways, two architectural requirements are non-negotiable:
+1. **Zero Double-Charges (Idempotency):** Transient network timeouts, client reconnects, and retries must never cause a client transaction to be executed twice for the same unique request token.
+2. **Crash Resilience Without State Loss:** If a worker process encounters a corrupt payload, unhandled exception, or poison-pill input and crashes abruptly, all previously committed state and ledger history must remain 100% durable in memory!
 
-In traditional multithreaded languages, engineers attempt to achieve this with distributed locks and database transactions, which introduce lock contention and latency spikes.
+In traditional multithreaded systems, developers frequently attempt to coordinate shared state using mutexes or database locks, introducing bottleneck contention and cascading deadlocks when threads abort unexpectedly.
 
-In Erlang, we achieve this through **Separation of Concerns across Actors**:
-- **The Watcher / Coordinator Process:** A durable, long-lived process holding the committed transaction store (\`tx_store\`) keyed by \`RequestId\` (**Idempotency Key**). It never performs risky validation or network calls directly.
-- **The Disposable Payment Worker:** A monitored sub-process that validates and executes charges. If it crashes, the Watcher catches the \`'DOWN'\` message, spawns a pristine replacement worker up to \`MaxRestarts\`, and continues serving traffic with zero data loss!
+In Erlang, this is solved cleanly by the **Coordinator-Worker Separation Pattern**:
+- **The Long-Lived Coordinator (Watcher):** A durable, highly reliable process that owns the committed state archive indexed by unique client request tokens. The coordinator never performs risky deserialization, complex numerical calculations, or external I/O directly.
+- **The Disposable Worker:** A monitored child process spawned dynamically to perform computation and validation. If the worker encounters a fault and terminates, the coordinator traps the \`'DOWN'\` signal, decrements a restart budget, spawns a pristine replacement worker, and continues servicing requests without losing a single committed entry!
 
 ## Deep Concept Breakdown & Under the Hood
 
-### 1. The 3-Step Idempotent Charge Protocol
-When a client invokes \`charge(WatcherPid, RequestId, Amount, Currency)\`:
-1. **Step 1 (Idempotency Check):** The Watcher checks if \`RequestId\` already exists in its \`tx_store\`. If found, it immediately returns \`{ok, {already_processed, SavedReceipt}}\` without contacting the worker!
-2. **Step 2 (Delegated Worker Execution):** If new, the Watcher delegates \`{validate_and_charge, RequestId, Amount, Currency}\` to its active \`worker_pid\`.
-   - The worker validates:
-     - \`Amount > 0\` and \`is_integer(Amount)\` -> if invalid, replies \`{error, invalid_amount}\` (business validation, worker stays alive).
-     - \`Currency in [usd, eur, etb]\` -> if invalid, replies \`{error, unsupported_currency}\`.
-     - Valid -> returns \`{ok, #{tx_id => RequestId, amount => Amount, currency => Currency, status => settled}}\`.
-3. **Step 3 (Durable Commit):** The Watcher inserts \`RequestId => ReceiptMap\` into its \`tx_store\` and replies to the client with \`{ok, ReceiptMap}\`.
+### 1. The Idempotent Request Protocol
+When a client invokes a state-mutating operation with an idempotency key:
+1. **Cache Verification:** The coordinator looks up the key in its committed state map. If the key already exists, the coordinator immediately returns the cached result without delegating work to any child process.
+2. **Worker Delegation:** If the key is new, the coordinator forwards the raw request to the monitored worker along with a unique reference tag (\`make_ref()\`).
+3. **Validation & Execution:** The worker validates the payload. If business constraints fail, the worker returns an error tuple without terminating. If valid, the worker computes the result and replies to the coordinator.
+4. **Atomic Commit:** The coordinator stores the successful result in its state map before acknowledging the client.
 
-### 2. Automatic Worker Replacement & Crash Testing
-When \`trigger_crash_test(WatcherPid)\` is called:
-- The active worker is commanded to exit with \`exit(simulated_payment_worker_crash)\`.
-- The Watcher intercepts \`{'DOWN', MRef, process, OldWorker, simulated_payment_worker_crash}\`.
-- If \`restarts_left > 0\`, the Watcher decrements \`restarts_left\`, increments \`restart_count\`, spawns a fresh monitored worker, and preserves the entire \`tx_store\`!
-- If \`restarts_left == 0\`, the Watcher records that no active worker is available and returns \`{error, max_restarts_exceeded}\`.
+### 2. Monitored Worker Lifecycle & Crash Recovery
+The coordinator manages the child worker using unidirectional monitors:
+- **Atomic Creation:** Using \`spawn_monitor/1\` ensures no race window exists between process creation and monitoring.
+- **DOWN Message Trapping:** When the child process terminates, the BEAM runtime enqueues \`{'DOWN', MonitorRef, process, ChildPid, Reason}\` in the coordinator mailbox.
+- **Restart Budget Management:** The coordinator maintains a budget of remaining restarts. If the budget is greater than zero, it decrements the remaining allowance, increments a restart counter, and spawns a replacement worker. If the budget is exhausted, it transitions into a degraded state, refusing further restart attempts.
+- **State Invariance:** Because all committed entries reside exclusively in the coordinator's loop variables, a child worker crash can never corrupt or erase accumulated history.
+
+## Parallel Worked Example: The Resilient Sensor Ingestion Sentinel (telemetry_sentinel.erl)
+
+The following production-grade module demonstrates a resilient telemetry ingestion sentinel. The sentinel coordinates calibrated sensor measurements, indexes historical readings in memory to reject duplicate sample tokens, and supervises a disposable calibrator worker with automatic crash recovery and restart budgeting.
+
+\`\`\`erlang
+-module(telemetry_sentinel).
+-export([
+    start_sentinel/1,
+    record_reading/3,
+    trigger_sensor_fault/1,
+    get_active_calibrator/1,
+    get_archive/1,
+    stop_sentinel/1,
+    sentinel_loop/1,
+    calibrator_loop/0
+]).
+
+%% @doc Spawns the sentinel coordinator actor and initial monitored calibrator worker.
+start_sentinel(MaxRetries) when is_integer(MaxRetries), MaxRetries >= 0 ->
+    InitRef = make_ref(),
+    Parent = self(),
+    _SentinelPid = spawn(fun() ->
+        {CalibratorPid, MRef} = spawn_monitor(fun() -> calibrator_loop() end),
+        State = #{
+            calibrator_pid => CalibratorPid,
+            calibrator_mref => MRef,
+            retries_left => MaxRetries,
+            retry_count => 0,
+            archive_map => #{}
+        },
+        Parent ! {InitRef, ok, self()},
+        sentinel_loop(State)
+    end),
+    receive
+        {InitRef, ok, Pid} -> {ok, Pid}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Submits an idempotent sensor reading for calibration and archival.
+record_reading(SentinelPid, SampleId, Measurement) ->
+    Ref = make_ref(),
+    SentinelPid ! {record_reading, self(), Ref, SampleId, Measurement},
+    receive
+        {reply, Ref, Result} -> Result
+    after 2000 ->
+        {error, timeout}
+    end.
+
+%% @doc Simulates a sensor calibration crash to verify coordinator resilience.
+trigger_sensor_fault(SentinelPid) ->
+    Ref = make_ref(),
+    SentinelPid ! {trigger_sensor_fault, self(), Ref},
+    receive
+        {reply, Ref, Result} -> Result
+    after 2000 ->
+        {error, timeout}
+    end.
+
+%% @doc Returns the active calibrator PID and accumulated retry count.
+get_active_calibrator(SentinelPid) ->
+    Ref = make_ref(),
+    SentinelPid ! {get_active_calibrator, self(), Ref},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Returns the archive map containing all calibrated sensor readings.
+get_archive(SentinelPid) ->
+    Ref = make_ref(),
+    SentinelPid ! {get_archive, self(), Ref},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        #{}
+    end.
+
+%% @doc Cleanly stops the sentinel coordinator and terminates the calibrator worker.
+stop_sentinel(SentinelPid) ->
+    Ref = make_ref(),
+    SentinelPid ! {stop, self(), Ref},
+    receive
+        {reply, Ref, ok} -> ok
+    after 1000 ->
+        ok
+    end.
+
+%% @doc Tail-recursive coordinator loop managing state, idempotency, and crash recovery.
+sentinel_loop(State = #{calibrator_pid := CalibratorPid,
+                        calibrator_mref := CalibratorMRef,
+                        retries_left := RetriesLeft,
+                        retry_count := RetryCount,
+                        archive_map := ArchiveMap}) ->
+    receive
+        {record_reading, From, Ref, SampleId, Measurement} ->
+            case maps:find(SampleId, ArchiveMap) of
+                {ok, ExistingSample} ->
+                    From ! {reply, Ref, {ok, {already_archived, ExistingSample}}},
+                    sentinel_loop(State);
+                error when is_pid(CalibratorPid) ->
+                    CalibratorPid ! {calibrate, self(), Ref, SampleId, Measurement},
+                    receive
+                        {calibrator_reply, Ref, {ok, Sample}} ->
+                            NewArchive = maps:put(SampleId, Sample, ArchiveMap),
+                            From ! {reply, Ref, {ok, Sample}},
+                            sentinel_loop(State#{archive_map => NewArchive});
+                        {calibrator_reply, Ref, {error, Reason}} ->
+                            From ! {reply, Ref, {error, Reason}},
+                            sentinel_loop(State)
+                    after 1000 ->
+                        From ! {reply, Ref, {error, calibrator_timeout}},
+                        sentinel_loop(State)
+                    end;
+                error ->
+                    From ! {reply, Ref, {error, no_active_calibrator}},
+                    sentinel_loop(State)
+            end;
+
+        {trigger_sensor_fault, From, Ref} ->
+            if
+                is_pid(CalibratorPid) andalso RetriesLeft > 0 ->
+                    OldPid = CalibratorPid,
+                    CalibratorPid ! sensor_fault,
+                    receive
+                        {'DOWN', CalibratorMRef, process, OldPid, _Reason} ->
+                            {NewPid, NewMRef} = spawn_monitor(fun() -> calibrator_loop() end),
+                            NewState = State#{
+                                calibrator_pid => NewPid,
+                                calibrator_mref => NewMRef,
+                                retries_left => RetriesLeft - 1,
+                                retry_count => RetryCount + 1
+                            },
+                            From ! {reply, Ref, {ok, OldPid, NewPid}},
+                            sentinel_loop(NewState)
+                    after 1000 ->
+                        From ! {reply, Ref, {error, fault_timeout}},
+                        sentinel_loop(State)
+                    end;
+                is_pid(CalibratorPid) ->
+                    OldPid = CalibratorPid,
+                    CalibratorPid ! sensor_fault,
+                    receive
+                        {'DOWN', CalibratorMRef, process, OldPid, _Reason} ->
+                            NewState = State#{
+                                calibrator_pid => undefined,
+                                calibrator_mref => undefined,
+                                retries_left => 0,
+                                retry_count => RetryCount + 1
+                            },
+                            From ! {reply, Ref, {error, retry_limit_reached}},
+                            sentinel_loop(NewState)
+                    after 1000 ->
+                        From ! {reply, Ref, {error, fault_timeout}},
+                        sentinel_loop(State)
+                    end;
+                true ->
+                    From ! {reply, Ref, {error, no_active_calibrator}},
+                    sentinel_loop(State)
+            end;
+
+        {'DOWN', CalibratorMRef, process, CalibratorPid, _CrashReason} ->
+            if
+                RetriesLeft > 0 ->
+                    {NewPid, NewMRef} = spawn_monitor(fun() -> calibrator_loop() end),
+                    sentinel_loop(State#{
+                        calibrator_pid => NewPid,
+                        calibrator_mref => NewMRef,
+                        retries_left => RetriesLeft - 1,
+                        retry_count => RetryCount + 1
+                    });
+                true ->
+                    sentinel_loop(State#{
+                        calibrator_pid => undefined,
+                        calibrator_mref => undefined,
+                        retries_left => 0
+                    })
+            end;
+
+        {get_active_calibrator, From, Ref} ->
+            if
+                is_pid(CalibratorPid) ->
+                    From ! {reply, Ref, {ok, CalibratorPid, RetryCount}};
+                true ->
+                    From ! {reply, Ref, {error, no_active_calibrator}}
+            end,
+            sentinel_loop(State);
+
+        {get_archive, From, Ref} ->
+            From ! {reply, Ref, ArchiveMap},
+            sentinel_loop(State);
+
+        {stop, From, Ref} ->
+            if
+                is_pid(CalibratorPid) ->
+                    exit(CalibratorPid, shutdown);
+                true ->
+                    ok
+            end,
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+%% @doc Tail-recursive worker loop performing sensor validation and calibration.
+calibrator_loop() ->
+    receive
+        {calibrate, From, Ref, SampleId, {SensorType, RawValue}} ->
+            ValidSensor = (SensorType =:= temperature orelse SensorType =:= humidity orelse SensorType =:= pressure),
+            ValidVal = (is_integer(RawValue) orelse is_float(RawValue)) andalso RawValue >= 0,
+            if
+                not ValidSensor ->
+                    From ! {calibrator_reply, Ref, {error, uncalibrated_sensor}},
+                    calibrator_loop();
+                not ValidVal ->
+                    From ! {calibrator_reply, Ref, {error, invalid_reading}},
+                    calibrator_loop();
+                true ->
+                    Sample = #{
+                        sample_id => SampleId,
+                        sensor => SensorType,
+                        value => RawValue,
+                        status => calibrated
+                    },
+                    From ! {calibrator_reply, Ref, {ok, Sample}},
+                    calibrator_loop()
+            end;
+
+        sensor_fault ->
+            exit(simulated_calibrator_fault);
+
+        stop ->
+            ok
+    end.
+\`\`\`
 
 ## Assignment Specification
 
-Implement \`src/payment_system.erl\` with the following exports:
+Implement the \`payment_system\` module in \`src/payment_system.erl\` with the following exports:
 \`\`\`erlang
 -module(payment_system).
 -export([
@@ -3555,19 +3788,62 @@ Implement \`src/payment_system.erl\` with the following exports:
 ]).
 \`\`\`
 
-1. \`start_system(MaxRestarts) -> {ok, WatcherPid}\`:
-   - Spawns Watcher, which spawns and monitors the initial worker.
-   - Initial state: \`#{worker_pid => W, worker_mref => MRef, restarts_left => MaxRestarts, restart_count => 0, tx_store => #{}}\`.
-2. \`charge(WatcherPid, RequestId, Amount, Currency) -> {ok, ReceiptMap} | {ok, {already_processed, ReceiptMap}} | {error, Reason}\`.
-3. \`trigger_crash_test(WatcherPid) -> {ok, OldWorkerPid, NewWorkerPid} | {error, max_restarts_exceeded}\`.
-4. \`get_active_worker(WatcherPid) -> {ok, WorkerPid, RestartCount} | {error, no_active_worker}\`.
-5. \`get_processed_txs(WatcherPid) -> #{RequestId => ReceiptMap}\`.
-6. \`stop_system(WatcherPid) -> ok\`.
+### 1. \`start_system/1\`
+- **Input**: Non-negative integer \`MaxRestarts\` representing the maximum allowable worker crash recoveries.
+- **Behavior**: Spawns the coordinator watcher actor and initial worker process via \`spawn_monitor/1\`. Initializes internal coordinator state with \`restarts_left\` set to \`MaxRestarts\`, \`restart_count\` set to \`0\`, and an empty map for \`tx_store\`. Synchronously returns \`{ok, WatcherPid}\` to the calling process upon initialization.
+- **Examples**:
+  - \`payment_system:start_system(3)\` returns \`{ok, <0.150.0>}\`.
 
-## Rules & Verification Constraints
+### 2. \`charge/4\`
+- **Input**: Process identifier \`WatcherPid\`, binary \`RequestId\` (idempotency key), integer \`Amount\`, and atom \`Currency\` (\`usd\`, \`eur\`, or \`etb\`).
+- **Behavior**: Synchronously submits a charge transaction to the watcher coordinator.
+  - If \`RequestId\` already exists in \`tx_store\`, immediately returns \`{ok, {already_processed, ExistingReceipt}}\` without contacting the worker.
+  - If new, forwards the request to the active worker for business validation and execution.
+  - If \`Amount\` is not an integer or is less than or equal to zero, returns \`{error, invalid_amount}\` while keeping the worker alive.
+  - If \`Currency\` is not \`usd\`, \`eur\`, or \`etb\`, returns \`{error, unsupported_currency}\` while keeping the worker alive.
+  - If valid, commits \`RequestId => Receipt\` into \`tx_store\` where \`Receipt\` is \`#{tx_id => RequestId, amount => Amount, currency => Currency, status => settled}\` and returns \`{ok, Receipt}\`.
+- **Examples**:
+  - \`payment_system:charge(W, <<"req_101">>, 250, usd)\` returns \`{ok, #{tx_id => <<"req_101">>, amount => 250, currency => usd, status => settled}}\`.
+  - \`payment_system:charge(W, <<"req_101">>, 250, usd)\` (duplicate replay) returns \`{ok, {already_processed, #{tx_id => <<"req_101">>, ...}}}\`.
+  - \`payment_system:charge(W, <<"req_102">>, -50, usd)\` returns \`{error, invalid_amount}\`.
+  - \`payment_system:charge(W, <<"req_103">>, 100, gbp)\` returns \`{error, unsupported_currency}\`.
 
-- Must maintain \`tx_store\` durability across worker crashes.
-- \`watcher_loop/1\` must be tail-recursive (\`requireTailRecursion: ["watcher_loop/1"]\`).
+### 3. \`trigger_crash_test/1\`
+- **Input**: Process identifier \`WatcherPid\`.
+- **Behavior**: Synchronously tests system fault tolerance by commanding the active worker to terminate abruptly with reason \`simulated_payment_worker_crash\`. The watcher intercepts the \`'DOWN'\` monitor notification.
+  - If \`restarts_left > 0\`, decrements \`restarts_left\`, increments \`restart_count\`, spawns a fresh monitored worker, preserves \`tx_store\` intact, and returns \`{ok, OldWorkerPid, NewWorkerPid}\`.
+  - If \`restarts_left == 0\`, updates state to indicate no active worker is available and returns \`{error, max_restarts_exceeded}\`.
+- **Examples**:
+  - \`payment_system:trigger_crash_test(W)\` returns \`{ok, <0.151.0>, <0.152.0>}\`.
+  - Subsequent call when restarts exhausted returns \`{error, max_restarts_exceeded}\`.
+
+### 4. \`get_active_worker/1\`
+- **Input**: Process identifier \`WatcherPid\`.
+- **Behavior**: Synchronously queries the process identifier and restart count of the active worker. Returns \`{ok, WorkerPid, RestartCount}\` if a worker is running, or \`{error, no_active_worker}\` if the restart budget is exhausted.
+- **Examples**:
+  - \`payment_system:get_active_worker(W)\` returns \`{ok, <0.151.0>, 0}\`.
+
+### 5. \`get_processed_txs/1\`
+- **Input**: Process identifier \`WatcherPid\`.
+- **Behavior**: Synchronously retrieves the map of all committed transaction receipts (\`tx_store\`) held in the watcher's durable memory.
+- **Examples**:
+  - \`payment_system:get_processed_txs(W)\` returns \`#{<<"req_101">> => #{tx_id => <<"req_101">>, amount => 250, currency => usd, status => settled}}\`.
+
+### 6. \`stop_system/1\`
+- **Input**: Process identifier \`WatcherPid\`.
+- **Behavior**: Synchronously shuts down the payment system by terminating the active worker with reason \`shutdown\` and returning \`ok\`.
+- **Examples**:
+  - \`payment_system:stop_system(W)\` returns \`ok\`.
+
+### 7. \`watcher_loop/1\`
+- **Input**: Map \`State\` containing \`worker_pid\`, \`worker_mref\`, \`restarts_left\`, \`restart_count\`, and \`tx_store\`.
+- **Behavior**: Tail-recursive message handling loop. Dispatches charges, queries, crash testing, and monitor notifications without accumulating stack frames.
+- **Examples**: Tail recursion is strictly enforced by compiler AST analysis.
+
+### 8. \`worker_loop/0\`
+- **Input**: None.
+- **Behavior**: Tail-recursive disposable worker loop. Handles payment validation and receipt generation, crash simulations, and shutdown signals.
+- **Examples**: Tail recursion is strictly enforced by compiler AST analysis.
 `,
     mentalModelCheck: {
       question: 'In the resilient payment gateway architecture, why does the Watcher store completed transactions rather than the Payment Worker?',
@@ -3629,7 +3905,7 @@ Implement \`src/payment_system.erl\` with the following exports:
       },
     ],
     astRules: {
-      requiredCalls: ['erlang:spawn_monitor/1', 'erlang:monitor/2'],
+      requiredCalls: ['erlang:spawn_monitor/1'],
       requireTailRecursion: ['watcher_loop/1', 'worker_loop/0'],
     },
     solutionExplanation: 'Implements a complete resilient payment gateway with a durable Watcher coordinator, idempotent transaction store, and monitored worker crash recovery.',
@@ -3645,62 +3921,35 @@ Implement \`src/payment_system.erl\` with the following exports:
     worker_loop/0
 ]).
 
-%% Architectural Requirement:
-%% Spawn coordinator Watcher with initial state:
-%% #{worker_pid => W, worker_mref => MRef, restarts_left => MaxRestarts, restart_count => 0, tx_store => #{}}.
-%% Parent receives {InitRef, ok, self()} -> return {ok, WatcherPid}.
+%% @doc Spawns the watcher coordinator and initial monitored worker process.
 start_system(MaxRestarts) ->
     ok.
 
-%% Architectural Requirement:
-%% Synchronously request charge from Watcher via {charge, self(), Ref, RequestId, Amount, Currency} (2000ms timeout).
+%% @doc Submits an idempotent charge request to the payment gateway.
 charge(WatcherPid, RequestId, Amount, Currency) ->
     ok.
 
-%% Architectural Requirement:
-%% Synchronously command Watcher to crash current worker via {trigger_crash_test, self(), Ref} (2000ms timeout).
+%% @doc Triggers a simulated crash on the active worker to test fault recovery.
 trigger_crash_test(WatcherPid) ->
     ok.
 
-%% Architectural Requirement:
-%% Synchronously query active worker: {get_active_worker, self(), Ref} -> {ok, WorkerPid, RestartCount}.
+%% @doc Returns the process identifier and restart count of the active worker.
 get_active_worker(WatcherPid) ->
     ok.
 
-%% Architectural Requirement:
-%% Synchronously query committed transaction map: {get_processed_txs, self(), Ref} -> TxStore.
+%% @doc Returns the map of all settled transaction receipts committed to the store.
 get_processed_txs(WatcherPid) ->
     ok.
 
-%% Architectural Requirement:
-%% Synchronously stop Watcher and terminate active worker cleanly via {stop, self(), Ref}.
+%% @doc Stops the watcher system and terminates the active worker.
 stop_system(WatcherPid) ->
     ok.
 
-%% Architectural Requirement:
-%% Coordinator actor loop managing tx_store idempotency and worker crash recovery:
-%% - {charge, From, Ref, RequestId, Amount, Currency}: check maps:find(RequestId, TxStore).
-%%   If present, reply {ok, {already_processed, Receipt}}.
-%%   If new and worker alive, forward {validate_and_charge, self(), Ref, ...} to WorkerPid.
-%%   On {worker_reply, Ref, {ok, Receipt}}: commit to tx_store, reply to From, recurse.
-%%   On {worker_reply, Ref, {error, Reason}}: reply error to From, recurse.
-%% - {trigger_crash_test, From, Ref}: send crash_test to WorkerPid, wait for {'DOWN', ...}.
-%%   If restarts_left > 0: spawn replacement, decrement restarts_left, increment restart_count, reply {ok, Old, New}.
-%%   If restarts_left == 0: set worker_pid => undefined, reply {error, max_restarts_exceeded}.
-%% - {get_active_worker, From, Ref}: reply {ok, WorkerPid, RestartCount} or {error, no_active_worker}.
-%% - {get_processed_txs, From, Ref}: reply TxStore.
-%% - {stop, From, Ref}: exit(WorkerPid, shutdown) and reply ok.
+%% @doc Tail-recursive coordinator loop managing state, idempotency, and worker lifecycle.
 watcher_loop(State) ->
     ok.
 
-%% Architectural Requirement:
-%% Disposable payment worker:
-%% - {validate_and_charge, From, Ref, RequestId, Amount, Currency}:
-%%   If Amount =< 0 orelse not is_integer(Amount) -> reply {error, invalid_amount}.
-%%   If Currency not in [usd, eur, etb] -> reply {error, unsupported_currency}.
-%%   Else -> reply {ok, #{tx_id => RequestId, amount => Amount, currency => Currency, status => settled}}.
-%% - crash_test -> exit(simulated_payment_worker_crash).
-%% - stop -> ok.
+%% @doc Worker loop handling payload validation and settlement execution.
 worker_loop() ->
     ok.
 `,
@@ -3940,62 +4189,35 @@ worker_loop() ->
     worker_loop/0
 ]).
 
-%% Architectural Requirement:
-%% Spawn coordinator Watcher with initial state:
-%% #{worker_pid => W, worker_mref => MRef, restarts_left => MaxRestarts, restart_count => 0, tx_store => #{}}.
-%% Parent receives {InitRef, ok, self()} -> return {ok, WatcherPid}.
+%% @doc Spawns the watcher coordinator and initial monitored worker process.
 start_system(MaxRestarts) ->
     ok.
 
-%% Architectural Requirement:
-%% Synchronously request charge from Watcher via {charge, self(), Ref, RequestId, Amount, Currency} (2000ms timeout).
+%% @doc Submits an idempotent charge request to the payment gateway.
 charge(WatcherPid, RequestId, Amount, Currency) ->
     ok.
 
-%% Architectural Requirement:
-%% Synchronously command Watcher to crash current worker via {trigger_crash_test, self(), Ref} (2000ms timeout).
+%% @doc Triggers a simulated crash on the active worker to test fault recovery.
 trigger_crash_test(WatcherPid) ->
     ok.
 
-%% Architectural Requirement:
-%% Synchronously query active worker: {get_active_worker, self(), Ref} -> {ok, WorkerPid, RestartCount}.
+%% @doc Returns the process identifier and restart count of the active worker.
 get_active_worker(WatcherPid) ->
     ok.
 
-%% Architectural Requirement:
-%% Synchronously query committed transaction map: {get_processed_txs, self(), Ref} -> TxStore.
+%% @doc Returns the map of all settled transaction receipts committed to the store.
 get_processed_txs(WatcherPid) ->
     ok.
 
-%% Architectural Requirement:
-%% Synchronously stop Watcher and terminate active worker cleanly via {stop, self(), Ref}.
+%% @doc Stops the watcher system and terminates the active worker.
 stop_system(WatcherPid) ->
     ok.
 
-%% Architectural Requirement:
-%% Coordinator actor loop managing tx_store idempotency and worker crash recovery:
-%% - {charge, From, Ref, RequestId, Amount, Currency}: check maps:find(RequestId, TxStore).
-%%   If present, reply {ok, {already_processed, Receipt}}.
-%%   If new and worker alive, forward {validate_and_charge, self(), Ref, ...} to WorkerPid.
-%%   On {worker_reply, Ref, {ok, Receipt}}: commit to tx_store, reply to From, recurse.
-%%   On {worker_reply, Ref, {error, Reason}}: reply error to From, recurse.
-%% - {trigger_crash_test, From, Ref}: send crash_test to WorkerPid, wait for {'DOWN', ...}.
-%%   If restarts_left > 0: spawn replacement, decrement restarts_left, increment restart_count, reply {ok, Old, New}.
-%%   If restarts_left == 0: set worker_pid => undefined, reply {error, max_restarts_exceeded}.
-%% - {get_active_worker, From, Ref}: reply {ok, WorkerPid, RestartCount} or {error, no_active_worker}.
-%% - {get_processed_txs, From, Ref}: reply TxStore.
-%% - {stop, From, Ref}: exit(WorkerPid, shutdown) and reply ok.
+%% @doc Tail-recursive coordinator loop managing state, idempotency, and worker lifecycle.
 watcher_loop(State) ->
     ok.
 
-%% Architectural Requirement:
-%% Disposable payment worker:
-%% - {validate_and_charge, From, Ref, RequestId, Amount, Currency}:
-%%   If Amount =< 0 orelse not is_integer(Amount) -> reply {error, invalid_amount}.
-%%   If Currency not in [usd, eur, etb] -> reply {error, unsupported_currency}.
-%%   Else -> reply {ok, #{tx_id => RequestId, amount => Amount, currency => Currency, status => settled}}.
-%% - crash_test -> exit(simulated_payment_worker_crash).
-%% - stop -> ok.
+%% @doc Worker loop handling payload validation and settlement execution.
 worker_loop() ->
     ok.
 `,
