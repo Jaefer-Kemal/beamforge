@@ -2469,61 +2469,173 @@ The beauty of \`state_timeout\` is that **it automatically cancels itself** if t
 > [!warning] Production OTP Trap: State Timeout Cancellation Invariants
 > Remember that \`{state_timeout, Ms, Event}\` is tied strictly to the state name. If your state machine executes an internal transition from \`open\` to \`open\` (e.g. \`{next_state, open, NewData}\`), the state timeout is **reset**! If you want to keep the existing running timer while updating state data, you must return \`{keep_state, NewData}\` instead of \`{next_state, CurrentState, NewData}\`.
 
-## Parallel Worked Example
+## Parallel Worked Example: The Session Probe State Machine
 
-The following is an abbreviated 2-state toggle switch demonstrating \`gen_statem\` with \`state_functions\`:
+The following \`session_probe_statem\` module demonstrates how to implement a finite state machine using OTP's modern \`gen_statem\` behaviour in \`state_functions\` callback mode.
+It models an automated connection probe transitioning across three distinct states: \`disconnected\`, \`probing\`, and \`connected\`. When entering \`probing\`, it arms an automatic \`state_timeout\` action that cleanly falls back to \`disconnected\` if confirmation does not arrive within the expected window:
 
 \`\`\`erlang
--module(toggle_statem).
+-module(session_probe_statem).
 -behaviour(gen_statem).
--export([start_link/0, press/1, get_state/1, stop/1]).
--export([callback_mode/0, init/1, terminate/3, code_change/4]).
--export([off/3, on/3]).
 
-callback_mode() -> state_functions.
-start_link() -> gen_statem:start_link(?MODULE, [], []).
-press(Pid) -> gen_statem:call(Pid, press).
-get_state(Pid) -> gen_statem:call(Pid, get_state).
-stop(Pid) -> gen_statem:stop(Pid).
+%% Client API
+-export([
+    start_link/1,
+    connect/1,
+    confirm/1,
+    disconnect/1,
+    get_state/1,
+    stop/1
+]).
 
-init([]) -> {ok, off, #{presses => 0}}.
+%% gen_statem Callbacks
+-export([
+    callback_mode/0,
+    init/1,
+    disconnected/3,
+    probing/3,
+    connected/3,
+    terminate/3,
+    code_change/4
+]).
 
-off({call, From}, press, Data = #{presses := P}) ->
-    {next_state, on, Data#{presses := P + 1}, [{reply, From, switched_on}]};
-off({call, From}, get_state, Data) ->
-    {keep_state, Data, [{reply, From, off}]}.
+%% =============================================================================
+%% Client API
+%% =============================================================================
 
-on({call, From}, press, Data = #{presses := P}) ->
-    {next_state, off, Data#{presses := P + 1}, [{reply, From, switched_off}]};
-on({call, From}, get_state, Data) ->
-    {keep_state, Data, [{reply, From, on}]}.
+%% @doc Start and link the probe state machine with a probe timeout in milliseconds.
+start_link(ProbeTimeoutMs) when is_integer(ProbeTimeoutMs), ProbeTimeoutMs > 0 ->
+    gen_statem:start_link(?MODULE, ProbeTimeoutMs, []).
 
-terminate(_R, _State, _Data) -> ok.
-code_change(_Old, State, Data, _Extra) -> {ok, State, Data}.
+%% @doc Request to initiate connection probing.
+connect(Pid) ->
+    gen_statem:call(Pid, connect).
+
+%% @doc Confirm successful handshake receipt.
+confirm(Pid) ->
+    gen_statem:call(Pid, confirm).
+
+%% @doc Disconnect the active session.
+disconnect(Pid) ->
+    gen_statem:call(Pid, disconnect).
+
+%% @doc Query the current state atom of the probe.
+get_state(Pid) ->
+    gen_statem:call(Pid, get_state).
+
+%% @doc Gracefully stop the state machine.
+stop(Pid) ->
+    gen_statem:stop(Pid).
+
+%% =============================================================================
+%% gen_statem Callbacks
+%% =============================================================================
+
+%% @doc Declare state_functions callback mode where each state is a distinct function.
+callback_mode() ->
+    state_functions.
+
+%% @doc Initialize state machine in disconnected state with initial configuration.
+init(ProbeTimeoutMs) ->
+    Data = #{timeout => ProbeTimeoutMs, attempts => 0},
+    {ok, disconnected, Data}.
+
+%% ── State: disconnected ───────────────────────────────────────────────────────
+disconnected({call, From}, get_state, Data) ->
+    {keep_state, Data, [{reply, From, disconnected}]};
+disconnected({call, From}, connect, Data = #{timeout := Timeout, attempts := Attempts}) ->
+    NewData = Data#{attempts := Attempts + 1},
+    %% Transition to probing and arm an automatic state timeout
+    Actions = [{state_timeout, Timeout, probe_timeout}, {reply, From, ok}],
+    {next_state, probing, NewData, Actions};
+disconnected({call, From}, _Msg, Data) ->
+    {keep_state, Data, [{reply, From, {error, not_connected}}]}.
+
+%% ── State: probing ────────────────────────────────────────────────────────────
+probing({call, From}, get_state, Data) ->
+    {keep_state, Data, [{reply, From, probing}]};
+probing({call, From}, confirm, Data) ->
+    %% Confirmation received within timeout -> transition to connected
+    {next_state, connected, Data, [{reply, From, ok}]};
+probing(state_timeout, probe_timeout, Data) ->
+    %% Built-in state timer fired: probe timed out, fall back to disconnected
+    {next_state, disconnected, Data};
+probing({call, From}, _Msg, Data) ->
+    {keep_state, Data, [{reply, From, {error, probing_in_progress}}]}.
+
+%% ── State: connected ──────────────────────────────────────────────────────────
+connected({call, From}, get_state, Data) ->
+    {keep_state, Data, [{reply, From, connected}]};
+connected({call, From}, disconnect, Data) ->
+    {next_state, disconnected, Data, [{reply, From, ok}]};
+connected({call, From}, _Msg, Data) ->
+    {keep_state, Data, [{reply, From, ok}]}.
+
+terminate(_Reason, _State, _Data) ->
+    ok.
+
+code_change(_OldVsn, State, Data, _Extra) ->
+    {ok, State, Data}.
 \`\`\`
 
 ## Assignment Specification
 
-Implement \`src/circuit_breaker_statem.erl\` representing a self-healing circuit breaker:
-1. \`callback_mode() -> state_functions\`.
-2. \`start_link(FailureThreshold, OpenTimeoutMs) -> {ok, Pid}\`:
-   - Initial state is \`closed\`. Initial data is \`#{threshold => FailureThreshold, timeout => OpenTimeoutMs, failures => 0}\`.
-3. \`execute(Pid, ActionFun)\`:
-   - In \`closed\`:
-     - Calls \`ActionFun()\`. If it returns \`{ok, Val}\`, resets \`failures => 0\` and replies \`{ok, Val}\`.
-     - If it returns \`{error, Reason}\` or crashes, increments \`failures\`. If \`failures + 1 >= Threshold\`, transitions to \`open\` with action \`[{state_timeout, OpenTimeoutMs, try_half_open}]\` and replies \`{error, Reason}\`.
-   - In \`open\`:
-     - **Fast-fails immediately without running \`ActionFun()\`**, replying \`{error, circuit_open}\`.
-     - When \`state_timeout\` event \`try_half_open\` triggers, transitions to \`half_open\`.
-   - In \`half_open\`:
-     - Executes \`ActionFun()\`. If \`{ok, Val}\`, transitions back to \`closed\` with \`failures => 0\` and replies \`{ok, Val}\`.
-     - If \`{error, Reason}\`, trips back to \`open\` with \`state_timeout\` and replies \`{error, Reason}\`.
-4. \`get_state_name(Pid) -> closed | open | half_open\`.
-5. \`stop(Pid) -> ok\`.
+Implement \`src/circuit_breaker_statem.erl\` representing an automated, self-healing circuit breaker that protects downstream systems from cascading failures by tracking execution results across three states: \`closed\`, \`open\`, and \`half_open\`.
+
+### Client API
+
+#### \`callback_mode/0\`
+- **Input**: None.
+- **Behavior**: Declares the callback mode for the \`gen_statem\` engine. Returns the atom \`state_functions\`.
+- **Examples**:
+  - \`circuit_breaker_statem:callback_mode()\` returns \`state_functions\`.
+
+#### \`start_link/2\`
+- **Input**: \`FailureThreshold\` (positive integer specifying consecutive failure limit before tripping), \`OpenTimeoutMs\` (positive integer cooldown period in milliseconds).
+- **Behavior**: Spawns and links the circuit breaker process. Initializes the state machine in \`closed\` state with consecutive failure count set to zero, and records the threshold and timeout configuration in state data.
+- **Examples**:
+  - \`circuit_breaker_statem:start_link(3, 500)\` returns \`{ok, Pid}\`.
+
+#### \`execute/2\`
+- **Input**: \`Pid\` (pid of the running state machine), \`ActionFun\` (nullary function of type \`fun(() -> term())\`).
+- **Behavior**: Synchronously submits a protected operation to the circuit breaker for execution. The behavior depends strictly on current state:
+  - In \`closed\`: Executes \`ActionFun\`. If it returns \`{ok, Result}\`, resets consecutive failures to zero and replies with \`{ok, Result}\` while maintaining \`closed\` state. If it returns an error or crashes, increments consecutive failures; if failures reach or exceed \`FailureThreshold\`, transitions to \`open\`, arms the \`OpenTimeoutMs\` state timeout, and replies with the error.
+  - In \`open\`: Immediately fast-fails without executing \`ActionFun\`, replying with \`{error, circuit_open}\`.
+  - In \`half_open\`: Executes \`ActionFun\` as a trial probe. If it succeeds with \`{ok, Result}\`, self-heals by resetting failures to zero and transitioning back to \`closed\`. If it fails or crashes, trips back to \`open\` with the state timeout re-armed and replies with the error.
+- **Examples**:
+  - \`circuit_breaker_statem:execute(CB, fun() -> {ok, 100} end)\` returns \`{ok, 100}\` (in \`closed\`).
+  - \`circuit_breaker_statem:execute(CB, fun() -> {ok, 100} end)\` returns \`{error, circuit_open}\` (in \`open\`).
+
+#### \`get_state_name/1\`
+- **Input**: \`Pid\` (pid of the running state machine).
+- **Behavior**: Synchronously queries the current state atom of the circuit breaker.
+- **Examples**:
+  - \`circuit_breaker_statem:get_state_name(CB)\` returns \`closed\`, \`open\`, or \`half_open\`.
+
+#### \`stop/1\`
+- **Input**: \`Pid\` (pid of the running state machine).
+- **Behavior**: Gracefully terminates the state machine via \`gen_statem:stop/1\`. Returns \`ok\`.
+- **Examples**:
+  - \`circuit_breaker_statem:stop(CB)\` returns \`ok\`.
+
+### State Callback Invariants
+
+#### \`closed/3\`
+- Handles queries for \`get_state_name\` by replying with \`closed\`.
+- Evaluates protected executions. If an attempt succeeds, resets failures to zero. If an attempt fails, increments the failure count; when reaching \`FailureThreshold\`, transitions to \`open\` and arms \`OpenTimeoutMs\` state timeout.
+
+#### \`open/3\`
+- Handles queries for \`get_state_name\` by replying with \`open\`.
+- Immediately rejects all protected execution calls with \`{error, circuit_open}\` without invoking the provided closure.
+- Upon receiving the \`state_timeout\` event, transitions automatically to \`half_open\`.
+
+#### \`half_open/3\`
+- Handles queries for \`get_state_name\` by replying with \`half_open\`.
+- Evaluates trial execution. A successful attempt transitions back to \`closed\` with failures reset to zero. A failed attempt trips back to \`open\` with the state timeout re-armed.
 
 ## Rules & Verification Constraints
 
-- Must implement \`-behaviour(gen_statem).\` and export \`callback_mode/0\`.
+- Must implement \`-behaviour(gen_statem).\` and export \`callback_mode/0\` returning \`state_functions\`.
 - Must export state functions \`closed/3\`, \`open/3\`, and \`half_open/3\`.
 - In \`open\` state, must never invoke \`ActionFun()\`.
 `,
@@ -2584,32 +2696,40 @@ Implement \`src/circuit_breaker_statem.erl\` representing a self-healing circuit
     code_change/4
 ]).
 
-%% Client API
+%% @doc Start and link the circuit breaker with a failure threshold and cooldown timeout in ms.
 start_link(FailureThreshold, OpenTimeoutMs) ->
     gen_statem:start_link(?MODULE, {FailureThreshold, OpenTimeoutMs}, []).
 
+%% @doc Execute a protected operation through the circuit breaker.
 execute(Pid, ActionFun) when is_function(ActionFun, 0) ->
     ok.
 
+%% @doc Synchronously query the current state name atom of the circuit breaker.
 get_state_name(Pid) ->
     closed.
 
+%% @doc Gracefully terminate the state machine.
 stop(Pid) ->
     gen_statem:stop(Pid).
 
 %% gen_statem Callbacks
+
+%% @doc Declare state_functions callback mode.
 callback_mode() ->
     state_functions.
 
+%% @doc Initialize the circuit breaker in closed state.
 init({Threshold, TimeoutMs}) ->
     Data = #{threshold => Threshold, timeout => TimeoutMs, failures => 0},
     {ok, closed, Data}.
 
+%% @doc Closed state: normal execution, increments failures on error and trips to open.
 closed({call, From}, get_state_name, Data) ->
     {keep_state, Data, [{reply, From, closed}]};
 closed({call, From}, _Msg, Data) ->
     {keep_state, Data, [{reply, From, ok}]}.
 
+%% @doc Open state: immediately fast-fails calls and awaits state_timeout.
 open({call, From}, get_state_name, Data) ->
     {keep_state, Data, [{reply, From, open}]};
 open({call, From}, _Msg, Data) ->
@@ -2617,14 +2737,17 @@ open({call, From}, _Msg, Data) ->
 open(state_timeout, _Event, Data) ->
     {next_state, half_open, Data}.
 
+%% @doc Half-open state: trial probe, heals to closed on success or trips back to open on error.
 half_open({call, From}, get_state_name, Data) ->
     {keep_state, Data, [{reply, From, half_open}]};
 half_open({call, From}, _Msg, Data) ->
     {keep_state, Data, [{reply, From, ok}]}.
 
+%% @doc Clean up state machine resources on shutdown.
 terminate(_Reason, _State, _Data) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, Data, _Extra) ->
     {ok, State, Data}.
 `,
@@ -2737,32 +2860,40 @@ code_change(_OldVsn, State, Data, _Extra) ->
     code_change/4
 ]).
 
-%% Client API
+%% @doc Start and link the circuit breaker with a failure threshold and cooldown timeout in ms.
 start_link(FailureThreshold, OpenTimeoutMs) ->
     gen_statem:start_link(?MODULE, {FailureThreshold, OpenTimeoutMs}, []).
 
+%% @doc Execute a protected operation through the circuit breaker.
 execute(Pid, ActionFun) when is_function(ActionFun, 0) ->
     ok.
 
+%% @doc Synchronously query the current state name atom of the circuit breaker.
 get_state_name(Pid) ->
     closed.
 
+%% @doc Gracefully terminate the state machine.
 stop(Pid) ->
     gen_statem:stop(Pid).
 
 %% gen_statem Callbacks
+
+%% @doc Declare state_functions callback mode.
 callback_mode() ->
     state_functions.
 
+%% @doc Initialize the circuit breaker in closed state.
 init({Threshold, TimeoutMs}) ->
     Data = #{threshold => Threshold, timeout => TimeoutMs, failures => 0},
     {ok, closed, Data}.
 
+%% @doc Closed state: normal execution, increments failures on error and trips to open.
 closed({call, From}, get_state_name, Data) ->
     {keep_state, Data, [{reply, From, closed}]};
 closed({call, From}, _Msg, Data) ->
     {keep_state, Data, [{reply, From, ok}]}.
 
+%% @doc Open state: immediately fast-fails calls and awaits state_timeout.
 open({call, From}, get_state_name, Data) ->
     {keep_state, Data, [{reply, From, open}]};
 open({call, From}, _Msg, Data) ->
@@ -2770,14 +2901,17 @@ open({call, From}, _Msg, Data) ->
 open(state_timeout, _Event, Data) ->
     {next_state, half_open, Data}.
 
+%% @doc Half-open state: trial probe, heals to closed on success or trips back to open on error.
 half_open({call, From}, get_state_name, Data) ->
     {keep_state, Data, [{reply, From, half_open}]};
 half_open({call, From}, _Msg, Data) ->
     {keep_state, Data, [{reply, From, ok}]}.
 
+%% @doc Clean up state machine resources on shutdown.
 terminate(_Reason, _State, _Data) ->
     ok.
 
+%% @doc Handle hot-code configuration upgrades.
 code_change(_OldVsn, State, Data, _Extra) ->
     {ok, State, Data}.
 `,

@@ -2495,6 +2495,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `erlc.exe`: Compiled `payload_hasher.erl` cleanly with 0 warnings/errors.
   - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
 
+## Phase 141: Pedagogical Despoiling of Chapter 7 Lecture 5 (`ch07-l05`)
+- [x] **141.1: Audit & Eliminate Spoilers in Lecture 7.5 (`ch07-l05`)**:
+  - Authored a direct, focused parallel worked example `session_probe_statem.erl` (`start_link/1`, `connect/1`, `confirm/1`, `disconnect/1`, `get_state/1`, `stop/1`, and callbacks), demonstrating `gen_statem` with `state_functions` callback mode and automated `state_timeout` fallback in a realistic session probing domain, adhering to the Proportional Simplicity rule.
+  - Audited and de-spoiled `Assignment Specification`: structured all functions (`callback_mode/0`, `start_link/2`, `execute/2`, `get_state_name/1`, `stop/1`) and callback invariants (`closed/3`, `open/3`, `half_open/3`) into clean `Input`, `Behavior`, and `Examples` blocks without Erlang syntax or tuple dictations in prompt prose.
+  - Added clean EDoc `@doc` comments across starter code, `files[0].content`, `solutionCode`, and `solutionFiles['src/circuit_breaker_statem.erl']`, strictly maintaining zero `-spec` declarations and zero in-body comments or hints.
+- [x] **141.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `npx tsc --noEmit`: 0 TypeScript errors across the web-ide workspace.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Compiled `session_probe_statem.erl` cleanly with 0 warnings/errors.
+  - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
+
 
 
 
