@@ -2734,7 +2734,7 @@ In a naive request-response actor call:
 2. If the server terminates unexpectedly (e.g., due to an unhandled exception or memory exhaustion) immediately after receiving the message, the client has no way of knowing the server is dead.
 3. The client sits idle for the entire 5,000ms duration before timing out!
 
-To prevent this latency penalty, OTP's synchronous call implementation (\`gen:do_call/4\`) pairs temporary unidirectional process monitors with request dispatching:
+To prevent this latency penalty, OTP's synchronous call implementation (\`gen_server:call/3\`, implemented under the hood in OTP's internal \`gen:do_call/4\` helper) pairs temporary unidirectional process monitors with request dispatching:
 - **Temporary Monitor**: The caller monitors the server process right before dispatching the request.
 - **Normal Flow**: When the server completes work and replies with \`{Ref, Reply}\`, the caller demonitors the reference with \`[flush]\` and returns the answer.
 - **Crash Flow**: If the server crashes mid-flight, the BEAM runtime immediately synthesizes a \`'DOWN'\` message and delivers it to the caller's mailbox with near-zero latency (<1ms). The caller unblocks instantly with \`{error, {server_crashed, Reason}}\` instead of hanging for seconds.
@@ -2811,7 +2811,7 @@ Implement \`src/my_gen_server.erl\` exporting \`start/2\`, \`call/3\`, \`cast/2\
 ### 3. \`call/3\`
 - **Input**: \`ServerPid\` (pid of running server), \`Request\` (term containing request payload), \`Timeout\` (integer timeout in milliseconds).
 - **Behavior**:
-  - Executes a monitor-backed synchronous call following OTP's \`gen:do_call/4\` pattern:
+  - Executes a monitor-backed synchronous call following OTP's \`gen_server:call/3\` pattern (implemented internally via \`gen:do_call/4\`):
     - Attaches a temporary monitor to \`ServerPid\` via \`MRef = erlang:monitor(process, ServerPid)\`.
     - Dispatches \`{'$gen_call', {self(), MRef}, Request}\` to \`ServerPid\`.
     - Awaits \`{MRef, Reply}\`, flushes the monitor via \`erlang:demonitor(MRef, [flush])\`, and returns \`Reply\`.
