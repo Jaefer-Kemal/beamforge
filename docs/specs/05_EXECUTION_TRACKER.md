@@ -2457,6 +2457,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `erlc.exe`: Compiled both `otp_intro_demo.erl` and `device_telemetry.erl` cleanly with 0 warnings/errors.
   - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
 
+## Phase 138: Pedagogical Despoiling of Chapter 7 Lecture 2 (`ch07-l02`)
+- [x] **138.1: Audit & Eliminate Spoilers in Lecture 7.2 (`ch07-l02`)**:
+  - Authored an authentic parallel worked example `cloud_storage_bucket.erl` (`start_link/1`, `upload_async/3`, `allocate_reserved/3`, `query_usage/1`, `stop/1`, and full `gen_server` callbacks), demonstrating synchronous calls vs asynchronous casts with quota verification in a realistic cloud storage domain.
+  - Audited and de-spoiled `Assignment Specification`: structured all functions (`start_link/1`, `credit/3`, `debit/3`, `get_balances/1`, `stop/1`) into clean `Input`, `Behavior`, and `Examples` blocks without Erlang syntax or message tuple spoilers in prompt prose.
+  - Added clean EDoc `@doc` comments across starter code, `files[0].content`, `solutionCode`, and `solutionFiles['src/wallet_server.erl']`, strictly maintaining zero `-spec` declarations and zero in-body comments or hints.
+- [x] **138.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `npx tsc --noEmit`: 0 TypeScript errors across the web-ide workspace.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `erlc.exe`: Compiled both `wallet_server.erl` and `cloud_storage_bucket.erl` cleanly with 0 warnings/errors.
+  - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-7].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
+
 
 
 

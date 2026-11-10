@@ -630,66 +630,167 @@ When client code invokes \`gen_server:call(ServerPid, {debit, <<"USD">>, 50})\`:
 > [!warning] Production OTP Trap: The Cast Mailbox Explosion
 > Never use \`gen_server:cast/2\` for requests that require backpressure or acknowledgement. If upstream traffic spikes, a \`cast\` pipeline can queue millions of messages in the server's mailbox in seconds. When in doubt, prefer \`call\`—the 5ms roundtrip latency is far cheaper than an unrecoverable production OOM restart!
 
-## Parallel Worked Example
+## Parallel Worked Example: Cloud Storage Quota Manager (cloud_storage_bucket.erl)
 
-The following module implements a simple inventory stock counter demonstrating \`call\` and \`cast\`:
+To see how synchronous calls and asynchronous casts are orchestrated in a production system, consider \`cloud_storage_bucket.erl\`. This server manages departmental cloud storage quotas: allowing non-blocking asynchronous upload notifications, while enforcing strict synchronous reservations that prevent total storage from exceeding the provisioned ceiling.
+
+Notice how the module exports both the **Client API** and the **gen_server Callbacks**, handling both fire-and-forget uploads and synchronous space reservations:
 
 \`\`\`erlang
--module(stock_server).
+-module(cloud_storage_bucket).
 -behaviour(gen_server).
--export([start_link/1, restock/2, reserve/2, get_stock/1, stop/1]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
-start_link(Initial) -> gen_server:start_link(?MODULE, Initial, []).
-restock(Pid, Qty)   -> gen_server:cast(Pid, {restock, Qty}).
-reserve(Pid, Qty)   -> gen_server:call(Pid, {reserve, Qty}).
-get_stock(Pid)      -> gen_server:call(Pid, get_stock).
-stop(Pid)           -> gen_server:stop(Pid).
+%% Client API
+-export([
+    start_link/1,
+    upload_async/3,
+    allocate_reserved/3,
+    query_usage/1,
+    stop/1
+]).
 
-init(InitialQty) -> {ok, #{stock => InitialQty}}.
+%% gen_server Callbacks
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
-handle_call({reserve, Qty}, _From, State = #{stock := Stock}) when Qty =< 0 ->
-    {reply, {error, invalid_quantity}, State};
-handle_call({reserve, Qty}, _From, State = #{stock := Stock}) when Stock >= Qty ->
-    NewStock = Stock - Qty,
-    {reply, {ok, NewStock}, State#{stock := NewStock}};
-handle_call({reserve, _Qty}, _From, State) ->
-    {reply, {error, out_of_stock}, State};
-handle_call(get_stock, _From, State = #{stock := Stock}) ->
-    {reply, Stock, State}.
+%% @doc Starts and links the storage bucket gen_server with a maximum byte ceiling.
+start_link(MaxBytes) when is_integer(MaxBytes), MaxBytes > 0 ->
+    gen_server:start_link(?MODULE, [MaxBytes], []).
 
-handle_cast({restock, Qty}, State = #{stock := Stock}) when Qty > 0 ->
-    {noreply, State#{stock := Stock + Qty}}.
+%% @doc Asynchronously records department upload bytes without blocking the caller.
+upload_async(Pid, Department, ByteSize) when is_integer(ByteSize), ByteSize > 0 ->
+    gen_server:cast(Pid, {upload, Department, ByteSize}).
 
-handle_info(_Info, State) -> {noreply, State}.
-terminate(_Reason, _State) -> ok.
-code_change(_Old, State, _Extra) -> {ok, State}.
+%% @doc Synchronously requests reserved department storage space with quota verification.
+allocate_reserved(Pid, Department, RequestedBytes) when is_integer(RequestedBytes) ->
+    gen_server:call(Pid, {reserve_space, Department, RequestedBytes}).
+
+%% @doc Synchronously queries the total usage and per-department storage breakdown.
+query_usage(Pid) ->
+    gen_server:call(Pid, get_usage).
+
+%% @doc Synchronously requests clean termination of the storage server.
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+%% ── gen_server Callbacks ─────────────────────────────────────────────────────
+
+%% @doc Initializes the server state with a total quota ceiling and empty department map.
+init([MaxBytes]) ->
+    State = #{
+        ceiling => MaxBytes,
+        total_used => 0,
+        departments => #{}
+    },
+    {ok, State}.
+
+%% @doc Handles synchronous storage reservation and usage queries.
+handle_call({reserve_space, _Department, RequestedBytes}, _From, State) when RequestedBytes =< 0 ->
+    {reply, {error, invalid_request_size}, State};
+handle_call({reserve_space, Department, RequestedBytes}, _From, State = #{ceiling := Max, total_used := Used, departments := Depts}) ->
+    if
+        Used + RequestedBytes =< Max ->
+            NewUsed = Used + RequestedBytes,
+            CurrentDeptUsage = maps:get(Department, Depts, 0),
+            NewDepts = maps:put(Department, CurrentDeptUsage + RequestedBytes, Depts),
+            RemainingQuota = Max - NewUsed,
+            NewState = State#{total_used := NewUsed, departments := NewDepts},
+            {reply, {ok, RemainingQuota}, NewState};
+        true ->
+            {reply, {error, quota_exceeded}, State}
+    end;
+handle_call(get_usage, _From, State) ->
+    {reply, State, State};
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+%% @doc Handles asynchronous upload notifications.
+handle_cast({upload, Department, ByteSize}, State = #{ceiling := Max, total_used := Used, departments := Depts}) ->
+    NewUsed = min(Max, Used + ByteSize),
+    CurrentDept = maps:get(Department, Depts, 0),
+    NewDepts = maps:put(Department, CurrentDept + ByteSize, Depts),
+    {noreply, State#{total_used := NewUsed, departments := NewDepts}};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+%% @doc Handles out-of-band signals and raw process messages.
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+%% @doc Cleans up server resources upon termination.
+terminate(_Reason, _State) ->
+    ok.
+
+%% @doc Transforms state across hot code upgrades.
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
 \`\`\`
 
 ## Assignment Specification
 
 Implement \`src/wallet_server.erl\` representing a multi-currency banking ledger:
-1. \`start_link(InitialBalancesMap) -> {ok, Pid}\`:
-   - Starts a linked \`gen_server\`. Initial state must be \`#{balances => InitialBalancesMap}\`.
-2. \`credit(Pid, Currency, Amount)\`:
-   - Asynchronously casts \`{credit, Currency, Amount}\` to the server.
-   - If \`Currency\` is already present, adds \`Amount\` to existing balance; if absent, initializes at \`Amount\`.
-3. \`debit(Pid, Currency, Amount)\`:
-   - Synchronously calls the server with \`{debit, Currency, Amount}\`.
-   - If \`Amount =< 0\`, replies \`{error, invalid_amount}\`.
-   - If balance of \`Currency\` is absent or \`< Amount\`, replies \`{error, insufficient_funds}\`.
-   - If balance \`>= Amount\`, deducts \`Amount\` and replies \`{ok, NewBalance}\`.
-4. \`get_balances(Pid) -> BalancesMap\`:
-   - Synchronously queries the server and returns the current \`BalancesMap\`.
-5. \`stop(Pid) -> ok\`:
-   - Stops the server gracefully via \`gen_server:stop(Pid)\`.
+\`\`\`erlang
+-module(wallet_server).
+-behaviour(gen_server).
+
+-export([
+    start_link/1,
+    credit/3,
+    debit/3,
+    get_balances/1,
+    stop/1
+]).
+\`\`\`
+
+### 1. \`start_link/1\`
+- **Input**: Map \`InitialBalances\` containing binary currency keys and non-negative integer balances.
+- **Behavior**: Starts and links a \`gen_server\` process executing the \`wallet_server\` callback module. Initializes internal state as \`#{balances => InitialBalances}\`. Returns \`{ok, Pid}\` on success.
+- **Examples**:
+  - \`wallet_server:start_link(#{<<"USD">> => 500, <<"EUR">> => 200})\` returns \`{ok, <0.150.0>}\`.
+
+### 2. \`credit/3\`
+- **Input**: Process identifier \`Pid\`, binary \`Currency\`, positive integer \`Amount\`.
+- **Behavior**: Asynchronously credits \`Amount\` to \`Currency\` via \`gen_server:cast/2\`. If \`Currency\` already exists in the ledger, increments its balance; if absent, initializes the currency with balance \`Amount\`. Returns \`ok\` immediately without waiting for server confirmation.
+- **Examples**:
+  - \`wallet_server:credit(W, <<"GBP">>, 150)\` returns \`ok\`.
+
+### 3. \`debit/3\`
+- **Input**: Process identifier \`Pid\`, binary \`Currency\`, integer \`Amount\`.
+- **Behavior**: Synchronously debits \`Amount\` from \`Currency\` via \`gen_server:call/2\`.
+  - If \`Amount\` is less than or equal to zero, replies with \`{error, invalid_amount}\`.
+  - If \`Currency\` is absent from the ledger or its current balance is less than \`Amount\`, replies with \`{error, insufficient_funds}\` and leaves all balances unchanged.
+  - If the existing balance is greater than or equal to \`Amount\`, deducts \`Amount\` and replies with \`{ok, NewBalance}\`.
+- **Examples**:
+  - \`wallet_server:debit(W, <<"USD">>, 50)\` returns \`{ok, 450}\`.
+  - \`wallet_server:debit(W, <<"USD">>, 1000)\` returns \`{error, insufficient_funds}\`.
+  - \`wallet_server:debit(W, <<"JPY">>, 50)\` returns \`{error, insufficient_funds}\`.
+  - \`wallet_server:debit(W, <<"USD">>, -10)\` returns \`{error, invalid_amount}\`.
+
+### 4. \`get_balances/1\`
+- **Input**: Process identifier \`Pid\`.
+- **Behavior**: Synchronously retrieves the current map of all currency balances via \`gen_server:call/2\`.
+- **Examples**:
+  - \`wallet_server:get_balances(W)\` returns \`#{<<"USD">> => 450, <<"EUR">> => 200, <<"GBP">> => 150}\`.
+
+### 5. \`stop/1\`
+- **Input**: Process identifier \`Pid\`.
+- **Behavior**: Synchronously commands clean termination of the wallet server via \`gen_server:stop/1\`.
+- **Examples**:
+  - \`wallet_server:stop(W)\` returns \`ok\`.
 
 ## Rules & Verification Constraints
 
 - Must export \`start_link/1\`, \`credit/3\`, \`debit/3\`, \`get_balances/1\`, and \`stop/1\`.
+- Must export all 6 mandatory \`gen_server\` callbacks: \`init/1\`, \`handle_call/3\`, \`handle_cast/2\`, \`handle_info/2\`, \`terminate/2\`, and \`code_change/3\`.
 - \`credit/3\` must use \`gen_server:cast/2\`.
 - \`debit/3\` and \`get_balances/1\` must use \`gen_server:call/2\`.
-- Internal state map must follow \`#{balances => #{Currency => Balance}}\`.
+- Internal state map must follow \`#{balances => #{Currency => Balance}}\` (verified by \`sys:get_state/1\`).
 `,
     mentalModelCheck: {
       question: 'Under high traffic bursts, why is gen_server:call safer than gen_server:cast for processing operations?',
@@ -760,38 +861,49 @@ gen_server:call(Server, {process_transaction, Tx})`,
     code_change/3
 ]).
 
-%% Client API
+%% @doc Starts and links the wallet server with an initial balances map.
 start_link(InitialBalances) when is_map(InitialBalances) ->
     gen_server:start_link(?MODULE, InitialBalances, []).
 
+%% @doc Asynchronously credits funds to the specified currency balance.
 credit(Pid, Currency, Amount) when Amount > 0 ->
     ok.
 
+%% @doc Synchronously debits funds from the specified currency balance.
 debit(Pid, Currency, Amount) ->
     ok.
 
+%% @doc Synchronously queries the map of all active currency balances.
 get_balances(Pid) ->
     ok.
 
+%% @doc Synchronously requests clean termination of the wallet server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
-%% gen_server Callbacks
+%% ── gen_server Callbacks ─────────────────────────────────────────────────────
+
+%% @doc Initializes the server state with the balances map.
 init(InitialBalances) ->
     {ok, #{balances => InitialBalances}}.
 
+%% @doc Handles synchronous call requests.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handles asynchronous cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handles out-of-band signals and raw messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Cleans up server resources upon termination.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handles state transformations across hot code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -816,26 +928,33 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Starts and links the wallet server with an initial balances map.
 start_link(InitialBalances) when is_map(InitialBalances) ->
     gen_server:start_link(?MODULE, InitialBalances, []).
 
+%% @doc Asynchronously credits funds to the specified currency balance.
 credit(Pid, Currency, Amount) when Amount > 0 ->
     gen_server:cast(Pid, {credit, Currency, Amount}).
 
+%% @doc Synchronously debits funds from the specified currency balance.
 debit(Pid, Currency, Amount) ->
     gen_server:call(Pid, {debit, Currency, Amount}).
 
+%% @doc Synchronously queries the map of all active currency balances.
 get_balances(Pid) ->
     gen_server:call(Pid, get_balances).
 
+%% @doc Synchronously requests clean termination of the wallet server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
-%% gen_server Callbacks
+%% ── gen_server Callbacks ─────────────────────────────────────────────────────
+
+%% @doc Initializes the server state with the balances map.
 init(InitialBalances) ->
     {ok, #{balances => InitialBalances}}.
 
+%% @doc Handles synchronous call requests.
 handle_call({debit, _Currency, Amount}, _From, State) when Amount =< 0 ->
     {reply, {error, invalid_amount}, State};
 handle_call({debit, Currency, Amount}, _From, State = #{balances := Balances}) ->
@@ -853,6 +972,7 @@ handle_call(get_balances, _From, State = #{balances := Balances}) ->
 handle_call(_Req, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+%% @doc Handles asynchronous cast messages.
 handle_cast({credit, Currency, Amount}, State = #{balances := Balances}) ->
     CurrentBal = maps:get(Currency, Balances, 0),
     NewBalances = maps:put(Currency, CurrentBal + Amount, Balances),
@@ -860,12 +980,15 @@ handle_cast({credit, Currency, Amount}, State = #{balances := Balances}) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handles out-of-band signals and raw messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Cleans up server resources upon termination.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handles state transformations across hot code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -894,38 +1017,49 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Starts and links the wallet server with an initial balances map.
 start_link(InitialBalances) when is_map(InitialBalances) ->
     gen_server:start_link(?MODULE, InitialBalances, []).
 
+%% @doc Asynchronously credits funds to the specified currency balance.
 credit(Pid, Currency, Amount) when Amount > 0 ->
     ok.
 
+%% @doc Synchronously debits funds from the specified currency balance.
 debit(Pid, Currency, Amount) ->
     ok.
 
+%% @doc Synchronously queries the map of all active currency balances.
 get_balances(Pid) ->
     ok.
 
+%% @doc Synchronously requests clean termination of the wallet server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
-%% gen_server Callbacks
+%% ── gen_server Callbacks ─────────────────────────────────────────────────────
+
+%% @doc Initializes the server state with the balances map.
 init(InitialBalances) ->
     {ok, #{balances => InitialBalances}}.
 
+%% @doc Handles synchronous call requests.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handles asynchronous cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handles out-of-band signals and raw messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Cleans up server resources upon termination.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handles state transformations across hot code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -953,26 +1087,33 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
-%% Client API
+%% @doc Starts and links the wallet server with an initial balances map.
 start_link(InitialBalances) when is_map(InitialBalances) ->
     gen_server:start_link(?MODULE, InitialBalances, []).
 
+%% @doc Asynchronously credits funds to the specified currency balance.
 credit(Pid, Currency, Amount) when Amount > 0 ->
     gen_server:cast(Pid, {credit, Currency, Amount}).
 
+%% @doc Synchronously debits funds from the specified currency balance.
 debit(Pid, Currency, Amount) ->
     gen_server:call(Pid, {debit, Currency, Amount}).
 
+%% @doc Synchronously queries the map of all active currency balances.
 get_balances(Pid) ->
     gen_server:call(Pid, get_balances).
 
+%% @doc Synchronously requests clean termination of the wallet server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
-%% gen_server Callbacks
+%% ── gen_server Callbacks ─────────────────────────────────────────────────────
+
+%% @doc Initializes the server state with the balances map.
 init(InitialBalances) ->
     {ok, #{balances => InitialBalances}}.
 
+%% @doc Handles synchronous call requests.
 handle_call({debit, _Currency, Amount}, _From, State) when Amount =< 0 ->
     {reply, {error, invalid_amount}, State};
 handle_call({debit, Currency, Amount}, _From, State = #{balances := Balances}) ->
@@ -990,6 +1131,7 @@ handle_call(get_balances, _From, State = #{balances := Balances}) ->
 handle_call(_Req, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+%% @doc Handles asynchronous cast messages.
 handle_cast({credit, Currency, Amount}, State = #{balances := Balances}) ->
     CurrentBal = maps:get(Currency, Balances, 0),
     NewBalances = maps:put(Currency, CurrentBal + Amount, Balances),
@@ -997,12 +1139,15 @@ handle_cast({credit, Currency, Amount}, State = #{balances := Balances}) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handles out-of-band signals and raw messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Cleans up server resources upon termination.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handles state transformations across hot code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
