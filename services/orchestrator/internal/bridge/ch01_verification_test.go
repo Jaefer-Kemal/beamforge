@@ -40,6 +40,22 @@ is_within_quota(UsedMb, LimitMb, IsAdmin) ->
     IsAdmin =:= true orelse (UsedMb >= 0 andalso UsedMb =< LimitMb).
 `
 
+	patternVarsSolution := `-module(pattern_vars).
+-export([rebind_update/2, extract_middle/1]).
+
+%% @doc Compute double the sum of Base and Increment across immutable bindings.
+rebind_update(Base, Increment) ->
+    V1 = Base,
+    V2 = V1 + Increment,
+    V3 = V2 * 2,
+    V3.
+
+%% @doc Return the second element of a 3-element tuple, failing if arity is not 3.
+extract_middle(TripleTuple) ->
+    {_, Middle, _} = TripleTuple,
+    Middle.
+`
+
 	tests := []struct {
 		name          string
 		exerciseID    string
@@ -61,6 +77,14 @@ is_within_quota(UsedMb, LimitMb, IsAdmin) ->
 				"src/basic_types.erl": basicTypesSolution,
 			},
 			visibleCount: 3,
+		},
+		{
+			name:       "ch01-l03 Variables & Single Assignment",
+			exerciseID: "ch01-l03",
+			files: map[string]string{
+				"src/pattern_vars.erl": patternVarsSolution,
+			},
+			visibleCount: 2,
 		},
 	}
 
@@ -189,6 +213,38 @@ is_within_quota(UsedMb, LimitMb, IsAdmin) ->
 		}
 		if !compFailed {
 			t.Errorf("Expected comparison_and_logic stage to fail for negative quota bug, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch01-l03 rejects non-triple tuple cheat via element/2", func(t *testing.T) {
+		sessionID := "test-ch01-l03-neg-triple"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/pattern_vars.erl": `-module(pattern_vars).
+-export([rebind_update/2, extract_middle/1]).
+
+rebind_update(Base, Increment) ->
+    (Base + Increment) * 2.
+
+extract_middle(Tuple) ->
+    element(2, Tuple).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch01-l03", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected extract_middle accepting non-3-tuple via element(2, Tuple) to fail verification, but got PASSED")
 		}
 	})
 }

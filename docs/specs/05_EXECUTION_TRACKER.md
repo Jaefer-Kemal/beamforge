@@ -3065,6 +3065,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter1Verification` passed all 4 subtests in `7.61s` (`7.668s` total); `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` passed all 8 CH01 lessons including `ch01-l02 | 3/3 tests passed` (`14.75s` / `14.774s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 188: Spec 04 / Spec 08 Anti-Spoiler Rework, Export & Non-Triple Hardening & Live Tri-Verification of Chapter 1 Lecture 3 (`ch01-l03`)
+- [x] **188.1: De-Spoil Parallel Worked Example, Test Explanations & Sync Starter/Solution Contracts (`src/pattern_vars.erl`, `ch01-l03`)**:
+  - Updated `ch01-l03` ONLY in `apps/web-ide/src/data/chapters/ch01.ts` (`lines 512–695`): standardized `> [!WARNING]` (`line 512`), replaced the 1:1 parallel clone `auth_session` (`calculate_extended_ttl/2`, `extract_user_id/1`) with the domain-disjoint settlement module `ledger_step.erl` (`net_settlement/3`, `match_tagged_amount/2` demonstrating bound-pinning + nested wildcards at `lines 522–545`), added the Spec 04 §1.3 `=` manual reading note & `pattern_matching` reference-card pointer (`line 556`), scrubbed arithmetic formula & `{_, Middle, _}` pattern spoilers from Assignment Specification & `visibleTestCases` explanations (`lines 560–583, 625, 632`), and synchronized `_`-prefixed `-Wall -Werror` starter stubs + plain-English `%% @doc` headers across all 4 code copies (`lines 639–695`).
+  - Fixed `Run` catch `call_str` (`services/orchestrator/internal/bridge/erl_runner_chapters.go`, `line 124`) and hardened `Submit` (`case "ch01-l03"`, `lines 4247–4285`) to verify both `{rebind_update, 2}` & `{extract_middle, 1}` exports, negative `Increment` (`rebind_update(0, -7) -> -14`), nested tuple elements (`{tag, [1, 2], done} -> [1, 2]`), and non-3-tuple rejection (`extract_middle({only, two})` must fail).
+  - Expanded `services/orchestrator/internal/bridge/ch01_verification_test.go` (`lines 43–250`) to cover `ch01-l03` (`RunVerification` 2 stages `score=100` + `RunCode` 2/2 visible tests) plus negative rejection when a cheat `element(2, Tuple)` accepts a 2-tuple.
+- [x] **188.2: Mandatory Live Tri-Verification & Compiler Suite (`ch01-l03`, Local Commit Only per Spec 08 §3.3)**:
+  - **Parallel Worked Example (`ledger_step.erl`)**: Extracted from `ch01.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified live on OTP 29 (`PWE_OK`).
+  - **Starter & Solution Pack (`pattern_vars.erl`)**: Verified starter & solution parity (`files[0].content === starterCode`, `solutionFiles['src/pattern_vars.erl'] === solutionCode`), compiled starter with `-Wall -Werror` (0 warnings) returning `{ok, ok}`, compiled solution with `+debug_info -Wall -Werror`, and ran both `visibleTestCases` plus bounds & 2-tuple rejection (`SOL_ALL_VISIBLE_AND_BOUNDS_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter1Verification` passed all 6 subtests in `12.07s` (`12.098s` total); `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` passed all 8 CH01 lessons including `ch01-l03 | 2/2 tests passed` (`18.22s` / `18.244s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
+
 
 
 

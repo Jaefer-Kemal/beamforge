@@ -509,7 +509,7 @@ If you need to match a value in a pattern but do not intend to use it, use the s
 {_, UserStatus} = {101, active}.  %% Discards ID 101, binds UserStatus = active
 \`\`\`
 
-> [!warning] Common Beginner Syntax Trap: How to "Update" State
+> [!WARNING] Common Beginner Syntax Trap: How to "Update" State
 > Beginners often wonder: *If variables are immutable, how do I calculate updated values?*
 > The answer: **Create a new, descriptively named variable!**
 > Instead of modifying \`Price = Price * 1.1\`, write:
@@ -521,29 +521,28 @@ If you need to match a value in a pattern but do not intend to use it, use the s
 
 ## Parallel Worked Example
 
-Here is a module demonstrating how sequential calculations progress state through new variable names, and how pattern matching with wildcards extracts specific fields from multi-element compound terms:
+Consider a financial settlement ledger module that tracks balances across immutable intermediate steps and verifies currency tags via nested pattern matching:
 
 \`\`\`erlang
--module(auth_session).
--export([calculate_extended_ttl/2, extract_user_id/1]).
+-module(ledger_step).
+-export([net_settlement/3, match_tagged_amount/2]).
 
-%% Progress expiration calculations sequentially through distinct immutable variables
-calculate_extended_ttl(BaseTtl, GracePeriod) ->
-    InitialTtl  = BaseTtl,
-    BufferedTtl = InitialTtl + GracePeriod,
-    MaxTtl      = BufferedTtl * 3,
-    MaxTtl.
+%% Progress balances through distinct immutable bindings
+net_settlement(GrossCents, FeeCents, BonusCents) ->
+    AfterFee   = GrossCents - FeeCents,
+    WithBonus  = AfterFee + BonusCents,
+    DoublePool = WithBonus + WithBonus,
+    {AfterFee, DoublePool}.
 
-%% Extract the user ID from a 4-element session record: {session, SessionId, UserId, CreatedAt}
-extract_user_id(SessionRecord) ->
-    %% The wildcard '_' matches and discards elements without binding a variable name
-    {_, _, TargetUser, _} = SessionRecord,
-    TargetUser.
+%% Match an already-bound Currency atom while discarding outer fields
+match_tagged_amount(Currency, Entry) ->
+    {_, {Currency, Amount}, _} = Entry,
+    Amount.
 \`\`\`
 
-Notice:
-- In \`calculate_extended_ttl\`, variables \`InitialTtl\`, \`BufferedTtl\`, and \`MaxTtl\` progress the calculation sequentially without mutating any memory.
-- In \`extract_user_id\`, \`{_, _, TargetUser, _} = SessionRecord\` discards the first, second, and fourth elements using the wildcard \`_\`, binding only \`TargetUser\`.
+Notice how the BEAM evaluates each step:
+- \`net_settlement/3\` chains three immutable variables (\`AfterFee\`, \`WithBonus\`, \`DoublePool\`) so earlier bindings remain inspectable rather than overwritten in memory.
+- \`match_tagged_amount/2\` combines anonymous wildcards (\`_\`) to ignore unreferenced fields, an already-bound variable (\`Currency\`) to assert equality, and an unbound variable (\`Amount\`) to capture the target value.
 
 ## Official Erlang Docs & Function Reference
 
@@ -554,33 +553,34 @@ Pattern = Expression
   Unbound variables in Pattern are bound.
   If matching fails, a badmatch run-time error occurs.
 \`\`\`
+> **How to Read This Spec**: \`=\` is Erlang's pattern-match operator rather than a destructive assignment. It evaluates the right-hand side \`Expression\`, binds any unbound variables in \`Pattern\`, and verifies structural equality against literals or previously bound variables. Open the attached **\`pattern_matching\` Reference Card** below for the official OTP reference manual and emulator implementation links.
 
 ## Assignment Specification
 
-In \`pattern_vars.erl\`, implement two functions demonstrating immutable variable progression and pattern matching:
+In \`src/pattern_vars.erl\`, implement and export \`rebind_update/2\` and \`extract_middle/1\`:
 
 1. \`rebind_update(Base, Increment)\`:
    - **Input**: Integer \`Base\` and integer \`Increment\`.
-   - **Behavior**: Progress the calculation across multiple sequential, newly bound immutable variables:
-     - Bind an initial variable to \`Base\`.
-     - Bind a second variable to the sum of the first variable and \`Increment\`.
-     - Bind a third variable to double the second variable (multiplied by 2), and return it.
-     - Never mutate or re-assign an existing variable.
+   - **Behavior**: Progresses the calculation in $O(1)$ time across sequential newly bound immutable variables:
+     - First binds an intermediate total equal to \`Base\` increased by \`Increment\`.
+     - Next binds a final variable equal to twice that intermediate total, and returns it.
+     - Never attempts to reassign an already-bound variable.
    - **Examples**:
-     - \`pattern_vars:rebind_update(10, 5)\` returns \`30\` (\`(10 + 5) * 2 = 30\`).
+     - \`pattern_vars:rebind_update(10, 5)\` returns \`30\` (10 plus 5 yields 15, doubled is 30).
      - \`pattern_vars:rebind_update(100, 50)\` returns \`300\`.
 
 2. \`extract_middle(TripleTuple)\`:
-   - **Input**: A 3-element tuple containing arbitrary terms (e.g., \`{alpha, beta, gamma}\` or \`{1, 999, "test"}\`).
-   - **Behavior**: Using pattern matching with the \`=\` operator, destructure the tuple and extract only the middle (second) element while discarding the first and third elements with the wildcard \`_\`.
+   - **Input**: A 3-element tuple containing arbitrary Erlang terms.
+   - **Behavior**: Destructures the 3-element tuple in $O(1)$ time via pattern matching, returns its second (middle) element, rejects tuples whose arity is not 3, and discards the outer two elements cleanly without creating unused named variables.
    - **Examples**:
      - \`pattern_vars:extract_middle({alpha, beta, gamma})\` returns \`beta\`.
      - \`pattern_vars:extract_middle({1, 999, "test"})\` returns \`999\`.
 
 ## Rules & Verification Constraints
 
-- Do not attempt to mutate or rebind any variable already bound.
-- Ensure all variable names start with an Uppercase letter.`,
+- **Exports**: \`pattern_vars\` must export \`rebind_update/2\` and \`extract_middle/1\`.
+- **Single Assignment**: Do not attempt to mutate or rebind any previously bound variable.
+- **Compiler Cleanliness**: Must compile cleanly with zero unused-variable warnings (discard ignored tuple elements properly).`,
     otpDocCards: [
       {
         functionName: 'pattern_matching',
@@ -622,20 +622,20 @@ In \`pattern_vars.erl\`, implement two functions demonstrating immutable variabl
         title: 'Sequential Variable Progression',
         erlangCall: 'pattern_vars:rebind_update(10, 5)',
         expectedOutput: '30',
-        explanation: 'V1 = 10, V2 = 15, V3 = 15 * 2 = 30.',
+        explanation: 'Sequential immutable calculation starting from Base 10 with Increment 5 produces 30.',
       },
       {
         id: 'tc-ch01-03-b',
         title: 'Extract Middle Tuple Element',
         erlangCall: 'pattern_vars:extract_middle({alpha, beta, gamma})',
         expectedOutput: 'beta',
-        explanation: 'Destructures {_, Middle, _} and extracts beta.',
+        explanation: 'Pattern-matches the 3-element tuple and returns its second element (beta).',
       },
     ],
     astRules: {
       requiredCalls: [],
     },
-    solutionExplanation: 'Demonstrates single assignment immutability using sequential variables and tuple pattern extraction.',
+    solutionExplanation: 'Demonstrates single-assignment immutability across sequential bindings and 3-element tuple destructuring using anonymous wildcards for ignored positions.',
     files: [
       {
         name: 'pattern_vars.erl',
@@ -643,13 +643,12 @@ In \`pattern_vars.erl\`, implement two functions demonstrating immutable variabl
         content: `-module(pattern_vars).
 -export([rebind_update/2, extract_middle/1]).
 
-%% @doc Progress calculation across sequential immutable variable bindings:
-%% adds Increment to Base, doubles the result, and returns the final value.
-rebind_update(Base, Increment) ->
+%% @doc Compute double the sum of Base and Increment across immutable bindings.
+rebind_update(_Base, _Increment) ->
     ok.
 
-%% @doc Return the middle (second) element of a 3-element tuple using pattern matching.
-extract_middle(TripleTuple) ->
+%% @doc Return the second element of a 3-element tuple, failing if arity is not 3.
+extract_middle(_TripleTuple) ->
     ok.`,
       },
     ],
@@ -657,12 +656,14 @@ extract_middle(TripleTuple) ->
       'src/pattern_vars.erl': `-module(pattern_vars).
 -export([rebind_update/2, extract_middle/1]).
 
+%% @doc Compute double the sum of Base and Increment across immutable bindings.
 rebind_update(Base, Increment) ->
     V1 = Base,
     V2 = V1 + Increment,
     V3 = V2 * 2,
     V3.
 
+%% @doc Return the second element of a 3-element tuple, failing if arity is not 3.
 extract_middle(TripleTuple) ->
     {_, Middle, _} = TripleTuple,
     Middle.`,
@@ -670,23 +671,24 @@ extract_middle(TripleTuple) ->
     starterCode: `-module(pattern_vars).
 -export([rebind_update/2, extract_middle/1]).
 
-%% @doc Progress calculation across sequential immutable variable bindings:
-%% adds Increment to Base, doubles the result, and returns the final value.
-rebind_update(Base, Increment) ->
+%% @doc Compute double the sum of Base and Increment across immutable bindings.
+rebind_update(_Base, _Increment) ->
     ok.
 
-%% @doc Return the middle (second) element of a 3-element tuple using pattern matching.
-extract_middle(TripleTuple) ->
+%% @doc Return the second element of a 3-element tuple, failing if arity is not 3.
+extract_middle(_TripleTuple) ->
     ok.`,
     solutionCode: `-module(pattern_vars).
 -export([rebind_update/2, extract_middle/1]).
 
+%% @doc Compute double the sum of Base and Increment across immutable bindings.
 rebind_update(Base, Increment) ->
     V1 = Base,
     V2 = V1 + Increment,
     V3 = V2 * 2,
     V3.
 
+%% @doc Return the second element of a 3-element tuple, failing if arity is not 3.
 extract_middle(TripleTuple) ->
     {_, Middle, _} = TripleTuple,
     Middle.`,

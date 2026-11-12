@@ -121,7 +121,7 @@ T2_Res = try pattern_vars:extract_middle({alpha, beta, gamma}) of
           expected => <<"beta">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
-    #{call_str => <<"pattern_vars:extract_middle(...)">>, expected => <<"beta">>,
+    #{call_str => <<"pattern_vars:extract_middle({alpha, beta, gamma})">>, expected => <<"beta">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res],
@@ -4248,13 +4248,34 @@ Stages = [CompileStage, S1_Arithmetic, S2_Comparisons]
 		return `
 CompileStage = case code:ensure_loaded(pattern_vars) of
     {module, pattern_vars} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"pattern_vars.erl compiled cleanly">>};
+        Exports = pattern_vars:module_info(exports),
+        Required = [{rebind_update, 2}, {extract_middle, 1}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"pattern_vars.erl compiled cleanly and exported rebind_update/2 and extract_middle/1.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Vars = try {pattern_vars:rebind_update(10, 5), pattern_vars:rebind_update(100, 50), pattern_vars:extract_middle({alpha, beta, gamma}), pattern_vars:extract_middle({1, 999, "test"})} of
-    {30, 300, beta, 999} ->
-        #{id => <<"pattern_vars_suite">>, title => <<"Single Assignment & Tuple Destructuring">>, status => <<"passed">>, time_ms => 6, details => <<"Verified sequential variable state progression and middle extraction">>};
+S1_Vars = try
+    NonTripleRejected = try pattern_vars:extract_middle({only, two}) of
+        _ -> false
+    catch
+        _:_ -> true
+    end,
+    {pattern_vars:rebind_update(10, 5),
+     pattern_vars:rebind_update(100, 50),
+     pattern_vars:rebind_update(0, -7),
+     pattern_vars:extract_middle({alpha, beta, gamma}),
+     pattern_vars:extract_middle({1, 999, "test"}),
+     pattern_vars:extract_middle({tag, [1, 2], done}),
+     NonTripleRejected}
+of
+    {30, 300, -14, beta, 999, [1, 2], true} ->
+        #{id => <<"pattern_vars_suite">>, title => <<"Single Assignment & Tuple Destructuring">>, status => <<"passed">>, time_ms => 6, details => <<"Verified sequential immutable state progression, 3-tuple middle extraction, and non-triple rejection.">>};
     Got1 ->
         #{id => <<"pattern_vars_suite">>, title => <<"Single Assignment & Tuple Destructuring">>, status => <<"failed">>, time_ms => 6, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
 catch C1:R1 ->
@@ -8050,15 +8071,7 @@ S2_ActiveOnceBackpressure = try
     timer:sleep(20),
     {ok, ListenPid, Port} = tcp_flow_worker:start_server(),
     case bf_backpressure_tester:verify_active_once_backpressure(node(), Port, tcp_flow_worker, 50, 5) of
-        {ok, #{verdict := <<"PASSED">>, observed_queue_len := QLen}} ->
-            tcp_flow_worker:stop_server(ListenPid),
-            #{id => <<"active_once_backpressure">>, title => <<"Live Backpressure Test: Mailbox Bounded under Burst Load">>, status => <<"passed">>, time_ms => 60, details => list_to_binary(io_lib:format("Blasted 50 frames; worker mailbox queue length remained bounded at ~p (<= 5). Hardware TCP flow control enforced!", [QLen]))};
-        {ok, _} ->
-            tcp_flow_worker:stop_server(ListenPid),
-            #{id => <<"active_once_backpressure">>, title => <<"Live Backpressure Test: Mailbox Bounded under Burst Load">>, status => <<"passed">>, time_ms => 60, details => <<"Backpressure test passed.">>};
-        {error, ErrReason, Rep} ->
-            tcp_flow_worker:stop_server(ListenPid),
-            #{id => <<"active_once_backpressure">>, title => <<"Live Backpressure Test: Mai
+        {ok, #{verdict := <<
     #{packets_processed := 1, bytes_processed := 11, closed := false} = tcp_flow_worker:get_stats(tcp_flow_worker),
     1 = tcp_flow_worker:get_processed_count(tcp_flow_worker),
     ok = gen_tcp:close(CSock3),
