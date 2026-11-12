@@ -3261,12 +3261,13 @@ T1_Res = try
     {ok, Reply} = gen_tcp:recv(ClientSock, 0, 2000),
     gen_tcp:close(ClientSock),
     tcp_flow_worker:stop_server(ListenPid),
-    Passed = (Reply =:= <<"+ACK: TEST_PING\r\n">> orelse Reply =:= <<"ACK:TEST_PING\r\n">>),
+    Passed = (Reply =:= <<"+ACK: TEST_PING\r\n">>),
     #{call_str => <<"tcp_flow_worker:start_server() -> send TEST_PING">>,
       expected => <<"<<\"+ACK: TEST_PING\\r\\n\">>">>,
       actual => list_to_binary(lists:flatten(io_lib:format("~p", [Reply]))),
       passed => Passed, time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
+    (case whereis(tcp_flow_worker) of undefined -> ok; P -> catch gen_server:stop(P) end),
     #{call_str => <<"tcp_flow_worker:start_server(...)">>, expected => <<"<<\"+ACK: TEST_PING\\r\\n\">>">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
@@ -7956,12 +7957,13 @@ CompileStage = case compile:file("%s/src/tcp_flow_worker.erl", [return_errors, {
         #{id => <<"compile">>, title => <<"Compile tcp_flow_worker.erl">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("~p", [Err]))}
 end,
 S1_Ast = case bf_ast_verifier:verify_rules("%s/src/tcp_flow_worker.erl", #{
-    required_calls => [{inet, setopts, 2}, {gen_tcp, send, 2}]
+    required_calls => [{inet, setopts, 2}, {gen_tcp, send, 2}],
+    required_constructs => [record_def]
 }) of
     {ok, _} ->
-        #{id => <<"ast_verification">>, title => <<"AST Analysis: Flow Control Calls">>, status => <<"passed">>, time_ms => 15, details => <<"Verified inet:setopts and gen_tcp:send calls exist.">>};
+        #{id => <<"ast_verification">>, title => <<"AST Analysis: Flow Control Calls & State Record">>, status => <<"passed">>, time_ms => 15, details => <<"Verified inet:setopts/2, gen_tcp:send/2, and #state record definition.">>};
     {error, AstFailReason} ->
-        #{id => <<"ast_verification">>, title => <<"AST Analysis: Flow Control Calls">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST verification failed: ~p", [AstFailReason]))}
+        #{id => <<"ast_verification">>, title => <<"AST Analysis: Flow Control Calls & State Record">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST verification failed: ~p", [AstFailReason]))}
 end,
 S2_ActiveOnceBackpressure = try
     catch tcp_flow_worker:stop_server(whereis(tcp_flow_worker)),
@@ -7981,7 +7983,25 @@ S2_ActiveOnceBackpressure = try
 catch C:R ->
     #{id => <<"active_once_backpressure">>, title => <<"Live Backpressure Test: Mailbox Bounded under Burst Load">>, status => <<"failed">>, time_ms => 60, details => list_to_binary(io_lib:format("Backpressure test crashed: ~p:~p", [C, R]))}
 end,
-Stages = [CompileStage, S1_Ast, S2_ActiveOnceBackpressure]
+S3_EchoAndLifecycle = try
+    (case whereis(tcp_flow_worker) of undefined -> ok; OldP -> catch gen_server:stop(OldP) end),
+    timer:sleep(20),
+    {ok, LPid3, Port3} = tcp_flow_worker:start_server(),
+    {ok, CSock3} = gen_tcp:connect("127.0.0.1", Port3, [binary, {packet, raw}, {active, false}], 2000),
+    ok = gen_tcp:send(CSock3, <<"TEST_PING\r\n">>),
+    {ok, <<"+ACK: TEST_PING\r\n">>} = gen_tcp:recv(CSock3, 0, 2000),
+    #{packets_processed := 1, bytes_processed := 11, closed := false} = tcp_flow_worker:get_stats(tcp_flow_worker),
+    1 = tcp_flow_worker:get_processed_count(tcp_flow_worker),
+    ok = gen_tcp:close(CSock3),
+    timer:sleep(30),
+    #{packets_processed := 1, bytes_processed := 11, closed := true} = tcp_flow_worker:get_stats(tcp_flow_worker),
+    ok = tcp_flow_worker:stop_server(LPid3),
+    #{id => <<"echo_and_lifecycle">>, title => <<"Echo Protocol, Counters & Close Lifecycle">>, status => <<"passed">>, time_ms => 40, details => <<"Verified +ACK echo prefix, packet/byte counters, and {tcp_closed, Sock} state transition.">>}
+catch C3:R3 ->
+    (case whereis(tcp_flow_worker) of undefined -> ok; OldP3 -> catch gen_server:stop(OldP3) end),
+    #{id => <<"echo_and_lifecycle">>, title => <<"Echo Protocol, Counters & Close Lifecycle">>, status => <<"failed">>, time_ms => 40, details => list_to_binary(io_lib:format("Lifecycle verification failed: ~p:~p", [C3, R3]))}
+end,
+Stages = [CompileStage, S1_Ast, S2_ActiveOnceBackpressure, S3_EchoAndLifecycle]
 `, wsDir, wsDir, wsDir), true
 
 	case "ch10-l04":

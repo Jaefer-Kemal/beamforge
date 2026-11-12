@@ -954,9 +954,10 @@ The **#1 cause of production outages** in network services is the unconstrained 
 
 When a socket is opened in \`{active, true}\` mode, the operating system kernel delivers incoming network packets directly into the Erlang process's mailbox as fast as the physical network card can receive them. If a rogue client or malicious attacker blasts 200,000 packets per second, your Erlang process's mailbox queue length balloons from 0 to 1,000,000 messages in seconds. The BEAM VM consumes all available RAM and triggers the Linux Out-Of-Memory (OOM) Killer, destroying the entire node!
 
-> [!abstract] Flow Control: \`{active, true}\` vs \`{active, once}\`
+> [!IMPORTANT]
+> **Flow Control: \`{active, true}\` vs \`{active, once}\`:**
 > - **Dangerous \`{active, true}\`:** Unbounded mailbox flood. Fast clients push 100k msgs/sec directly into actor mailbox, exhausting RAM and triggering OOM.
-> - **Production Safe \`{active, once}\`:** Hardware backpressure. OS delivers exactly 1 packet, switches socket to passive mode, and waits until the actor calls \`inet:setopts(Sock, [{active, once}])\` before accepting the next packet.
+> - **Production Safe \`{active, once}\`:** Hardware backpressure. OS delivers exactly 1 packet, switches socket to passive mode, and waits until the actor re-arms the option before accepting the next packet.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -978,74 +979,102 @@ When a socket is opened in \`{active, true}\` mode, the operating system kernel 
 4. **\`{active, N}\` (Burst Active Mode)**:
    - Delivers \`N\` messages before flipping to passive and sending a \`{tcp_passive, Socket}\` notification.
 
-> [!warning] Production Networking Trap: The Mailbox OOM Tsunami
+> [!WARNING]
+> **Production Networking Trap: The Mailbox OOM Tsunami:**
 > Under network jitter or traffic spikes, an active socket actor that takes 10ms to insert into a database will fall behind a client sending a packet every 0.1ms. The 100x discrepancy accumulates in the process mailbox. In production, **never use \`{active, true}\` on untrusted external network sockets**.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Official OTP Signature (kernel / inet)
+%% Official OTP Signatures (kernel / inet & gen_tcp)
 inet:setopts(Socket, Options) -> ok | {error, Reason}
   Types:
     Socket = inet:socket()
-    Options = [inet:socket_setopt()]
-    %% Options can include: [{active, once}], [{active, true}], [{active, false}], [{active, N}]
+    Options = [{active, once | true | false | integer()} | {packet, raw | line | 1 | 2 | 4} | binary]
 
-%% Incoming Socket Messages Delivered to Mailbox
-{tcp, Socket, Data}          %% Arrives when socket is active and bytes are read
-{tcp_closed, Socket}        %% Arrives when remote peer disconnects
+gen_tcp:send(Socket, Packet) -> ok | {error, Reason}
+  Types:
+    Socket = gen_tcp:socket()
+    Packet = iodata()
+
+%% Incoming Socket Messages Delivered to Controlling Process
+{tcp, Socket, Data}         %% Arrives when socket is active and bytes are read
+{tcp_closed, Socket}        %% Arrives when remote peer disconnects cleanly
 {tcp_error, Socket, Reason} %% Arrives on network fault
 \`\`\`
 
-## Parallel Worked Example
+Consult the attached OTP documentation cards below for \`inet:setopts/2\` active-mode flow control and \`gen_tcp:send/2\` socket transmission semantics.
 
-Here is a supervised connection worker applying bounded \`{active, once}\` backpressure:
+## Parallel Worked Example: Flow-Controlled Telemetry Line Pump
+
+Consider a separate domain: a bare actor (\`telemetry_active_pump\`) that takes socket ownership from a caller, receives single newline-delimited frames via \`{active, once}\`, forwards parsed frames to a downstream sink process, and re-arms the socket only after forwarding succeeds:
 
 \`\`\`erlang
--module(echo_backpressure_worker).
--behaviour(gen_server).
--export([init/1, handle_info/2, terminate/2]).
+-module(telemetry_active_pump).
+-export([start_pump/2, stop_pump/1]).
 
-init([Socket]) ->
-    ok = inet:setopts(Socket, [binary, {active, once}]),
-    {ok, #{socket => Socket, count => 0}}.
+%% @doc Transfer ownership of Socket to a new pump actor forwarding telemetry lines to SinkPid.
+start_pump(Socket, SinkPid) ->
+    Pid = spawn_link(fun() ->
+        receive
+            arm ->
+                ok = inet:setopts(Socket, [binary, {packet, line}, {active, once}]),
+                pump_loop(Socket, SinkPid, 0)
+        end
+    end),
+    ok = gen_tcp:controlling_process(Socket, Pid),
+    Pid ! arm,
+    {ok, Pid}.
 
-handle_info({tcp, Socket, Data}, #{socket := Socket, count := Count} = State) ->
-    ok = gen_tcp:send(Socket, <<"+ECHO: ", Data/binary>>),
-    %% CRITICAL: Re-arm active once AFTER processing
-    ok = inet:setopts(Socket, [{active, once}]),
-    {noreply, State#{count => Count + 1}};
-handle_info({tcp_closed, _Socket}, State) ->
-    {stop, normal, State}.
-
-terminate(_Reason, #{socket := Socket}) ->
-    catch gen_tcp:close(Socket),
+%% @doc Stop the running telemetry pump actor cleanly.
+stop_pump(Pid) ->
+    Pid ! stop,
     ok.
+
+pump_loop(Socket, SinkPid, Seen) ->
+    receive
+        {tcp, Socket, FrameBin} ->
+            NextSeen = Seen + 1,
+            SinkPid ! {telemetry_line, NextSeen, FrameBin},
+            ok = inet:setopts(Socket, [{active, once}]),
+            pump_loop(Socket, SinkPid, NextSeen);
+        {tcp_closed, Socket} ->
+            SinkPid ! {telemetry_eof, Seen},
+            ok = gen_tcp:close(Socket);
+        {tcp_error, Socket, Reason} ->
+            SinkPid ! {telemetry_fault, Reason},
+            ok = gen_tcp:close(Socket);
+        stop ->
+            ok = gen_tcp:close(Socket)
+    end.
 \`\`\`
+
+### What the BEAM Does Under the Hood
+- **Safe Controlling-Process Ordering**: Spawning the actor in a wait state, transferring socket ownership with \`gen_tcp:controlling_process/2\`, and only then signaling \`arm\` guarantees no incoming packets are ever delivered to the wrong mailbox before handoff completes.
+- **Re-Arm After Work**: Calling \`inet:setopts(Socket, [{active, once}])\` at the end of the data branch ensures the kernel holds additional network frames in OS buffers until the consumer catches up.
 
 ## Assignment Specification
 
-Implement module \`src/tcp_flow_worker.erl\` as a supervised \`gen_server\` that accepts a raw client socket, manages it in \`{active, once}\` mode, and applies strict backpressure:
+Pre-wired supervision and harness helpers (\`start_link/1\`, \`get_stats/1\`, \`get_processed_count/1\`, \`stop/1\`, \`start_server/0\`, \`stop_server/1\`, \`handle_call/3\`, \`handle_cast/2\`, \`terminate/2\`, \`code_change/3\`) and the \`#state\` record are provided inside \`src/tcp_flow_worker.erl\`. Complete the socket flow-control callbacks inside \`src/tcp_flow_worker.erl\` (\`-module(tcp_flow_worker).\`):
 
-1. **\`start_link(Socket)\`**:
-   - Starts and links the \`gen_server\`.
-   - In \`init/1\`, stores \`Socket\` and arms the socket with \`inet:setopts(Socket, [binary, {active, once}])\`.
-2. **\`handle_info({tcp, Socket, Data}, State)\`**:
-   - Sends back an echo response: \`gen_tcp:send(Socket, <<"+ACK: ", Data/binary>>)\`.
-   - Increments packets and bytes processed counters.
-   - **Crucial**: Calls \`ok = inet:setopts(Socket, [{active, once}])\` before returning \`{noreply, NewState}\`.
-3. **\`handle_info({tcp_closed, Socket}, State)\`**:
-   - Marks \`closed => true\` in state.
-4. **\`handle_call(get_stats, _From, State)\`**:
-   - Returns \`#{packets_processed => Packets, bytes_processed => Bytes, closed => Closed}\`.
-5. **\`get_stats(Server)\` & \`get_processed_count(Server)\`**:
-   - Synchronous helpers to inspect worker state.
-6. **\`start_server/0\` & \`stop_server/1\`**:
-   - Helper functions to start a listening server on port \`0\`, accept one client, register \`tcp_flow_worker\`, and tear down cleanly.
+### \`init/1\`
+- **Input**: Single-element list \`[Socket]\` (and delegated raw \`Socket\` clause).
+- **Behavior**: Arms \`Socket\` for binary reception and single-packet active delivery so the first incoming frame arrives safely once ownership is settled, and returns an \`ok\` tuple containing a freshly initialized \`#state\` record tracking \`Socket\`, zero processed packets, zero processed bytes, and \`closed\` set to \`false\`.
+- **Examples**:
+  - Starting the worker leaves initial stats at \`#{packets_processed => 0, bytes_processed => 0, closed => false}\`.
+
+### \`handle_info/2\`
+- **Input**: Mailbox event term and current \`#state\` record.
+- **Behavior**: Handles four socket lifecycle events and ignores unknown messages without modifying state:
+  1. **Socket Handoff Notification (\`{socket_assigned, Socket}\`)**: Re-arms single-packet active delivery on \`Socket\` after \`start_server/0\` assigns controlling process ownership, and stores \`Socket\` in state.
+  2. **Incoming TCP Data (\`{tcp, Socket, DataBin}\`)**: Transmits an acknowledgement frame consisting of the literal ASCII prefix \`"+ACK: "\` followed by the incoming payload bytes over \`Socket\`, re-arms single-packet active delivery immediately afterward so subsequent packets can flow safely without mailbox flooding, and increments \`packets_processed\` by \`1\` and \`bytes_processed\` by the incoming payload's byte size.
+  3. **Graceful Close & Network Error Notifications (\`tcp_closed\` / \`tcp_error\`)**: Records \`closed\` as \`true\` in state without crashing the worker so callers inspecting stats still observe the closed flag.
+- **Examples**:
+  - Connecting to \`tcp_flow_worker:start_server/0\` and sending \`<<"TEST_PING\\r\\n">>\` receives \`<<"+ACK: TEST_PING\\r\\n">>\`, increments \`packets_processed\` to \`1\`, and leaves \`closed\` as \`false\` until client disconnect (after which \`closed\` becomes \`true\`).
 
 ## Rules & Verification Constraints
-- Verified by **\`bf_backpressure_tester:verify_active_once_backpressure/5\`**, which blasts 50 frames into your socket and asserts that your process mailbox queue length **never exceeds 5**!
-- AST verifier enforces required calls: \`inet:setopts/2\` and \`gen_tcp:send/2\`.
+- **Mailbox Bound Invariant**: Verified live by \`bf_backpressure_tester:verify_active_once_backpressure/5\`, which blasts 50 burst frames into the worker and asserts that \`message_queue_len\` remains bounded at \`<= 5\`.
+- **AST & Record Checks**: \`bf_ast_verifier\` enforces required remote calls \`inet:setopts/2\` and \`gen_tcp:send/2\` plus the \`#state\` record definition (\`record_def\`).
     `,
     otpDocCards: [
       {
@@ -1088,22 +1117,27 @@ Implement module \`src/tcp_flow_worker.erl\` as a supervised \`gen_server\` that
     closed = false :: boolean()
 }).
 
+%% @doc Start and link a tcp_flow_worker gen_server owning Socket.
 -spec start_link(gen_tcp:socket()) -> {ok, pid()} | {error, term()}.
 start_link(Socket) ->
     gen_server:start_link(?MODULE, [Socket], []).
 
+%% @doc Return a map of packets_processed, bytes_processed, and closed status from Server.
 -spec get_stats(pid() | atom()) -> map().
 get_stats(Server) ->
     gen_server:call(Server, get_stats).
 
+%% @doc Return the total count of TCP frames processed by Server.
 -spec get_processed_count(pid() | atom()) -> non_neg_integer().
 get_processed_count(Server) ->
     gen_server:call(Server, get_processed_count).
 
+%% @doc Synchronously stop the tcp_flow_worker gen_server Server.
 -spec stop(pid() | atom()) -> ok.
 stop(Server) ->
     gen_server:stop(Server).
 
+%% @doc Start a single-connection loopback TCP server that spawns tcp_flow_worker and hands off client ownership.
 start_server() ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],
     {ok, ListenSocket} = gen_tcp:listen(0, ListenOpts),
@@ -1122,6 +1156,7 @@ start_server() ->
     end),
     {ok, ListenPid, Port}.
 
+%% @doc Stop the registered tcp_flow_worker and terminate its acceptor ListenPid.
 stop_server(ListenPid) ->
     case whereis(tcp_flow_worker) of
         undefined -> ok;
@@ -1130,13 +1165,13 @@ stop_server(ListenPid) ->
     exit(ListenPid, kill),
     ok.
 
+%% @doc Arm Socket for binary single-packet active reception and initialize the #state record.
 init([Socket]) ->
-    %% % TODO: Arm the socket for its initial packet using inet:setopts/2 with binary and {active, once}.
-    %% % Initialize the state record with the socket, 0 packets_processed, 0 bytes_processed, and closed = false.
     {ok, #state{socket = Socket}};
 init(Socket) ->
     init([Socket]).
 
+%% @doc Handle get_stats and get_processed_count synchronous call queries.
 handle_call(get_stats, _From, State) ->
     Reply = #{
         packets_processed => State#state.packets_processed,
@@ -1149,29 +1184,17 @@ handle_call(get_processed_count, _From, State) ->
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous stop casts or ignore unknown casts.
 handle_cast(stop, State) ->
     {stop, normal, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({socket_assigned, Socket}, State) ->
-    %% % TODO: Arm the socket with {active, once} now that this process is the controlling process.
-    {noreply, State#state{socket = Socket}};
-handle_info({tcp, _Socket, _DataBin}, State) ->
-    %% % TODO:
-    %% % 1. Echo the received binary back to the client prefixed with "+ACK: " via gen_tcp:send/2.
-    %% % 2. Crucial: Re-arm the socket with {active, once} via inet:setopts/2 so the next packet can be delivered.
-    %% % 3. Increment packets_processed by 1 and bytes_processed by byte_size(DataBin).
-    %% % 4. Return {noreply, UpdatedState}.
-    {noreply, State};
-handle_info({tcp_closed, _Socket}, State) ->
-    %% % TODO: Handle client disconnect by updating state with closed = true.
-    {noreply, State#state{closed = true}};
-handle_info({tcp_error, _Socket, _Reason}, State) ->
-    {noreply, State#state{closed = true}};
+%% @doc Handle socket ownership handoff, single-frame echo with active-once re-arming, and disconnect/error transitions.
 handle_info(_Other, State) ->
     {noreply, State}.
 
+%% @doc Close any tracked TCP socket before worker termination.
 terminate(_Reason, State) ->
     case State#state.socket of
         undefined -> ok;
@@ -1179,9 +1202,10 @@ terminate(_Reason, State) ->
     end,
     ok.
 
+%% @doc Pass state through unchanged on hot code upgrade.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-    `,
+`,
     solutionCode: `-module(tcp_flow_worker).
 -behaviour(gen_server).
 
@@ -1195,22 +1219,27 @@ code_change(_OldVsn, State, _Extra) ->
     closed = false :: boolean()
 }).
 
+%% @doc Start and link a tcp_flow_worker gen_server owning Socket.
 -spec start_link(gen_tcp:socket()) -> {ok, pid()} | {error, term()}.
 start_link(Socket) ->
     gen_server:start_link(?MODULE, [Socket], []).
 
+%% @doc Return a map of packets_processed, bytes_processed, and closed status from Server.
 -spec get_stats(pid() | atom()) -> map().
 get_stats(Server) ->
     gen_server:call(Server, get_stats).
 
+%% @doc Return the total count of TCP frames processed by Server.
 -spec get_processed_count(pid() | atom()) -> non_neg_integer().
 get_processed_count(Server) ->
     gen_server:call(Server, get_processed_count).
 
+%% @doc Synchronously stop the tcp_flow_worker gen_server Server.
 -spec stop(pid() | atom()) -> ok.
 stop(Server) ->
     gen_server:stop(Server).
 
+%% @doc Start a single-connection loopback TCP server that spawns tcp_flow_worker and hands off client ownership.
 start_server() ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],
     {ok, ListenSocket} = gen_tcp:listen(0, ListenOpts),
@@ -1229,6 +1258,7 @@ start_server() ->
     end),
     {ok, ListenPid, Port}.
 
+%% @doc Stop the registered tcp_flow_worker and terminate its acceptor ListenPid.
 stop_server(ListenPid) ->
     case whereis(tcp_flow_worker) of
         undefined -> ok;
@@ -1237,12 +1267,14 @@ stop_server(ListenPid) ->
     exit(ListenPid, kill),
     ok.
 
+%% @doc Arm Socket for binary single-packet active reception and initialize the #state record.
 init([Socket]) ->
     ok = inet:setopts(Socket, [binary, {active, once}]),
     {ok, #state{socket = Socket, packets_processed = 0, bytes_processed = 0, closed = false}};
 init(Socket) ->
     init([Socket]).
 
+%% @doc Handle get_stats and get_processed_count synchronous call queries.
 handle_call(get_stats, _From, State) ->
     Reply = #{
         packets_processed => State#state.packets_processed,
@@ -1255,11 +1287,13 @@ handle_call(get_processed_count, _From, State) ->
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous stop casts or ignore unknown casts.
 handle_cast(stop, State) ->
     {stop, normal, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle socket ownership handoff, single-frame echo with active-once re-arming, and disconnect/error transitions.
 handle_info({socket_assigned, Socket}, State) ->
     ok = inet:setopts(Socket, [{active, once}]),
     {noreply, State#state{socket = Socket}};
@@ -1276,6 +1310,7 @@ handle_info({tcp_error, _Socket, _Reason}, State) ->
 handle_info(_Other, State) ->
     {noreply, State}.
 
+%% @doc Close any tracked TCP socket before worker termination.
 terminate(_Reason, State) ->
     case State#state.socket of
         undefined -> ok;
@@ -1283,9 +1318,10 @@ terminate(_Reason, State) ->
     end,
     ok.
 
+%% @doc Pass state through unchanged on hot code upgrade.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-    `,
+`,
         files: [
       {
         name: 'tcp_flow_worker.erl',
@@ -1303,22 +1339,27 @@ code_change(_OldVsn, State, _Extra) ->
     closed = false :: boolean()
 }).
 
+%% @doc Start and link a tcp_flow_worker gen_server owning Socket.
 -spec start_link(gen_tcp:socket()) -> {ok, pid()} | {error, term()}.
 start_link(Socket) ->
     gen_server:start_link(?MODULE, [Socket], []).
 
+%% @doc Return a map of packets_processed, bytes_processed, and closed status from Server.
 -spec get_stats(pid() | atom()) -> map().
 get_stats(Server) ->
     gen_server:call(Server, get_stats).
 
+%% @doc Return the total count of TCP frames processed by Server.
 -spec get_processed_count(pid() | atom()) -> non_neg_integer().
 get_processed_count(Server) ->
     gen_server:call(Server, get_processed_count).
 
+%% @doc Synchronously stop the tcp_flow_worker gen_server Server.
 -spec stop(pid() | atom()) -> ok.
 stop(Server) ->
     gen_server:stop(Server).
 
+%% @doc Start a single-connection loopback TCP server that spawns tcp_flow_worker and hands off client ownership.
 start_server() ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],
     {ok, ListenSocket} = gen_tcp:listen(0, ListenOpts),
@@ -1337,6 +1378,7 @@ start_server() ->
     end),
     {ok, ListenPid, Port}.
 
+%% @doc Stop the registered tcp_flow_worker and terminate its acceptor ListenPid.
 stop_server(ListenPid) ->
     case whereis(tcp_flow_worker) of
         undefined -> ok;
@@ -1345,13 +1387,13 @@ stop_server(ListenPid) ->
     exit(ListenPid, kill),
     ok.
 
+%% @doc Arm Socket for binary single-packet active reception and initialize the #state record.
 init([Socket]) ->
-    %% % TODO: Arm the socket for its initial packet using inet:setopts/2 with binary and {active, once}.
-    %% % Initialize the state record with the socket, 0 packets_processed, 0 bytes_processed, and closed = false.
     {ok, #state{socket = Socket}};
 init(Socket) ->
     init([Socket]).
 
+%% @doc Handle get_stats and get_processed_count synchronous call queries.
 handle_call(get_stats, _From, State) ->
     Reply = #{
         packets_processed => State#state.packets_processed,
@@ -1364,29 +1406,17 @@ handle_call(get_processed_count, _From, State) ->
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous stop casts or ignore unknown casts.
 handle_cast(stop, State) ->
     {stop, normal, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({socket_assigned, Socket}, State) ->
-    %% % TODO: Arm the socket with {active, once} now that this process is the controlling process.
-    {noreply, State#state{socket = Socket}};
-handle_info({tcp, _Socket, _DataBin}, State) ->
-    %% % TODO:
-    %% % 1. Echo the received binary back to the client prefixed with "+ACK: " via gen_tcp:send/2.
-    %% % 2. Crucial: Re-arm the socket with {active, once} via inet:setopts/2 so the next packet can be delivered.
-    %% % 3. Increment packets_processed by 1 and bytes_processed by byte_size(DataBin).
-    %% % 4. Return {noreply, UpdatedState}.
-    {noreply, State};
-handle_info({tcp_closed, _Socket}, State) ->
-    %% % TODO: Handle client disconnect by updating state with closed = true.
-    {noreply, State#state{closed = true}};
-handle_info({tcp_error, _Socket, _Reason}, State) ->
-    {noreply, State#state{closed = true}};
+%% @doc Handle socket ownership handoff, single-frame echo with active-once re-arming, and disconnect/error transitions.
 handle_info(_Other, State) ->
     {noreply, State}.
 
+%% @doc Close any tracked TCP socket before worker termination.
 terminate(_Reason, State) ->
     case State#state.socket of
         undefined -> ok;
@@ -1394,9 +1424,10 @@ terminate(_Reason, State) ->
     end,
     ok.
 
+%% @doc Pass state through unchanged on hot code upgrade.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-    `,
+`,
       },
     ],
     solutionFiles: {
@@ -1413,22 +1444,27 @@ code_change(_OldVsn, State, _Extra) ->
     closed = false :: boolean()
 }).
 
+%% @doc Start and link a tcp_flow_worker gen_server owning Socket.
 -spec start_link(gen_tcp:socket()) -> {ok, pid()} | {error, term()}.
 start_link(Socket) ->
     gen_server:start_link(?MODULE, [Socket], []).
 
+%% @doc Return a map of packets_processed, bytes_processed, and closed status from Server.
 -spec get_stats(pid() | atom()) -> map().
 get_stats(Server) ->
     gen_server:call(Server, get_stats).
 
+%% @doc Return the total count of TCP frames processed by Server.
 -spec get_processed_count(pid() | atom()) -> non_neg_integer().
 get_processed_count(Server) ->
     gen_server:call(Server, get_processed_count).
 
+%% @doc Synchronously stop the tcp_flow_worker gen_server Server.
 -spec stop(pid() | atom()) -> ok.
 stop(Server) ->
     gen_server:stop(Server).
 
+%% @doc Start a single-connection loopback TCP server that spawns tcp_flow_worker and hands off client ownership.
 start_server() ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],
     {ok, ListenSocket} = gen_tcp:listen(0, ListenOpts),
@@ -1447,6 +1483,7 @@ start_server() ->
     end),
     {ok, ListenPid, Port}.
 
+%% @doc Stop the registered tcp_flow_worker and terminate its acceptor ListenPid.
 stop_server(ListenPid) ->
     case whereis(tcp_flow_worker) of
         undefined -> ok;
@@ -1455,12 +1492,14 @@ stop_server(ListenPid) ->
     exit(ListenPid, kill),
     ok.
 
+%% @doc Arm Socket for binary single-packet active reception and initialize the #state record.
 init([Socket]) ->
     ok = inet:setopts(Socket, [binary, {active, once}]),
     {ok, #state{socket = Socket, packets_processed = 0, bytes_processed = 0, closed = false}};
 init(Socket) ->
     init([Socket]).
 
+%% @doc Handle get_stats and get_processed_count synchronous call queries.
 handle_call(get_stats, _From, State) ->
     Reply = #{
         packets_processed => State#state.packets_processed,
@@ -1473,11 +1512,13 @@ handle_call(get_processed_count, _From, State) ->
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous stop casts or ignore unknown casts.
 handle_cast(stop, State) ->
     {stop, normal, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle socket ownership handoff, single-frame echo with active-once re-arming, and disconnect/error transitions.
 handle_info({socket_assigned, Socket}, State) ->
     ok = inet:setopts(Socket, [{active, once}]),
     {noreply, State#state{socket = Socket}};
@@ -1494,6 +1535,7 @@ handle_info({tcp_error, _Socket, _Reason}, State) ->
 handle_info(_Other, State) ->
     {noreply, State}.
 
+%% @doc Close any tracked TCP socket before worker termination.
 terminate(_Reason, State) ->
     case State#state.socket of
         undefined -> ok;
@@ -1501,13 +1543,14 @@ terminate(_Reason, State) ->
     end,
     ok.
 
+%% @doc Pass state through unchanged on hot code upgrade.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-    `,
+`,
     },
 solutionExplanation: `### Solution Breakdown: Bounded Flow Control Worker
-1. **Initial Arming**: In \\\`init/1\\\`, \\\`inet:setopts(Socket, [binary, {active, once}])\\\` tells the kernel to deliver exactly one incoming frame before pausing.
-2. **Backpressure Re-arming**: In \\\`handle_info({tcp, ...})\\\`, after transmitting the echo response, we explicitly re-arm active reception with \\\`inet:setopts(Socket, [{active, once}])\\\`. If the worker is delayed, packets stay safely in the OS kernel receive buffer, triggering TCP window scaling to throttle the sender.
+1. **Initial Arming**: In \`init/1\`, \`inet:setopts(Socket, [binary, {active, once}])\` tells the kernel to deliver exactly one incoming frame before pausing.
+2. **Backpressure Re-arming**: In \`handle_info({tcp, ...})\`, after transmitting the echo response, we explicitly re-arm active reception with \`inet:setopts(Socket, [{active, once}])\`. If the worker is delayed, packets stay safely in the OS kernel receive buffer, triggering TCP window scaling to throttle the sender.
 3. **State Telemetry**: We maintain running tallies of packets and bytes processed, updating them monotonically with zero race conditions.`,
     visibleTestCases: [
       {

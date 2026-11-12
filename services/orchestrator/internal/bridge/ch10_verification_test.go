@@ -133,22 +133,27 @@ encode_length_prefixed(PayloadBin) when is_binary(PayloadBin) ->
     closed = false :: boolean()
 }).
 
+%% @doc Start and link a tcp_flow_worker gen_server owning Socket.
 -spec start_link(gen_tcp:socket()) -> {ok, pid()} | {error, term()}.
 start_link(Socket) ->
     gen_server:start_link(?MODULE, [Socket], []).
 
+%% @doc Return a map of packets_processed, bytes_processed, and closed status from Server.
 -spec get_stats(pid() | atom()) -> map().
 get_stats(Server) ->
     gen_server:call(Server, get_stats).
 
+%% @doc Return the total count of TCP frames processed by Server.
 -spec get_processed_count(pid() | atom()) -> non_neg_integer().
 get_processed_count(Server) ->
     gen_server:call(Server, get_processed_count).
 
+%% @doc Synchronously stop the tcp_flow_worker gen_server Server.
 -spec stop(pid() | atom()) -> ok.
 stop(Server) ->
     gen_server:stop(Server).
 
+%% @doc Start a single-connection loopback TCP server that spawns tcp_flow_worker and hands off client ownership.
 start_server() ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],
     {ok, ListenSocket} = gen_tcp:listen(0, ListenOpts),
@@ -167,6 +172,7 @@ start_server() ->
     end),
     {ok, ListenPid, Port}.
 
+%% @doc Stop the registered tcp_flow_worker and terminate its acceptor ListenPid.
 stop_server(ListenPid) ->
     case whereis(tcp_flow_worker) of
         undefined -> ok;
@@ -175,12 +181,14 @@ stop_server(ListenPid) ->
     exit(ListenPid, kill),
     ok.
 
+%% @doc Arm Socket for binary single-packet active reception and initialize the #state record.
 init([Socket]) ->
     ok = inet:setopts(Socket, [binary, {active, once}]),
     {ok, #state{socket = Socket, packets_processed = 0, bytes_processed = 0, closed = false}};
 init(Socket) ->
     init([Socket]).
 
+%% @doc Handle get_stats and get_processed_count synchronous call queries.
 handle_call(get_stats, _From, State) ->
     Reply = #{
         packets_processed => State#state.packets_processed,
@@ -193,16 +201,18 @@ handle_call(get_processed_count, _From, State) ->
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous stop casts or ignore unknown casts.
 handle_cast(stop, State) ->
     {stop, normal, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle socket ownership handoff, single-frame echo with active-once re-arming, and disconnect/error transitions.
 handle_info({socket_assigned, Socket}, State) ->
     ok = inet:setopts(Socket, [{active, once}]),
     {noreply, State#state{socket = Socket}};
 handle_info({tcp, Socket, DataBin}, State) ->
-    ok = gen_tcp:send(Socket, <<"ACK:", DataBin/binary>>),
+    ok = gen_tcp:send(Socket, <<"+ACK: ", DataBin/binary>>),
     ok = inet:setopts(Socket, [{active, once}]),
     NewPackets = State#state.packets_processed + 1,
     NewBytes = State#state.bytes_processed + byte_size(DataBin),
@@ -214,6 +224,7 @@ handle_info({tcp_error, _Socket, _Reason}, State) ->
 handle_info(_Other, State) ->
     {noreply, State}.
 
+%% @doc Close any tracked TCP socket before worker termination.
 terminate(_Reason, State) ->
     case State#state.socket of
         undefined -> ok;
@@ -221,6 +232,7 @@ terminate(_Reason, State) ->
     end,
     ok.
 
+%% @doc Pass state through unchanged on hot code upgrade.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,

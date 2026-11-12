@@ -2799,6 +2799,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter10Verification/ch10-l02` (`VERIFIED 100% PASSED`, score=100, 4 stages in `2.07s`, `2.414s` package total); `TEST_CHAPTER=10 TestDynamicVisibleTestsCurriculum` (`ch10-l02 | 4/4 tests passed`, all 7 Ch. 10 lessons passed in `10.72s` / `10.745s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 165: Pedagogical Despoiling, Backpressure Grader Expansion & Live Tri-Verification of Chapter 10 Lecture 3 (`ch10-l03`)
+- [x] **165.1: Replace `echo_backpressure_worker` Clone with Domain-Disjoint PWE (`telemetry_active_pump.erl`), Clean Starter Stubs & Fix `ch10_verification_test.go` / `Run` / `Submit` Drift (`ch10-l03`: `tcp_flow_worker.erl`)**:
+  - Replaced `echo_backpressure_worker` (near 1:1 `gen_server` clone) in `apps/web-ide/src/data/chapters/ch10.ts` with a domain-disjoint runnable bare-actor pump (`telemetry_active_pump.erl`: safe `controlling_process/2` handshake + `{active, once}` line pump to a downstream `SinkPid`), converted Obsidian callouts to GFM alerts, added `gen_tcp:send/2` + card pointer to `## Official Erlang Docs & Function Reference`, rewrote `## Assignment Specification` to strict Spec 08 `Input`/`Behavior`/`Examples` layout with zero code spoilers, and fixed double-escaped backticks in `solutionExplanation`.
+  - Removed pre-solved `{tcp_closed, _}` clause and code-dictating `%% % TODO ...` hints from `starterCode` and `files[0].content` (`src/tcp_flow_worker.erl`), leaving clean Spec 08 `@doc` contracts across all 12 exports/callbacks (`starterCode`, `files`, `solutionCode`, `solutionFiles`, and `ch10_verification_test.go`) and neutral `init/1` / `handle_info/2` stubs.
+  - Fixed `ch10_verification_test.go` (`<<"ACK:", ...>>` -> `<<"+ACK: ", ...>>`), tightened `erl_runner_chapters.go` `Run` to require exact `<<"+ACK: TEST_PING\r\n">>` with crash cleanup, and upgraded `Submit` (`S1_Ast` + `S3_EchoAndLifecycle`) to enforce `record_def` alongside `inet:setopts/2` / `gen_tcp:send/2` and verify echo payload, `get_stats/1`, `get_processed_count/1`, and disconnect `closed := true` transition.
+- [x] **165.2: Mandatory Live Tri-Verification & Compiler Suite (`ch10-l03`)**:
+  - **Parallel Worked Example (`telemetry_active_pump.erl`)**: Extracted from `ch10.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified live line streaming + EOF notification (`PWE_CH10_L03_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe -Wall`), started/stopped pipeline, and read initial stats safely (`STARTER_CH10_L03 exports=true stubs=safe`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` (`inet:setopts/2`, `gen_tcp:send/2`, `record_def`), passed visible test (`1/1`), and passed `bf_backpressure_tester:verify_active_once_backpressure/5` (`SOLUTION_CH10_L03_OK ast=passed visible=1/1 backpressure=passed`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter10Verification/ch10-l03` (`VERIFIED 100% PASSED`, score=100, 4 stages in `2.88s`, `3.379s` package total); `TEST_CHAPTER=10 TestDynamicVisibleTestsCurriculum` (all 7 Ch. 10 lessons passed in `10.33s` / `10.353s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 
