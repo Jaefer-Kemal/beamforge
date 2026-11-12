@@ -1318,36 +1318,37 @@ UseSsl = proplists:get_bool(ssl, DbOpts).                 %% => true
 IsDev  = proplists:get_bool(development, DbOpts).         %% => false
 \`\`\`
 
-## Parallel Worked Example: Cluster Node Registry & RPC Config
+## Parallel Worked Example
 
-The following module manages server nodes in a distributed cluster and parses RPC client connection flags. Notice how \`lists:keyfind/3\` and \`lists:keystore/4\` operate at position 2, while \`proplists\` cleanly handles optional configuration settings with defaults:
+Consider an edge DNS zone registry indexed by zone name (at tuple position 3) alongside a resolver configuration parser using property lists:
 
 \`\`\`erlang
--module(cluster_node_registry).
--export([lookup_node/2, upsert_node/2, read_rpc_options/1]).
+-module(dns_zone_loader).
+-export([register_zone/2, parse_resolver_flags/1]).
 
-%% @doc Looks up a registered node by its NodeId at tuple position 2.
-lookup_node(Registry, NodeId) ->
-    case lists:keyfind(NodeId, 2, Registry) of
-        {node_reg, NodeId, _Host, _Region, _Status} = Node ->
-            {ok, Node};
-        false ->
-            {error, not_found}
-    end.
+%% ── Phase 1: Native C Keyed Tuple Manipulation at Arbitrary Tuple Position ──
+%% Looks up or updates {zone, Region, ZoneName, PrimaryIp} keyed at 1-based position 3.
+register_zone(Zones, {zone, _Region, ZoneName, _Ip} = NewZone) ->
+    Existed = case lists:keyfind(ZoneName, 3, Zones) of
+        false -> false;
+        _ExistingTuple -> true
+    end,
+    UpdatedZones = lists:keystore(ZoneName, 3, Zones, NewZone),
+    {Existed, UpdatedZones}.
 
-%% @doc Replaces an existing node record or appends a new node tuple.
-upsert_node(Registry, {node_reg, NodeId, _, _, _} = NewNode) ->
-    lists:keystore(NodeId, 2, Registry, NewNode).
-
-%% @doc Normalizes RPC communication options using proplists.
-read_rpc_options(Options) ->
-    MaxRetries = proplists:get_value(max_retries, Options, 3),
-    Channel = proplists:get_value(channel, Options, standard),
-    IsCompressed = proplists:get_bool(compress, Options),
-    {rpc_cfg, MaxRetries, Channel, IsCompressed}.
+%% ── Phase 2: Flexible Option Extraction via proplists ───────────────────────
+%% Supports bare flag atoms (such as recursive) alongside key-value pairs.
+parse_resolver_flags(Flags) ->
+    TtlSeconds = proplists:get_value(ttl, Flags, 300),
+    UseRecursive = proplists:get_bool(recursive, Flags),
+    {resolver_plan, TtlSeconds, UseRecursive}.
 \`\`\`
 
-## Standard Library Function Reference
+How the BEAM executes these two stdlib modules:
+- **Phase 1 (\`register_zone/2\`)**: Passes 1-based position \`3\` (the \`ZoneName\` field after \`zone\` at 1 and \`Region\` at 2) to the ERTS C BIFs \`lists:keyfind/3\` and \`lists:keystore/4\`; \`keystore/4\` replaces the matching tuple in-place when present or appends it at the tail when missing.
+- **Phase 2 (\`parse_resolver_flags/1\`)**: \`proplists:get_bool/2\` treats a bare atom \`recursive\` identically to \`{recursive, true}\` and handles \`{recursive, false}\` accurately, whereas \`proplists:get_value/3\` returns caller values or defaults in one pass.
+
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 lists:keyfind(Key, Pos, List) -> Tuple | false
@@ -1356,55 +1357,43 @@ proplists:get_value(Key, List, Default) -> term()
 proplists:get_bool(Key, List) -> boolean()
 \`\`\`
 
+> How to read these signatures: \`Pos\` is strictly 1-based (\`pos_integer() >= 1\`) counting from the tuple tag atom at position \`1\`, while \`proplists\` helpers normalize mixed option lists containing both bare flag atoms and 2-tuples. Open the attached **Reference Cards** for \`lists:keyfind/3\` and \`proplists:get_value/3\` documentation.
+
 ## Assignment Specification
 
 Implement three keylist and proplist functions in \`src/keylist_config.erl\`:
 
-### 1. \`find_product_by_id/2\`
+### 1. \`find_product_by_id(Inventory, ProductId)\`
 - **Input**:
-  - \`Inventory\`: A list of catalog records formatted as \`[{product, Id, Name, Price, Stock}, ...]\`.
-  - \`ProductId\`: An integer identifier representing the primary lookup key.
-- **Behavior**: Search the inventory list using \`lists:keyfind/3\` matching \`ProductId\` against the record's primary key position (note 1-based indexing). If the product is found, wrap and return \`{ok, ProductTuple}\`. If no matching record exists in the list, return \`{error, not_found}\`.
+  - \`Inventory\` — A list of zero or more 5-element \`product\` tuples (carrying \`Id\`, \`Name\`, \`Price\`, and \`Stock\`).
+  - \`ProductId\` — An integer primary key to match against each product's identifier field.
+- **Behavior**: Search \`Inventory\` using C-backed keylist lookup matching \`ProductId\` at the product identifier tuple position (keeping Erlang's 1-based tuple indexing in mind). Wrap a matched tuple in an ok pair, or return a not-found error pair when absent.
 - **Examples**:
-  \`\`\`erlang
-  keylist_config:find_product_by_id([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 4}], 2)
-  %% => {ok, {product, 2, "Mouse", 25, 4}}
+  - \`keylist_config:find_product_by_id([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 4}], 2)\` returns \`{ok, {product, 2, "Mouse", 25, 4}}\`.
+  - \`keylist_config:find_product_by_id([{product, 1, "Keyboard", 50, 10}], 999)\` returns \`{error, not_found}\`.
 
-  keylist_config:find_product_by_id([{product, 1, "Keyboard", 50, 10}], 999)
-  %% => {error, not_found}
-  \`\`\`
-
-### 2. \`upsert_product/2\`
+### 2. \`upsert_product(Inventory, NewProduct)\`
 - **Input**:
-  - \`Inventory\`: A list of catalog records formatted as \`[{product, Id, Name, Price, Stock}, ...]\`.
-  - \`NewProduct\`: A replacement or newly introduced product record \`{product, ProdId, Name, Price, Stock}\`.
-- **Behavior**: Perform an "upsert" (update or insert) operation on the inventory list using \`lists:keystore/4\`. If a record with matching \`ProdId\` exists at the key position, replace it with \`NewProduct\` in-place. If no such record exists, append \`NewProduct\` to the list. Return the updated inventory list.
+  - \`Inventory\` — A list of zero or more 5-element \`product\` tuples.
+  - \`NewProduct\` — A 5-element \`product\` tuple representing a replacement or newly added catalog entry.
+- **Behavior**: Perform an order-preserving keylist upsert: if an existing product shares \`NewProduct\`'s product identifier at key position 2, replace it in-place with \`NewProduct\`; otherwise append \`NewProduct\` to the end of \`Inventory\`. Return the updated list.
 - **Examples**:
-  \`\`\`erlang
-  keylist_config:upsert_product([{product, 1, "Keyboard", 50, 10}], {product, 1, "Keyboard", 45, 12})
-  %% => [{product, 1, "Keyboard", 45, 12}]
-  \`\`\`
+  - \`keylist_config:upsert_product([{product, 1, "Keyboard", 50, 10}], {product, 1, "Keyboard", 45, 12})\` returns \`[{product, 1, "Keyboard", 45, 12}]\`.
 
-### 3. \`read_socket_options/1\`
-- **Input**: A property list of network socket configuration options \`OptsList\`.
-- **Behavior**: Extract configuration parameters and normalize them into a 4-tuple \`{socket_cfg, Port, ActiveMode, IsBinary}\`:
-  - Retrieve the integer \`port\` value using \`proplists:get_value/3\`, falling back to \`8080\` if absent.
-  - Retrieve the \`active\` socket mode value using \`proplists:get_value/3\`, falling back to \`false\` if absent.
-  - Determine whether \`binary\` mode is enabled using \`proplists:get_bool/2\`.
-  - Return \`{socket_cfg, Port, ActiveMode, IsBinary}\`.
+### 3. \`read_socket_options(OptsList)\`
+- **Input**: \`OptsList\` — A mixed property list of network socket options containing bare flag atoms and/or key-value pairs.
+- **Behavior**: Normalize \`OptsList\` into a 4-element \`socket_cfg\` tuple containing \`Port\`, \`ActiveMode\`, and \`IsBinary\` in that order:
+  - \`Port\` resolves from the \`port\` option defaulting to \`8080\`.
+  - \`ActiveMode\` resolves from the \`active\` option defaulting to \`false\`.
+  - \`IsBinary\` resolves as a boolean flag from the \`binary\` option (supporting bare \`binary\` as true, \`{binary, true}\`, \`{binary, false}\`, or absent as \`false\`).
 - **Examples**:
-  \`\`\`erlang
-  keylist_config:read_socket_options([binary, {port, 9090}, {active, once}])
-  %% => {socket_cfg, 9090, once, true}
+  - \`keylist_config:read_socket_options([binary, {port, 9090}, {active, once}])\` returns \`{socket_cfg, 9090, once, true}\`.
+  - \`keylist_config:read_socket_options([])\` returns \`{socket_cfg, 8080, false, false}\`.
 
-  keylist_config:read_socket_options([])
-  %% => {socket_cfg, 8080, false, false}
-  \`\`\`
+## Rules & Verification Constraints
 
-## Verification Constraints
-
-- You must employ \`lists:keyfind/3\`, \`lists:keystore/4\`, and \`proplists:get_value/3\`.
-- Strictly no Maps (\`#{}\`) or Bit-Syntax Binaries (\`<<...>>\`). Use tuples, lists, atoms, and numbers only.`,
+- \`bf_ast_verifier\` enforces required remote calls to \`lists:keyfind/3\`, \`lists:keystore/4\`, \`proplists:get_value/3\`, and \`proplists:get_bool/2\`, and forbids list comprehensions (\`[Expr || ...]\`), maps (\`#{}\`), and bit-syntax binaries (\`<<...>>\`).
+- Use tuples, lists, atoms, strings, booleans, and integers only.`,
     otpDocCards: [
       {
         functionName: 'lists:keyfind/3',
@@ -1479,9 +1468,10 @@ Implement three keylist and proplist functions in \`src/keylist_config.erl\`:
       },
     ],
     astRules: {
-      requiredCalls: ['lists:keyfind/3', 'lists:keystore/4', 'proplists:get_value/3'],
+      requiredCalls: ['lists:keyfind/3', 'lists:keystore/4', 'proplists:get_value/3', 'proplists:get_bool/2'],
+      forbiddenConstructs: ['list_comprehension', 'map_syntax', 'bit_syntax'],
     },
-    solutionExplanation: 'Demonstrates C BIF keylist search/update with lists:keyfind/3 and lists:keystore/4 alongside proplist option parsing.',
+    solutionExplanation: 'Demonstrates C BIF keylist search/update with lists:keyfind/3 and lists:keystore/4 alongside proplists option extraction and boolean flag normalization.',
     files: [
       {
         name: 'keylist_config.erl',
@@ -1489,15 +1479,15 @@ Implement three keylist and proplist functions in \`src/keylist_config.erl\`:
         content: `-module(keylist_config).
 -export([find_product_by_id/2, upsert_product/2, read_socket_options/1]).
 
-%% @doc Searches inventory list for a product tuple matching ProductId.
+%% @doc Search Inventory by ProductId at product identifier position, returning an ok pair wrapping the matching product tuple or a not-found error pair when absent.
 find_product_by_id(_Inventory, _ProductId) ->
     ok.
 
-%% @doc Replaces an existing product record or appends a new one.
+%% @doc Replace an existing product tuple matching NewProduct's identifier in place, or append NewProduct to the end of Inventory when not present.
 upsert_product(_Inventory, _NewProduct) ->
     ok.
 
-%% @doc Parses socket property list into a normalized socket_cfg configuration tuple.
+%% @doc Extract caller-supplied socket configuration options from OptsList (defaulting port to 8080, active mode to false, and binary flag to false) into a normalized socket_cfg tuple.
 read_socket_options(_OptsList) ->
     ok.`,
       },
@@ -1506,6 +1496,7 @@ read_socket_options(_OptsList) ->
       'src/keylist_config.erl': `-module(keylist_config).
 -export([find_product_by_id/2, upsert_product/2, read_socket_options/1]).
 
+%% @doc Search Inventory by ProductId at product identifier position, returning an ok pair wrapping the matching product tuple or a not-found error pair when absent.
 find_product_by_id(Inventory, ProductId) ->
     case lists:keyfind(ProductId, 2, Inventory) of
         {product, ProductId, _, _, _} = Prod ->
@@ -1514,9 +1505,11 @@ find_product_by_id(Inventory, ProductId) ->
             {error, not_found}
     end.
 
+%% @doc Replace an existing product tuple matching NewProduct's identifier in place, or append NewProduct to the end of Inventory when not present.
 upsert_product(Inventory, {product, ProdId, _, _, _} = NewProduct) ->
     lists:keystore(ProdId, 2, Inventory, NewProduct).
 
+%% @doc Extract caller-supplied socket configuration options from OptsList (defaulting port to 8080, active mode to false, and binary flag to false) into a normalized socket_cfg tuple.
 read_socket_options(OptsList) ->
     Port = proplists:get_value(port, OptsList, 8080),
     Active = proplists:get_value(active, OptsList, false),
@@ -1526,20 +1519,21 @@ read_socket_options(OptsList) ->
     starterCode: `-module(keylist_config).
 -export([find_product_by_id/2, upsert_product/2, read_socket_options/1]).
 
-%% @doc Searches inventory list for a product tuple matching ProductId.
+%% @doc Search Inventory by ProductId at product identifier position, returning an ok pair wrapping the matching product tuple or a not-found error pair when absent.
 find_product_by_id(_Inventory, _ProductId) ->
     ok.
 
-%% @doc Replaces an existing product record or appends a new one.
+%% @doc Replace an existing product tuple matching NewProduct's identifier in place, or append NewProduct to the end of Inventory when not present.
 upsert_product(_Inventory, _NewProduct) ->
     ok.
 
-%% @doc Parses socket property list into a normalized socket_cfg configuration tuple.
+%% @doc Extract caller-supplied socket configuration options from OptsList (defaulting port to 8080, active mode to false, and binary flag to false) into a normalized socket_cfg tuple.
 read_socket_options(_OptsList) ->
     ok.`,
     solutionCode: `-module(keylist_config).
 -export([find_product_by_id/2, upsert_product/2, read_socket_options/1]).
 
+%% @doc Search Inventory by ProductId at product identifier position, returning an ok pair wrapping the matching product tuple or a not-found error pair when absent.
 find_product_by_id(Inventory, ProductId) ->
     case lists:keyfind(ProductId, 2, Inventory) of
         {product, ProductId, _, _, _} = Prod ->
@@ -1548,9 +1542,11 @@ find_product_by_id(Inventory, ProductId) ->
             {error, not_found}
     end.
 
+%% @doc Replace an existing product tuple matching NewProduct's identifier in place, or append NewProduct to the end of Inventory when not present.
 upsert_product(Inventory, {product, ProdId, _, _, _} = NewProduct) ->
     lists:keystore(ProdId, 2, Inventory, NewProduct).
 
+%% @doc Extract caller-supplied socket configuration options from OptsList (defaulting port to 8080, active mode to false, and binary flag to false) into a normalized socket_cfg tuple.
 read_socket_options(OptsList) ->
     Port = proplists:get_value(port, OptsList, 8080),
     Active = proplists:get_value(active, OptsList, false),

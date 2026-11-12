@@ -1052,46 +1052,49 @@ init:stop().
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try keylist_config:find_product_by_id([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 4}], 2) of
     {ok, {product, 2, "Mouse", 25, 4}} = R1 ->
-        #{call_str => <<"keylist_config:find_product_by_id(..., 2)">>,
+        #{call_str => <<"keylist_config:find_product_by_id([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 4}], 2)">>,
           expected => <<"{ok, {product, 2, \"Mouse\", 25, 4}}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"keylist_config:find_product_by_id(...)">>,
+        #{call_str => <<"keylist_config:find_product_by_id([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 4}], 2)">>,
           expected => <<"{ok, {product, 2, \"Mouse\", 25, 4}}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"keylist_config:find_product_by_id(...)">>, expected => <<"{ok, ...}">>,
+    #{call_str => <<"keylist_config:find_product_by_id([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 4}], 2)">>,
+      expected => <<"{ok, {product, 2, \"Mouse\", 25, 4}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try keylist_config:find_product_by_id([{product, 1, "Keyboard", 50, 10}], 999) of
     {error, not_found} = R2 ->
-        #{call_str => <<"keylist_config:find_product_by_id(..., 999)">>,
+        #{call_str => <<"keylist_config:find_product_by_id([{product, 1, \"Keyboard\", 50, 10}], 999)">>,
           expected => <<"{error, not_found}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"keylist_config:find_product_by_id(...)">>,
+        #{call_str => <<"keylist_config:find_product_by_id([{product, 1, \"Keyboard\", 50, 10}], 999)">>,
           expected => <<"{error, not_found}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
 catch C2:R2 ->
-    #{call_str => <<"keylist_config:find_product_by_id(...)">>, expected => <<"{error, not_found}">>,
+    #{call_str => <<"keylist_config:find_product_by_id([{product, 1, \"Keyboard\", 50, 10}], 999)">>,
+      expected => <<"{error, not_found}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
 T3_Res = try keylist_config:upsert_product([{product, 1, "Keyboard", 50, 10}], {product, 1, "Keyboard", 45, 12}) of
     [{product, 1, "Keyboard", 45, 12}] = R3 ->
-        #{call_str => <<"keylist_config:upsert_product(..., {product, 1, \"Keyboard\", 45, 12})">>,
+        #{call_str => <<"keylist_config:upsert_product([{product, 1, \"Keyboard\", 50, 10}], {product, 1, \"Keyboard\", 45, 12})">>,
           expected => <<"[{product, 1, \"Keyboard\", 45, 12}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T3_Start};
     Other3 ->
-        #{call_str => <<"keylist_config:upsert_product(...)">>,
+        #{call_str => <<"keylist_config:upsert_product([{product, 1, \"Keyboard\", 50, 10}], {product, 1, \"Keyboard\", 45, 12})">>,
           expected => <<"[{product, 1, \"Keyboard\", 45, 12}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
 catch C3:R3 ->
-    #{call_str => <<"keylist_config:upsert_product(...)">>, expected => <<"[{product, ...}]">>,
+    #{call_str => <<"keylist_config:upsert_product([{product, 1, \"Keyboard\", 50, 10}], {product, 1, \"Keyboard\", 45, 12})">>,
+      expected => <<"[{product, 1, \"Keyboard\", 45, 12}]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 T4_Start = erlang:system_time(millisecond),
@@ -1102,11 +1105,12 @@ T4_Res = try keylist_config:read_socket_options([binary, {port, 9090}, {active, 
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R4]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T4_Start};
     Other4 ->
-        #{call_str => <<"keylist_config:read_socket_options(...)">>,
+        #{call_str => <<"keylist_config:read_socket_options([binary, {port, 9090}, {active, once}])">>,
           expected => <<"{socket_cfg, 9090, once, true}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other4]))), passed => false, time_ms => 0}
 catch C4:R4 ->
-    #{call_str => <<"keylist_config:read_socket_options(...)">>, expected => <<"{socket_cfg, ...}">>,
+    #{call_str => <<"keylist_config:read_socket_options([binary, {port, 9090}, {active, once}])">>,
+      expected => <<"{socket_cfg, 9090, once, true}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
@@ -5567,37 +5571,79 @@ Stages = [CompileStage_H04, S_Ast_H04, S1_Fold]
 `, wsDir, wsDir), true
 
 	case "ch03-l05":
-		return `
+		return fmt.Sprintf(`
 CompileStage_H05 = case code:ensure_loaded(keylist_config) of
     {module, keylist_config} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"keylist_config.erl compiled cleanly">>};
+        Exports_H05 = keylist_config:module_info(exports),
+        Req_H05 = [{find_product_by_id, 2}, {upsert_product, 2}, {read_socket_options, 1}],
+        Missing_H05 = [FA || FA <- Req_H05, not lists:member(FA, Exports_H05)],
+        case Missing_H05 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"keylist_config.erl compiled cleanly and exported find_product_by_id/2, upsert_product/2, read_socket_options/1.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_H05]))}
+        end;
     {error, E_H05} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_H05]))}
+end,
+S_Ast_H05 = try
+    SourceCandidates_H05 = [
+        filename:join(["%s", "src", "keylist_config.erl"]),
+        filename:join(["%s", "keylist_config.erl"])
+    ],
+    SourceFile_H05 = case [P || P <- SourceCandidates_H05, filelib:is_regular(P)] of
+        [ValidSrc_H05 | _] -> ValidSrc_H05;
+        [] -> hd(SourceCandidates_H05)
+    end,
+    Rules_H05 = #{
+        required_remote_calls => [{lists, keyfind, 3}, {lists, keystore, 4}, {proplists, get_value, 3}, {proplists, get_bool, 2}],
+        forbidden_constructs => [list_comprehension, map_syntax, bit_syntax]
+    },
+    case bf_ast_verifier:verify_rules(SourceFile_H05, <<>>, Rules_H05) of
+        {ok, _} ->
+            #{id => <<"ast_keylist_config_audit">>, title => <<"AST Keylist & Proplist BIF Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified lists:keyfind/3, lists:keystore/4, proplists:get_value/3, proplists:get_bool/2 and zero comprehensions, maps, or binaries.">>};
+        {error, AstViolations_H05} ->
+            FirstMsg_H05 = case AstViolations_H05 of
+                [#{message := M_H05} | _] -> M_H05;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_H05]))
+            end,
+            #{id => <<"ast_keylist_config_audit">>, title => <<"AST Keylist & Proplist BIF Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_H05, error => AstViolations_H05}
+    end
+catch Class_Ast_H05:Err_Ast_H05 ->
+    #{id => <<"ast_keylist_config_audit">>, title => <<"AST Keylist & Proplist BIF Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [Class_Ast_H05, Err_Ast_H05]))}
 end,
 S1_Keylists = try
     Inv0 = [{product, 10, "Widget", 15, 8}, {product, 20, "Gadget", 30, 2}],
     F_Found = keylist_config:find_product_by_id(Inv0, 20),
     F_Miss = keylist_config:find_product_by_id(Inv0, 99),
+    F_Empty = keylist_config:find_product_by_id([], 10),
     Inv1 = keylist_config:upsert_product(Inv0, {product, 10, "Widget", 20, 10}),
     Inv2 = keylist_config:upsert_product(Inv1, {product, 30, "Doohickey", 5, 50}),
+    InvEmpty = keylist_config:upsert_product([], {product, 5, "Hub", 40, 3}),
     OptsCustom = keylist_config:read_socket_options([binary, {port, 9999}, {active, once}]),
     OptsDefault = keylist_config:read_socket_options([]),
-    case {F_Found, F_Miss, Inv1, length(Inv2), OptsCustom, OptsDefault} of
+    OptsBinFalse = keylist_config:read_socket_options([{binary, false}, {port, 443}]),
+    OptsBinTupleTrue = keylist_config:read_socket_options([{binary, true}, {active, true}]),
+    case {F_Found, F_Miss, F_Empty, Inv1, Inv2, InvEmpty, OptsCustom, OptsDefault, OptsBinFalse, OptsBinTupleTrue} of
         {{ok, {product, 20, "Gadget", 30, 2}},
          {error, not_found},
+         {error, not_found},
          [{product, 10, "Widget", 20, 10}, {product, 20, "Gadget", 30, 2}],
-         3,
+         [{product, 10, "Widget", 20, 10}, {product, 20, "Gadget", 30, 2}, {product, 30, "Doohickey", 5, 50}],
+         [{product, 5, "Hub", 40, 3}],
          {socket_cfg, 9999, once, true},
-         {socket_cfg, 8080, false, false}} ->
-            #{id => <<"keylist_and_proplist">>, title => <<"lists:keyfind/keystore & proplists Parsing">>, status => <<"passed">>, time_ms => 10, details => <<"C BIF keylist search/update and proplist extraction with defaults verified">>};
+         {socket_cfg, 8080, false, false},
+         {socket_cfg, 443, false, false},
+         {socket_cfg, 8080, true, true}} ->
+            #{id => <<"keylist_and_proplist">>, title => <<"lists:keyfind/keystore & proplists Parsing">>, status => <<"passed">>, time_ms => 10, details => <<"C BIF keylist search/upsert order preservation and proplists tuple/flag defaults verified">>};
         Got_H05 ->
             #{id => <<"keylist_and_proplist">>, title => <<"lists:keyfind/keystore & proplists Parsing">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Keylist mismatch: ~p", [Got_H05]))}
     end
 catch Class_H05:Err_H05 ->
     #{id => <<"keylist_and_proplist">>, title => <<"lists:keyfind/keystore & proplists Parsing">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_H05, Err_H05]))}
 end,
-Stages = [CompileStage_H05, S1_Keylists]
-`, true
+Stages = [CompileStage_H05, S_Ast_H05, S1_Keylists]
+`, wsDir, wsDir), true
 
 	case "ch03-l06":
 		return `

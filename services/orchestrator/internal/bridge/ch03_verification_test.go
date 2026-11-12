@@ -108,6 +108,30 @@ reverse_with_fold(List) ->
     lists:foldl(fun(Elem, Acc) -> [Elem | Acc] end, [], List).
 `
 
+	keylistConfigSolution := `-module(keylist_config).
+-export([find_product_by_id/2, upsert_product/2, read_socket_options/1]).
+
+%% @doc Search Inventory by ProductId at product identifier position, returning an ok pair wrapping the matching product tuple or a not-found error pair when absent.
+find_product_by_id(Inventory, ProductId) ->
+    case lists:keyfind(ProductId, 2, Inventory) of
+        {product, ProductId, _, _, _} = Prod ->
+            {ok, Prod};
+        false ->
+            {error, not_found}
+    end.
+
+%% @doc Replace an existing product tuple matching NewProduct's identifier in place, or append NewProduct to the end of Inventory when not present.
+upsert_product(Inventory, {product, ProdId, _, _, _} = NewProduct) ->
+    lists:keystore(ProdId, 2, Inventory, NewProduct).
+
+%% @doc Extract caller-supplied socket configuration options from OptsList (defaulting port to 8080, active mode to false, and binary flag to false) into a normalized socket_cfg tuple.
+read_socket_options(OptsList) ->
+    Port = proplists:get_value(port, OptsList, 8080),
+    Active = proplists:get_value(active, OptsList, false),
+    IsBinary = proplists:get_bool(binary, OptsList),
+    {socket_cfg, Port, Active, IsBinary}.
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -132,6 +156,11 @@ reverse_with_fold(List) ->
 			exerciseID:   "ch03-l04",
 			visibleCount: 3,
 			files:        map[string]string{"src/hof_fold.erl": hofFoldSolution},
+		},
+		{
+			exerciseID:   "ch03-l05",
+			visibleCount: 4,
+			files:        map[string]string{"src/keylist_config.erl": keylistConfigSolution},
 		},
 	}
 
@@ -574,6 +603,105 @@ reverse_with_fold(List) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected foldl_state_reduction stage to fail for zero-seeded min/max bug, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch03-l05 rejects manual recursion bypassing keyfind/keystore/proplists via AST audit", func(t *testing.T) {
+		sessionID := "test-ch03-l05-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/keylist_config.erl": `-module(keylist_config).
+-export([find_product_by_id/2, upsert_product/2, read_socket_options/1]).
+
+find_product_by_id([], _Id) -> {error, not_found};
+find_product_by_id([{product, Id, _, _, _} = P | _], Id) -> {ok, P};
+find_product_by_id([_ | T], Id) -> find_product_by_id(T, Id).
+
+upsert_product(Inv, NewProd) -> [NewProd | Inv].
+
+read_socket_options(Opts) ->
+    {socket_cfg, proplists:get_value(port, Opts, 8080), proplists:get_value(active, Opts, false), lists:member(binary, Opts)}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch03-l05", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected manual bypass of lists:keyfind/keystore/proplists:get_bool to fail ch03-l05, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_keylist_config_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_keylist_config_audit stage to fail for missing C/proplist BIF calls, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch03-l05 rejects {binary, true} failure and prepended insert order bug", func(t *testing.T) {
+		sessionID := "test-ch03-l05-neg-edge"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		buggy := map[string]string{
+			"src/keylist_config.erl": `-module(keylist_config).
+-export([find_product_by_id/2, upsert_product/2, read_socket_options/1]).
+
+find_product_by_id(Inventory, ProductId) ->
+    case lists:keyfind(ProductId, 2, Inventory) of
+        {product, ProductId, _, _, _} = Prod -> {ok, Prod};
+        false -> {error, not_found}
+    end.
+
+%% Bug: prepends NewProduct on miss instead of lists:keystore appending at end; still calls keystore on hit path.
+upsert_product(Inventory, {product, ProdId, _, _, _} = NewProduct) ->
+    case lists:keyfind(ProdId, 2, Inventory) of
+        false -> [NewProduct | Inventory];
+        _ -> lists:keystore(ProdId, 2, Inventory, NewProduct)
+    end.
+
+%% Bug: uses proplists:get_value(binary, Opts, false) which returns false even when {binary, false} or bare binary atom is tested alongside get_bool.
+read_socket_options(OptsList) ->
+    Port = proplists:get_value(port, OptsList, 8080),
+    Active = proplists:get_value(active, OptsList, false),
+    IsBinary = lists:member(binary, OptsList) andalso proplists:get_bool(binary, OptsList),
+    {socket_cfg, Port, Active, IsBinary}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch03-l05", buggy)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected prepended insert + {binary, true} bug in ch03-l05 to fail, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "keylist_and_proplist" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected keylist_and_proplist stage to fail for order/proplist bug, stages=%+v", report.Stages)
 		}
 	})
 }
