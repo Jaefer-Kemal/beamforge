@@ -13,113 +13,158 @@ export const CHAPTER_8_LESSONS: LessonContent[] = [
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-In production backends, individual worker processes will inevitably encounter hardware timeouts, unexpected corrupt payloads, or database connection drops. The foundational architectural superpower of Erlang and the BEAM VM is **Supervision Trees** (\`-behaviour(supervisor).\`).
+In production backends, individual worker processes will inevitably encounter hardware timeouts, corrupt payloads, or dropped database sockets. The foundational architectural superpower of Erlang and the BEAM VM is **Supervision Trees** (\`-behaviour(supervisor).\`).
 
-Instead of writing defensive \`try/catch\` blocks around every statement, Erlang systems embrace the **"Let It Crash"** philosophy:
-1. **Workers** execute risky business logic. When unexpected corruption occurs, the worker crashes immediately, destroying its tainted heap.
-2. **Supervisors** execute zero business logic. They exist solely to monitor workers and restore them to a known-clean state.
+Instead of scattering defensive \`try/catch\` blocks across every function, Erlang systems embrace the **"Let It Crash"** philosophy:
+1. **Workers** execute risky domain logic. When unexpected corruption occurs, the worker terminates immediately, destroying its tainted heap.
+2. **Supervisors** execute zero business logic. They exist solely to monitor workers, enforce restart rate limits, and restore clean state.
 
-However, restoring workers requires choosing the correct **Restart Strategy**. If an independent caching worker crashes, you must not take down the entire system. Conversely, if a shared database connection crashes, downstream workers that depend on it must be cleanly restarted so they do not operate on dead handles.
+Restoring workers safely requires choosing the right **Restart Strategy**. If an independent caching worker crashes, you should not take down unrelated subsystems. Conversely, if a shared connection pool crashes, downstream workers holding references to it must be cleanly restarted so they do not operate on dead handles.
+
+## Deep Concept Breakdown & Under the Hood
 
 ### The 4 OTP Restart Strategies
 
-1. **\`one_for_one\` (Independent Workers):**
-   - If a child process terminates, only that single child is restarted.
-   - Siblings are completely unaffected.
-   - *Ideal for:* Independent web request handlers, stateless calculators, isolated worker pools.
+| Strategy | Failure Blast Radius | Production Use Case |
+| :--- | :--- | :--- |
+| \`one_for_one\` | Crashed child only | Independent request handlers, stateless worker pools |
+| \`rest_for_one\` | Crashed child + children started **after** it | Sequential dependency pipelines (\`db_pool -> cache -> gateway\`) |
+| \`one_for_all\` | **All** children under the supervisor | Mutually dependent peers that cannot run independently |
+| \`simple_one_for_one\` | Single dynamic worker instance | Dynamic connection pools (e.g., per-socket TCP/XMPP handlers) |
 
-2. **\`rest_for_one\` (Sequential Dependency Pipeline):**
-   - If a child process terminates, any child process started **after** it in the specification list is terminated in reverse order and restarted in forward order.
-   - Preceding upstream children are completely untouched!
-   - *Ideal for:* Pipeline architectures like \`[db_pool -> pricing_cache -> order_gateway]\`. If \`pricing_cache\` crashes, \`order_gateway\` restarts, but \`db_pool\` remains online.
+1. **\`one_for_one\` (Independent Workers)**:
+   - Only the terminated child is restarted; siblings remain untouched.
+2. **\`rest_for_one\` (Sequential Dependency Pipeline)**:
+   - Any child started **after** the crashed child in the specification list is terminated in reverse startup order and restarted in forward startup order. Upstream children remain untouched.
+3. **\`one_for_all\` (Tightly Coupled Cluster)**:
+   - Every surviving sibling is immediately terminated in reverse startup order and restarted alongside the failed child.
+4. **\`simple_one_for_one\` (Dynamic Worker Factory)**:
+   - Holds a single template child specification and starts with zero children at boot, spawning identical workers on demand via \`supervisor:start_child/2\`.
 
-3. **\`one_for_all\` (Tightly Coupled Cluster):**
-   - If any child process terminates, **all** other child processes are immediately terminated and restarted together.
-   - *Ideal for:* Mutually dependent peers, such as a protocol worker and its companion active state monitor where neither can function without the other.
+### What the BEAM Does Under the Hood: Sliding Windows & Escalation
 
-4. **\`simple_one_for_one\` (Dynamic Worker Factory):**
-   - A supervisor that manages a dynamic pool of identical workers spawned on demand (e.g. active TCP sockets or incoming chat sessions).
-   - Holds a single template child spec and starts with zero children at boot.
+Internally, an OTP \`supervisor\` is a specialized \`gen_server\` that calls \`process_flag(trap_exit, true)\` in its \`init/1\` phase and links to every child in startup order:
+- When a child exits abnormally, the BEAM delivers \`{'EXIT', ChildPid, Reason}\` to the supervisor's mailbox.
+- The supervisor records the timestamp in a bounded sliding-window queue sized to \`intensity\`.
+- If the count of restarts within the last \`period\` seconds exceeds \`intensity\`, the supervisor concludes the subsystem is in an unrecoverable crash loop, terminates all remaining children in **reverse startup order**, and exits with \`shutdown\`—escalating failure to its parent supervisor.
 
-### The Modern Map-Based \`sup_flags()\` Format
+### The Modern Map-Based \`sup_flags()\` Contract
 
-In modern Erlang/OTP, the supervisor callback \`init/1\` returns:
+In modern Erlang/OTP, \`supervisor:init/1\` returns a tuple containing a configuration map and child specifications:
 
 \`\`\`erlang
-{ok, {SupFlagsMap, [ChildSpecMap1, ChildSpecMap2, ...]}}
+{ok, {SupFlagsMap, ChildSpecs}}
 \`\`\`
 
-The \`SupFlagsMap\` specifies how the supervisor handles child failures:
-
-\`\`\`erlang
-#{
-    strategy => Strategy,    %% one_for_one | rest_for_one | one_for_all | simple_one_for_one
-    intensity => Intensity,  %% Max allowable crashes (e.g., 3)
-    period => Period         %% Sliding time window in seconds (e.g., 5)
-}
-\`\`\`
+The \`SupFlagsMap\` configures restart strategy and rate limiting via three fields: \`strategy\`, \`intensity\`, and \`period\`.
 
 > [!warning] Production Supervision Trap: Infinite Crash Loops
-> If a child process has a fatal initialization bug (e.g., invalid database credentials), the supervisor could blindly restart it billions of times, consuming 100% CPU and filling disk logs in seconds.
-> The \`intensity\` (MaxRestarts) and \`period\` (MaxSeconds) parameters define a restart rate limit:
-> - If more than \`Intensity\` crashes occur within \`Period\` seconds, the supervisor concludes that the subsystem is unrecoverable.
-> - It terminates all surviving children in reverse startup order and terminates itself with \`shutdown\`!
-> - This escalates the failure up to the parent supervisor in the tree.
+> If a worker has a deterministic startup defect (such as invalid credentials or a bound port conflict), an uncapped supervisor would restart it endlessly at 100% CPU. Setting realistic \`intensity\` (maximum restarts) and \`period\` (window in seconds) bounds crash loops and triggers controlled escalation up the supervision tree.
 
-### Parallel Worked Example
-
-Here is how a telecom supervisor configures its strategies and calculates its restart budget:
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
--module(telecom_sup_planner).
--export([make_flags/3, route_strategy/1, eval_budget/2]).
-
-make_flags(Strategy, MaxR, MaxT)
-  when (Strategy =:= one_for_one orelse Strategy =:= rest_for_one orelse
-        Strategy =:= one_for_all orelse Strategy =:= simple_one_for_one),
-       is_integer(MaxR), MaxR >= 0,
-       is_integer(MaxT), MaxT > 0 ->
-    #{
-        strategy => Strategy,
-        intensity => MaxR,
-        period => MaxT
-    }.
-
-route_strategy(independent_radios) -> one_for_one;
-route_strategy(signal_pipeline)    -> rest_for_one;
-route_strategy(dual_transceivers)  -> one_for_all;
-route_strategy(dynamic_calls)      -> simple_one_for_one;
-route_strategy(_)                  -> {error, unknown_topology}.
-
-eval_budget(Crashes, Seconds)
-  when is_integer(Crashes), is_integer(Seconds), Crashes >= 0, Seconds > 0 ->
-    Rate = Crashes / Seconds,
-    #{
-        intensity => Crashes,
-        period => Seconds,
-        max_rate_per_sec => Rate,
-        tolerated_downtime => ok
-    }.
+%% Official OTP Signature (stdlib / supervisor)
+Module:init(Args) -> {ok, {SupFlags, [ChildSpec]}} | ignore
+  Types:
+    Args = term()
+    SupFlags = #{strategy => strategy(), intensity => non_neg_integer(), period => pos_integer()}
+    strategy() = one_for_one | rest_for_one | one_for_all | simple_one_for_one
 \`\`\`
 
-### Your Mission
+In OTP callback specs, \`non_neg_integer()\` allows \`0\` and positive integers, whereas \`pos_integer()\` strictly requires integers greater than \`0\` (a supervisor window of \`0\` seconds is invalid). Consult the OTP Doc Card below for the complete \`supervisor:init/1\` reference.
 
-Implement module \`strategy_planner\` exporting:
-1. \`build_sup_flags(Strategy, Intensity, Period) -> map()\`:
-   - Validates that \`Strategy\` is one of \`[one_for_one, rest_for_one, one_for_all, simple_one_for_one]\`.
-   - Validates that \`Intensity >= 0\` and \`Period > 0\`.
-   - Returns the standardized \`#{strategy => Strategy, intensity => Intensity, period => Period}\` map.
-2. \`select_strategy_for_topology(Topology) -> Strategy\`:
-   - Maps architecture descriptors to the optimal OTP restart strategy:
-     - \`independent_workers -> one_for_one\`
-     - \`dependent_pipeline -> rest_for_one\`
-     - \`coupled_cluster -> one_for_all\`
-     - \`dynamic_pool -> simple_one_for_one\`
-     - Any other input returns \`{error, unknown_topology}\`.
-3. \`calculate_restart_budget(MaxCrashes, WindowSeconds) -> map()\`:
-   - Validates inputs (\`MaxCrashes >= 0\`, \`WindowSeconds > 0\`).
-   - Calculates \`Rate = MaxCrashes / WindowSeconds\`.
-   - Returns \`#{intensity => MaxCrashes, period => WindowSeconds, max_rate_per_sec => Rate, tolerated_downtime => ok}\`.
+## Parallel Worked Example: Log Ingestion Supervisor
+
+Consider \`ingestion_sup\`, a log ingestion supervisor in a telemetry collector. Notice how it combines compound guard expressions (\`when ... orelse ...\`), multi-clause pattern matching for symbolic sink validation, floating-point division for rate metrics, and the \`SupFlags\` map inside \`init/1\`:
+
+\`\`\`erlang
+-module(ingestion_sup).
+-behaviour(supervisor).
+
+%% Public API & Policy Helpers
+-export([
+    start_link/1,
+    is_valid_sink/1,
+    throughput_metric/2
+]).
+
+%% Supervisor Callback
+-export([init/1]).
+
+%% @doc Start the log ingestion supervisor with a configured sink mode.
+start_link(Sink) when Sink =:= stdout orelse Sink =:= disk orelse Sink =:= s3 ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, Sink).
+
+%% @doc Verify whether a destination atom matches a supported log sink.
+is_valid_sink(stdout) -> true;
+is_valid_sink(disk)   -> true;
+is_valid_sink(s3)     -> true;
+is_valid_sink(_)      -> false.
+
+%% @doc Compute floating-point messages-per-second throughput for a window.
+throughput_metric(Messages, WindowSec)
+  when is_integer(Messages), Messages >= 0,
+       is_integer(WindowSec), WindowSec > 0 ->
+    #{
+        events_per_sec => Messages / WindowSec,
+        window_seconds => WindowSec
+    }.
+
+%% @doc Initialize the ingestion supervisor flags and ordered child pipeline.
+init(_Sink) ->
+    SupFlags = #{
+        strategy => rest_for_one,
+        intensity => 4,
+        period => 10
+    },
+    {ok, {SupFlags, []}}.
+\`\`\`
+
+Key Erlang mechanics illustrated above:
+- **Compound \`orelse\` Guards**: Parenthesizing multiple \`=:=\` alternatives lets Erlang validate an enum atom safely alongside comma-separated numeric checks (\`,\` acts as \`andalso\` in guards).
+- **Floating-Point Division (\`/\`)**: Unlike \`div\`, Erlang's \`/\` operator always evaluates to a \`float()\` even when the operands divide evenly (e.g., \`10 / 2\` produces \`5.0\`).
+
+## Assignment Specification
+
+Implement \`src/strategy_planner.erl\` with the following exports:
+
+\`\`\`erlang
+-module(strategy_planner).
+
+-export([
+    build_sup_flags/3,
+    select_strategy_for_topology/1,
+    calculate_restart_budget/2
+]).
+\`\`\`
+
+### Functional Requirements
+
+#### \`build_sup_flags/3\`
+- **Input**: \`Strategy\` (atom), \`Intensity\` (non-negative integer), \`Period\` (positive integer).
+- **Behavior**: Enforces via function head guard clauses that \`Strategy\` is one of the four valid OTP supervisor restart strategies (\`one_for_one\`, \`rest_for_one\`, \`one_for_all\`, or \`simple_one_for_one\`), \`Intensity\` is an integer zero or greater, and \`Period\` is an integer strictly greater than zero. Returns a supervisor flags map containing keys \`strategy\`, \`intensity\`, and \`period\`. Invalid inputs must fail with a function clause exception.
+- **Examples**:
+  - \`strategy_planner:build_sup_flags(rest_for_one, 3, 5)\` returns \`#{intensity => 3, period => 5, strategy => rest_for_one}\`.
+
+#### \`select_strategy_for_topology/1\`
+- **Input**: \`Topology\` (atom or term).
+- **Behavior**: Classifies architectural topology descriptors into the optimal OTP restart strategy atom: maps \`independent_workers\` to \`one_for_one\`, \`dependent_pipeline\` to \`rest_for_one\`, \`coupled_cluster\` to \`one_for_all\`, and \`dynamic_pool\` to \`simple_one_for_one\`. Any unrecognized input must return an \`unknown_topology\` error tuple.
+- **Examples**:
+  - \`strategy_planner:select_strategy_for_topology(dependent_pipeline)\` returns \`rest_for_one\`.
+  - \`strategy_planner:select_strategy_for_topology(unknown)\` returns \`{error, unknown_topology}\`.
+
+#### \`calculate_restart_budget/2\`
+- **Input**: \`MaxCrashes\` (non-negative integer), \`WindowSeconds\` (positive integer).
+- **Behavior**: Enforces via guard clauses that both inputs are integers with \`MaxCrashes\` at least zero and \`WindowSeconds\` strictly positive. Computes the floating-point crash rate per second over the time window and returns a budget summary map containing \`intensity\`, \`period\`, \`max_rate_per_sec\`, and \`tolerated_downtime\` set to \`ok\`.
+- **Examples**:
+  - \`strategy_planner:calculate_restart_budget(10, 2)\` returns \`#{intensity => 10, max_rate_per_sec => 5.0, period => 2, tolerated_downtime => ok}\`.
+
+## Rules & Verification Constraints
+
+- Must export \`build_sup_flags/3\`, \`select_strategy_for_topology/1\`, and \`calculate_restart_budget/2\`.
+- Must use guard clauses (\`when\`) to validate supervisor strategy atoms and integer ranges.
+- \`max_rate_per_sec\` must be a floating-point value.
 `,
     mentalModelCheck: {
       question: 'In a supervision tree with children [db_pool, pricing_cache, order_gateway] under rest_for_one, what happens when pricing_cache crashes?',
@@ -172,12 +217,15 @@ Implement module \`strategy_planner\` exporting:
     calculate_restart_budget/2
 ]).
 
+%% @doc Construct a validated OTP sup_flags() map for supervisor initialization.
 build_sup_flags(Strategy, Intensity, Period) ->
     ok.
 
+%% @doc Map an architectural topology atom to the optimal OTP restart strategy.
 select_strategy_for_topology(Topology) ->
     ok.
 
+%% @doc Compute crash rate telemetry and budget limits over a sliding time window.
 calculate_restart_budget(MaxCrashes, WindowSeconds) ->
     ok.
 `,
@@ -189,6 +237,7 @@ calculate_restart_budget(MaxCrashes, WindowSeconds) ->
     calculate_restart_budget/2
 ]).
 
+%% @doc Construct a validated OTP sup_flags() map for supervisor initialization.
 build_sup_flags(Strategy, Intensity, Period)
   when (Strategy =:= one_for_one orelse Strategy =:= rest_for_one orelse
         Strategy =:= one_for_all orelse Strategy =:= simple_one_for_one),
@@ -200,12 +249,14 @@ build_sup_flags(Strategy, Intensity, Period)
         period => Period
     }.
 
+%% @doc Map an architectural topology atom to the optimal OTP restart strategy.
 select_strategy_for_topology(independent_workers) -> one_for_one;
 select_strategy_for_topology(dependent_pipeline)  -> rest_for_one;
 select_strategy_for_topology(coupled_cluster)     -> one_for_all;
 select_strategy_for_topology(dynamic_pool)        -> simple_one_for_one;
 select_strategy_for_topology(_)                   -> {error, unknown_topology}.
 
+%% @doc Compute crash rate telemetry and budget limits over a sliding time window.
 calculate_restart_budget(MaxCrashes, WindowSeconds)
   when is_integer(MaxCrashes), is_integer(WindowSeconds), MaxCrashes >= 0, WindowSeconds > 0 ->
     Rate = MaxCrashes / WindowSeconds,
@@ -228,12 +279,15 @@ calculate_restart_budget(MaxCrashes, WindowSeconds)
     calculate_restart_budget/2
 ]).
 
+%% @doc Construct a validated OTP sup_flags() map for supervisor initialization.
 build_sup_flags(Strategy, Intensity, Period) ->
     ok.
 
+%% @doc Map an architectural topology atom to the optimal OTP restart strategy.
 select_strategy_for_topology(Topology) ->
     ok.
 
+%% @doc Compute crash rate telemetry and budget limits over a sliding time window.
 calculate_restart_budget(MaxCrashes, WindowSeconds) ->
     ok.
 `,
@@ -248,6 +302,7 @@ calculate_restart_budget(MaxCrashes, WindowSeconds) ->
     calculate_restart_budget/2
 ]).
 
+%% @doc Construct a validated OTP sup_flags() map for supervisor initialization.
 build_sup_flags(Strategy, Intensity, Period)
   when (Strategy =:= one_for_one orelse Strategy =:= rest_for_one orelse
         Strategy =:= one_for_all orelse Strategy =:= simple_one_for_one),
@@ -259,12 +314,14 @@ build_sup_flags(Strategy, Intensity, Period)
         period => Period
     }.
 
+%% @doc Map an architectural topology atom to the optimal OTP restart strategy.
 select_strategy_for_topology(independent_workers) -> one_for_one;
 select_strategy_for_topology(dependent_pipeline)  -> rest_for_one;
 select_strategy_for_topology(coupled_cluster)     -> one_for_all;
 select_strategy_for_topology(dynamic_pool)        -> simple_one_for_one;
 select_strategy_for_topology(_)                   -> {error, unknown_topology}.
 
+%% @doc Compute crash rate telemetry and budget limits over a sliding time window.
 calculate_restart_budget(MaxCrashes, WindowSeconds)
   when is_integer(MaxCrashes), is_integer(WindowSeconds), MaxCrashes >= 0, WindowSeconds > 0 ->
     Rate = MaxCrashes / WindowSeconds,

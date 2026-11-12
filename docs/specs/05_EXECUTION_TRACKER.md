@@ -2553,6 +2553,20 @@ We execute the platform overhaul incrementally so every single piece is built to
     - `https://beamforge-eight.vercel.app/learn/ch07-l07` (`HTTP/1.1 200 OK`)
     - `https://beamforge-eight.vercel.app/learn/ch07-l08` (`HTTP/1.1 200 OK`)
 
+## Phase 146: Pedagogical Despoiling & Audit of Chapter 8 Lecture 1 (`ch08-l01`)
+- [x] **146.1: Eliminate 1:1 Parallel Clone & Spoilers in Lecture 8.1 (`ch08-l01`)**:
+  - Replaced the verbatim 1:1 find-and-replace clone `telecom_sup_planner` (`make_flags/3`, `route_strategy/1`, `eval_budget/2`) with a genuinely domain-disjoint, proportionally simple parallel worked example `ingestion_sup.erl` (`-behaviour(supervisor)`, `start_link/1`, `is_valid_sink/1`, `throughput_metric/2`, `init/1`). Teaches compound `orelse` guard syntax, pattern-matched enum validation, float division (`/`), and `SupFlags` inside a real OTP supervisor without mirroring assignment APIs or map schemas.
+  - Upgraded `conceptMarkdown` to full Spec 04 structure including a crash-blast-radius table, BEAM sliding-window & reverse-shutdown explanation, and clean `## Official Erlang Docs & Function Reference` section (zero emojis).
+  - Converted Assignment Specification into clean `Input`, `Behavior`, and `Examples` blocks across `build_sup_flags/3`, `select_strategy_for_topology/1`, and `calculate_restart_budget/2` with zero syntax spoilers in prompt prose.
+  - Added clean EDoc `@doc` comments across `starterCode`, `files[0].content`, `solutionCode`, and `solutionFiles['src/strategy_planner.erl']`, strictly maintaining neutral `ok.` starter scaffolding, zero in-body comments, and zero `-spec` declarations.
+- [x] **146.2: Multi-Compiler & Backend Verification**:
+  - `npm run build`: Next.js 14 production build compiled with 0 errors across 8/8 routes.
+  - `npx tsc --noEmit`: 0 TypeScript errors across the web-ide workspace.
+  - `go build ./...`: Go orchestrator backend compiled with 0 errors.
+  - `go test -v -run TestChapter8Verification/ch08-l01 ./internal/bridge`: Verified 100% passed (`score=100`, 5 stages in `1.72s`).
+  - `erlc.exe -Wall`: Compiled `ingestion_sup.erl` and `strategy_planner.erl` cleanly with 0 warnings/errors.
+  - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-8].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
+
 
 
 
