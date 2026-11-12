@@ -135,6 +135,27 @@ encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
     <<16#01:8, Len:16/big-unsigned-integer, TextBinary/binary>>.
 `
 
+	binaryScannerSolution := `-module(binary_scanner).
+-export([split_key_value/1, extract_lines/1, xor_mask_payload/2]).
+
+%% @doc Split HeaderBin on the first colon-space separator and return an ok tuple holding key and value binaries, or a malformed-header error tuple when the separator is missing.
+split_key_value(HeaderBin) ->
+    case binary:split(HeaderBin, <<": ">>) of
+        [Key, Value] ->
+            {ok, Key, Value};
+        _ ->
+            {error, malformed_header}
+    end.
+
+%% @doc Split MultiLineBin on every CRLF sequence while discarding empty tokens and return the list of non-empty line binaries.
+extract_lines(MultiLineBin) ->
+    binary:split(MultiLineBin, <<"\r\n">>, [global, trim_all]).
+
+%% @doc Transform each 8-bit byte of PayloadBin via bitwise XOR against caller-supplied MaskByte using a binary comprehension and return the masked binary.
+xor_mask_payload(PayloadBin, MaskByte) ->
+    << <<(B bxor MaskByte):8>> || <<B:8>> <= PayloadBin >>.
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -164,6 +185,11 @@ encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
 			exerciseID:   "ch04-l05",
 			visibleCount: 4,
 			files:        map[string]string{"src/bit_packer.erl": bitPackerSolution},
+		},
+		{
+			exerciseID:   "ch04-l06",
+			visibleCount: 4,
+			files:        map[string]string{"src/binary_scanner.erl": binaryScannerSolution},
 		},
 	}
 
@@ -700,6 +726,101 @@ encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected bit_syntax_wire_format stage to fail when little-endian ordering is used, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l06 rejects list comprehension + list_to_binary bypass instead of <= binary comprehension via AST audit", func(t *testing.T) {
+		sessionID := "test-ch04-l06-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		bypass := map[string]string{
+			"src/binary_scanner.erl": `-module(binary_scanner).
+-export([split_key_value/1, extract_lines/1, xor_mask_payload/2]).
+
+split_key_value(HeaderBin) ->
+    case binary:split(HeaderBin, <<": ">>) of
+        [Key, Value] -> {ok, Key, Value};
+        _ -> {error, malformed_header}
+    end.
+
+extract_lines(MultiLineBin) ->
+    binary:split(MultiLineBin, <<"\r\n">>, [global, trim_all]).
+
+%% Bypass: allocates intermediate linked list via list comprehension instead of binary comprehension <=.
+xor_mask_payload(PayloadBin, MaskByte) ->
+    list_to_binary([B bxor MaskByte || <<B:8>> <= PayloadBin]).
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l06", bypass)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when list comprehension bypass replaces <= binary comprehension, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_binary_scanner_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_binary_scanner_audit stage to fail on list comprehension bypass, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l06 rejects global header split bug and missing trim_all blank-line bug", func(t *testing.T) {
+		sessionID := "test-ch04-l06-neg-edge"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		buggy := map[string]string{
+			"src/binary_scanner.erl": `-module(binary_scanner).
+-export([split_key_value/1, extract_lines/1, xor_mask_payload/2]).
+
+%% Bug: splits globally so multi-colon values fail to preserve full value.
+split_key_value(HeaderBin) ->
+    case binary:split(HeaderBin, <<": ">>, [global]) of
+        [Key, Value] -> {ok, Key, Value};
+        _ -> {error, malformed_header}
+    end.
+
+%% Bug: omits trim_all so leading/consecutive/trailing empty lines remain.
+extract_lines(MultiLineBin) ->
+    binary:split(MultiLineBin, <<"\r\n">>, [global]).
+
+xor_mask_payload(PayloadBin, MaskByte) ->
+    << <<(B bxor MaskByte):8>> || <<B:8>> <= PayloadBin >>.
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l06", buggy)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict on global split / missing trim_all bug, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "binary_scanner_and_comprehension" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected binary_scanner_and_comprehension stage to fail on global split / missing trim_all bug, stages=%+v", report.Stages)
 		}
 	})
 }

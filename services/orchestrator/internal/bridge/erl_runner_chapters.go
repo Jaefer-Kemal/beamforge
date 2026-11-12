@@ -1613,26 +1613,62 @@ init:stop().
 	case "ch04-l06":
 		return `
 T1_Start = erlang:system_time(millisecond),
-T1_Res = try
-    KV = binary_scanner:split_key_value(<<"Authorization: Bearer_123">>),
-    Lines = binary_scanner:extract_lines(<<"line1\r\nline2\r\n\r\nline3">>),
-    Masked = binary_scanner:xor_mask_payload(<<"abc">>, 16#FF),
-    Unmasked = binary_scanner:xor_mask_payload(Masked, 16#FF),
-    case {KV, Lines, Unmasked} of
-        {{ok, <<"Authorization">>, <<"Bearer_123">>}, [<<"line1">>, <<"line2">>, <<"line3">>], <<"abc">>} ->
-            #{call_str => <<"binary_scanner:split_key_value + extract_lines + xor_mask_payload">>,
-              expected => <<"{{ok, <<\"Authorization\">>, <<\"Bearer_123\">>}, [<<\"line1\">>, <<\"line2\">>, <<\"line3\">>], <<\"abc\">>}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [{KV, Lines, Unmasked}]))),
-              passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
-        Got1 ->
-            #{call_str => <<"binary_scanner operations">>, expected => <<"{{ok, ...}, [...], ...}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got1]))), passed => false, time_ms => 0}
-    end
+T1_Res = try binary_scanner:split_key_value(<<"Authorization: Bearer_token_123">>) of
+    {ok, <<"Authorization">>, <<"Bearer_token_123">>} = R1 ->
+        #{call_str => <<"binary_scanner:split_key_value(<<\"Authorization: Bearer_token_123\">>)">>,
+          expected => <<"{ok, <<\"Authorization\">>, <<\"Bearer_token_123\">>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
+    Got1 ->
+        #{call_str => <<"binary_scanner:split_key_value(<<\"Authorization: Bearer_token_123\">>)">>, expected => <<"{ok, <<\"Authorization\">>, <<\"Bearer_token_123\">>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"binary_scanner operations">>, expected => <<"{{ok, ...}}">>,
+    #{call_str => <<"binary_scanner:split_key_value(<<\"Authorization: Bearer_token_123\">>)">>, expected => <<"{ok, <<\"Authorization\">>, <<\"Bearer_token_123\">>}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try binary_scanner:split_key_value(<<"InvalidHeaderContent">>) of
+    {error, malformed_header} = R2 ->
+        #{call_str => <<"binary_scanner:split_key_value(<<\"InvalidHeaderContent\">>)">>,
+          expected => <<"{error, malformed_header}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T2_Start};
+    Got2 ->
+        #{call_str => <<"binary_scanner:split_key_value(<<\"InvalidHeaderContent\">>)">>, expected => <<"{error, malformed_header}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got2]))), passed => false, time_ms => 0}
+catch C2:R2 ->
+    #{call_str => <<"binary_scanner:split_key_value(<<\"InvalidHeaderContent\">>)">>, expected => <<"{error, malformed_header}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try binary_scanner:extract_lines(<<"line1\r\n\r\nline2\r\nline3\r\n">>) of
+    [<<"line1">>, <<"line2">>, <<"line3">>] = R3 ->
+        #{call_str => <<"binary_scanner:extract_lines(<<\"line1\\r\\n\\r\\nline2\\r\\nline3\\r\\n\">>)">>,
+          expected => <<"[<<\"line1\">>, <<\"line2\">>, <<\"line3\">>]">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T3_Start};
+    Got3 ->
+        #{call_str => <<"binary_scanner:extract_lines(<<\"line1\\r\\n\\r\\nline2\\r\\nline3\\r\\n\">>)">>, expected => <<"[<<\"line1\">>, <<\"line2\">>, <<\"line3\">>]">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got3]))), passed => false, time_ms => 0}
+catch C3:R3 ->
+    #{call_str => <<"binary_scanner:extract_lines(<<\"line1\\r\\n\\r\\nline2\\r\\nline3\\r\\n\">>)">>, expected => <<"[<<\"line1\">>, <<\"line2\">>, <<\"line3\">>]">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+T4_Start = erlang:system_time(millisecond),
+T4_Res = try binary_scanner:xor_mask_payload(<<16#AA, 16#55>>, 16#FF) of
+    <<85, 170>> = R4 ->
+        #{call_str => <<"binary_scanner:xor_mask_payload(<<16#AA, 16#55>>, 16#FF)">>,
+          expected => <<"<<85, 170>>">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R4]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T4_Start};
+    Got4 ->
+        #{call_str => <<"binary_scanner:xor_mask_payload(<<16#AA, 16#55>>, 16#FF)">>, expected => <<"<<85, 170>>">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got4]))), passed => false, time_ms => 0}
+catch C4:R4 ->
+    #{call_str => <<"binary_scanner:xor_mask_payload(<<16#AA, 16#55>>, 16#FF)">>, expected => <<"<<85, 170>>">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -6513,30 +6549,113 @@ Stages = [CompileStage_M05, S_Ast_M05, S1_Bits]
 		return fmt.Sprintf(`
 CompileStage_M06 = case code:ensure_loaded(binary_scanner) of
     {module, binary_scanner} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"binary_scanner.erl compiled cleanly; split_key_value/1, extract_lines/1, xor_mask_payload/2 exported">>};
+        Exports_M06 = binary_scanner:module_info(exports),
+        Req_M06 = [{split_key_value, 1}, {extract_lines, 1}, {xor_mask_payload, 2}],
+        Missing_M06 = [FA || FA <- Req_M06, not lists:member(FA, Exports_M06)],
+        case Missing_M06 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"binary_scanner.erl compiled cleanly; split_key_value/1, extract_lines/1, xor_mask_payload/2 exported">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_M06]))}
+        end;
     {error, E_M06} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_M06]))}
 end,
+S_Ast_M06 = try
+    SourceCandidates_M06 = [
+        filename:join(["%s", "src", "binary_scanner.erl"]),
+        filename:join(["%s", "binary_scanner.erl"])
+    ],
+    SourceFile_M06 = case [P || P <- SourceCandidates_M06, filelib:is_regular(P)] of
+        [ValidSrc_M06 | _] -> ValidSrc_M06;
+        [] -> hd(SourceCandidates_M06)
+    end,
+    Rules_M06 = #{
+        required_remote_calls => [{binary, split, 2}, {binary, split, 3}],
+        required_constructs => [bit_syntax],
+        forbidden_constructs => [list_comprehension]
+    },
+    BinCompAudit_M06 = case epp:parse_file(SourceFile_M06, []) of
+        {ok, Forms_M06} ->
+            WalkScan_M06 = fun WalkS(Node, Pred) ->
+                case Pred(Node) of
+                    true -> true;
+                    false when is_tuple(Node) -> WalkS(tuple_to_list(Node), Pred);
+                    false when is_list(Node) -> lists:any(fun(El) -> WalkS(El, Pred) end, Node);
+                    false -> false
+                end
+            end,
+            SplitClauses_M06 = lists:flatten([Clauses || {function, _, split_key_value, 1, Clauses} <- Forms_M06]),
+            LinesClauses_M06 = lists:flatten([Clauses || {function, _, extract_lines, 1, Clauses} <- Forms_M06]),
+            XorClauses_M06 = lists:flatten([Clauses || {function, _, xor_mask_payload, 2, Clauses} <- Forms_M06]),
+            HasSplit2_M06 = WalkScan_M06(SplitClauses_M06, fun
+                ({call, _, {remote, _, {atom, _, binary}, {atom, _, split}}, [_, _]}) -> true;
+                (_) -> false
+            end),
+            HasSplit3_M06 = WalkScan_M06(LinesClauses_M06, fun
+                ({call, _, {remote, _, {atom, _, binary}, {atom, _, split}}, [_, _, _]}) -> true;
+                (_) -> false
+            end),
+            HasBinComp_M06 = WalkScan_M06(XorClauses_M06, fun
+                ({bc, _, _, Quals}) -> lists:any(fun(Q) -> is_tuple(Q) andalso tuple_size(Q) >= 1 andalso element(1, Q) =:= b_generate end, Quals);
+                (_) -> false
+            end),
+            case {HasSplit2_M06, HasSplit3_M06, HasBinComp_M06} of
+                {true, true, true} -> ok;
+                _ ->
+                    {error, iolist_to_binary(io_lib:format(
+                        "Expected binary:split/2 in split_key_value/1 (~p), binary:split/3 in extract_lines/1 (~p), and binary comprehension (<=) in xor_mask_payload/2 (~p).",
+                        [HasSplit2_M06, HasSplit3_M06, HasBinComp_M06]
+                    ))}
+            end;
+        {error, ParseErr_M06} ->
+            {error, iolist_to_binary(io_lib:format("Failed to inspect scanner AST: ~p", [ParseErr_M06]))}
+    end,
+    case {bf_ast_verifier:verify_rules(SourceFile_M06, <<>>, Rules_M06), BinCompAudit_M06} of
+        {{ok, _}, ok} ->
+            #{id => <<"ast_binary_scanner_audit">>, title => <<"AST Binary Scan & Comprehension Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified binary:split/2, binary:split/3, binary comprehension (<=), and absence of intermediate list comprehensions.">>};
+        {{error, AstViolations_M06}, _} ->
+            FirstMsg_M06 = case AstViolations_M06 of
+                [#{message := M_M06} | _] -> M_M06;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_M06]))
+            end,
+            #{id => <<"ast_binary_scanner_audit">>, title => <<"AST Binary Scan & Comprehension Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_M06, error => AstViolations_M06};
+        {_, {error, BinAuditMsg_M06}} ->
+            #{id => <<"ast_binary_scanner_audit">>, title => <<"AST Binary Scan & Comprehension Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => BinAuditMsg_M06}
+    end
+catch Class_Ast_M06:Err_Ast_M06 ->
+    #{id => <<"ast_binary_scanner_audit">>, title => <<"AST Binary Scan & Comprehension Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [Class_Ast_M06, Err_Ast_M06]))}
+end,
 S1_Scanner = try
     H1 = binary_scanner:split_key_value(<<"Content-Type: application/json">>),
+    HMulti = binary_scanner:split_key_value(<<"X-Meta: foo: bar">>),
     H2 = binary_scanner:split_key_value(<<"BadHeaderWithoutSeparator">>),
     Lines = binary_scanner:extract_lines(<<"GET / HTTP/1.1\r\nHost: beamforge.io\r\n\r\nUser-Agent: BeamForge\r\n">>),
+    LinesLead = binary_scanner:extract_lines(<<"\r\n\r\nonly_one\r\n">>),
+    LinesEmpty = binary_scanner:extract_lines(<<>>),
     Masked = binary_scanner:xor_mask_payload(<<"super_secret_payload">>, 16#AA),
     Unmasked = binary_scanner:xor_mask_payload(Masked, 16#AA),
-    case {H1, H2, Lines, Unmasked =:= <<"super_secret_payload">>} of
+    XorCase = binary_scanner:xor_mask_payload(<<"ABC">>, 16#20),
+    XorEmpty = binary_scanner:xor_mask_payload(<<>>, 16#FF),
+    case {H1, HMulti, H2, Lines, LinesLead, LinesEmpty, Unmasked =:= <<"super_secret_payload">>, XorCase, XorEmpty} of
         {{ok, <<"Content-Type">>, <<"application/json">>},
+         {ok, <<"X-Meta">>, <<"foo: bar">>},
          {error, malformed_header},
          [<<"GET / HTTP/1.1">>, <<"Host: beamforge.io">>, <<"User-Agent: BeamForge">>],
-         true} ->
-            #{id => <<"binary_scanner_and_comprehension">>, title => <<"Binary Scanning (binary:split) & Binary Comprehensions (<=)">>, status => <<"passed">>, time_ms => 8, details => <<"Verified header splitting with error fallback, global CRLF line extraction with trim_all, and byte-wise binary comprehension XOR masking">>};
+         [<<"only_one">>],
+         [],
+         true,
+         <<"abc">>,
+         <<>>} ->
+            #{id => <<"binary_scanner_and_comprehension">>, title => <<"Binary Scanning (binary:split) & Binary Comprehensions (<=)">>, status => <<"passed">>, time_ms => 8, details => <<"Verified first-occurrence header splitting, multi-colon preservation, trim_all empty-line pruning, empty binary edges, and XOR comprehension roundtrip">>};
         Got_M06 ->
             #{id => <<"binary_scanner_and_comprehension">>, title => <<"Binary Scanning (binary:split) & Binary Comprehensions (<=)">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Scanner mismatch: ~p", [Got_M06]))}
     end
 catch Class_M06:Err_M06 ->
     #{id => <<"binary_scanner_and_comprehension">>, title => <<"Binary Scanning (binary:split) & Binary Comprehensions (<=)">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_M06, Err_M06]))}
 end,
-Stages = [CompileStage_M06, S1_Scanner]
-`), true
+Stages = [CompileStage_M06, S_Ast_M06, S1_Scanner]
+`, wsDir, wsDir), true
 
 	case "ch04-l07":
 		return fmt.Sprintf(`
