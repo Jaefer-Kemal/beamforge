@@ -752,85 +752,127 @@ classify_restart(transient, _AbnormalReason) ->
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-What happens when a fatal dependency goes down—for instance, when the primary PostgreSQL database suffers a network partition, or a configuration file is corrupt?
+What happens when a critical dependency suffers a catastrophic failure—for example, a primary PostgreSQL cluster losing connectivity, or a corrupted TLS key failing every startup?
 
-If a \`permanent\` worker crashes immediately every time the supervisor starts it, what prevents the supervisor from spinning in an infinite 100% CPU restart loop that freezes the entire BEAM node?
+If a \`permanent\` worker crashes immediately every time the supervisor spawns it, an uncapped supervisor would spin in a tight 100% CPU loop, saturating schedulers and flooding logs until the entire BEAM node becomes unresponsive.
+
+## Deep Concept Breakdown & Under the Hood
 
 ### The OTP Sliding Window Rate Limiter
 
-Every OTP supervisor implements an internal sliding window algorithm specified by two parameters in \`sup_flags()\`:
-- **\`intensity => MaxR\`**: The maximum number of allowable crashes.
-- **\`period => MaxT\`**: The sliding time window in seconds.
+Every OTP supervisor runs a built-in sliding window rate limiter configured via \`intensity\` (maximum restarts \`MaxR\`) and \`period\` (window duration \`MaxT\` seconds) in \`sup_flags()\`:
+1. When a child terminates abnormally, the supervisor appends the current monotonic timestamp to an internal \`restarts\` queue.
+2. It prunes timestamps older than \`MaxT\` seconds relative to the latest crash.
+3. It counts remaining crashes inside the inclusive window from \`Latest - MaxT\` through \`Latest\`.
+4. If \`CrashCount <= MaxR\`, the supervisor stays within budget and restarts affected children; if \`CrashCount > MaxR\`, **Max Restart Intensity Exceeded** triggers upward escalation.
 
-Whenever any child process terminates abnormally:
-1. The supervisor records the current monotonic timestamp in its internal \`restarts\` queue.
-2. It discards all recorded timestamps that are older than \`MaxT\` seconds relative to the latest crash.
-3. It counts the number of crashes that occurred within the window \`[Latest - MaxT, Latest]\`.
-4. **The Decision Point:**
-   - If \`CrashCount <= MaxR\`: The supervisor stays within its restart budget. It restarts the child according to its strategy (\`one_for_one\`, \`rest_for_one\`, etc.).
-   - If \`CrashCount > MaxR\`: The supervisor declares **Max Restart Intensity Exceeded**!
+### What the BEAM Does Under the Hood: Shutdown Escalation & Ordering
 
-### The Upward Crash Escalation Cascade
+When the intensity budget is exceeded:
+- The supervisor stops restarting children locally because the fault is systemic.
+- It terminates all surviving children in **strict reverse startup order** and exits itself with \`shutdown\`.
+- Because supervisors link upward, that exit notifies the parent supervisor, which can either restart the entire sub-tree or escalate further toward the application root.
 
-When the restart intensity budget is exceeded:
-1. The supervisor stops attempting to restart children. It recognizes that the problem is systemic and cannot be solved locally.
-2. It terminates all of its surviving children in **strict reverse order** of startup.
-3. It terminates **itself** with reason \`shutdown\`!
-4. Because the supervisor is linked to its parent supervisor, its own termination triggers an exit signal up the supervision tree.
-5. The parent supervisor now handles the failure—either restarting this entire subsystem or escalating further up to the root supervisor of the application release!
-
-### Downstream Shutdown Order in \`rest_for_one\`
-
-In a \`rest_for_one\` supervision tree with children \`[db_pool, pricing_cache, order_gateway]\`:
-- If \`pricing_cache\` crashes, the affected children are \`[pricing_cache, order_gateway]\`.
-- **Termination Order:** Downstream children must be stopped in **strict reverse order**: \`order_gateway\` is stopped first, then \`pricing_cache\`.
-- **Restart Order:** They are restarted in **forward dependency order**: \`pricing_cache\` is restarted first, then \`order_gateway\`!
-- The upstream dependency \`db_pool\` remains untouched.
+Similarly, under \`rest_for_one\` on a chain \`[db_pool, pricing_cache, order_gateway]\`, crashing \`pricing_cache\` stops downstream children in **reverse startup order** (\`order_gateway\`, then \`pricing_cache\`) before rebooting them in **forward dependency order** (\`pricing_cache\`, then \`order_gateway\`), leaving \`db_pool\` untouched.
 
 > [!warning] Production Supervision Trap: Intensity Blizzard CPU Starvation
-> Setting \`intensity => 1000, period => 1\` effectively disables crash throttling. If a bug causes an immediate crash on boot, the BEAM VM will spend 100% of its CPU cycles in supervisor loops, starving other schedulers. Always choose sensible values (e.g. \`intensity => 3..5, period => 5..10\`).
+> Setting \`intensity => 1000, period => 1\` disables crash throttling in practice. Deterministic startup failures will pin scheduler threads inside restart loops, starving live traffic. Always calibrate tight bounds (such as \`intensity => 3..5\` over \`period => 5..10\` seconds).
 
-### Parallel Worked Example
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
--module(crash_escalator_demo).
--export([check_window/3, downstream_order/2]).
+%% Official OTP Type Spec (stdlib / supervisor)
+sup_flags() = #{
+    strategy => strategy(),
+    intensity => non_neg_integer(),
+    period => pos_integer()
+}
 
-check_window([], _MaxR, _MaxT) ->
-    {ok, within_budget};
-check_window(Timestamps, MaxR, MaxT) ->
-    Latest = lists:max(Timestamps),
-    Cutoff = Latest - MaxT,
-    Recent = [T || T <- Timestamps, T >= Cutoff, T =< Latest],
-    case length(Recent) > MaxR of
-        true -> {escalate, length(Recent), MaxR};
-        false -> {ok, length(Recent), MaxR}
-    end.
+%% Official OTP Signature (stdlib / lists)
+lists:splitwith(Pred, List1) -> {List2, List3}
+  Types:
+    Pred = fun((Elem :: T) -> boolean())
+    List1 = List2 = List3 = [T]
+\`\`\`
 
-downstream_order(AllChildren, TargetId) ->
-    case lists:splitwith(fun(Id) -> Id =/= TargetId end, AllChildren) of
-        {_Prefix, []} -> {error, not_found};
-        {_Prefix, Affected} ->
-            {reverse_stop, lists:reverse(Affected), forward_restart, Affected}
+\`lists:splitwith/2\` splits \`List1\` into a leading prefix \`List2\` of elements satisfying \`Pred(Elem) =:= true\` and a trailing remainder \`List3\` starting at the **first element** where \`Pred\` returns \`false\` (or \`[]\` if every element matched). Consult the attached OTP Doc Card below for the full \`sup_flags()\` schema.
+
+## Parallel Worked Example: Deployment Window & Rollback Audit
+
+Consider \`deploy_window_audit\`, a small CI/CD release auditor that identifies stale deploy timestamps relative to the latest event and determines rollback steps preceding a deployment gate:
+
+\`\`\`erlang
+-module(deploy_window_audit).
+
+-export([
+    partition_stale_events/2,
+    rollback_before_gate/2
+]).
+
+%% @doc Partition timestamps into stale and active sets relative to the newest event.
+partition_stale_events([], _RetentionSec) ->
+    {[], []};
+partition_stale_events(Timestamps, RetentionSec)
+  when is_list(Timestamps), is_integer(RetentionSec), RetentionSec > 0 ->
+    Anchor = lists:max(Timestamps),
+    Cutoff = Anchor - RetentionSec,
+    lists:partition(fun(T) -> T < Cutoff end, Timestamps).
+
+%% @doc Return steps completed prior to GateName in reverse rollback order.
+rollback_before_gate(PipelineSteps, GateName) when is_list(PipelineSteps) ->
+    case lists:splitwith(fun(Step) -> Step =/= GateName end, PipelineSteps) of
+        {AllSteps, []} ->
+            {gate_missing, AllSteps};
+        {PriorSteps, _Remaining} ->
+            {rollback, lists:reverse(PriorSteps)}
     end.
 \`\`\`
 
-### Your Mission
+Key Erlang mechanics illustrated above:
+- **Empty-List Clause Before \`lists:max/1\`**: Calling \`lists:max([])\` raises \`function_clause\`, so handling \`[]\` in an earlier clause keeps empty histories safe while enforcing numeric bounds in the non-empty clause.
+- **Pivot Splitting with \`lists:splitwith/2\`**: Matching against elements *not equal* to a target places everything upstream in the first tuple element and keeps the target itself at the head of the second tuple element (or \`[]\` when absent).
 
-Implement module \`escalation_analyzer\` exporting:
-1. \`evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT) -> {escalate_to_parent, Count, MaxR} | {within_budget, Count, MaxR}\`:
-   - If list is empty, returns \`{within_budget, 0, MaxR}\`.
-   - Finds \`Latest = lists:max(CrashTimestampsSecList)\`.
-   - Counts timestamps \`Ts\` satisfying \`(Latest - MaxT) =< Ts andalso Ts =< Latest\`.
-   - If \`Count > MaxR\`, returns \`{escalate_to_parent, Count, MaxR}\`; otherwise returns \`{within_budget, Count, MaxR}\`.
-2. \`plan_escalation_action(ChildOrderList, CrashedChildId) -> {stop_in_reverse_order, ToStopReverseList, restart_in_order, ToRestartForwardList} | {error, child_not_found}\`:
-   - Locates \`CrashedChildId\` in \`ChildOrderList\`. Returns \`{error, child_not_found}\` if missing.
-   - Extracts the crashed child and all downstream children: \`Affected = [CrashedChildId | Downstream]\`.
-   - Computes \`ToStopReverseList = lists:reverse(Affected)\`.
-   - Computes \`ToRestartForwardList = Affected\`.
-   - Returns \`{stop_in_reverse_order, ToStopReverseList, restart_in_order, ToRestartForwardList}\`.
-3. \`reverse_shutdown_order(StartupChildIdsList) -> list()\`:
-   - Returns \`lists:reverse(StartupChildIdsList)\`.
+## Assignment Specification
+
+Implement \`src/escalation_analyzer.erl\` with the following exports:
+
+\`\`\`erlang
+-module(escalation_analyzer).
+
+-export([
+    evaluate_crash_burst/3,
+    plan_escalation_action/2,
+    reverse_shutdown_order/1
+]).
+\`\`\`
+
+### Functional Requirements
+
+#### \`evaluate_crash_burst/3\`
+- **Input**: \`CrashTimestampsSecList\` (list of numeric timestamps in seconds), \`MaxR\` (non-negative integer restart limit), \`MaxT\` (positive integer window duration in seconds).
+- **Behavior**: Handles empty histories immediately as zero crashes within budget (while still enforcing valid \`MaxR\` and \`MaxT\` bounds via guards). For non-empty lists, finds the latest crash timestamp and counts how many crash timestamps fall inside the inclusive sliding window spanning from \`MaxT\` seconds prior to the latest crash up through the latest crash itself. Replies with \`within_budget\` when the count does not exceed \`MaxR\`, or \`escalate_to_parent\` when it exceeds \`MaxR\`, bundling the counted crashes and \`MaxR\` in a 3-tuple.
+- **Examples**:
+  - \`escalation_analyzer:evaluate_crash_burst([10, 12, 14], 3, 5)\` returns \`{within_budget, 3, 3}\`.
+  - \`escalation_analyzer:evaluate_crash_burst([10, 11, 12, 13], 3, 5)\` returns \`{escalate_to_parent, 4, 3}\`.
+
+#### \`plan_escalation_action/2\`
+- **Input**: \`ChildOrderList\` (ordered startup list of child identifiers), \`CrashedChildId\` (identifier term).
+- **Behavior**: Locates \`CrashedChildId\` within \`ChildOrderList\`. If missing, returns an \`unknown\` / missing child error tuple (\`child_not_found\`). When found, isolates the crashed child and all children started after it as the affected subset, computes the reverse-order teardown sequence and forward-order restart sequence, and returns a 4-tuple pairing \`stop_in_reverse_order\` with the teardown list and \`restart_in_order\` with the forward restart list.
+- **Examples**:
+  - \`escalation_analyzer:plan_escalation_action([db_pool, pricing_cache, order_gateway], pricing_cache)\` returns \`{stop_in_reverse_order, [order_gateway, pricing_cache], restart_in_order, [pricing_cache, order_gateway]}\`.
+  - \`escalation_analyzer:plan_escalation_action([db_pool], missing)\` returns \`{error, child_not_found}\`.
+
+#### \`reverse_shutdown_order/1\`
+- **Input**: \`StartupChildIdsList\` (list of child identifiers in startup order).
+- **Behavior**: Enforces via guard clauses that the argument is a list and returns the exact full-supervisor teardown order by reversing the startup sequence.
+- **Examples**:
+  - \`escalation_analyzer:reverse_shutdown_order([db_pool, pricing_cache, order_gateway])\` returns \`[order_gateway, pricing_cache, db_pool]\`.
+
+## Rules & Verification Constraints
+
+- Must export \`evaluate_crash_burst/3\`, \`plan_escalation_action/2\`, and \`reverse_shutdown_order/1\`.
+- Must use guard clauses (\`when\`) enforcing list types, non-negative crash intensity, and positive window periods.
+- Sliding-window timestamps must be counted inclusively across both bounds.
 `,
     mentalModelCheck: {
       question: 'When a supervisor exceeds its MaxR restarts within MaxT seconds, why does it shut itself down instead of just giving up on that single worker?',
@@ -883,12 +925,15 @@ Implement module \`escalation_analyzer\` exporting:
     reverse_shutdown_order/1
 ]).
 
+%% @doc Evaluate whether crash timestamps exceed the allowed restart intensity within the sliding period window; treats empty lists as zero crashes and rejects negative intensity or non-positive period bounds.
 evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT) ->
     ok.
 
+%% @doc Determine affected downstream children from a startup order at a crashed child ID, returning reverse shutdown and forward restart plans or an error tuple if missing.
 plan_escalation_action(ChildOrderList, CrashedChildId) ->
     ok.
 
+%% @doc Compute the supervisor teardown sequence by reversing a child startup ID list; rejects non-list inputs.
 reverse_shutdown_order(StartupChildIdsList) ->
     ok.
 `,
@@ -900,7 +945,9 @@ reverse_shutdown_order(StartupChildIdsList) ->
     reverse_shutdown_order/1
 ]).
 
-evaluate_crash_burst([], MaxR, _MaxT) ->
+%% @doc Evaluate whether crash timestamps exceed the allowed restart intensity within the sliding period window; treats empty lists as zero crashes and rejects negative intensity or non-positive period bounds.
+evaluate_crash_burst([], MaxR, MaxT)
+  when is_integer(MaxR), MaxR >= 0, is_integer(MaxT), MaxT > 0 ->
     {within_budget, 0, MaxR};
 evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT)
   when is_list(CrashTimestampsSecList), is_integer(MaxR), MaxR >= 0, is_integer(MaxT), MaxT > 0 ->
@@ -913,6 +960,7 @@ evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT)
         true         -> {within_budget, Count, MaxR}
     end.
 
+%% @doc Determine affected downstream children from a startup order at a crashed child ID, returning reverse shutdown and forward restart plans or an error tuple if missing.
 plan_escalation_action(ChildOrderList, CrashedChildId) when is_list(ChildOrderList) ->
     case lists:splitwith(fun(Id) -> Id =/= CrashedChildId end, ChildOrderList) of
         {_Prefix, []} ->
@@ -923,6 +971,7 @@ plan_escalation_action(ChildOrderList, CrashedChildId) when is_list(ChildOrderLi
             {stop_in_reverse_order, ToStop, restart_in_order, ToRestart}
     end.
 
+%% @doc Compute the supervisor teardown sequence by reversing a child startup ID list; rejects non-list inputs.
 reverse_shutdown_order(StartupChildIdsList) when is_list(StartupChildIdsList) ->
     lists:reverse(StartupChildIdsList).
 `,
@@ -938,12 +987,15 @@ reverse_shutdown_order(StartupChildIdsList) when is_list(StartupChildIdsList) ->
     reverse_shutdown_order/1
 ]).
 
+%% @doc Evaluate whether crash timestamps exceed the allowed restart intensity within the sliding period window; treats empty lists as zero crashes and rejects negative intensity or non-positive period bounds.
 evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT) ->
     ok.
 
+%% @doc Determine affected downstream children from a startup order at a crashed child ID, returning reverse shutdown and forward restart plans or an error tuple if missing.
 plan_escalation_action(ChildOrderList, CrashedChildId) ->
     ok.
 
+%% @doc Compute the supervisor teardown sequence by reversing a child startup ID list; rejects non-list inputs.
 reverse_shutdown_order(StartupChildIdsList) ->
     ok.
 `,
@@ -958,7 +1010,9 @@ reverse_shutdown_order(StartupChildIdsList) ->
     reverse_shutdown_order/1
 ]).
 
-evaluate_crash_burst([], MaxR, _MaxT) ->
+%% @doc Evaluate whether crash timestamps exceed the allowed restart intensity within the sliding period window; treats empty lists as zero crashes and rejects negative intensity or non-positive period bounds.
+evaluate_crash_burst([], MaxR, MaxT)
+  when is_integer(MaxR), MaxR >= 0, is_integer(MaxT), MaxT > 0 ->
     {within_budget, 0, MaxR};
 evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT)
   when is_list(CrashTimestampsSecList), is_integer(MaxR), MaxR >= 0, is_integer(MaxT), MaxT > 0 ->
@@ -971,6 +1025,7 @@ evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT)
         true         -> {within_budget, Count, MaxR}
     end.
 
+%% @doc Determine affected downstream children from a startup order at a crashed child ID, returning reverse shutdown and forward restart plans or an error tuple if missing.
 plan_escalation_action(ChildOrderList, CrashedChildId) when is_list(ChildOrderList) ->
     case lists:splitwith(fun(Id) -> Id =/= CrashedChildId end, ChildOrderList) of
         {_Prefix, []} ->
@@ -981,6 +1036,7 @@ plan_escalation_action(ChildOrderList, CrashedChildId) when is_list(ChildOrderLi
             {stop_in_reverse_order, ToStop, restart_in_order, ToRestart}
     end.
 
+%% @doc Compute the supervisor teardown sequence by reversing a child startup ID list; rejects non-list inputs.
 reverse_shutdown_order(StartupChildIdsList) when is_list(StartupChildIdsList) ->
     lists:reverse(StartupChildIdsList).
 `,

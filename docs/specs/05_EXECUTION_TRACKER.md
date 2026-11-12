@@ -2608,6 +2608,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter8Verification/ch08-l02` (`VERIFIED 100% PASSED`, score=100, 5 stages in `1.37s`) and `TEST_CHAPTER=8 TestDynamicVisibleTestsCurriculum` (`ch08-l02 | 3/3 tests passed`, all 7 Ch. 8 lessons passed in `11.19s`).
   - **Workspace Compilers**: `Select-String` confirmed `0` `-spec` declarations across `ch01`–`ch08`; `go build ./...`, `npx tsc --noEmit`, and `npm run build` (8/8 routes) all passed cleanly.
 
+## Phase 150: Pedagogical Despoiling & Live Tri-Verification of Chapter 8 Lecture 3 (`ch08-l03`)
+- [x] **150.1: Audit & Eliminate Spoilers in Lecture 8.3 (`ch08-l03`: `escalation_analyzer.erl`)**:
+  - Replaced the verbatim 1:1 clone `crash_escalator_demo` (`check_window/3`, `downstream_order/2`) with a genuinely domain-disjoint, proportionally simple parallel worked example `deploy_window_audit.erl` (`partition_stale_events/2`, `rollback_before_gate/2`). Teaches empty-list safety ahead of `lists:max/1`, time-window subtraction with `lists:partition/2`, and pivot splitting with `lists:splitwith/2` + `lists:reverse/1` in a rollback context without cloning escalation clauses or tuple returns.
+  - Upgraded `conceptMarkdown` to full Spec 04 structure: added `## Deep Concept Breakdown & Under the Hood` and `## Official Erlang Docs & Function Reference` (documenting `sup_flags()` and `lists:splitwith/2` without emojis).
+  - De-spoiled Assignment Specification (`### Functional Requirements`) into clean `Input`, `Behavior`, and `Examples` blocks across `evaluate_crash_burst/3`, `plan_escalation_action/2`, and `reverse_shutdown_order/1`, removing all verbatim formula/variable dictations from prose.
+  - Added 10/10 `@doc` contracts across `starterCode`, `files[0].content`, `solutionCode`, and `solutionFiles['src/escalation_analyzer.erl']` (plus guard validation on `evaluate_crash_burst([], MaxR, MaxT)`), keeping neutral `ok.` starter bodies, zero in-body comments, and zero `-spec`.
+- [x] **150.2: Mandatory Live Tri-Verification & Compiler Suite (`ch08-l03`)**:
+  - **Parallel Worked Example (`deploy_window_audit.erl`)**: Extracted from `ch08.ts`, compiled with `erlc.exe -Wall` (exit code 0, 0 warnings), and verified live via escript (`PWE_L03_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe` exit code 0), verified all 3 exports present, and executed stubs cleanly (`STARTER_L03 exports=true stubs={ok,ok,ok}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `erlc.exe -Wall +debug_info` (exit code 0, 0 warnings), passed `bf_ast_verifier` (`guards`), and passed `SOLUTION_L03_OK` (including empty-list guard rejection).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter8Verification/ch08-l03` (`VERIFIED 100% PASSED`, score=100, 5 stages in `1.37s`) and `TEST_CHAPTER=8 TestDynamicVisibleTestsCurriculum` (`ch08-l03 | 3/3 tests passed`, all 7 Ch. 8 lessons passed in `12.57s`).
+  - **Workspace Compilers**: `Select-String` confirmed `0` `-spec` declarations across `ch01`–`ch08`; `go build ./...`, `npx tsc --noEmit`, and `npm run build` (8/8 routes) all passed cleanly.
+
 
 
 
