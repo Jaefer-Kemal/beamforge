@@ -1479,17 +1479,17 @@ Erlang's punctuation is based on the logic of formal written English:
 2. **; (Semicolon) — "OR ELSE"**:
    Separates alternative clauses of the **same function and arity**.
    \`\`\`erlang
-   status(200) -> ok;             %% semicolon tells compiler: "or try next clause"
-   status(404) -> not_found       %% no semicolon on the final clause
+   grade(1) -> gold;              %% semicolon tells compiler: "or try next clause"
+   grade(2) -> silver             %% no semicolon on the final clause
    \`\`\`
 
 3. **. (Period) — "FULL STOP"**:
    Placed **only at the very end of the entire function definition**.
    \`\`\`erlang
-   status(500) -> error.          %% period tells compiler: "function definition complete"
+   grade(3) -> bronze.            %% period tells compiler: "function definition complete"
    \`\`\`
 
-> [!warning] The Most Common Beginner Compiler Error
+> [!WARNING] The Most Common Beginner Compiler Error
 > Putting a period (\`.\`) instead of a semicolon (\`;\`) between function clauses immediately terminates the function!
 > If you write:
 > \`\`\`erlang
@@ -1511,39 +1511,33 @@ If called with \`{node_a, node_b}\`, the first clause fails to match, falling th
 
 ## Parallel Worked Example
 
-Consider an industrial actuator controller demonstrating multi-clause dispatch, list head extraction, and repeated pattern variable matching:
+Consider a deterministic signal dispatcher demonstrating semicolon-separated multi-clause heads, list vs atom matching, and repeated variable binding across arguments:
 
 \`\`\`erlang
--module(actuator_controller).
--export([mode_profile/1, lead_telemetry_or_default/2, verify_symmetric_pins/1]).
+-module(gate_dispatch).
+-export([classify_signal/1, confirm_dual_reading/2]).
 
-%% Evaluate actuator state atom and return operational power budget
-mode_profile(idle) ->
-    {power_watts, 5};
-mode_profile(calibrating) ->
-    {power_watts, 25};
-mode_profile(active_load) ->
-    {power_watts, 120};
-mode_profile(_) ->
-    {error, unsupported_mode}.
+%% Dispatch empty lists, non-empty queues, named atoms, and fallback inputs via ';' and '.'
+classify_signal([]) ->
+    {empty, halt};
+classify_signal([Priority | _Queue]) ->
+    {queued, Priority};
+classify_signal(reset) ->
+    cleared;
+classify_signal(_Other) ->
+    {ignored, unknown_signal}.
 
-%% Retrieve the most recent measurement from a queue, falling back to calibration baseline
-lead_telemetry_or_default([LatestReading | _OlderReadings], _Baseline) ->
-    LatestReading;
-lead_telemetry_or_default([], Baseline) ->
-    Baseline.
-
-%% Verify that dual redundant sensor pins report identical voltage levels
-verify_symmetric_pins({PinVoltage, PinVoltage}) ->
-    {synced, PinVoltage};
-verify_symmetric_pins({_Primary, _Secondary}) ->
-    unsynced.
+%% Repeated variable ExpectedTag asserts arg 1 equals the tag inside arg 2's sensor tuple
+confirm_dual_reading(ExpectedTag, {sensor, ExpectedTag, Value}) ->
+    {verified, ExpectedTag, Value};
+confirm_dual_reading(_ExpectedTag, _Sample) ->
+    rejected.
 \`\`\`
 
-Notice:
-- Each clause of \`mode_profile/1\` ends with a semicolon \`;\`, while the final clause ends with a period \`.\`.
-- \`lead_telemetry_or_default/2\` separates the non-empty list pattern clause from the empty list fallback clause with \`;\`.
-- \`verify_symmetric_pins/1\` asserts identical pin values in the tuple using the repeated variable \`PinVoltage\`.
+Notice how the BEAM evaluates each feature:
+- Each clause of \`classify_signal/1\` separates alternative heads with \`;\`, ending only the final \`_Other\` fallback clause with a period \`.\`.
+- Non-empty list pattern \`[Priority | _Queue]\` matches the front signal in $O(1)$ time and skips earlier clauses cleanly on \`[]\`.
+- \`confirm_dual_reading/2\` reuses \`ExpectedTag\` twice in the first clause head to assert structural equality without writing an explicit \`if\` branch.
 
 ## Official Erlang Docs & Function Reference
 
@@ -1557,36 +1551,37 @@ Name(PatternsN) -> BodyN.
   First matching pattern executes.
   If no pattern matches, a function_clause run-time exception occurs.
 \`\`\`
+> **How to Read This Spec**: Erlang evaluates clauses sequentially from top to bottom until the first clause pattern unifies with the supplied arguments; reaching past the final clause without matching raises a \`function_clause\` exception. Open the attached **\`function_clause\` Reference Card** below for official OTP error-handling documentation and ERTS source links.
 
 ## Assignment Specification
 
-In \`clause_router.erl\`, implement three multi-clause functions using pattern matching in function heads and the Erlang punctuation triad:
+In \`src/clause_router.erl\`, implement and export \`describe_status/1\`, \`head_or_default/2\`, and \`verify_identical_pair/1\`:
 
 1. \`describe_status(Code)\`:
    - **Input**: An integer HTTP-style status code \`Code\`.
-   - **Behavior**: Use pattern matching across function clauses to map known status codes to status tuples. If the code is not one of the explicitly handled status values, fall back via a wildcard clause.
-     - Code \`200\`: Returns \`{ok, success}\`.
-     - Code \`404\`: Returns \`{error, not_found}\`.
-     - Code \`500\`: Returns \`{error, server_crash}\`.
-     - Any other code: Returns \`{error, unknown_code}\`.
+   - **Behavior**: Routes known status codes in $O(1)$ time across function clauses and falls back cleanly for any unrecognized code:
+     - \`200\` returns \`{ok, success}\`.
+     - \`404\` returns \`{error, not_found}\`.
+     - \`500\` returns \`{error, server_crash}\`.
+     - Any other input returns \`{error, unknown_code}\`.
    - **Examples**:
      - \`clause_router:describe_status(200)\` returns \`{ok, success}\`.
      - \`clause_router:describe_status(404)\` returns \`{error, not_found}\`.
      - \`clause_router:describe_status(418)\` returns \`{error, unknown_code}\`.
 
 2. \`head_or_default(List, Default)\`:
-   - **Input**: A list \`List\` and a fallback value \`Default\` of any term type.
-   - **Behavior**: Extract the first element if the list is non-empty; if the list is empty, return the fallback value. Must be implemented as two distinct function clauses separated by a semicolon.
+   - **Input**: A proper list \`List\` and fallback term \`Default\`.
+   - **Behavior**: Returns the first element in $O(1)$ time when \`List\` is non-empty, or returns \`Default\` when \`List\` is empty.
    - **Examples**:
      - \`clause_router:head_or_default([packet, ping], fallback)\` returns \`packet\`.
      - \`clause_router:head_or_default([], 999)\` returns \`999\`.
      - \`clause_router:head_or_default([], default_val)\` returns \`default_val\`.
 
 3. \`verify_identical_pair(PairTuple)\`:
-   - **Input**: A 2-element tuple \`PairTuple\`.
-   - **Behavior**: Check whether both elements in the pair are identical using repeated pattern variable binding in the clause head (without \`if\`, \`case\`, or boolean equality operators).
-     - If both elements match: Returns \`{matched, Value}\` where \`Value\` is the shared element.
-     - If elements differ or input does not match: Returns the atom \`mismatch\`.
+   - **Input**: A 2-element tuple (or non-matching fallback term).
+   - **Behavior**: Checks whether \`PairTuple\` is a 2-element tuple whose two elements match strictly in both value and runtime type in $O(1)$ time using clause-head pattern matching:
+     - When both elements are strictly identical (\`Value\`), returns \`{matched, Value}\`.
+     - Otherwise (mismatched elements or wrong tuple size), returns \`mismatch\`.
    - **Examples**:
      - \`clause_router:verify_identical_pair({alpha, alpha})\` returns \`{matched, alpha}\`.
      - \`clause_router:verify_identical_pair({omega, omega})\` returns \`{matched, omega}\`.
@@ -1594,8 +1589,9 @@ In \`clause_router.erl\`, implement three multi-clause functions using pattern m
 
 ## Rules & Verification Constraints
 
-- Follow the punctuation triad strictly: separate clauses of the same function with \`;\` and terminate each function with \`.\`.
-- Do not use \`case\` or \`if\` expressions—rely entirely on multi-clause function head pattern matching.`,
+- **Exports**: \`clause_router\` must export \`describe_status/1\`, \`head_or_default/2\`, and \`verify_identical_pair/1\`.
+- **No \`if\` Expressions**: Enforced via AST verification (\`if_expr\` is forbidden)—rely on multi-clause function heads separated by \`;\` and ending in \`.\`.
+- **Strict Type Matching & Clean Compilation**: Must distinguish numeric types (\`{42, 42.0}\` -> \`mismatch\`), reject non-pairs cleanly, and compile with zero unused-variable warnings.`,
     otpDocCards: [
       {
         functionName: 'function_clause',
@@ -1651,13 +1647,14 @@ In \`clause_router.erl\`, implement three multi-clause functions using pattern m
         title: 'Match Identical Pair Tuple',
         erlangCall: 'clause_router:verify_identical_pair({omega, omega})',
         expectedOutput: '{matched, omega}',
-        explanation: 'Matches {X, X} repeated pattern variable clause.',
+        explanation: 'Matches a 2-tuple whose first and second elements are identical and returns the matched tuple.',
       },
     ],
     astRules: {
       requiredConstructs: [],
+      forbiddenConstructs: ['if_expr'],
     },
-    solutionExplanation: 'Demonstrates multi-clause function dispatch, the punctuation triad (; vs .), and repeated pattern variable matching.',
+    solutionExplanation: 'Demonstrates multi-clause function dispatch separated by semicolons, strict pair equality in clause heads, and trailing full-stop punctuation.',
     files: [
       {
         name: 'clause_router.erl',
@@ -1665,16 +1662,16 @@ In \`clause_router.erl\`, implement three multi-clause functions using pattern m
         content: `-module(clause_router).
 -export([describe_status/1, head_or_default/2, verify_identical_pair/1]).
 
-%% @doc Classify status codes 200, 404, 500, or return unknown_code error.
-describe_status(Code) ->
+%% @doc Map HTTP status codes 200, 404, 500 to ok/error tuples, defaulting other inputs to unknown_code.
+describe_status(_Code) ->
     ok.
 
-%% @doc Return first element of a non-empty list, or Default when list is empty.
-head_or_default(List, Default) ->
+%% @doc Return the first element of a non-empty list, or Default when the list is empty.
+head_or_default(_List, _Default) ->
     ok.
 
-%% @doc Return {matched, Value} if both tuple elements are identical, otherwise mismatch.
-verify_identical_pair(Pair) ->
+%% @doc Return a matched 2-tuple if both elements of a 2-tuple match strictly, or mismatch otherwise.
+verify_identical_pair(_Pair) ->
     ok.`,
       },
     ],
@@ -1682,6 +1679,7 @@ verify_identical_pair(Pair) ->
       'src/clause_router.erl': `-module(clause_router).
 -export([describe_status/1, head_or_default/2, verify_identical_pair/1]).
 
+%% @doc Map HTTP status codes 200, 404, 500 to ok/error tuples, defaulting other inputs to unknown_code.
 describe_status(200) ->
     {ok, success};
 describe_status(404) ->
@@ -1691,11 +1689,13 @@ describe_status(500) ->
 describe_status(_) ->
     {error, unknown_code}.
 
+%% @doc Return the first element of a non-empty list, or Default when the list is empty.
 head_or_default([H | _], _Default) ->
     H;
 head_or_default([], Default) ->
     Default.
 
+%% @doc Return a matched 2-tuple if both elements of a 2-tuple match strictly, or mismatch otherwise.
 verify_identical_pair({X, X}) ->
     {matched, X};
 verify_identical_pair(_) ->
@@ -1704,20 +1704,21 @@ verify_identical_pair(_) ->
     starterCode: `-module(clause_router).
 -export([describe_status/1, head_or_default/2, verify_identical_pair/1]).
 
-%% @doc Classify status codes 200, 404, 500, or return unknown_code error.
-describe_status(Code) ->
+%% @doc Map HTTP status codes 200, 404, 500 to ok/error tuples, defaulting other inputs to unknown_code.
+describe_status(_Code) ->
     ok.
 
-%% @doc Return first element of a non-empty list, or Default when list is empty.
-head_or_default(List, Default) ->
+%% @doc Return the first element of a non-empty list, or Default when the list is empty.
+head_or_default(_List, _Default) ->
     ok.
 
-%% @doc Return {matched, Value} if both tuple elements are identical, otherwise mismatch.
-verify_identical_pair(Pair) ->
+%% @doc Return a matched 2-tuple if both elements of a 2-tuple match strictly, or mismatch otherwise.
+verify_identical_pair(_Pair) ->
     ok.`,
     solutionCode: `-module(clause_router).
 -export([describe_status/1, head_or_default/2, verify_identical_pair/1]).
 
+%% @doc Map HTTP status codes 200, 404, 500 to ok/error tuples, defaulting other inputs to unknown_code.
 describe_status(200) ->
     {ok, success};
 describe_status(404) ->
@@ -1727,11 +1728,13 @@ describe_status(500) ->
 describe_status(_) ->
     {error, unknown_code}.
 
+%% @doc Return the first element of a non-empty list, or Default when the list is empty.
 head_or_default([H | _], _Default) ->
     H;
 head_or_default([], Default) ->
     Default.
 
+%% @doc Return a matched 2-tuple if both elements of a 2-tuple match strictly, or mismatch otherwise.
 verify_identical_pair({X, X}) ->
     {matched, X};
 verify_identical_pair(_) ->

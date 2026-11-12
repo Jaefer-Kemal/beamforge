@@ -327,7 +327,7 @@ T3_Res = try clause_router:verify_identical_pair({omega, omega}) of
           expected => <<"{matched, omega}">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T3_Start}
 catch C3:R3 ->
-    #{call_str => <<"clause_router:verify_identical_pair(...)">>, expected => <<"{matched, omega}">>,
+    #{call_str => <<"clause_router:verify_identical_pair({omega, omega})">>, expected => <<"{matched, omega}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res],
@@ -4466,34 +4466,65 @@ Stages = [CompileStage, S1_Ast, S2_Arity]
 `, wsDir, wsDir), true
 
 	case "ch01-l07":
-		return `
+		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(clause_router) of
     {module, clause_router} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"clause_router.erl compiled cleanly">>};
+        Exports = clause_router:module_info(exports),
+        Required = [{describe_status, 1}, {head_or_default, 2}, {verify_identical_pair, 1}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"clause_router.erl compiled cleanly and exported describe_status/1, head_or_default/2, and verify_identical_pair/1.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Router = try
+S1_Ast = try
+    SourceCandidates = [
+        filename:join(["%s", "src", "clause_router.erl"]),
+        filename:join(["%s", "clause_router.erl"])
+    ],
+    SourceFile = case [P || P <- SourceCandidates, filelib:is_regular(P)] of
+        [ValidSrc | _] -> ValidSrc;
+        [] -> hd(SourceCandidates)
+    end,
+    case bf_ast_verifier:verify_rules(SourceFile, #{forbidden_constructs => [if_expr]}) of
+        {ok, _} ->
+            #{id => <<"ast_clause_style_audit">>, title => <<"AST Analysis: No if_expr Branching">>, status => <<"passed">>, time_ms => 10, details => <<"Verified pure multi-clause function heads with zero if expressions.">>};
+        {error, [#{message := Msg} | _]} ->
+            #{id => <<"ast_clause_style_audit">>, title => <<"AST Analysis: No if_expr Branching">>, status => <<"failed">>, time_ms => 10, details => Msg};
+        {error, Violations} ->
+            #{id => <<"ast_clause_style_audit">>, title => <<"AST Analysis: No if_expr Branching">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_clause_style_audit">>, title => <<"AST Analysis: No if_expr Branching">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_Router = try
     S_200 = clause_router:describe_status(200),
     S_404 = clause_router:describe_status(404),
     S_500 = clause_router:describe_status(500),
     S_418 = clause_router:describe_status(418),
     H_NonEmpty = clause_router:head_or_default([packet, ping], fallback),
     H_Empty = clause_router:head_or_default([], default_val),
+    H_Num = clause_router:head_or_default([1, 2], 0),
     P_Same = clause_router:verify_identical_pair({alpha, alpha}),
     P_Diff = clause_router:verify_identical_pair({alpha, beta}),
-    case {S_200, S_404, S_500, S_418, H_NonEmpty, H_Empty, P_Same, P_Diff} of
+    P_LooseNum = clause_router:verify_identical_pair({42, 42.0}),
+    P_WrongArity = clause_router:verify_identical_pair({1, 2, 3}),
+    case {S_200, S_404, S_500, S_418, H_NonEmpty, H_Empty, H_Num, P_Same, P_Diff, P_LooseNum, P_WrongArity} of
         {{ok, success}, {error, not_found}, {error, server_crash}, {error, unknown_code},
-         packet, default_val, {matched, alpha}, mismatch} ->
-            #{id => <<"multi_clause_routing">>, title => <<"Multi-Clause Routing & Punctuation Triad">>, status => <<"passed">>, time_ms => 8, details => <<"Verified status code matching, head_or_default, and identical pair check">>};
+         packet, default_val, 1, {matched, alpha}, mismatch, mismatch, mismatch} ->
+            #{id => <<"multi_clause_routing">>, title => <<"Multi-Clause Routing & Punctuation Triad">>, status => <<"passed">>, time_ms => 8, details => <<"Verified status routing, list head/fallback clauses, strict type pair matching, and non-pair mismatch fallback.">>};
         Got1 ->
             #{id => <<"multi_clause_routing">>, title => <<"Multi-Clause Routing & Punctuation Triad">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
     end
 catch C1:Err1 ->
     #{id => <<"multi_clause_routing">>, title => <<"Multi-Clause Routing & Punctuation Triad">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
-Stages = [CompileStage, S1_Router]
-`, true
+Stages = [CompileStage, S1_Ast, S2_Router]
+`, wsDir, wsDir), true
 
 	case "ch01-l08":
 		return `

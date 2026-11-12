@@ -111,6 +111,32 @@ connect(Host, Port, Timeout) ->
     {connection, ?MODULE, Host, Port, Timeout}.
 `
 
+	clauseRouterSolution := `-module(clause_router).
+-export([describe_status/1, head_or_default/2, verify_identical_pair/1]).
+
+%% @doc Map HTTP status codes 200, 404, 500 to ok/error tuples, defaulting other inputs to unknown_code.
+describe_status(200) ->
+    {ok, success};
+describe_status(404) ->
+    {error, not_found};
+describe_status(500) ->
+    {error, server_crash};
+describe_status(_) ->
+    {error, unknown_code}.
+
+%% @doc Return the first element of a non-empty list, or Default when the list is empty.
+head_or_default([H | _], _Default) ->
+    H;
+head_or_default([], Default) ->
+    Default.
+
+%% @doc Return a matched 2-tuple if both elements of a 2-tuple match strictly, or mismatch otherwise.
+verify_identical_pair({X, X}) ->
+    {matched, X};
+verify_identical_pair(_) ->
+    mismatch.
+`
+
 	tests := []struct {
 		name          string
 		exerciseID    string
@@ -162,6 +188,14 @@ connect(Host, Port, Timeout) ->
 			exerciseID: "ch01-l06",
 			files: map[string]string{
 				"src/arity_calc.erl": arityCalcSolution,
+			},
+			visibleCount: 3,
+		},
+		{
+			name:       "ch01-l07 Multi-Clause Functions & Punctuation Triad",
+			exerciseID: "ch01-l07",
+			files: map[string]string{
+				"src/clause_router.erl": clauseRouterSolution,
 			},
 			visibleCount: 3,
 		},
@@ -451,6 +485,63 @@ connect(Host, Port, Timeout) ->
 		}
 		if !astFailed {
 			t.Errorf("Expected ast_arity_and_macros_audit stage to fail for hardcoded connect/1..3, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch01-l07 rejects if_expr branching and loose numeric equality", func(t *testing.T) {
+		sessionID := "test-ch01-l07-neg-if"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/clause_router.erl": `-module(clause_router).
+-export([describe_status/1, head_or_default/2, verify_identical_pair/1]).
+
+describe_status(Code) ->
+    if
+        Code =:= 200 -> {ok, success};
+        Code =:= 404 -> {error, not_found};
+        Code =:= 500 -> {error, server_crash};
+        true -> {error, unknown_code}
+    end.
+
+head_or_default([H | _], _Default) ->
+    H;
+head_or_default([], Default) ->
+    Default.
+
+verify_identical_pair({A, B}) ->
+    if
+        A == B -> {matched, A};
+        true -> mismatch
+    end;
+verify_identical_pair(_) ->
+    mismatch.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch01-l07", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected clause_router using forbidden if_expr and loose == to fail verification, but got PASSED")
+		}
+
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_clause_style_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_clause_style_audit stage to fail for if_expr, stages=%+v", report.Stages)
 		}
 	})
 }

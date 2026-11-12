@@ -3109,6 +3109,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter1Verification` passed all 12 subtests in `33.98s` (`34.017s` total); `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` passed all 8 CH01 lessons including `ch01-l06 | 3/3 tests passed` (`16.38s` / `16.398s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 192: Spec 04 / Spec 08 Anti-Spoiler Rework, `if_expr` AST Hardening & Live Tri-Verification of Chapter 1 Lecture 7 (`ch01-l07`)
+- [x] **192.1: De-Spoil Concept Snippet, Parallel Clone (`actuator_controller` -> `gate_dispatch`), Test Spoilers & Sync Contracts (`src/clause_router.erl`, `ch01-l07`)**:
+  - Updated `ch01-l07` ONLY in `apps/web-ide/src/data/chapters/ch01.ts` (`lines 1479–1742`): replaced `200`/`404`/`500` `status` textbook snippets with `grade/1` (`lines 1482–1490`), standardized `> [!WARNING]` (`line 1492`), replaced the 3-endpoint 1:1 mirror `actuator_controller` (`mode_profile/1`, `lead_telemetry_or_default/2`, `verify_symmetric_pins/1`) with the domain-disjoint 2-function dispatcher `gate_dispatch.erl` (`classify_signal/1`, `confirm_dual_reading/2` at `lines 1512–1540`), added the Spec 04 §1.3 clause manual reading note & `function_clause` reference-card pointer (`line 1554`), scrubbed `{X, X}` pattern spoilers from `visibleTestCases[2]` (`line 1650`), populated `astRules.forbiddenConstructs: ['if_expr']` (`line 1655`), and synchronized `_`-prefixed `-Wall -Werror` starter stubs + plain-English `%% @doc` headers across all 4 code blocks (`lines 1658–1742`).
+  - Fixed `Run` catch `call_str` (`services/orchestrator/internal/bridge/erl_runner_chapters.go`, `line 330`) and hardened `Submit` (`case "ch01-l07"`, `lines 4468–4527`) to verify all 3 exports (`describe_status/1`, `head_or_default/2`, `verify_identical_pair/1`), enforce `bf_ast_verifier` `forbidden_constructs => [if_expr]` (`ast_clause_style_audit`), and assert strict numeric type distinction (`{42, 42.0} -> mismatch`) + wrong-tuple fallback (`{1, 2, 3} -> mismatch`).
+  - Expanded `services/orchestrator/internal/bridge/ch01_verification_test.go` (`lines 114–545`) to cover `ch01-l07` (`RunVerification` 3 stages `score=100` + `RunCode` 3/3 visible tests) plus negative rejection when using `if` expressions and loose `==`.
+- [x] **192.2: Mandatory Live Tri-Verification & Compiler Suite (`ch01-l07`, Local Commit Only per Spec 08 §3.3)**:
+  - **Parallel Worked Example (`gate_dispatch.erl`)**: Extracted from `ch01.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified live on OTP 29 (`PWE_OK`).
+  - **Starter & Solution Pack (`clause_router.erl`)**: Verified starter & solution parity (`files[0].content === starterCode`, `solutionFiles['src/clause_router.erl'] === solutionCode`), compiled starter with `-Wall -Werror` (0 warnings) returning `{ok, ok, ok}`, compiled solution with `+debug_info -Wall -Werror`, passed `bf_ast_verifier`, and ran all 3 `visibleTestCases` + strict/tuple bounds live (`SOL_ALL_VISIBLE_AND_AST_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter1Verification` passed all 14 subtests in `28.55s` (`28.569s` total); `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` passed all 8 CH01 lessons including `ch01-l07 | 3/3 tests passed` (`16.96s` / `17.011s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
+
 
 
 
