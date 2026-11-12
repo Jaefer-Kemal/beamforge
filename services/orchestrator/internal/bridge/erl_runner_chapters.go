@@ -490,7 +490,7 @@ T1_Res = try guard_validator:validate_port(8080) of
         #{call_str => <<"guard_validator:validate_port(8080)">>, expected => <<"{ok, unprivileged_port}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"guard_validator:validate_port(...)">>, expected => <<"{ok, unprivileged_port}">>,
+    #{call_str => <<"guard_validator:validate_port(8080)">>, expected => <<"{ok, unprivileged_port}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 
@@ -4724,41 +4724,85 @@ Stages = [CompileStage, S1_Ast, S2_Match]
 `, wsDir, wsDir), true
 
 	case "ch02-l02":
-		return `
+		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(guard_validator) of
     {module, guard_validator} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"guard_validator.erl compiled cleanly">>};
+        Exports = guard_validator:module_info(exports),
+        Required = [{validate_port, 1}, {classify_temperature, 1}, {safe_ratio, 2}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"guard_validator.erl compiled cleanly and exported validate_port/1, classify_temperature/1, and safe_ratio/2.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Guards = try
+S1_Ast = try
+    SourceCandidates = [
+        filename:join(["%s", "src", "guard_validator.erl"]),
+        filename:join(["%s", "guard_validator.erl"])
+    ],
+    SourceFile = case [P || P <- SourceCandidates, filelib:is_regular(P)] of
+        [ValidSrc | _] -> ValidSrc;
+        [] -> hd(SourceCandidates)
+    end,
+    case bf_ast_verifier:verify_rules(SourceFile, #{required_constructs => [guards], forbidden_constructs => [if_expr]}) of
+        {ok, _} ->
+            #{id => <<"ast_guard_clauses_audit">>, title => <<"AST Analysis: Required Guards & No if_expr">>, status => <<"passed">>, time_ms => 10, details => <<"Verified when guard clauses are present and if expressions are absent.">>};
+        {error, Violations} ->
+            #{id => <<"ast_guard_clauses_audit">>, title => <<"AST Analysis: Required Guards & No if_expr">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST rule violation: ~p", [Violations]))}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_guard_clauses_audit">>, title => <<"AST Analysis: Required Guards & No if_expr">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_Guards = try
     P1 = guard_validator:validate_port(8080),
+    P1b = guard_validator:validate_port(1024),
+    P1c = guard_validator:validate_port(65535),
     P2 = guard_validator:validate_port(80),
+    P2b = guard_validator:validate_port(1),
+    P2c = guard_validator:validate_port(1023),
     P3 = guard_validator:validate_port(70000),
+    P3b = guard_validator:validate_port(65536),
     P4 = guard_validator:validate_port(-1),
+    P4b = guard_validator:validate_port(0),
     P5 = guard_validator:validate_port(not_a_port),
+    P6 = guard_validator:validate_port(80.0),
     T1 = guard_validator:classify_temperature(-5),
     T2 = guard_validator:classify_temperature(0),
+    T2b = guard_validator:classify_temperature(0.0),
     T3 = guard_validator:classify_temperature(20),
+    T3b = guard_validator:classify_temperature(25),
     T4 = guard_validator:classify_temperature(35),
+    T4b = guard_validator:classify_temperature(25.5),
     T5 = guard_validator:classify_temperature(invalid),
     R1 = guard_validator:safe_ratio(10, 2),
+    R1b = guard_validator:safe_ratio(4, 2),
+    R1c = guard_validator:safe_ratio(-10, -2),
     R2 = guard_validator:safe_ratio(1, 2),
+    R2b = guard_validator:safe_ratio(10, -2),
     R3 = guard_validator:safe_ratio(10, 0),
     R4 = guard_validator:safe_ratio(foo, 2),
-    case {P1, P2, P3, P4, P5, T1, T2, T3, T4, T5, R1, R2, R3, R4} of
-        {{ok, unprivileged_port}, {ok, privileged_port}, {error, invalid_port}, {error, invalid_port}, {error, invalid_port},
-         freezing, freezing, temperate, hot, {error, invalid_temperature},
-         high_ratio, normal_ratio, {error, invalid_ratio}, {error, invalid_ratio}} ->
-            #{id => <<"guard_clause_validation">>, title => <<"Pure Guard Clauses & Silent Guard Failure">>, status => <<"passed">>, time_ms => 10, details => <<"Passed all port range, temperature, and safe ratio guards">>};
+    R5 = guard_validator:safe_ratio(10, "2"),
+    case {P1, P1b, P1c, P2, P2b, P2c, P3, P3b, P4, P4b, P5, P6,
+          T1, T2, T2b, T3, T3b, T4, T4b, T5,
+          R1, R1b, R1c, R2, R2b, R3, R4, R5} of
+        {{ok, unprivileged_port}, {ok, unprivileged_port}, {ok, unprivileged_port},
+         {ok, privileged_port}, {ok, privileged_port}, {ok, privileged_port},
+         {error, invalid_port}, {error, invalid_port}, {error, invalid_port}, {error, invalid_port}, {error, invalid_port}, {error, invalid_port},
+         freezing, freezing, freezing, temperate, temperate, hot, hot, {error, invalid_temperature},
+         high_ratio, high_ratio, high_ratio, normal_ratio, normal_ratio, {error, invalid_ratio}, {error, invalid_ratio}, {error, invalid_ratio}} ->
+            #{id => <<"guard_clause_validation">>, title => <<"Pure Guard Clauses & Silent Guard Failure">>, status => <<"passed">>, time_ms => 10, details => <<"Passed all inclusive boundary port, temperature, negative-divisor, and silent guard failure checks.">>};
         Got1 ->
             #{id => <<"guard_clause_validation">>, title => <<"Pure Guard Clauses & Silent Guard Failure">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Guard mismatch: ~p", [Got1]))}
     end
 catch C1:Err1 ->
     #{id => <<"guard_clause_validation">>, title => <<"Pure Guard Clauses & Silent Guard Failure">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
-Stages = [CompileStage, S1_Guards]
-`, true
+Stages = [CompileStage, S1_Ast, S2_Guards]
+`, wsDir, wsDir), true
 
 	case "ch02-l03":
 		return `

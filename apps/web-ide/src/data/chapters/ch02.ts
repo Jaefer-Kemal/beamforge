@@ -286,7 +286,7 @@ Guards must be deterministic, lightning-fast, and free of side effects. For this
 
 Only a curated set of Built-In Functions (BIFs) and operators can be used in guards:
 - **Type BIFs**: \`is_integer/1\`, \`is_float/1\`, \`is_number/1\`, \`is_atom/1\`, \`is_tuple/1\`, \`is_list/1\`, \`is_boolean/1\`.
-- **Comparison Operators**: \`=:==\`, \`=/=\`, \`==\`, \`/=\`, \`<\`, \`=<\`, \`>\`, \`>=\`.
+- **Comparison Operators**: \`=:=\`, \`=/=\`, \`==\`, \`/=\`, \`<\`, \`=<\`, \`>\`, \`>=\`.
 - **Arithmetic & Logic**: \`+\`, \`-\`, \`*\`, \`/\`, \`div\`, \`rem\`, \`andalso\`, \`orelse\`, \`not\`.
 
 \`\`\`erlang
@@ -301,8 +301,8 @@ Erlang guards use punctuation to express Boolean logic:
 - **; (Semicolon)** means **OR**: if any semicolon-separated guard evaluates to \`true\`, the clause is selected.
 
 \`\`\`erlang
-%% Matches if X is integer AND X is between 1 and 100:
-in_range(X) when is_integer(X), X >= 1, X =< 100 -> true;
+%% Matches if N is a positive AND even integer:
+is_positive_even(N) when is_integer(N), N > 0, (N rem 2) =:= 0 -> true;
 
 %% Matches if Status is 'active' OR Status is 'pending':
 is_open(Status) when Status =:= active; Status =:= pending -> true;
@@ -310,19 +310,18 @@ is_open(_) -> false.
 \`\`\`
 
 ### 3. THE SILENT GUARD EXCEPTION RULE (Crucial Erlang Invariant)
-In standard Erlang expressions, dividing by zero (\`10 / 0\`) or calling an arithmetic function on an atom crashes the process immediately with \`badarith\`.
+In standard Erlang expressions, dividing or taking a remainder by zero (\`100 rem 0\`) or calling a numeric operation on an atom crashes the process immediately with \`badarith\`.
 
 **Inside a guard clause, exceptions NEVER crash the process!**
 
-If an expression inside a guard raises a runtime error (e.g. \`A / B > 2\` when \`B =:= 0\`, or \`length(X) > 0\` when \`X\` is an atom), the guard simply traps the failure and **silently evaluates to \`false\`**! The BEAM runtime immediately moves to evaluate the next clause.
+If an expression inside a guard raises a runtime error (e.g. \`100 rem D =:= 0\` when \`D =:= 0\`, or \`length(X) > 0\` when \`X\` is an atom), the guard simply traps the failure and **silently evaluates to \`false\`**! The BEAM runtime immediately moves to evaluate the next clause.
 
 \`\`\`erlang
-%% If ElapsedMs is 0 or not a number, (BytesTransferred / ElapsedMs) fails silently to false:
-throughput_rating(Bytes, ElapsedMs)
-  when is_number(Bytes), is_number(ElapsedMs), ElapsedMs > 0, (Bytes / ElapsedMs) >= 1024.0 ->
-    high_throughput;
-throughput_rating(_, _) ->
-    standard_throughput.
+%% If Step is 0 or an atom, (100 rem Step) fails silently to false instead of crashing:
+divides_hundred(Step) when (100 rem Step) =:= 0 ->
+    exact_divisor;
+divides_hundred(_) ->
+    not_a_divisor.
 \`\`\`
 
 > [!warning] Common Beginner Syntax Trap: Less-Than-Or-Equal (=<)
@@ -331,37 +330,29 @@ throughput_rating(_, _) ->
 
 ## Parallel Worked Example
 
-Consider an aeronautical telemetry and approach safety monitoring system:
+Consider an industrial crane safety interlock controller:
 
 \`\`\`erlang
--module(flight_telemetry).
--export([categorize_altitude/1, safe_glide_slope/2]).
+-module(crane_interlock).
+-export([can_bypass/1, hoist_efficiency/1]).
 
-%% Categorize flight level in thousands of feet (FL) using integer boundary guards
-categorize_altitude(Feet) when is_integer(Feet), Feet >= 18000 ->
-    class_a_airspace;
-categorize_altitude(Feet) when is_integer(Feet), Feet >= 3000, Feet < 18000 ->
-    controlled_airspace;
-categorize_altitude(Feet) when is_integer(Feet), Feet >= 0, Feet < 3000 ->
-    terminal_area;
-categorize_altitude(_) ->
-    {error, invalid_altitude}.
+%% 1. Combine semicolon (OR) guard clauses with strict atom equality
+can_bypass(Role) when Role =:= chief_rigger; Role =:= safety_officer ->
+    true;
+can_bypass(_) ->
+    false.
 
-%% Calculate vertical descent rate vs distance without crashing on zero distance (runway threshold)
-%% In guards, (DescentFt / Miles) silently evaluates to false if Miles is zero or non-numeric!
-safe_glide_slope(DescentFt, Miles)
-  when is_number(DescentFt), is_number(Miles), Miles > 0, (DescentFt / Miles) =< 318.0 ->
-    normal_approach;
-safe_glide_slope(DescentFt, Miles)
-  when is_number(DescentFt), is_number(Miles), Miles > 0 ->
-    steep_approach;
-safe_glide_slope(_, _) ->
-    {error, invalid_approach_parameters}.
+%% 2. Combine tuple matching, type checks, and silent division failure in guards
+hoist_efficiency({load, Newtons, Seconds})
+  when is_number(Newtons), is_number(Seconds), Seconds > 0, (Newtons / Seconds) < 500.0 ->
+    steady_hoist;
+hoist_efficiency(_) ->
+    rejected_sample.
 \`\`\`
 
-Notice:
-- \`categorize_altitude/1\` combines type check \`is_integer/1\` with comma-separated range checks to enforce boundaries cleanly across multiple clauses.
-- \`safe_glide_slope/2\` performs floating-point division in the guard; if \`Miles\` is zero or invalid, the guard fails silently to \`false\` and executes the fallback clause without crashing the process.
+Notice how the BEAM evaluates this module:
+- \`can_bypass/1\` uses a semicolon (\`;\`) guard sequence so either \`chief_rigger\` OR \`safety_officer\` evaluates to \`true\`, while any other input falls through to \`false\`.
+- \`hoist_efficiency/1\` unpacks \`{load, Newtons, Seconds}\` and chains comma (\`,\`) guards checking type BIFs and the rate calculation; if \`Seconds\` is zero, non-numeric, or the term is malformed, the guard evaluates safely to \`false\` and selects \`rejected_sample\` without crashing.
 
 ## Official Erlang Docs & Function Reference
 
@@ -370,17 +361,18 @@ Notice:
 Clause(Args) when Guard1, Guard2 -> ...;      %% Comma = AND
 Clause(Args) when Guard1; Guard2 -> ... .     %% Semicolon = OR
 \`\`\`
+> Note: See the Erlang Reference Card for guard sequence type specs and BEAM register-level evaluation guarantees.
 
 ## Assignment Specification
 
 Implement three validation and classification functions in \`guard_validator.erl\` using guard clauses (\`when\`):
 
 ### 1. \`validate_port(Port)\`
-- **Input**: Any term \`Port\`.
-- **Behavior**: Use guard clauses with integer type assertions and range bounds:
-  - Ports from \`1024\` to \`65535\` (inclusive): Return \`{ok, unprivileged_port}\`.
-  - Ports from \`1\` to \`1023\` (inclusive): Return \`{ok, privileged_port}\`.
-  - Any other value (negative numbers, 0, numbers greater than 65535, or non-integer terms): Return \`{error, invalid_port}\`.
+- **Input**: Any Erlang term \`Port\`.
+- **Behavior**: Use guard clauses with integer type assertions and inclusive boundary comparisons:
+  - Ports from \`1024\` through \`65535\` (inclusive): return an \`ok\` pair tagged with \`unprivileged_port\`.
+  - Ports from \`1\` through \`1023\` (inclusive): return an \`ok\` pair tagged with \`privileged_port\`.
+  - Any other value (non-positive integers, values above \`65535\`, floats, or non-numeric terms): return an \`error\` pair tagged with \`invalid_port\`.
 - **Examples**:
   - \`guard_validator:validate_port(8080)\` returns \`{ok, unprivileged_port}\`.
   - \`guard_validator:validate_port(443)\` returns \`{ok, privileged_port}\`.
@@ -388,12 +380,12 @@ Implement three validation and classification functions in \`guard_validator.erl
   - \`guard_validator:validate_port("80")\` returns \`{error, invalid_port}\`.
 
 ### 2. \`classify_temperature(TempC)\`
-- **Input**: Any term \`TempC\`.
-- **Behavior**: Classify numeric temperatures into climate status atoms using number guards:
-  - Less than or equal to \`0\`: Return atom \`freezing\`.
-  - Greater than \`0\` and less than or equal to \`25\`: Return atom \`temperate\`.
-  - Greater than \`25\`: Return atom \`hot\`.
-  - Any non-numeric value: Return \`{error, invalid_temperature}\`.
+- **Input**: Any Erlang term \`TempC\`.
+- **Behavior**: Classify integer or float Celsius temperatures into status atoms using numeric type guards:
+  - Less than or equal to \`0\`: return the atom \`freezing\`.
+  - Strictly greater than \`0\` and less than or equal to \`25\`: return the atom \`temperate\`.
+  - Strictly greater than \`25\`: return the atom \`hot\`.
+  - Any non-numeric value: return an \`error\` pair tagged with \`invalid_temperature\`.
 - **Examples**:
   - \`guard_validator:classify_temperature(-5)\` returns \`freezing\`.
   - \`guard_validator:classify_temperature(0)\` returns \`freezing\`.
@@ -402,11 +394,11 @@ Implement three validation and classification functions in \`guard_validator.erl
   - \`guard_validator:classify_temperature(warm)\` returns \`{error, invalid_temperature}\`.
 
 ### 3. \`safe_ratio(A, B)\`
-- **Input**: Terms \`A\` and \`B\`.
-- **Behavior**: Calculate the ratio of \`A\` divided by \`B\` using guards to protect against division by zero and invalid types:
-  - If both \`A\` and \`B\` are numbers, \`B\` is not zero, and the quotient is greater than or equal to \`2.0\`: Return atom \`high_ratio\`.
-  - If both \`A\` and \`B\` are numbers, \`B\` is not zero, and the quotient is less than \`2.0\`: Return atom \`normal_ratio\`.
-  - If either argument is non-numeric, \`B\` is zero, or any guard fails: Return \`{error, invalid_ratio}\`.
+- **Input**: Any Erlang terms \`A\` and \`B\`.
+- **Behavior**: Evaluate the ratio of \`A\` divided by \`B\` using guard clauses to protect against zero divisors and invalid types:
+  - When both \`A\` and \`B\` are numbers, \`B\` is non-zero, and the quotient is greater than or equal to \`2.0\`: return the atom \`high_ratio\`.
+  - When both \`A\` and \`B\` are numbers and \`B\` is non-zero with a quotient below \`2.0\`: return the atom \`normal_ratio\`.
+  - When either argument is non-numeric, \`B\` is zero, or any guard fails: return an \`error\` pair tagged with \`invalid_ratio\`.
 - **Examples**:
   - \`guard_validator:safe_ratio(10, 2)\` returns \`high_ratio\`.
   - \`guard_validator:safe_ratio(3, 2)\` returns \`normal_ratio\`.
@@ -416,7 +408,7 @@ Implement three validation and classification functions in \`guard_validator.erl
 ## Rules & Verification Constraints
 
 - Guard clauses (\`when\`) must be used for all range and type assertions.
-- Do not use \`<=\` (use \`=<\`).`,
+- Do not use \`if\` expressions or \`<=\` (use \`=<\`).`,
     otpDocCards: [
       {
         functionName: 'guard_sequences',
@@ -478,11 +470,12 @@ Implement three validation and classification functions in \`guard_validator.erl
         title: 'Safe Ratio Division By Zero Fallback',
         erlangCall: 'guard_validator:safe_ratio(10, 0)',
         expectedOutput: '{error, invalid_ratio}',
-        explanation: 'B =:= 0 silently fails ratio guard and triggers fallback.',
+        explanation: 'Zero divisor silently fails the ratio guard and triggers the error fallback.',
       },
     ],
     astRules: {
       requiredConstructs: ['guards'],
+      forbiddenConstructs: ['if_expr'],
     },
     solutionExplanation: 'Enforces numerical bounds using when is_integer, when is_number, and safe division guards.',
     files: [
@@ -492,16 +485,16 @@ Implement three validation and classification functions in \`guard_validator.erl
         content: `-module(guard_validator).
 -export([validate_port/1, classify_temperature/1, safe_ratio/2]).
 
-%% @doc Validate network port number and classify as privileged or unprivileged.
-validate_port(Port) ->
+%% @doc Classify an integer TCP or UDP port into an ok pair tagged as privileged (1 through 1023) or unprivileged (1024 through 65535) via guards, or return an error pair for out-of-range or non-integer inputs.
+validate_port(_Port) ->
     ok.
 
-%% @doc Classify numeric Celsius temperature into freezing, temperate, or hot.
-classify_temperature(TempC) ->
+%% @doc Classify an integer or float Celsius temperature into a freezing (at or below 0), temperate (above 0 up to 25), or hot (above 25) status atom via guards, returning an error pair for non-numeric inputs.
+classify_temperature(_TempC) ->
     ok.
 
-%% @doc Compute division ratio with guard protection against zero divisors and invalid types.
-safe_ratio(A, B) ->
+%% @doc Evaluate the quotient of two numbers using guards to classify quotients at or above 2.0 versus below 2.0, returning an error pair when either input is non-numeric or the divisor is zero.
+safe_ratio(_A, _B) ->
     ok.`,
       },
     ],
@@ -509,6 +502,7 @@ safe_ratio(A, B) ->
       'src/guard_validator.erl': `-module(guard_validator).
 -export([validate_port/1, classify_temperature/1, safe_ratio/2]).
 
+%% @doc Classify an integer TCP or UDP port into an ok pair tagged as privileged (1 through 1023) or unprivileged (1024 through 65535) via guards, or return an error pair for out-of-range or non-integer inputs.
 validate_port(Port) when is_integer(Port), Port >= 1024, Port =< 65535 ->
     {ok, unprivileged_port};
 validate_port(Port) when is_integer(Port), Port >= 1, Port =< 1023 ->
@@ -516,6 +510,7 @@ validate_port(Port) when is_integer(Port), Port >= 1, Port =< 1023 ->
 validate_port(_) ->
     {error, invalid_port}.
 
+%% @doc Classify an integer or float Celsius temperature into a freezing (at or below 0), temperate (above 0 up to 25), or hot (above 25) status atom via guards, returning an error pair for non-numeric inputs.
 classify_temperature(TempC) when is_number(TempC), TempC =< 0 ->
     freezing;
 classify_temperature(TempC) when is_number(TempC), TempC > 0, TempC =< 25 ->
@@ -525,6 +520,7 @@ classify_temperature(TempC) when is_number(TempC), TempC > 25 ->
 classify_temperature(_) ->
     {error, invalid_temperature}.
 
+%% @doc Evaluate the quotient of two numbers using guards to classify quotients at or above 2.0 versus below 2.0, returning an error pair when either input is non-numeric or the divisor is zero.
 safe_ratio(A, B) when is_number(A), is_number(B), B =/= 0, (A / B) >= 2.0 ->
     high_ratio;
 safe_ratio(A, B) when is_number(A), is_number(B), B =/= 0 ->
@@ -535,20 +531,21 @@ safe_ratio(_, _) ->
     starterCode: `-module(guard_validator).
 -export([validate_port/1, classify_temperature/1, safe_ratio/2]).
 
-%% @doc Validate network port number and classify as privileged or unprivileged.
-validate_port(Port) ->
+%% @doc Classify an integer TCP or UDP port into an ok pair tagged as privileged (1 through 1023) or unprivileged (1024 through 65535) via guards, or return an error pair for out-of-range or non-integer inputs.
+validate_port(_Port) ->
     ok.
 
-%% @doc Classify numeric Celsius temperature into freezing, temperate, or hot.
-classify_temperature(TempC) ->
+%% @doc Classify an integer or float Celsius temperature into a freezing (at or below 0), temperate (above 0 up to 25), or hot (above 25) status atom via guards, returning an error pair for non-numeric inputs.
+classify_temperature(_TempC) ->
     ok.
 
-%% @doc Compute division ratio with guard protection against zero divisors and invalid types.
-safe_ratio(A, B) ->
+%% @doc Evaluate the quotient of two numbers using guards to classify quotients at or above 2.0 versus below 2.0, returning an error pair when either input is non-numeric or the divisor is zero.
+safe_ratio(_A, _B) ->
     ok.`,
     solutionCode: `-module(guard_validator).
 -export([validate_port/1, classify_temperature/1, safe_ratio/2]).
 
+%% @doc Classify an integer TCP or UDP port into an ok pair tagged as privileged (1 through 1023) or unprivileged (1024 through 65535) via guards, or return an error pair for out-of-range or non-integer inputs.
 validate_port(Port) when is_integer(Port), Port >= 1024, Port =< 65535 ->
     {ok, unprivileged_port};
 validate_port(Port) when is_integer(Port), Port >= 1, Port =< 1023 ->
@@ -556,6 +553,7 @@ validate_port(Port) when is_integer(Port), Port >= 1, Port =< 1023 ->
 validate_port(_) ->
     {error, invalid_port}.
 
+%% @doc Classify an integer or float Celsius temperature into a freezing (at or below 0), temperate (above 0 up to 25), or hot (above 25) status atom via guards, returning an error pair for non-numeric inputs.
 classify_temperature(TempC) when is_number(TempC), TempC =< 0 ->
     freezing;
 classify_temperature(TempC) when is_number(TempC), TempC > 0, TempC =< 25 ->
@@ -565,6 +563,7 @@ classify_temperature(TempC) when is_number(TempC), TempC > 25 ->
 classify_temperature(_) ->
     {error, invalid_temperature}.
 
+%% @doc Evaluate the quotient of two numbers using guards to classify quotients at or above 2.0 versus below 2.0, returning an error pair when either input is non-numeric or the divisor is zero.
 safe_ratio(A, B) when is_number(A), is_number(B), B =/= 0, (A / B) >= 2.0 ->
     high_ratio;
 safe_ratio(A, B) when is_number(A), is_number(B), B =/= 0 ->

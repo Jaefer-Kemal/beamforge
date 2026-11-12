@@ -30,6 +30,36 @@ repackage_envelope(Packet) ->
     {dropped, Packet}.
 `
 
+	guardValidatorSolution := `-module(guard_validator).
+-export([validate_port/1, classify_temperature/1, safe_ratio/2]).
+
+%% @doc Classify an integer TCP or UDP port into an ok pair tagged as privileged (1 through 1023) or unprivileged (1024 through 65535) via guards, or return an error pair for out-of-range or non-integer inputs.
+validate_port(Port) when is_integer(Port), Port >= 1024, Port =< 65535 ->
+    {ok, unprivileged_port};
+validate_port(Port) when is_integer(Port), Port >= 1, Port =< 1023 ->
+    {ok, privileged_port};
+validate_port(_) ->
+    {error, invalid_port}.
+
+%% @doc Classify an integer or float Celsius temperature into a freezing (at or below 0), temperate (above 0 up to 25), or hot (above 25) status atom via guards, returning an error pair for non-numeric inputs.
+classify_temperature(TempC) when is_number(TempC), TempC =< 0 ->
+    freezing;
+classify_temperature(TempC) when is_number(TempC), TempC > 0, TempC =< 25 ->
+    temperate;
+classify_temperature(TempC) when is_number(TempC), TempC > 25 ->
+    hot;
+classify_temperature(_) ->
+    {error, invalid_temperature}.
+
+%% @doc Evaluate the quotient of two numbers using guards to classify quotients at or above 2.0 versus below 2.0, returning an error pair when either input is non-numeric or the divisor is zero.
+safe_ratio(A, B) when is_number(A), is_number(B), B =/= 0, (A / B) >= 2.0 ->
+    high_ratio;
+safe_ratio(A, B) when is_number(A), is_number(B), B =/= 0 ->
+    normal_ratio;
+safe_ratio(_, _) ->
+    {error, invalid_ratio}.
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -39,6 +69,11 @@ repackage_envelope(Packet) ->
 			exerciseID:   "ch02-l01",
 			visibleCount: 4,
 			files:        map[string]string{"src/deep_match.erl": deepMatchSolution},
+		},
+		{
+			exerciseID:   "ch02-l02",
+			visibleCount: 4,
+			files:        map[string]string{"src/guard_validator.erl": guardValidatorSolution},
 		},
 	}
 
@@ -225,6 +260,121 @@ extract_route(_) ->
 		}
 		if !exportFailed {
 			t.Errorf("Expected compile_and_export_audit stage to fail for missing export, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l02 rejects if_expr branching and missing guard clauses via AST audit", func(t *testing.T) {
+		sessionID := "test-ch02-l02-neg-if"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/guard_validator.erl": `-module(guard_validator).
+-export([validate_port/1, classify_temperature/1, safe_ratio/2]).
+
+validate_port(Port) ->
+    if
+        is_integer(Port), Port >= 1024, Port =< 65535 -> {ok, unprivileged_port};
+        is_integer(Port), Port >= 1, Port =< 1023 -> {ok, privileged_port};
+        true -> {error, invalid_port}
+    end.
+
+classify_temperature(TempC) ->
+    if
+        is_number(TempC), TempC =< 0 -> freezing;
+        is_number(TempC), TempC > 0, TempC =< 25 -> temperate;
+        is_number(TempC), TempC > 25 -> hot;
+        true -> {error, invalid_temperature}
+    end.
+
+safe_ratio(A, B) ->
+    if
+        is_number(A), is_number(B), B =/= 0, (A / B) >= 2.0 -> high_ratio;
+        is_number(A), is_number(B), B =/= 0 -> normal_ratio;
+        true -> {error, invalid_ratio}
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch02-l02", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected guard_validator using if_expr to fail AST verification, but got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_guard_clauses_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_guard_clauses_audit stage to fail for if_expr, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l02 rejects float port bypass and off-by-one boundary error", func(t *testing.T) {
+		sessionID := "test-ch02-l02-neg-bounds"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		buggy := map[string]string{
+			"src/guard_validator.erl": `-module(guard_validator).
+-export([validate_port/1, classify_temperature/1, safe_ratio/2]).
+
+validate_port(Port) when is_number(Port), Port >= 1024, Port =< 65535 ->
+    {ok, unprivileged_port};
+validate_port(Port) when is_number(Port), Port >= 1, Port =< 1023 ->
+    {ok, privileged_port};
+validate_port(_) ->
+    {error, invalid_port}.
+
+classify_temperature(TempC) when is_number(TempC), TempC =< 0 ->
+    freezing;
+classify_temperature(TempC) when is_number(TempC), TempC > 0, TempC =< 25 ->
+    temperate;
+classify_temperature(TempC) when is_number(TempC), TempC > 25 ->
+    hot;
+classify_temperature(_) ->
+    {error, invalid_temperature}.
+
+safe_ratio(A, B) when is_number(A), is_number(B), B =/= 0, (A / B) >= 2.0 ->
+    high_ratio;
+safe_ratio(A, B) when is_number(A), is_number(B), B =/= 0 ->
+    normal_ratio;
+safe_ratio(_, _) ->
+    {error, invalid_ratio}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch02-l02", buggy)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected guard_validator using is_number instead of is_integer on validate_port to fail, but got PASSED")
+		}
+		guardFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "guard_clause_validation" && st.Status == "failed" {
+				guardFailed = true
+			}
+		}
+		if !guardFailed {
+			t.Errorf("Expected guard_clause_validation stage to fail for float port 80.0, stages=%+v", report.Stages)
 		}
 	})
 }
