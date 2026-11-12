@@ -56,6 +56,24 @@ extract_middle(TripleTuple) ->
     Middle.
 `
 
+	telecomEventsSolution := `-module(telecom_events).
+-export([make_event/3, extract_caller/1, swap_endpoints/1]).
+
+%% @doc Construct a tagged 5-element call event combining Id, Caller, Callee, and zero initial duration.
+make_event(Id, Caller, Callee) ->
+    {call_event, Id, Caller, Callee, 0}.
+
+%% @doc Extract and return the caller endpoint atom from a tagged 5-element call event.
+extract_caller(Event) ->
+    {call_event, _Id, Caller, _Callee, _Duration} = Event,
+    Caller.
+
+%% @doc Return an updated 5-element call event with Caller and Callee swapped while keeping Id and duration intact.
+swap_endpoints(Event) ->
+    {call_event, Id, Caller, Callee, Duration} = Event,
+    {call_event, Id, Callee, Caller, Duration}.
+`
+
 	tests := []struct {
 		name          string
 		exerciseID    string
@@ -85,6 +103,14 @@ extract_middle(TripleTuple) ->
 				"src/pattern_vars.erl": patternVarsSolution,
 			},
 			visibleCount: 2,
+		},
+		{
+			name:       "ch01-l04 Atoms & Tuples",
+			exerciseID: "ch01-l04",
+			files: map[string]string{
+				"src/telecom_events.erl": telecomEventsSolution,
+			},
+			visibleCount: 3,
 		},
 	}
 
@@ -245,6 +271,43 @@ extract_middle(Tuple) ->
 		}
 		if report.Verdict == "PASSED" {
 			t.Fatalf("Expected extract_middle accepting non-3-tuple via element(2, Tuple) to fail verification, but got PASSED")
+		}
+	})
+
+	t.Run("ch01-l04 rejects untagged or wildcard-tag tuple bypass", func(t *testing.T) {
+		sessionID := "test-ch01-l04-neg-tag"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/telecom_events.erl": `-module(telecom_events).
+-export([make_event/3, extract_caller/1, swap_endpoints/1]).
+
+make_event(Id, Caller, Callee) ->
+    {call_event, Id, Caller, Callee, 0}.
+
+extract_caller(Event) ->
+    {_Tag, _Id, Caller, _Callee, _Duration} = Event,
+    Caller.
+
+swap_endpoints(Event) ->
+    {call_event, Id, Caller, Callee, Duration} = Event,
+    {call_event, Id, Callee, Caller, Duration}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch01-l04", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected wildcard-tag extract_caller to fail verification, but got PASSED")
 		}
 	})
 }

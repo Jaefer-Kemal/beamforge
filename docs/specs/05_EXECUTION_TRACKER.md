@@ -3076,6 +3076,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter1Verification` passed all 6 subtests in `12.07s` (`12.098s` total); `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` passed all 8 CH01 lessons including `ch01-l03 | 2/2 tests passed` (`18.22s` / `18.244s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 189: Spec 04 / Spec 08 Anti-Spoiler Rework, Tag/Arity Guard Hardening & Live Tri-Verification of Chapter 1 Lecture 4 (`ch01-l04`)
+- [x] **189.1: De-Spoil Deep Concept Leak & Parallel Clone (`storage_ledger` -> `metrics_batch`), & Sync Starter/Solution Contracts (`src/telecom_events.erl`, `ch01-l04`)**:
+  - Updated `ch01-l04` ONLY in `apps/web-ide/src/data/chapters/ch01.ts` (`lines 718–940`): replaced leaked `call_event` / `alice` / `bob` atoms & `{call_event, 101, alice, bob, 120}` snippet (`lines 720, 731`) with non-spoiling routing terms (`route_hop`), standardized `> [!WARNING]` (`line 724`), replaced the 3-endpoint 1:1 mirror `storage_ledger` with the domain-disjoint 2-function module `metrics_batch.erl` (`tag_sample/2`, `promote_replica/2` at `lines 748–768`), added the Spec 04 §1.3 tuple manual reading note & `tuple_size` reference-card pointer (`line 778`), tightened Assignment Specification & Rules without wildcard syntax dictation (`lines 780–809`), and synchronized `_`-prefixed `-Wall -Werror` starter stubs + plain-English `%% @doc` headers across all 4 code blocks (`lines 872–940`).
+  - Fixed `Run` catch `call_str` (`services/orchestrator/internal/bridge/erl_runner_chapters.go`, `lines 157–178`) and hardened `Submit` (`case "ch01-l04"`, `lines 4287–4331`) to verify all 3 exports (`make_event/3`, `extract_caller/1`, `swap_endpoints/1`) plus rejection of wrong-tag (`{other_event, ...}`) and wrong-arity (`{call_event, 101, alice, bob}`) tuples.
+  - Expanded `services/orchestrator/internal/bridge/ch01_verification_test.go` (`lines 59–314`) to cover `ch01-l04` (`RunVerification` 2 stages `score=100` + `RunCode` 3/3 visible tests) plus negative rejection of wildcard-tag `extract_caller` cheats.
+- [x] **189.2: Mandatory Live Tri-Verification & Compiler Suite (`ch01-l04`, Local Commit Only per Spec 08 §3.3)**:
+  - **Parallel Worked Example (`metrics_batch.erl`)**: Extracted from `ch01.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified live on OTP 29 (`PWE_OK`).
+  - **Starter & Solution Pack (`telecom_events.erl`)**: Verified starter & solution parity (`files[0].content === starterCode`, `solutionFiles['src/telecom_events.erl'] === solutionCode`), compiled starter with `-Wall -Werror` (0 warnings) returning `{ok, ok, ok}`, compiled solution with `+debug_info -Wall -Werror`, and executed all 3 `visibleTestCases` plus tag/arity rejection (`SOL_ALL_VISIBLE_AND_BOUNDS_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter1Verification` passed all 8 subtests in `15.17s` (`15.451s` total); `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` passed all 8 CH01 lessons including `ch01-l04 | 3/3 tests passed` (`22.53s` / `22.615s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
+
 
 
 

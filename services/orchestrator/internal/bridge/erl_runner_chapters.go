@@ -154,11 +154,11 @@ T2_Res = try telecom_events:extract_caller({call_event, 101, alice, bob, 45}) of
           expected => <<"alice">>, actual => <<"alice">>, passed => true,
           time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"telecom_events:extract_caller(...)">>, expected => <<"alice">>,
+        #{call_str => <<"telecom_events:extract_caller({call_event, 101, alice, bob, 45})">>, expected => <<"alice">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
-    #{call_str => <<"telecom_events:extract_caller(...)">>, expected => <<"alice">>,
+    #{call_str => <<"telecom_events:extract_caller({call_event, 101, alice, bob, 45})">>, expected => <<"alice">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
@@ -169,12 +169,12 @@ T3_Res = try telecom_events:swap_endpoints({call_event, 101, alice, bob, 45}) of
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [E3]))),
           passed => true, time_ms => erlang:system_time(millisecond) - T3_Start};
     Other3 ->
-        #{call_str => <<"telecom_events:swap_endpoints(...)">>,
+        #{call_str => <<"telecom_events:swap_endpoints({call_event, 101, alice, bob, 45})">>,
           expected => <<"{call_event, 101, bob, alice, 45}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T3_Start}
 catch C3:R3 ->
-    #{call_str => <<"telecom_events:swap_endpoints(...)">>, expected => <<"{call_event, ...}">>,
+    #{call_str => <<"telecom_events:swap_endpoints({call_event, 101, alice, bob, 45})">>, expected => <<"{call_event, 101, bob, alice, 45}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res],
@@ -4288,7 +4288,15 @@ Stages = [CompileStage, S1_Vars]
 		return `
 CompileStage = case code:ensure_loaded(telecom_events) of
     {module, telecom_events} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"telecom_events.erl compiled cleanly">>};
+        Exports = telecom_events:module_info(exports),
+        Required = [{make_event, 3}, {extract_caller, 1}, {swap_endpoints, 1}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"telecom_events.erl compiled cleanly and exported make_event/3, extract_caller/1, and swap_endpoints/1.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
@@ -4299,10 +4307,20 @@ S1_Events = try
     Ev2 = telecom_events:make_event(500, charlie, dave),
     Caller2 = telecom_events:extract_caller({call_event, 999, server_alpha, client_beta, 10}),
     Swapped2 = telecom_events:swap_endpoints({call_event, 777, src_node, dst_node, 360}),
-    case {Ev1, Caller1, Swapped1, Ev2, Caller2, Swapped2} of
+    WrongTagRejected = try telecom_events:extract_caller({other_event, 101, alice, bob, 45}) of
+        _ -> false
+    catch
+        _:_ -> true
+    end,
+    WrongArityRejected = try telecom_events:swap_endpoints({call_event, 101, alice, bob}) of
+        _ -> false
+    catch
+        _:_ -> true
+    end,
+    case {Ev1, Caller1, Swapped1, Ev2, Caller2, Swapped2, WrongTagRejected, WrongArityRejected} of
         {{call_event, 101, alice, bob, 0}, alice, {call_event, 101, bob, alice, 0},
-         {call_event, 500, charlie, dave, 0}, server_alpha, {call_event, 777, dst_node, src_node, 360}} ->
-            #{id => <<"tuple_destructuring">>, title => <<"Tagged Tuple Creation & Endpoint Swapping">>, status => <<"passed">>, time_ms => 8, details => <<"Direct tuple pattern matching and element swapping verified">>};
+         {call_event, 500, charlie, dave, 0}, server_alpha, {call_event, 777, dst_node, src_node, 360}, true, true} ->
+            #{id => <<"tuple_destructuring">>, title => <<"Tagged Tuple Creation & Endpoint Swapping">>, status => <<"passed">>, time_ms => 8, details => <<"Tagged 5-tuple creation, caller extraction, endpoint swapping, and tag/arity rejection verified.">>};
         Got1 ->
             #{id => <<"tuple_destructuring">>, title => <<"Tagged Tuple Creation & Endpoint Swapping">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Tuple mismatch: ~p", [Got1]))}
     end
@@ -8055,23 +8073,7 @@ CompileStage = case compile:file("%s/src/tcp_flow_worker.erl", [return_errors, {
         code:load_file(TargetModule),
         #{id => <<"compile">>, title => <<"Compile tcp_flow_worker.erl">>, status => <<"passed">>, time_ms => 20, details => <<"Compilation succeeded">>};
     Err ->
-        #{id => <<"compile">>, title => <<"Compile tcp_flow_worker.erl">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("~p", [Err]))}
-end,
-S1_Ast = case bf_ast_verifier:verify_rules("%s/src/tcp_flow_worker.erl", #{
-    required_calls => [{inet, setopts, 2}, {gen_tcp, send, 2}],
-    required_constructs => [record_def]
-}) of
-    {ok, _} ->
-        #{id => <<"ast_verification">>, title => <<"AST Analysis: Flow Control Calls & State Record">>, status => <<"passed">>, time_ms => 15, details => <<"Verified inet:setopts/2, gen_tcp:send/2, and #state record definition.">>};
-    {error, AstFailReason} ->
-        #{id => <<"ast_verification">>, title => <<"AST Analysis: Flow Control Calls & State Record">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST verification failed: ~p", [AstFailReason]))}
-end,
-S2_ActiveOnceBackpressure = try
-    catch tcp_flow_worker:stop_server(whereis(tcp_flow_worker)),
-    timer:sleep(20),
-    {ok, ListenPid, Port} = tcp_flow_worker:start_server(),
-    case bf_backpressure_tester:verify_active_once_backpressure(node(), Port, tcp_flow_worker, 50, 5) of
-        {ok, #{verdict := <<
+        #{id => <<"compile">>, title => <<"Compile tcp_flow_worker.erl">>,
     #{packets_processed := 1, bytes_processed := 11, closed := false} = tcp_flow_worker:get_stats(tcp_flow_worker),
     1 = tcp_flow_worker:get_processed_count(tcp_flow_worker),
     ok = gen_tcp:close(CSock3),

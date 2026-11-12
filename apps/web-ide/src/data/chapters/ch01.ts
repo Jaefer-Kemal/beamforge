@@ -717,18 +717,18 @@ Together, they form the **Tagged Tuple Idiom**—the universal convention used a
 
 ### Atoms
 An **Atom** is a literal constant whose name is its value.
-- Lowercase names are automatically atoms: \`ok\`, \`error\`, \`call_event\`, \`alice\`, \`bob\`.
+- Lowercase names are automatically atoms: \`ok\`, \`error\`, \`ready\`, \`gateway_a\`, \`core_node\`.
 - Atoms are stored once in a global runtime **Atom Table**. An atom reference inside a message or process heap is simply a 1-word integer pointer. Comparing two atoms (\`State =:= ready\`) is an ultra-fast $O(1)$ single-cycle integer pointer comparison.
 - **Single-Quoted Atoms**: If an atom must begin with a capital letter, contain spaces, or include punctuation, enclose it in single quotes: \`'Monday'\`, \`'EXIT'\`, \`'user@domain.com'\`.
 
-> [!warning] The Atom Table is Never Garbage-Collected
+> [!WARNING] Common Production Trap: The Atom Table is Never Garbage-Collected
 > The BEAM VM Atom Table has a fixed limit (default 1,048,576 atoms) and is **never garbage-collected**.
 > Never dynamically generate atoms from untrusted user input using \`list_to_atom/1\`, or malicious requests can overflow the atom table and crash the entire node!
 
 ### Tuples
 A **Tuple** is an ordered, fixed-size container written with curly braces:
 \`\`\`erlang
-{call_event, 101, alice, bob, 120}
+{route_hop, 404, edge_west, core_01, 15}
 \`\`\`
 Tuples are stored as contiguous words on the process heap: a header word followed by each element's value. Element access is instant ($O(1)$ indexed offset).
 
@@ -747,33 +747,25 @@ Heartbeat = {heartbeat, 101, primary_node, healthy},
 
 ## Parallel Worked Example
 
-Consider a distributed file storage chunk ledger:
+Consider a distributed telemetry batching module that tags metric readings and rebuilds nested cluster descriptors immutably:
 
 \`\`\`erlang
--module(storage_ledger).
--export([allocate_chunk/3, get_chunk_status/1, update_chunk_checksum/2]).
+-module(metrics_batch).
+-export([tag_sample/2, promote_replica/2]).
 
-%% Create a 4-element tagged record tracking partition state:
-%% {chunk, ChunkId, Partition, Status}
-allocate_chunk(ChunkId, Partition, Status) ->
-    {chunk, ChunkId, Partition, Status}.
+%% Wrap a metric name and numeric value inside a versioned 4-tuple
+tag_sample(MetricName, Value) ->
+    {sample, v1, MetricName, Value}.
 
-%% Extract the status atom from a chunk tuple using pattern matching
-get_chunk_status(ChunkRecord) ->
-    {chunk, _Id, _Partition, Status} = ChunkRecord,
-    Status.
-
-%% Update the checksum in a 5-element file descriptor:
-%% replaces OldChecksum with NewChecksum while preserving other metadata
-update_chunk_checksum(FileDescriptor, NewChecksum) ->
-    {file_entry, Path, SizeBytes, _OldChecksum, ModifiedAt} = FileDescriptor,
-    {file_entry, Path, SizeBytes, NewChecksum, ModifiedAt}.
+%% Destructure a nested cluster tuple, replace the leader atom, and preserve other fields
+promote_replica(StandbyNode, ClusterInfo) ->
+    {cluster, _Leader, ReplicaCount, {zone, PrimaryZone}} = ClusterInfo,
+    {cluster, StandbyNode, ReplicaCount + 1, {zone, PrimaryZone}}.
 \`\`\`
 
-Notice:
-- \`allocate_chunk/3\` tags the tuple with \`chunk\` and groups related partition attributes.
-- \`get_chunk_status/1\` pattern matches the 4-element tuple, discarding unused fields with \`_\`.
-- \`update_chunk_checksum/2\` unpacks the 5-element \`file_entry\` tuple and constructs a new tuple with updated checksum while preserving remaining fields.
+Notice how the BEAM processes each operation:
+- \`tag_sample/2\` prepends the atom \`sample\` and schema tag \`v1\` to form a self-describing fixed-arity tuple.
+- \`promote_replica/2\` asserts the outer \`cluster\` tag and nested \`zone\` tag during pattern matching, discards \`_Leader\` without compiler warnings, and allocates a fresh updated tuple in $O(1)$ time without mutating \`ClusterInfo\`.
 
 ## Official Erlang Docs & Function Reference
 
@@ -783,36 +775,38 @@ Notice:
   Compound data type with fixed number of terms.
   Element access via pattern matching or element(N, Tuple) is O(1).
 \`\`\`
+> **How to Read This Spec**: Tuples pack \`N\` terms into contiguous words on the process heap, so both pattern-match destructuring and \`erlang:tuple_size/1\` header inspection run in $O(1)$ time without traversing elements. Open the attached **\`tuple_size\` Reference Card** below for official ERTS documentation and BIF C source links.
 
 ## Assignment Specification
 
-In \`telecom_events.erl\`, implement three functions that model and manipulate structured telecom switch records:
+In \`src/telecom_events.erl\`, implement and export \`make_event/3\`, \`extract_caller/1\`, and \`swap_endpoints/1\`:
 
 1. \`make_event(Id, Caller, Callee)\`:
    - **Input**: Integer \`Id\`, atom \`Caller\`, and atom \`Callee\`.
-   - **Behavior**: Construct and return a 5-element tagged tuple. The tuple must start with the tag atom \`call_event\`, followed by the call identifier, caller, callee, and an initial duration integer of \`0\`.
+   - **Behavior**: Constructs and returns a 5-element tagged tuple in $O(1)$ time starting with the tag atom \`call_event\`, followed by \`Id\`, \`Caller\`, \`Callee\`, and an initial duration integer of \`0\`.
    - **Examples**:
      - \`telecom_events:make_event(101, alice, bob)\` returns \`{call_event, 101, alice, bob, 0}\`.
      - \`telecom_events:make_event(202, operator, support)\` returns \`{call_event, 202, operator, support, 0}\`.
 
 2. \`extract_caller(Event)\`:
-   - **Input**: A 5-element \`call_event\` tuple.
-   - **Behavior**: Using pattern matching with the \`=\` operator, extract and return the \`Caller\` atom. Discard all other fields using wildcards.
+   - **Input**: A 5-element \`call_event\` tagged tuple.
+   - **Behavior**: Matches and validates the 5-element tagged tuple in $O(1)$ time (failing on wrong tag or tuple size), returning only the \`Caller\` atom while cleanly discarding the remaining fields without unused-variable warnings.
    - **Examples**:
      - \`telecom_events:extract_caller({call_event, 101, alice, bob, 45})\` returns \`alice\`.
      - \`telecom_events:extract_caller({call_event, 202, carol, dave, 120})\` returns \`carol\`.
 
 3. \`swap_endpoints(Event)\`:
-   - **Input**: A 5-element \`call_event\` tuple containing call identifier, endpoints, and duration.
-   - **Behavior**: Destructure the event and return a newly constructed \`call_event\` tuple where the positions of \`Caller\` and \`Callee\` are reversed, while keeping the call ID and elapsed duration unchanged.
+   - **Input**: A 5-element \`call_event\` tuple containing call identifier, caller, callee, and duration.
+   - **Behavior**: Validates and destructures the event in $O(1)$ time and returns a newly constructed 5-element \`call_event\` tuple with \`Caller\` and \`Callee\` positions exchanged while keeping \`Id\` and elapsed duration unchanged.
    - **Examples**:
      - \`telecom_events:swap_endpoints({call_event, 101, alice, bob, 45})\` returns \`{call_event, 101, bob, alice, 45}\`.
      - \`telecom_events:swap_endpoints({call_event, 500, gateway_a, gateway_b, 0})\` returns \`{call_event, 500, gateway_b, gateway_a, 0}\`.
 
 ## Rules & Verification Constraints
 
-- Test cases will use atoms like \`alice\` and \`bob\` as caller/callee names.
-- Do not use binaries or maps—stick strictly to atoms, integers, and tuples.`,
+- **Exports**: \`telecom_events\` must export \`make_event/3\`, \`extract_caller/1\`, and \`swap_endpoints/1\`.
+- **Tagged Tuple Contract**: Pattern-match on the leading \`call_event\` tag and 5-element structure so mismatched tags or arities fail cleanly rather than succeeding silently.
+- **Primitives Only**: Do not use binaries or maps—stick strictly to atoms, integers, and tuples with zero unused-variable warnings.`,
     otpDocCards: [
       {
         functionName: 'tuple_size',
@@ -874,7 +868,7 @@ In \`telecom_events.erl\`, implement three functions that model and manipulate s
     astRules: {
       requiredCalls: [],
     },
-    solutionExplanation: 'Demonstrates tagged tuple construction, element extraction, and field swapping using pattern matching.',
+    solutionExplanation: 'Demonstrates tagged 5-tuple construction, strict tag-validated field extraction, and immutable element swapping via pattern matching.',
     files: [
       {
         name: 'telecom_events.erl',
@@ -882,16 +876,16 @@ In \`telecom_events.erl\`, implement three functions that model and manipulate s
         content: `-module(telecom_events).
 -export([make_event/3, extract_caller/1, swap_endpoints/1]).
 
-%% @doc Return a 5-element call_event tuple with initial duration 0.
-make_event(Id, Caller, Callee) ->
+%% @doc Construct a tagged 5-element call event combining Id, Caller, Callee, and zero initial duration.
+make_event(_Id, _Caller, _Callee) ->
     ok.
 
-%% @doc Extract and return the Caller atom from a call_event tuple.
-extract_caller(Event) ->
+%% @doc Extract and return the caller endpoint atom from a tagged 5-element call event.
+extract_caller(_Event) ->
     ok.
 
-%% @doc Return a new call_event tuple with Caller and Callee positions swapped.
-swap_endpoints(Event) ->
+%% @doc Return an updated 5-element call event with Caller and Callee swapped while keeping Id and duration intact.
+swap_endpoints(_Event) ->
     ok.`,
       },
     ],
@@ -899,13 +893,16 @@ swap_endpoints(Event) ->
       'src/telecom_events.erl': `-module(telecom_events).
 -export([make_event/3, extract_caller/1, swap_endpoints/1]).
 
+%% @doc Construct a tagged 5-element call event combining Id, Caller, Callee, and zero initial duration.
 make_event(Id, Caller, Callee) ->
     {call_event, Id, Caller, Callee, 0}.
 
+%% @doc Extract and return the caller endpoint atom from a tagged 5-element call event.
 extract_caller(Event) ->
     {call_event, _Id, Caller, _Callee, _Duration} = Event,
     Caller.
 
+%% @doc Return an updated 5-element call event with Caller and Callee swapped while keeping Id and duration intact.
 swap_endpoints(Event) ->
     {call_event, Id, Caller, Callee, Duration} = Event,
     {call_event, Id, Callee, Caller, Duration}.`,
@@ -913,27 +910,30 @@ swap_endpoints(Event) ->
     starterCode: `-module(telecom_events).
 -export([make_event/3, extract_caller/1, swap_endpoints/1]).
 
-%% @doc Return a 5-element call_event tuple with initial duration 0.
-make_event(Id, Caller, Callee) ->
+%% @doc Construct a tagged 5-element call event combining Id, Caller, Callee, and zero initial duration.
+make_event(_Id, _Caller, _Callee) ->
     ok.
 
-%% @doc Extract and return the Caller atom from a call_event tuple.
-extract_caller(Event) ->
+%% @doc Extract and return the caller endpoint atom from a tagged 5-element call event.
+extract_caller(_Event) ->
     ok.
 
-%% @doc Return a new call_event tuple with Caller and Callee positions swapped.
-swap_endpoints(Event) ->
+%% @doc Return an updated 5-element call event with Caller and Callee swapped while keeping Id and duration intact.
+swap_endpoints(_Event) ->
     ok.`,
     solutionCode: `-module(telecom_events).
 -export([make_event/3, extract_caller/1, swap_endpoints/1]).
 
+%% @doc Construct a tagged 5-element call event combining Id, Caller, Callee, and zero initial duration.
 make_event(Id, Caller, Callee) ->
     {call_event, Id, Caller, Callee, 0}.
 
+%% @doc Extract and return the caller endpoint atom from a tagged 5-element call event.
 extract_caller(Event) ->
     {call_event, _Id, Caller, _Callee, _Duration} = Event,
     Caller.
 
+%% @doc Return an updated 5-element call event with Caller and Callee swapped while keeping Id and duration intact.
 swap_endpoints(Event) ->
     {call_event, Id, Caller, Callee, Duration} = Event,
     {call_event, Id, Callee, Caller, Duration}.`,
