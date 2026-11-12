@@ -648,11 +648,11 @@ T3_Res = try recursive_search:contains_item([apple, banana, cherry], banana) of
           expected => <<"true">>, actual => <<"true">>, passed => true,
           time_ms => erlang:system_time(millisecond) - T3_Start};
     Other3 ->
-        #{call_str => <<"recursive_search:contains_item(...)">>,
+        #{call_str => <<"recursive_search:contains_item([apple, banana, cherry], banana)">>,
           expected => <<"true">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
 catch C3:R3 ->
-    #{call_str => <<"recursive_search:contains_item(...)">>,
+    #{call_str => <<"recursive_search:contains_item([apple, banana, cherry], banana)">>,
       expected => <<"true">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
@@ -664,11 +664,11 @@ T4_Res = try recursive_search:contains_item([apple, banana, cherry], date) of
           expected => <<"false">>, actual => <<"false">>, passed => true,
           time_ms => erlang:system_time(millisecond) - T4_Start};
     Other4 ->
-        #{call_str => <<"recursive_search:contains_item(...)">>,
+        #{call_str => <<"recursive_search:contains_item([apple, banana, cherry], date)">>,
           expected => <<"false">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other4]))), passed => false, time_ms => 0}
 catch C4:R4 ->
-    #{call_str => <<"recursive_search:contains_item(...)">>,
+    #{call_str => <<"recursive_search:contains_item([apple, banana, cherry], date)">>,
       expected => <<"false">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
 end,
@@ -4892,32 +4892,88 @@ Stages = [CompileStage, S1_Ast, S2_Flow]
 `, wsDir, wsDir), true
 
 	case "ch02-l04":
-		return `
+		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(recursive_search) of
     {module, recursive_search} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"recursive_search.erl compiled cleanly">>};
+        Exports = recursive_search:module_info(exports),
+        Required = [{find_product, 2}, {contains_item, 2}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"recursive_search.erl compiled cleanly and exported find_product/2 and contains_item/2.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Search = try
+S1_Ast = try
+    SourceCandidates = [
+        filename:join(["%s", "src", "recursive_search.erl"]),
+        filename:join(["%s", "recursive_search.erl"])
+    ],
+    SourceFile = case [P || P <- SourceCandidates, filelib:is_regular(P)] of
+        [ValidSrc | _] -> ValidSrc;
+        [] -> hd(SourceCandidates)
+    end,
+    Rules = #{
+        forbidden_remote_calls => [{lists, keyfind, any}, {lists, member, any}, {lists, filter, any}, {lists, any, any}, {lists, keysearch, any}, {lists, search, any}],
+        forbidden_constructs => [list_comprehension]
+    },
+    AstOk = case bf_ast_verifier:verify_rules(SourceFile, Rules) of
+        {ok, _} -> true;
+        _ -> false
+    end,
+    NoListsCalls = case epp:parse_file(SourceFile, []) of
+        {ok, Forms} ->
+            HasLists = (fun Walk(T) when is_tuple(T) ->
+                case T of
+                    {remote, _, {atom, _, lists}, _} -> true;
+                    _ -> Walk(tuple_to_list(T))
+                end;
+                Walk([H | Tail]) -> Walk(H) orelse Walk(Tail);
+                Walk(_) -> false
+            end)(Forms),
+            not HasLists;
+        _ -> false
+    end,
+    case {AstOk, NoListsCalls} of
+        {true, true} ->
+            #{id => <<"ast_pure_recursion_audit">>, title => <<"AST Analysis: Pure Recursion Without lists:* or Comprehensions">>, status => <<"passed">>, time_ms => 10, details => <<"Verified manual recursive pattern matching with zero lists module calls or list comprehensions.">>};
+        _ ->
+            #{id => <<"ast_pure_recursion_audit">>, title => <<"AST Analysis: Pure Recursion Without lists:* or Comprehensions">>, status => <<"failed">>, time_ms => 10, details => <<"Forbidden lists module call or list comprehension detected; implement recursive head/tail pattern matching manually.">>}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_pure_recursion_audit">>, title => <<"AST Analysis: Pure Recursion Without lists:* or Comprehensions">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_Search = try
     Inv = [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}],
+    InvMixed = [{item, 2, "Decoy", 0, 0}, {product, 7, "Cable", 15, 20}, {product, 2, "Mouse", 25, 5}],
     F1 = recursive_search:find_product(Inv, 2),
+    F1b = recursive_search:find_product(InvMixed, 2),
+    F1c = recursive_search:find_product(Inv, 1),
     F2 = recursive_search:find_product(Inv, 99),
     F3 = recursive_search:find_product([], 1),
     Has1 = recursive_search:contains_item([apple, banana, cherry], banana),
+    Has1b = recursive_search:contains_item([apple, banana, cherry], apple),
     Has2 = recursive_search:contains_item([apple, banana, cherry], date),
     Has3 = recursive_search:contains_item([], date),
-    case {F1, F2, F3, Has1, Has2, Has3} of
-        {{ok, {product, 2, "Mouse", 25, 5}}, not_found, not_found, true, false, false} ->
-            #{id => <<"recursive_search_invariants">>, title => <<"Recursive Base Cases & Tuple Matching">>, status => <<"passed">>, time_ms => 8, details => <<"Recursive tuple lookup and item containment verified">>};
+    case {F1, F1b, F1c, F2, F3, Has1, Has1b, Has2, Has3} of
+        {{ok, {product, 2, "Mouse", 25, 5}},
+         {ok, {product, 2, "Mouse", 25, 5}},
+         {ok, {product, 1, "Keyboard", 50, 10}},
+         not_found,
+         not_found,
+         true, true, false, false} ->
+            #{id => <<"recursive_search_invariants">>, title => <<"Recursive Base Cases & Tuple Matching">>, status => <<"passed">>, time_ms => 8, details => <<"Recursive tuple lookup (ignoring non-product decoys), item containment, and [] base cases verified.">>};
         Got1 ->
             #{id => <<"recursive_search_invariants">>, title => <<"Recursive Base Cases & Tuple Matching">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Search mismatch: ~p", [Got1]))}
     end
 catch Class_Search:Err_Search ->
     #{id => <<"recursive_search_invariants">>, title => <<"Recursive Base Cases & Tuple Matching">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_Search, Err_Search]))}
 end,
-Stages = [CompileStage, S1_Search]
-`, true
+Stages = [CompileStage, S1_Ast, S2_Search]
+`, wsDir, wsDir), true
 
 	case "ch02-l05":
 		return fmt.Sprintf(`

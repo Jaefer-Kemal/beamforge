@@ -87,6 +87,26 @@ grade_latency(LatencyMs) ->
     end.
 `
 
+	recursiveSearchSolution := `-module(recursive_search).
+-export([find_product/2, contains_item/2]).
+
+%% @doc Recursively traverse an inventory list of 5-element product tuples to return an ok pair wrapping the entry matching TargetId, or report not-found when absent or empty.
+find_product([], _TargetId) ->
+    not_found;
+find_product([{product, TargetId, _Name, _Price, _Stock} = Prod | _Rest], TargetId) ->
+    {ok, Prod};
+find_product([_OtherProd | Rest], TargetId) ->
+    find_product(Rest, TargetId).
+
+%% @doc Recursively determine whether Target matches any element in List via head-to-tail pattern matching, returning a boolean.
+contains_item([], _Target) ->
+    false;
+contains_item([Target | _Rest], Target) ->
+    true;
+contains_item([_Other | Rest], Target) ->
+    contains_item(Rest, Target).
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -106,6 +126,11 @@ grade_latency(LatencyMs) ->
 			exerciseID:   "ch02-l03",
 			visibleCount: 4,
 			files:        map[string]string{"src/flow_control.erl": flowControlSolution},
+		},
+		{
+			exerciseID:   "ch02-l04",
+			visibleCount: 4,
+			files:        map[string]string{"src/recursive_search.erl": recursiveSearchSolution},
 		},
 	}
 
@@ -513,6 +538,95 @@ grade_latency(LatencyMs) ->
 		}
 		if !flowFailed {
 			t.Errorf("Expected case_and_if_expressions stage to fail for non-integer status code, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l04 rejects lists module calls via AST audit", func(t *testing.T) {
+		sessionID := "test-ch02-l04-neg-lists"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/recursive_search.erl": `-module(recursive_search).
+-export([find_product/2, contains_item/2]).
+
+find_product(Inventory, TargetId) ->
+    case lists:keyfind(TargetId, 2, Inventory) of
+        {product, _, _, _, _} = Prod -> {ok, Prod};
+        false -> not_found
+    end.
+
+contains_item(List, Target) ->
+    lists:member(Target, List).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch02-l04", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected recursive_search using lists:keyfind/lists:member to fail AST verification, but got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_pure_recursion_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_pure_recursion_audit stage to fail for lists:* calls, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l04 rejects list comprehension bypass via AST audit", func(t *testing.T) {
+		sessionID := "test-ch02-l04-neg-lc"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/recursive_search.erl": `-module(recursive_search).
+-export([find_product/2, contains_item/2]).
+
+find_product(Inventory, TargetId) ->
+    case [P || {product, Id, _, _, _} = P <- Inventory, Id =:= TargetId] of
+        [First | _] -> {ok, First};
+        [] -> not_found
+    end.
+
+contains_item([], _Target) -> false;
+contains_item([Target | _], Target) -> true;
+contains_item([_ | T], Target) -> contains_item(T, Target).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch02-l04", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected recursive_search using list comprehension to fail AST verification, but got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_pure_recursion_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_pure_recursion_audit stage to fail for list comprehension, stages=%+v", report.Stages)
 		}
 	})
 }

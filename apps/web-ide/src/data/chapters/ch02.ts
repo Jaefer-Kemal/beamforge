@@ -884,96 +884,99 @@ Before you can build complex systems like the Inventory Order Processor (\`inven
 
 ## Deep Concept Breakdown & Under the Hood
 
-### The 3 Rules of Recursive Search
-Every recursive search over an Erlang list consists of three distinct cases:
+### The 3 Rules of Recursive Traversal
+Every recursive scan over an Erlang list consists of three distinct cases:
 
 1. **The Base Case (List Exhausted):**
-   If the list is empty (\`[]\`), we traversed all items and did not find the target. Return an error or not-found atom.
+   If the list is empty (\`[]\`), every element has been checked without triggering an early return. Return the termination value.
    \`\`\`erlang
-   find_record([], _TargetKey) ->
-       {error, not_present};
+   has_zero([]) ->
+       false;
    \`\`\`
 
-2. **The Match Case (Target Located):**
-   If the head of the list contains the identifier we are searching for, stop immediately and return the item.
+2. **The Match Case (Condition Met):**
+   If the head element matches the stopping condition, return immediately without scanning the remainder of the list.
    \`\`\`erlang
-   find_record([{entry, TargetKey, Value} | _Tail], TargetKey) ->
-       {found, Value};
+   has_zero([0 | _Tail]) ->
+       true;
    \`\`\`
 
-3. **The Recursive Step (Search Deeper):**
-   If the head of the list does NOT match the target, discard the head and search the remaining tail!
+3. **The Recursive Step (Advance to Tail):**
+   If the head element does not satisfy the stopping condition, discard the head and recurse on \`Tail\`:
    \`\`\`erlang
-   find_record([_Other | Tail], TargetKey) ->
-       find_record(Tail, TargetKey).
+   has_zero([_Head | Tail]) ->
+       has_zero(Tail).
    \`\`\`
+
+### Matching a Repeated Variable Across Arguments
+Remember Chapter 1's single-assignment rule: if the **same variable name** appears both inside the list-head pattern and in a second function parameter (e.g., \`check([X | _Tail], X)\`), the BEAM VM compiles an exact equality check (\`is_eq_exact\`) before entering the clause body.
 
 ### Natural Tail Recursion
-Notice what happens in step 3: the recursive call \`find_record(Tail, TargetKey)\` is the **very last operation** executed in that clause.
-Because nothing remains to be calculated after \`find_record\` returns, the BEAM VM reuses the current stack frame. Searching a list of 100,000 items in Erlang does not allocate 100,000 stack frames—it runs in constant $O(1)$ stack space!
+Notice step 3: the recursive call \`has_zero(Tail)\` is the **very last operation** executed in that clause.
+Because nothing remains to be calculated after the call returns, the BEAM VM reuses the current stack frame. Scanning a list of 100,000 items runs in constant $O(1)$ stack space!
 
 > [!warning] Common Beginner Syntax Trap: The Missing Base Case
-> The most frequent beginner bug in recursive Erlang is forgetting the empty list clause (\`find_record([], _) -> ...\`).
-> If this clause is omitted and an item is not in the list, the function will attempt to match \`[]\` against \`[Head | Tail]\`, immediately crashing with a \`function_clause\` runtime error!
+> The most frequent beginner bug in recursive Erlang is forgetting the empty list clause (\`fn([], ...) -> ...\`).
+> If this clause is omitted and a target is absent, the function attempts to match \`[]\` against \`[Head | Tail]\`, crashing immediately with a \`function_clause\` runtime error!
 
 ## Parallel Worked Example
 
-Consider a distributed cluster node discovery and region membership system:
+Consider a distributed cluster health monitor inspecting node heartbeat tuples:
 
 \`\`\`erlang
 -module(cluster_nodes).
--export([locate_active_peer/2, count_matching_region/2]).
+-export([all_healthy/1, first_overloaded/2]).
 
-%% Locate a healthy peer node matching a given node name in a cluster topology list
-locate_active_peer([], _TargetNode) ->
-    {error, peer_unreachable};
-locate_active_peer([{peer, TargetNode, online, LatencyMs} | _Peers], TargetNode) ->
-    {active_peer, TargetNode, LatencyMs};
-locate_active_peer([_OtherPeer | Peers], TargetNode) ->
-    locate_active_peer(Peers, TargetNode).
+%% 1. Base case on [] plus tail-recursive verification across all cluster nodes
+all_healthy([]) ->
+    true;
+all_healthy([{node, _Name, healthy} | Tail]) ->
+    all_healthy(Tail);
+all_healthy([_Unhealthy | _Tail]) ->
+    false.
 
-%% Recursively count how many nodes belong to a specific geographic region
-count_matching_region([], _Region) ->
-    0;
-count_matching_region([{node, _Id, Region, _Cap} | Rest], Region) ->
-    1 + count_matching_region(Rest, Region);
-count_matching_region([_Node | Rest], Region) ->
-    count_matching_region(Rest, Region).
+%% 2. Recursive tuple scan comparing an inner load metric against a threshold guard
+first_overloaded([], _MaxLoad) ->
+    no_overload;
+first_overloaded([{node, Name, Load} | _Tail], MaxLoad) when Load > MaxLoad ->
+    {alert, Name, Load};
+first_overloaded([_Normal | Tail], MaxLoad) ->
+    first_overloaded(Tail, MaxLoad).
 \`\`\`
 
-Notice:
-- \`locate_active_peer/2\` demonstrates the 3-case recursive search pattern: empty list base case returning \`{error, peer_unreachable}\`, head pattern matching on \`TargetNode\`, and tail delegation.
-- \`count_matching_region/2\` demonstrates recursive list processing for counting matches without shadowing simple boolean membership tests.
+Notice how the BEAM executes this module:
+- \`all_healthy/1\` returns \`true\` only when recursion reaches the \`[]\` base case, short-circuiting to \`false\` on the first non-healthy node in $O(1)$ stack space.
+- \`first_overloaded/2\` destructures 3-element \`{node, Name, Load}\` tuples cleanly, returning \`{alert, Name, Load}\` on the first threshold breach or \`no_overload\` once the list is exhausted.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Recursive List Traversal Pattern:
 traverse([]) -> BaseResult;
-traverse([MatchItem | _Rest]) when Condition -> MatchResult;
-traverse([_Other | Rest]) -> traverse(Rest).
+traverse([MatchItem | _Tail]) when Condition -> MatchResult;
+traverse([_Other | Tail]) -> traverse(Tail).
 \`\`\`
+> Note: See the Erlang Reference Card for pattern-matching function clause semantics and $O(1)$ tail-call optimization guarantees.
 
 ## Assignment Specification
 
 Implement two recursive search functions in \`recursive_search.erl\`:
 
 ### 1. \`find_product(Inventory, TargetId)\`
-- **Input**: A list \`Inventory\` of 5-element product tuples, and a target product identifier \`TargetId\`. Each product is structured as \`{product, Id, Name, Price, Stock}\` where \`Id\`, \`Price\`, and \`Stock\` are integers, and \`Name\` is a string.
-- **Behavior**: Traverse the inventory list recursively using head/tail decomposition:
-  - If a product whose ID matches \`TargetId\` is found, return \`{ok, ProductTuple}\` containing the complete matching product.
-  - If the inventory is exhausted without finding a match, return the atom \`not_found\`.
-  - Must handle the empty list \`[]\` base case cleanly.
+- **Input**: A list \`Inventory\` of 5-element \`product\` tuples (each holding the atom \`product\`, an integer \`Id\`, a string \`Name\`, an integer \`Price\`, and an integer \`Stock\`), plus a target integer \`TargetId\`.
+- **Behavior**: Traverse \`Inventory\` recursively in $O(N)$ time and $O(1)$ stack space using head/tail decomposition:
+  - When a \`product\` tuple's ID matches \`TargetId\`, return an \`ok\` pair wrapping that complete matching product tuple.
+  - When the list is exhausted without a match (including an empty list), return the atom \`not_found\`.
 - **Examples**:
   - \`recursive_search:find_product([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}], 2)\` returns \`{ok, {product, 2, "Mouse", 25, 5}}\`.
   - \`recursive_search:find_product([{product, 1, "Keyboard", 50, 10}], 99)\` returns \`not_found\`.
   - \`recursive_search:find_product([], 1)\` returns \`not_found\`.
 
 ### 2. \`contains_item(List, Target)\`
-- **Input**: A list \`List\` of any terms and a \`Target\` term to locate.
-- **Behavior**: Check whether \`Target\` exists as an element in \`List\` using pure recursive pattern matching:
-  - If \`Target\` matches the head element of the list: Returns \`true\`.
-  - If the list is exhausted without finding \`Target\`: Returns \`false\`.
+- **Input**: A list \`List\` of arbitrary terms and a \`Target\` term to locate.
+- **Behavior**: Check whether \`Target\` exists inside \`List\` using pure recursive pattern matching:
+  - If \`Target\` matches the head element of the current sublist, stop immediately and return \`true\`.
+  - If the list is exhausted without finding \`Target\`, return \`false\`.
 - **Examples**:
   - \`recursive_search:contains_item([apple, banana, cherry], banana)\` returns \`true\`.
   - \`recursive_search:contains_item([apple, banana, cherry], date)\` returns \`false\`.
@@ -982,7 +985,7 @@ Implement two recursive search functions in \`recursive_search.erl\`:
 ## Rules & Verification Constraints
 
 - Implement using pure recursive pattern matching.
-- Do not use functions from the \`lists\` module (such as \`lists:keyfind/3\` or \`lists:member/2\`).
+- Do not use functions from the \`lists\` module or list comprehensions.
 - Must handle the empty list base case cleanly without crashing.`,
     otpDocCards: [
       {
@@ -992,11 +995,11 @@ Implement two recursive search functions in \`recursive_search.erl\`:
         typesSpec: ['List = [term()]', 'Target = term()'],
         description: 'Recursive head/tail list decomposition pattern.',
         complexityNote: 'O(N) time complexity with O(1) stack space under tail-call optimization.',
-        officialUrl: 'https://www.erlang.org/doc/programming_examples/list_comprehensions.html',
+        officialUrl: 'https://www.erlang.org/doc/reference_manual/functions.html',
       },
     ],
     mentalModelCheck: {
-      question: 'Why does an Erlang recursive search function crash with {function_clause} if the base case find_product([], _) -> not_found is omitted?',
+      question: 'Why does an Erlang recursive search function crash with function_clause if the base case for [] is omitted?',
       options: [
         {
           id: 'A',
@@ -1049,7 +1052,8 @@ Implement two recursive search functions in \`recursive_search.erl\`:
       },
     ],
     astRules: {
-      forbiddenCalls: ['lists:keyfind', 'lists:member', 'lists:filter'],
+      forbiddenCalls: ['lists:keyfind', 'lists:member', 'lists:filter', 'lists:any', 'lists:keysearch', 'lists:search'],
+      forbiddenConstructs: ['list_comprehension'],
     },
     solutionExplanation: 'Demonstrates base-case handling on [] and recursive head/tail pattern matching for tuple search and member verification.',
     files: [
@@ -1059,12 +1063,12 @@ Implement two recursive search functions in \`recursive_search.erl\`:
         content: `-module(recursive_search).
 -export([find_product/2, contains_item/2]).
 
-%% @doc Recursively search an inventory list for a product tuple matching TargetId.
-find_product(Inventory, TargetId) ->
+%% @doc Recursively traverse an inventory list of 5-element product tuples to return an ok pair wrapping the entry matching TargetId, or report not-found when absent or empty.
+find_product(_Inventory, _TargetId) ->
     ok.
 
-%% @doc Check whether Target is an element of List using recursive pattern matching.
-contains_item(List, Target) ->
+%% @doc Recursively determine whether Target matches any element in List via head-to-tail pattern matching, returning a boolean.
+contains_item(_List, _Target) ->
     ok.`,
       },
     ],
@@ -1072,6 +1076,7 @@ contains_item(List, Target) ->
       'src/recursive_search.erl': `-module(recursive_search).
 -export([find_product/2, contains_item/2]).
 
+%% @doc Recursively traverse an inventory list of 5-element product tuples to return an ok pair wrapping the entry matching TargetId, or report not-found when absent or empty.
 find_product([], _TargetId) ->
     not_found;
 find_product([{product, TargetId, _Name, _Price, _Stock} = Prod | _Rest], TargetId) ->
@@ -1079,6 +1084,7 @@ find_product([{product, TargetId, _Name, _Price, _Stock} = Prod | _Rest], Target
 find_product([_OtherProd | Rest], TargetId) ->
     find_product(Rest, TargetId).
 
+%% @doc Recursively determine whether Target matches any element in List via head-to-tail pattern matching, returning a boolean.
 contains_item([], _Target) ->
     false;
 contains_item([Target | _Rest], Target) ->
@@ -1089,16 +1095,17 @@ contains_item([_Other | Rest], Target) ->
     starterCode: `-module(recursive_search).
 -export([find_product/2, contains_item/2]).
 
-%% @doc Recursively search an inventory list for a product tuple matching TargetId.
-find_product(Inventory, TargetId) ->
+%% @doc Recursively traverse an inventory list of 5-element product tuples to return an ok pair wrapping the entry matching TargetId, or report not-found when absent or empty.
+find_product(_Inventory, _TargetId) ->
     ok.
 
-%% @doc Check whether Target is an element of List using recursive pattern matching.
-contains_item(List, Target) ->
+%% @doc Recursively determine whether Target matches any element in List via head-to-tail pattern matching, returning a boolean.
+contains_item(_List, _Target) ->
     ok.`,
     solutionCode: `-module(recursive_search).
 -export([find_product/2, contains_item/2]).
 
+%% @doc Recursively traverse an inventory list of 5-element product tuples to return an ok pair wrapping the entry matching TargetId, or report not-found when absent or empty.
 find_product([], _TargetId) ->
     not_found;
 find_product([{product, TargetId, _Name, _Price, _Stock} = Prod | _Rest], TargetId) ->
@@ -1106,6 +1113,7 @@ find_product([{product, TargetId, _Name, _Price, _Stock} = Prod | _Rest], Target
 find_product([_OtherProd | Rest], TargetId) ->
     find_product(Rest, TargetId).
 
+%% @doc Recursively determine whether Target matches any element in List via head-to-tail pattern matching, returning a boolean.
 contains_item([], _Target) ->
     false;
 contains_item([Target | _Rest], Target) ->
