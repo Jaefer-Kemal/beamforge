@@ -899,7 +899,7 @@ is_same_bare_jid(Jid1, Jid2) ->
     title: 'XMPP Stanza Anatomy (RFC 6120): Parsing & Constructing Stanzas',
     difficulty: 'Intermediate',
     xpReward: 100,
-        visualScene: 'tcp_xmpp_stream_framing',
+    visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Why does an XMPP <iq type="get"> stanza strictly require the recipient to return an <iq type="result"> or <iq type="error"> with the exact same id attribute?',
       options: [
@@ -935,6 +935,7 @@ In XMPP, after the stream header has been negotiated, all communication consists
 
 Production Erlang servers like MongooseIM and ejabberd handle millions of stanzas per second. Constructing XML efficiently using **IO Lists** and matching incoming stanzas using high-performance binary pattern matching is the foundation of high-throughput messaging.
 
+> [!IMPORTANT]
 > **The 3 Fundamental XMPP Stanza Patterns:**
 > 1. \`<iq>\` (Info/Query) — Request/Response correlated by unique \`id\` attribute.
 > 2. \`<presence>\` (Availability) — Broadcasts presence status and routing priority.
@@ -942,65 +943,130 @@ Production Erlang servers like MongooseIM and ejabberd handle millions of stanza
 
 ## Deep Concept Breakdown & Under the Hood
 
-### 1. Packet Classification
-Before dispatching a packet to its handler, the connection state machine must classify the incoming raw XML packet into one of the core types:
-- \`stream_open\`: Opening tag \`<stream:stream ... to='domain' ...>\`
-- \`auth_plain\`: SASL auth tag \`<auth ... mechanism='PLAIN'>Base64</auth>\`
-- \`iq\`: \`<iq ... type='get|set|result|error' id='ID' ...>\`
-- \`presence\`: \`<presence ... type='unavailable|available' ...>\`
-- \`message\`: \`<message ... id='ID' to='TO' type='chat' ...>\`
+### 1. Opening Stream, SASL Auth & Stanza Routing
+Before dispatching a packet to its handler, the connection state machine inspects the leading XML tag name and key metadata attributes:
+- **Opening stream header**: carries destination domain attributes (\`to='...'\`).
+- **SASL payload elements**: carry the negotiated Base64 challenge/response inside element text tags.
+- **Discrete stanzas**: \`<iq>\`, \`<presence>\`, and \`<message>\` carry routing attributes (\`id\`, \`type\`, \`to\`). Because \`<presence/>\` omits \`type\` when signaling online availability, parsers normalize a missing \`type\` to \`<<"available">>\`.
 
-### 2. High-Performance Wire Binary Construction
-In Erlang, concatenating binaries using \`<<Chunk1/binary, Chunk2/binary>>\` is extremely fast and zero-copy when building known XML payloads.
+### 2. Zero-Copy Assembly with IO Lists
+Concatenating dozens of nested binaries repeatedly with binary construction allocates intermediate copies on heap or binary space. Passing nested lists of binaries directly to \`erlang:iolist_to_binary/1\` (or writing an IO list to a socket port) computes total byte size in a single pass and fills one contiguous destination buffer.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% RFC 6120 Section 8: XML Stanzas
-%% Common Stanza Attributes:
-%% 'from': sender JID
-%% 'to': recipient JID
-%% 'id': unique identifier for tracking and correlation
-%% 'type': stanza semantic type
+%% Official OTP Signatures (stdlib / binary & erts / erlang)
+binary:match(Subject, Pattern) -> {Start, Length} | nomatch
+  Types:
+    Subject = binary()
+    Pattern = binary() | [binary()]
+    Start = Length = non_neg_integer()
+
+binary:part(Subject, Pos, Len) -> binary()
+  Types:
+    Subject = binary()
+    Pos = Len = non_neg_integer()
+
+binary:copy(Subject) -> binary()
+erlang:iolist_to_binary(IoList) -> binary()
 \`\`\`
+
+Consult the attached documentation cards below for \`binary:match/2\` search behavior and \`erlang:iolist_to_binary/1\` allocation guarantees.
+
+## Parallel Worked Example: Log Frame Attribute Scanner & Batch Serializer
+
+Consider a separate domain: an **Edge Audit Frame Codec** (\`audit_frame_codec\`) that classifies bracketed plain-text telemetry tags (\`<<"[EVT src='gw-1']boot</EVT>">>\`), extracts delimited values with \`binary:match/2\` + \`binary:part/3\` + \`binary:copy/1\`, and serializes batched records with \`iolist_to_binary/1\`:
+
+\`\`\`erlang
+-module(audit_frame_codec).
+-export([inspect_frame/1, encode_batch/1]).
+
+%% @doc Inspect a bracketed telemetry event line and unpin extracted fields.
+inspect_frame(Line) when is_binary(Line) ->
+    Clean = string:trim(Line),
+    case binary:match(Clean, <<"[EVT">>) of
+        {_, _} ->
+            Src = slice_attr(Clean, <<"src=">>),
+            Body = slice_inner(Clean, <<"]">>, <<"</EVT>">>),
+            {event, Src, Body};
+        nomatch ->
+            unrecognized
+    end;
+inspect_frame(_) ->
+    unrecognized.
+
+slice_attr(Bin, Prefix) ->
+    case binary:match(Bin, Prefix) of
+        {Pos, Len} ->
+            Skip = Pos + Len,
+            <<_:Skip/binary, Quote, Tail/binary>> = Bin,
+            case Quote of
+                39 -> slice_until(Tail, <<39>>);
+                34 -> slice_until(Tail, <<34>>);
+                _ -> <<>>
+            end;
+        nomatch ->
+            <<>>
+    end.
+
+slice_inner(Bin, LeftDelim, RightDelim) ->
+    case binary:match(Bin, LeftDelim) of
+        {LPos, LLen} ->
+            Skip = LPos + LLen,
+            <<_:Skip/binary, Rest/binary>> = Bin,
+            slice_until(Rest, RightDelim);
+        nomatch ->
+            <<>>
+    end.
+
+slice_until(Bin, Delim) ->
+    case binary:match(Bin, Delim) of
+        {EndPos, _} -> binary:copy(binary:part(Bin, 0, EndPos));
+        nomatch -> <<>>
+    end.
+
+%% @doc Serialize key-value metric pairs into an ASCII wire batch using an IO list.
+encode_batch(Pairs) ->
+    Rows = [[K, <<"=">>, V, <<";">>] || {K, V} <- Pairs],
+    iolist_to_binary([<<"BATCH[">>, Rows, <<"]">>]).
+\`\`\`
+
+### What ERTS Does at Runtime
+- **Byte-Offset Bit-Syntax Skipping**: \`<<_:Skip/binary, Rest/binary>>\` advances the bit pointer in $O(1)$ without copying bytes before extracting quoted attributes via \`binary:part/3\` and detaching them via \`binary:copy/1\`.
+- **Single-Pass Serialization**: \`encode_batch/1\` builds nested binary lists and collapses them in one allocation inside \`iolist_to_binary/1\`.
 
 ## Assignment Specification
 
-Implement the module \`xmpp_stanza\` in \`src/xmpp_stanza.erl\` with the following exports:
+Implement \`xmpp_stanza\` in \`src/xmpp_stanza.erl\` exporting \`classify_xml_packet/1\`, \`build_stream_features/1\`, \`build_bind_result/2\`, and \`build_chat_message/4\`.
 
-\`\`\`erlang
--module(xmpp_stanza).
--export([
-    classify_xml_packet/1,
-    build_stream_features/1,
-    build_bind_result/2,
-    build_chat_message/4
-]).
-\`\`\`
+### \`classify_xml_packet/1\`
+- **Input**: Raw XML packet binary (arbitrary Erlang term rejected cleanly as unrecognized).
+- **Behavior**: Trims outer whitespace and inspects the packet tag to classify it into one of six forms: a 2-tuple \`{stream_open, ToDomain}\` for opening \`stream:stream\` tags, \`{auth_plain, AuthData}\` for opening \`auth\` tags (extracting inner element text), \`{iq, Id, Type}\` for \`<iq\` stanzas, \`{presence, Type}\` for \`<presence\` stanzas (defaulting empty/absent \`type\` attribute to \`<<"available">>\`), \`{message, Id, Type, To}\` for \`<message\` stanzas, or atom \`unknown\` for unrecognized/closing elements or non-binary input. Supports both single- and double-quoted attributes and copies all extracted slices with \`binary:copy/1\`.
+- **Examples**:
+  - \`xmpp_stanza:classify_xml_packet(<<"<stream:stream to='localhost' version='1.0'>">>)\` returns \`{stream_open,<<"localhost">>}\`.
+  - \`xmpp_stanza:classify_xml_packet(<<"<iq type='get' id='ping_42'><ping/></iq>">>)\` returns \`{iq,<<"ping_42">>,<<"get">>}\`.
 
-### Functions to Implement:
-1. **\`classify_xml_packet(XmlBin) -> Classification\`**:
-   - Returns:
-     - \`{stream_open, ToDomainBin}\` if opening \`<stream:stream\` tag
-     - \`{auth_plain, Base64DataBin}\` if \`<auth mechanism='PLAIN'>Data</auth>\`
-     - \`{iq, IdBin, TypeBin}\` for \`<iq\` tags (extracts \`id\` and \`type\`)
-     - \`{presence, TypeBin}\` for \`<presence\` tags (extracts \`type\`, defaulting to \`<<"available">>\` if absent)
-     - \`{message, IdBin, TypeBin, ToBin}\` for \`<message\` tags
-     - \`unknown\` for any other packet.
-2. **\`build_stream_features(MechanismsList) -> binary()\`**:
-   - Takes a list of mechanism binaries (e.g. \`[<<"PLAIN">>]\` or \`[<<"PLAIN">>, <<"SCRAM-SHA-256">>]\`) and produces valid XML:
-     \`<stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>\`
-3. **\`build_bind_result(IdBin, FullJidBin) -> binary()\`**:
-   - Returns:
-     \`<iq type='result' id='ID'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>FullJid</jid></bind></iq>\`
-4. **\`build_chat_message(FromJidBin, ToJidBin, IdBin, BodyTextBin) -> binary()\`**:
-   - Returns:
-     \`<message from='From' to='To' id='Id' type='chat'><body>Body</body></message>\`
+### \`build_stream_features/1\`
+- **Input**: List of SASL mechanism binaries (e.g., \`[<<"PLAIN">>, <<"SCRAM-SHA-256">>]\`).
+- **Behavior**: Wraps each mechanism binary inside a \`<mechanism>\` element and encloses all mechanisms inside a single-quoted SASL \`stream:features\` XML wrapper using IO lists.
+- **Examples**:
+  - \`xmpp_stanza:build_stream_features([<<"PLAIN">>])\` returns \`<<"<stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>">>\`.
+
+### \`build_bind_result/2\`
+- **Input**: \`Binary Id\`, \`Binary FullJid\`.
+- **Behavior**: Assembles an IQ \`result\` stanza carrying single-quoted attributes, the \`urn:ietf:params:xml:ns:xmpp-bind\` namespace, and a \`<jid>\` element holding the bound full JID.
+- **Examples**:
+  - \`xmpp_stanza:build_bind_result(<<"bind_1">>, <<"alice@localhost/macbook">>)\` returns \`<<"<iq type='result' id='bind_1'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>alice@localhost/macbook</jid></bind></iq>">>\`.
+
+### \`build_chat_message/4\`
+- **Input**: \`Binary FromJid\`, \`Binary ToJid\`, \`Binary Id\`, \`Binary BodyText\`.
+- **Behavior**: Assembles an RFC 6120 chat message stanza with single-quoted \`from\`, \`to\`, \`id\`, and \`type='chat'\` attributes enclosing a \`<body>\` child element.
+- **Examples**:
+  - \`xmpp_stanza:build_chat_message(<<"alice@localhost">>, <<"bob@localhost">>, <<"msg_01">>, <<"Hello BEAM">>)\` returns \`<<"<message from='alice@localhost' to='bob@localhost' id='msg_01' type='chat'><body>Hello BEAM</body></message>">>\`.
 
 ## Rules & Verification Constraints
-
-- Must produce exact XML wire format as specified.
-- Attribute quotes in generated XML should be single quotes \`'\`.`,
+- **AST Checks**: \`bf_ast_verifier\` enforces \`binary:match/2\`, \`binary:copy/1\`, and \`bit_syntax\` usage in parsing helpers.
+- **Wire Formatting**: All generated XML attributes must use single quotes \`'\` and match exact RFC 6120 element nesting.`,
     otpDocCards: [
       {
         functionName: 'match',
@@ -1028,7 +1094,7 @@ Implement the module \`xmpp_stanza\` in \`src/xmpp_stanza.erl\` with the followi
         githubSourceUrl: 'https://github.com/erlang/otp/blob/master/erts/preloaded/src/erlang.erl',
       },
     ],
-        files: [
+    files: [
       {
         path: 'src/xmpp_stanza.erl',
         name: 'xmpp_stanza.erl',
@@ -1040,34 +1106,20 @@ Implement the module \`xmpp_stanza\` in \`src/xmpp_stanza.erl\` with the followi
     build_chat_message/4
 ]).
 
-%% @doc Classifies incoming raw XML packets into structured tuples.
--spec classify_xml_packet(binary()) ->
-    {stream_open, binary()} |
-    {auth_plain, binary()} |
-    {iq, binary(), binary()} |
-    {presence, binary()} |
-    {message, binary(), binary(), binary()} |
-    unknown.
-classify_xml_packet(XmlBin) when is_binary(XmlBin) ->
-    %% % TODO: Classify XmlBin using binary pattern matching or inspection
+%% @doc Classify a trimmed RFC 6120 XML binary into a tagged stream, auth, iq, presence, or message tuple, or unknown for unrecognized/non-binary input.
+classify_xml_packet(_XmlBin) ->
     unknown.
 
-%% @doc Constructs a <stream:features> XML payload advertising SASL mechanisms.
--spec build_stream_features([binary()]) -> binary().
-build_stream_features(Mechanisms) ->
-    %% % TODO: Construct <stream:features><mechanisms ...> XML
+%% @doc Serialize a list of SASL mechanism binaries into an XML stream:features payload using single-quoted attributes.
+build_stream_features(_Mechanisms) ->
     <<>>.
 
-%% @doc Constructs an IQ result responding to resource binding.
--spec build_bind_result(binary(), binary()) -> binary().
-build_bind_result(Id, FullJid) ->
-    %% % TODO: Construct <iq type='result' id='...'><bind ...><jid>...</jid></bind></iq>
+%% @doc Construct an IQ resource-binding result XML stanza with single-quoted attributes matching Id and FullJid.
+build_bind_result(_Id, _FullJid) ->
     <<>>.
 
-%% @doc Constructs a chat <message> stanza.
--spec build_chat_message(binary(), binary(), binary(), binary()) -> binary().
-build_chat_message(FromJid, ToJid, Id, BodyText) ->
-    %% % TODO: Construct <message from='...' to='...' id='...' type='chat'><body>...</body></message>
+%% @doc Construct an RFC 6120 chat message XML stanza for FromJid, ToJid, Id, and BodyText using single-quoted attributes.
+build_chat_message(_FromJid, _ToJid, _Id, _BodyText) ->
     <<>>.
 `,
       },
@@ -1081,6 +1133,7 @@ build_chat_message(FromJid, ToJid, Id, BodyText) ->
     build_chat_message/4
 ]).
 
+%% @doc Classify a trimmed RFC 6120 XML binary into a tagged stream, auth, iq, presence, or message tuple, or unknown for unrecognized/non-binary input.
 -spec classify_xml_packet(binary()) ->
     {stream_open, binary()} |
     {auth_plain, binary()} |
@@ -1090,12 +1143,12 @@ build_chat_message(FromJid, ToJid, Id, BodyText) ->
     unknown.
 classify_xml_packet(XmlBin) when is_binary(XmlBin) ->
     Trimmed = string:trim(XmlBin),
-    case binary:match(Trimmed, <<"stream:stream">>) of
+    case binary:match(Trimmed, <<"<stream:stream">>) of
         {_, _} ->
             ToDomain = extract_attr(Trimmed, <<"to=">>),
             {stream_open, ToDomain};
         nomatch ->
-            case binary:match(Trimmed, <<"auth">>) of
+            case binary:match(Trimmed, <<"<auth">>) of
                 {_, _} ->
                     AuthData = extract_tag_body(Trimmed, <<"auth">>),
                     {auth_plain, AuthData};
@@ -1126,7 +1179,9 @@ classify_xml_packet(XmlBin) when is_binary(XmlBin) ->
                             end
                     end
             end
-    end.
+    end;
+classify_xml_packet(_) ->
+    unknown.
 
 extract_attr(Xml, AttrPrefix) ->
     case binary:match(Xml, AttrPrefix) of
@@ -1170,6 +1225,7 @@ extract_tag_body(Xml, TagName) ->
         nomatch -> <<>>
     end.
 
+%% @doc Serialize a list of SASL mechanism binaries into an XML stream:features payload using single-quoted attributes.
 -spec build_stream_features([binary()]) -> binary().
 build_stream_features(Mechanisms) ->
     Inner = [[<<"<mechanism>">>, M, <<"</mechanism>">>] || M <- Mechanisms],
@@ -1180,6 +1236,7 @@ build_stream_features(Mechanisms) ->
         <<"</mechanisms></stream:features>">>
     ]).
 
+%% @doc Construct an IQ resource-binding result XML stanza with single-quoted attributes matching Id and FullJid.
 -spec build_bind_result(binary(), binary()) -> binary().
 build_bind_result(Id, FullJid) ->
     iolist_to_binary([
@@ -1189,6 +1246,7 @@ build_bind_result(Id, FullJid) ->
         <<"</jid></bind></iq>">>
     ]).
 
+%% @doc Construct an RFC 6120 chat message XML stanza for FromJid, ToJid, Id, and BodyText using single-quoted attributes.
 -spec build_chat_message(binary(), binary(), binary(), binary()) -> binary().
 build_chat_message(FromJid, ToJid, Id, BodyText) ->
     iolist_to_binary([
@@ -1209,34 +1267,20 @@ build_chat_message(FromJid, ToJid, Id, BodyText) ->
     build_chat_message/4
 ]).
 
-%% @doc Classifies incoming raw XML packets into structured tuples.
--spec classify_xml_packet(binary()) ->
-    {stream_open, binary()} |
-    {auth_plain, binary()} |
-    {iq, binary(), binary()} |
-    {presence, binary()} |
-    {message, binary(), binary(), binary()} |
-    unknown.
-classify_xml_packet(XmlBin) when is_binary(XmlBin) ->
-    %% % TODO: Classify XmlBin using binary pattern matching or inspection
+%% @doc Classify a trimmed RFC 6120 XML binary into a tagged stream, auth, iq, presence, or message tuple, or unknown for unrecognized/non-binary input.
+classify_xml_packet(_XmlBin) ->
     unknown.
 
-%% @doc Constructs a <stream:features> XML payload advertising SASL mechanisms.
--spec build_stream_features([binary()]) -> binary().
-build_stream_features(Mechanisms) ->
-    %% % TODO: Construct <stream:features><mechanisms ...> XML
+%% @doc Serialize a list of SASL mechanism binaries into an XML stream:features payload using single-quoted attributes.
+build_stream_features(_Mechanisms) ->
     <<>>.
 
-%% @doc Constructs an IQ result responding to resource binding.
--spec build_bind_result(binary(), binary()) -> binary().
-build_bind_result(Id, FullJid) ->
-    %% % TODO: Construct <iq type='result' id='...'><bind ...><jid>...</jid></bind></iq>
+%% @doc Construct an IQ resource-binding result XML stanza with single-quoted attributes matching Id and FullJid.
+build_bind_result(_Id, _FullJid) ->
     <<>>.
 
-%% @doc Constructs a chat <message> stanza.
--spec build_chat_message(binary(), binary(), binary(), binary()) -> binary().
-build_chat_message(FromJid, ToJid, Id, BodyText) ->
-    %% % TODO: Construct <message from='...' to='...' id='...' type='chat'><body>...</body></message>
+%% @doc Construct an RFC 6120 chat message XML stanza for FromJid, ToJid, Id, and BodyText using single-quoted attributes.
+build_chat_message(_FromJid, _ToJid, _Id, _BodyText) ->
     <<>>.
 `,
     visibleTestCases: [
@@ -1263,7 +1307,10 @@ build_chat_message(FromJid, ToJid, Id, BodyText) ->
       },
     ],
     astRules: {
-      requiredCalls: ['binary:copy/1'],
+      requireTailRecursion: [],
+      forbiddenCalls: [],
+      requiredCalls: ['binary:match/2', 'binary:copy/1'],
+      requiredConstructs: ['bit_syntax'],
     },
     solutionCode: `-module(xmpp_stanza).
 -export([
@@ -1273,6 +1320,7 @@ build_chat_message(FromJid, ToJid, Id, BodyText) ->
     build_chat_message/4
 ]).
 
+%% @doc Classify a trimmed RFC 6120 XML binary into a tagged stream, auth, iq, presence, or message tuple, or unknown for unrecognized/non-binary input.
 -spec classify_xml_packet(binary()) ->
     {stream_open, binary()} |
     {auth_plain, binary()} |
@@ -1282,12 +1330,12 @@ build_chat_message(FromJid, ToJid, Id, BodyText) ->
     unknown.
 classify_xml_packet(XmlBin) when is_binary(XmlBin) ->
     Trimmed = string:trim(XmlBin),
-    case binary:match(Trimmed, <<"stream:stream">>) of
+    case binary:match(Trimmed, <<"<stream:stream">>) of
         {_, _} ->
             ToDomain = extract_attr(Trimmed, <<"to=">>),
             {stream_open, ToDomain};
         nomatch ->
-            case binary:match(Trimmed, <<"auth">>) of
+            case binary:match(Trimmed, <<"<auth">>) of
                 {_, _} ->
                     AuthData = extract_tag_body(Trimmed, <<"auth">>),
                     {auth_plain, AuthData};
@@ -1318,7 +1366,9 @@ classify_xml_packet(XmlBin) when is_binary(XmlBin) ->
                             end
                     end
             end
-    end.
+    end;
+classify_xml_packet(_) ->
+    unknown.
 
 extract_attr(Xml, AttrPrefix) ->
     case binary:match(Xml, AttrPrefix) of
@@ -1362,6 +1412,7 @@ extract_tag_body(Xml, TagName) ->
         nomatch -> <<>>
     end.
 
+%% @doc Serialize a list of SASL mechanism binaries into an XML stream:features payload using single-quoted attributes.
 -spec build_stream_features([binary()]) -> binary().
 build_stream_features(Mechanisms) ->
     Inner = [[<<"<mechanism>">>, M, <<"</mechanism>">>] || M <- Mechanisms],
@@ -1372,6 +1423,7 @@ build_stream_features(Mechanisms) ->
         <<"</mechanisms></stream:features>">>
     ]).
 
+%% @doc Construct an IQ resource-binding result XML stanza with single-quoted attributes matching Id and FullJid.
 -spec build_bind_result(binary(), binary()) -> binary().
 build_bind_result(Id, FullJid) ->
     iolist_to_binary([
@@ -1381,6 +1433,7 @@ build_bind_result(Id, FullJid) ->
         <<"</jid></bind></iq>">>
     ]).
 
+%% @doc Construct an RFC 6120 chat message XML stanza for FromJid, ToJid, Id, and BodyText using single-quoted attributes.
 -spec build_chat_message(binary(), binary(), binary(), binary()) -> binary().
 build_chat_message(FromJid, ToJid, Id, BodyText) ->
     iolist_to_binary([

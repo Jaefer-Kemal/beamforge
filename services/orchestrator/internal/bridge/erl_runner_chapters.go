@@ -3491,13 +3491,15 @@ T1_Start = erlang:system_time(millisecond),
 T1_Res = try
     C1 = xmpp_stanza:classify_xml_packet(<<"<stream:stream to='localhost' version='1.0'>">>),
     C2 = xmpp_stanza:classify_xml_packet(<<"<iq type='get' id='ping_42'><ping/></iq>">>),
-    Pass1 = (C1 =:= {stream_header, open}) andalso (C2 =:= {stanza, iq}),
-    #{call_str => <<"classify_xml_packet(stream_open & iq)">>,
-      expected => <<"{{stream_header, open}, {stanza, iq}}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("~p", [{C1, C2}]))),
+    Act1 = {C1, C2},
+    Exp1 = {{stream_open, <<"localhost">>}, {iq, <<"ping_42">>, <<"get">>}},
+    Pass1 = (Act1 =:= Exp1),
+    #{call_str => <<"{xmpp_stanza:classify_xml_packet(<<\"<stream:stream to='localhost' version='1.0'>\">>), xmpp_stanza:classify_xml_packet(<<\"<iq type='get' id='ping_42'><ping/></iq>\">>)}">>,
+      expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp1]))),
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Act1]))),
       passed => Pass1, time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"classify_xml_packet(...)">>, expected => <<"tuples">>,
+    #{call_str => <<"classify_xml_packet(...)">>, expected => <<"{{stream_open,<<\"localhost\">>},{iq,<<\"ping_42\">>,<<\"get\">>}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
@@ -8389,7 +8391,7 @@ Stages = [CompileStage, S1_Ast, S2_UnitJidParsing]
 		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(xmpp_stanza) of
     {module, xmpp_stanza} ->
-        Req = [{classify_xml_packet, 1}, {build_stream_features, 2}, {build_bind_result, 2}, {build_chat_message, 4}],
+        Req = [{classify_xml_packet, 1}, {build_stream_features, 1}, {build_bind_result, 2}, {build_chat_message, 4}],
         Exports = xmpp_stanza:module_info(exports),
         case [E || E <- Req, not lists:member(E, Exports)] of
             [] -> #{id => <<"compile">>, title => <<"Compile xmpp_stanza.erl">>, status => <<"passed">>, time_ms => 12, details => <<"Compilation succeeded; all stanza functions exported.">>};
@@ -8400,48 +8402,56 @@ CompileStage = case code:ensure_loaded(xmpp_stanza) of
 end,
 S1_Ast = try
     SrcPath = filename:join(["%s", "src", "xmpp_stanza.erl"]),
-    Rules = #{},
+    Rules = #{
+        required_calls => [{binary, match, 2}, {binary, copy, 1}],
+        required_constructs => [bit_syntax]
+    },
     case bf_ast_verifier:verify_rules(SrcPath, Rules) of
-        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Stanza Structure">>, status => <<"passed">>, time_ms => 15, details => <<"AST analysis passed.">>};
-        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Stanza Structure">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
+        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: binary:match/2, binary:copy/1 & Bit Syntax">>, status => <<"passed">>, time_ms => 15, details => <<"Verified binary:match/2, binary:copy/1, and bit_syntax slicing.">>};
+        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: binary:match/2, binary:copy/1 & Bit Syntax">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
     end
 catch CatchClass_S1:CatchReason_S1 ->
-    #{id => <<"ast_verification">>, title => <<"AST Analysis: Stanza Structure">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST error: ~p:~p", [CatchClass_S1, CatchReason_S1]))}
+    #{id => <<"ast_verification">>, title => <<"AST Analysis: binary:match/2, binary:copy/1 & Bit Syntax">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST error: ~p:~p", [CatchClass_S1, CatchReason_S1]))}
 end,
 S2_UnitStanzaClassification = try
-    Cl1 = xmpp_stanza:classify_xml_packet(<<"<stream:stream to='chat.org' version='1.0'>">>),
-    Cl2 = xmpp_stanza:classify_xml_packet(<<"</stream:stream>">>),
-    Cl3 = xmpp_stanza:classify_xml_packet(<<"<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>dGVzdA==</auth>">>),
-    Cl4 = xmpp_stanza:classify_xml_packet(<<"<iq type='set' id='bind_99'><bind/></iq>">>),
-    Cl5 = xmpp_stanza:classify_xml_packet(<<"<presence/>">>),
+    Cl1 = xmpp_stanza:classify_xml_packet(<<"  <stream:stream to='chat.org' version='1.0'>  ">>),
+    Cl2 = xmpp_stanza:classify_xml_packet(<<"<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>dGVzdA==</auth>">>),
+    Cl3 = xmpp_stanza:classify_xml_packet(<<"<iq type='set' id='bind_99'><bind/></iq>">>),
+    Cl4 = xmpp_stanza:classify_xml_packet(<<"<presence/>">>),
+    Cl5 = xmpp_stanza:classify_xml_packet(<<"<presence type='unavailable'/>">>),
     Cl6 = xmpp_stanza:classify_xml_packet(<<"<message to='bob@chat.org' id='m_1' type='chat'><body>Hi</body></message>">>),
     Cl7 = xmpp_stanza:classify_xml_packet(<<"<unknown_tag/>">>),
-    Pass = (Cl1 =:= {stream_header, open}) andalso
-           (Cl2 =:= {stream_header, close}) andalso
-           (Cl3 =:= {sasl, auth}) andalso
-           (Cl4 =:= {stanza, iq}) andalso
-           (Cl5 =:= {stanza, presence}) andalso
-           (Cl6 =:= {stanza, message}) andalso
-           (Cl7 =:= {error, unknown_xml}),
+    Cl8 = xmpp_stanza:classify_xml_packet(<<"</stream:stream>">>),
+    Cl9 = xmpp_stanza:classify_xml_packet(not_a_binary),
+    Pass = (Cl1 =:= {stream_open, <<"chat.org">>}) andalso
+           (Cl2 =:= {auth_plain, <<"dGVzdA==">>}) andalso
+           (Cl3 =:= {iq, <<"bind_99">>, <<"set">>}) andalso
+           (Cl4 =:= {presence, <<"available">>}) andalso
+           (Cl5 =:= {presence, <<"unavailable">>}) andalso
+           (Cl6 =:= {message, <<"m_1">>, <<"chat">>, <<"bob@chat.org">>}) andalso
+           (Cl7 =:= unknown) andalso
+           (Cl8 =:= unknown) andalso
+           (Cl9 =:= unknown),
     case Pass of
-        true -> #{id => <<"unit_stanza_classification">>, title => <<"Unit Tests: Stanza XML Classification">>, status => <<"passed">>, time_ms => 18, details => <<"All 7 XML packet variants accurately classified.">>};
-        false -> #{id => <<"unit_stanza_classification">>, title => <<"Unit Tests: Stanza XML Classification">>, status => <<"failed">>, time_ms => 18, details => list_to_binary(io_lib:format("Classification mismatch: ~p", [{Cl1, Cl2, Cl3, Cl4, Cl5, Cl6, Cl7}]))}
+        true -> #{id => <<"unit_stanza_classification">>, title => <<"Unit Tests: Stanza XML Classification">>, status => <<"passed">>, time_ms => 18, details => <<"All 9 XML packet variants and edge cases accurately classified.">>};
+        false -> #{id => <<"unit_stanza_classification">>, title => <<"Unit Tests: Stanza XML Classification">>, status => <<"failed">>, time_ms => 18, details => list_to_binary(io_lib:format("Classification mismatch: ~p", [{Cl1, Cl2, Cl3, Cl4, Cl5, Cl6, Cl7, Cl8, Cl9}]))}
     end
 catch CatchClass_S2:CatchReason_S2 ->
     #{id => <<"unit_stanza_classification">>, title => <<"Unit Tests: Stanza XML Classification">>, status => <<"failed">>, time_ms => 18, details => list_to_binary(io_lib:format("Classification error: ~p:~p", [CatchClass_S2, CatchReason_S2]))}
 end,
 S3_UnitStanzaBuilders = try
-    FeatPre = xmpp_stanza:build_stream_features(<<"localhost">>, pre_auth),
-    CheckFeatPre = (binary:match(FeatPre, <<"PLAIN">>) =/= nomatch) andalso (binary:match(FeatPre, <<"stream:features">>) =/= nomatch),
-    FeatPost = xmpp_stanza:build_stream_features(<<"localhost">>, post_auth),
-    CheckFeatPost = (binary:match(FeatPost, <<"bind">>) =/= nomatch) andalso (binary:match(FeatPost, <<"stream:features">>) =/= nomatch),
+    Feat1 = xmpp_stanza:build_stream_features([<<"PLAIN">>]),
+    ExpFeat1 = <<"<stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>">>,
+    Feat2 = xmpp_stanza:build_stream_features([<<"PLAIN">>, <<"SCRAM-SHA-256">>]),
+    ExpFeat2 = <<"<stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism><mechanism>SCRAM-SHA-256</mechanism></mechanisms></stream:features>">>,
+    CheckFeat = (Feat1 =:= ExpFeat1) andalso (Feat2 =:= ExpFeat2),
     Bind = xmpp_stanza:build_bind_result(<<"b12">>, <<"user@host/res">>),
     ExpectedBind = <<"<iq type='result' id='b12'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>user@host/res</jid></bind></iq>">>,
     CheckBind = (Bind =:= ExpectedBind),
     Msg = xmpp_stanza:build_chat_message(<<"alice@h">>, <<"bob@h">>, <<"m44">>, <<"Hello world">>),
     ExpectedMsg = <<"<message from='alice@h' to='bob@h' id='m44' type='chat'><body>Hello world</body></message>">>,
     CheckMsg = (Msg =:= ExpectedMsg),
-    case CheckFeatPre andalso CheckFeatPost andalso CheckBind andalso CheckMsg of
+    case CheckFeat andalso CheckBind andalso CheckMsg of
         true -> #{id => <<"unit_stanza_builders">>, title => <<"Unit Tests: XML Stanza Serialization Builders">>, status => <<"passed">>, time_ms => 18, details => <<"Stream features, bind results, and chat messages generated with exact RFC 6120 XML.">>};
         false -> #{id => <<"unit_stanza_builders">>, title => <<"Unit Tests: XML Stanza Serialization Builders">>, status => <<"failed">>, time_ms => 18, details => <<"Builder XML mismatch.">>}
     end
