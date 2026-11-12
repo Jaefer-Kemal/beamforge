@@ -454,6 +454,7 @@ test_framing() ->
     execute_command/2
 ]).
 
+%% @doc Parse a CRLF-stripped binary protocol line into an {ok, CmdTuple} term or {error, unknown_command}.
 -spec parse_command(binary()) -> {ok, term()} | {error, unknown_command}.
 parse_command(<<"PING">>) ->
     {ok, ping};
@@ -469,34 +470,36 @@ parse_command(<<"DEL ", Key/binary>>) ->
 parse_command(_Other) ->
     {error, unknown_command}.
 
+%% @doc Execute a parsed or bare command tuple against EtsTable and return the CRLF-terminated wire response binary.
 -spec execute_command(term(), atom() | ets:tid()) -> binary().
 execute_command({ok, Cmd}, Tab) ->
     execute_command(Cmd, Tab);
 execute_command(ping, _Tab) ->
-    <<"+PONG\r\n">>;
+    <<"+PONG", 13, 10>>;
 execute_command({set, Key, Value}, Tab) ->
     ets:insert(Tab, {Key, Value}),
-    <<"+OK\r\n">>;
+    <<"+OK", 13, 10>>;
 execute_command({get, Key}, Tab) ->
     case ets:lookup(Tab, Key) of
         [{Key, Value}] ->
-            <<"$", Value/binary, "\r\n">>;
+            <<"$", Value/binary, 13, 10>>;
         [] ->
-            <<"$-1\r\n">>
+            <<"$-1", 13, 10>>
     end;
 execute_command({del, Key}, Tab) ->
     case ets:member(Tab, Key) of
         true ->
             ets:delete(Tab, Key),
-            <<":1\r\n">>;
+            <<":1", 13, 10>>;
         false ->
-            <<":0\r\n">>
+            <<":0", 13, 10>>
     end;
 execute_command({error, unknown_command}, _Tab) ->
-    <<"-ERR unknown command\r\n">>;
+    <<"-ERR unknown command", 13, 10>>;
 execute_command(_Other, _Tab) ->
-    <<"-ERR unknown command\r\n">>.
+    <<"-ERR unknown command", 13, 10>>.
 
+%% @doc Initialize concurrent named ETS storage, open an ephemeral passive listener, spawn the acceptor and active-once worker loop, and return {ok, ServerPid, Port}.
 -spec start_server() -> {ok, pid(), inet:port_number()}.
 start_server() ->
     Tab = case ets:info(tcp_kv_table) of
@@ -513,8 +516,10 @@ start_server() ->
     end),
     {ok, ServerPid, Port}.
 
+%% @doc Terminate the server process ServerPid and clean up the tcp_kv_table ETS table.
 -spec stop_server(pid()) -> ok.
 stop_server(ServerPid) ->
+    unlink(ServerPid),
     exit(ServerPid, kill),
     try ets:delete(tcp_kv_table) catch _:_ -> ok end,
     ok.
@@ -561,7 +566,7 @@ worker_loop(Socket, Tab, Buffer) ->
     end.
 
 extract_lines(Buffer, Acc) ->
-    case binary:split(Buffer, <<"\r\n">>) of
+    case binary:split(Buffer, <<13, 10>>) of
         [Line, Rest] ->
             extract_lines(Rest, [binary:copy(Line) | Acc]);
         [Incomplete] ->

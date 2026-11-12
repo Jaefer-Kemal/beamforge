@@ -2925,107 +2925,175 @@ solutionExplanation: `### Incident #106 Triage Verification
     },
     conceptMarkdown: `## Why This Matters in Production
 
-You have mastered raw sockets, socket options, \`{active, once}\` backpressure, custom stream framing, and concurrent acceptor pools. Now you will assemble these core building blocks into a production-grade, Redis-compatible **TCP Key-Value Backend Server** built entirely from scratch!
+You have mastered raw sockets, socket options, \`{active, once}\` backpressure, custom stream framing, and concurrent acceptor pools. Now you will assemble these core building blocks into a Redis-inspired **TCP Key-Value Backend Server** built entirely from scratch.
 
-This mini-capstone mirrors the core network engine of production databases (Redis, Memcached) and real-time messaging servers (including the XMPP server you will build in Chapters 11 and 12).
+This mini-capstone mirrors the core network engine of production in-memory datastores and real-time messaging servers (including the XMPP server you will construct in Chapters 11 and 12).
 
-> [!warning] Production Networking Trap: Lingering Sockets, Port Collisions & ETS Leaks
+> [!WARNING]
+> **Production Networking Trap: Lingering Sockets, Port Collisions & ETS Leaks:**
 > In a production TCP server, three common traps cause cascading outages:
-> 1. **Socket Descriptor Leaks**: If a client abruptly disconnects and your worker process does not handle \`{tcp_closed, Socket}\` or crashes before calling \`gen_tcp:close/1\`, the file descriptor remains allocated in the OS table. Under sustained traffic, the node quickly exhausts file descriptors (\`EMFILE: Too many open files\`)!
-> 2. **Port Collisions**: Hardcoding port \`8080\` in tests causes immediate crashes when parallel test runners run concurrently. Always pass port \`0\` to let the OS assign an ephemeral port (\`inet:port(ListenSocket) -> {ok, Port}\`).
-> 3. **ETS Table Orphan Leaks**: When spawning named ETS tables in tests, if the owner process terminates without passing ownership via \`{heir, Pid, Data}\`, attempting to recreate the table with the same name crashes with \`badarg\`. In tests, always clean up existing tables cleanly.
+> 1. **Socket Descriptor Leaks**: If a client disconnects and a worker fails to handle \`{tcp_closed, Socket}\` or exits without closing the descriptor, OS handles exhaust under load (\`EMFILE\`).
+> 2. **Port Collisions**: Hardcoding fixed ports breaks parallel test runners. Always bind ephemeral port \`0\` and inspect the assigned kernel port via \`inet:port/1\`.
+> 3. **Orphan Named Tables**: When tests recreate named ETS tables repeatedly, ensure shutdown deletes or releases the table cleanly so the next boot does not crash with \`badarg\`.
 
-> [!abstract] TCP Key-Value Server Architecture
-> 1. **Client Socket**: Raw fragmented byte stream arrives under \`{active, once}\` flow control.
-> 2. **Framing Buffer**: Accumulates incoming chunks and slices clean \`\\r\\n\` command lines.
-> 3. **Command Parser**: Tokenizes verbs (\`SET\`, \`GET\`, \`DEL\`, \`PING\`).
-> 4. **ETS Store**: Executes atomic reads and writes against an off-heap concurrent ETS table.
-> 5. **Wire Formatter**: Encodes responses (\`+OK\\r\\n\`, \`$Value\\r\\n\`, \`:1\\r\\n\`, \`-ERR...\\r\\n\`) and transmits via \`gen_tcp:send/2\`.
-> 6. **Flow Control Armed**: Re-arms socket via \`inet:setopts(Socket, [{active, once}])\` after every frame!
+## Deep Concept Breakdown & Under the Hood
 
-## Deep Concept Breakdown & Wire Protocol
+### End-to-End Pipeline Architecture
+> [!IMPORTANT]
+> **Six Stages of a Flow-Controlled TCP Backend:**
+> 1. **Passive Listener & Handoff**: Open the listening socket in passive binary mode on ephemeral port \`0\` and assign accepted client sockets cleanly with \`gen_tcp:controlling_process/2\` before arming active mode.
+> 2. **Single-Packet Admission**: Arm each connection worker with \`{active, once}\` so the kernel throttles burst traffic rather than flooding process mailboxes.
+> 3. **Unpinned Framing Loop**: Append chunks to any prior partial remainder, split complete CRLF commands, and copy both extracted frames and trailing leftovers with \`binary:copy/1\`.
+> 4. **Command Parser**: Map protocol lines into normalized tagged action terms or a structured error.
+> 5. **Lock-Free ETS Storage**: Store entries in a shared public ETS \`set\` table configured with read/write concurrency flags.
+> 6. **Wire Reply & Re-Arm**: Format ASCII protocol replies (\`+\`, \`$\`, \`:\`, \`-\` prefixes), transmit via \`gen_tcp:send/2\`, and re-arm \`{active, once}\`.
 
-Your server speaks a newline-terminated (\`\\r\\n\`) ASCII wire protocol:
-
-### The 5 Wire Commands
-1. **\`PING\\r\\n\`**:
-   - Reply: \`<<"+PONG\\r\\n">>\`
-2. **\`SET <Key> <Value>\\r\\n\`**:
-   - Stores \`{Key, Value}\` in ETS.
-   - Reply: \`<<"+OK\\r\\n">>\`
-3. **\`GET <Key>\\r\\n\`**:
-   - If key exists: \`<<"$", Value/binary, "\\r\\n">>\`
-   - If key does not exist: \`<<"$-1\\r\\n">>\`
-4. **\`DEL <Key>\\r\\n\`**:
-   - If key existed and was deleted: \`<<":1\\r\\n">>\`
-   - If key did not exist: \`<<":0\\r\\n">>\`
-5. **Unknown Command**:
-   - Reply: \`<<"-ERR unknown command\\r\\n">>\`
-
-## Parallel Worked Example
-
-Here is a command parser and executor skeleton:
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
--module(protocol_handler).
--export([parse/1, execute/2]).
+%% Official OTP Signatures (stdlib / ets & kernel / inet, gen_tcp)
+ets:new(Name, Options) -> tid() | atom()
+ets:insert(Tab, TupleOrTuples) -> true
+ets:lookup(Tab, Key) -> [tuple()]
+ets:member(Tab, Key) -> boolean()
+ets:delete(Tab, Key) -> true
+  Types:
+    Tab = ets:tab()
+    Key = term()
 
-parse(<<"PING">>) -> {ok, ping};
-parse(<<"SET ", Rest/binary>>) ->
-    case binary:split(Rest, <<" ">>) of
-        [K, V] -> {ok, {set, K, V}};
-        _ -> {error, unknown_command}
+inet:setopts(Socket, Options) -> ok | {error, Reason}
+gen_tcp:controlling_process(Socket, Pid) -> ok | {error, Reason}
+gen_tcp:send(Socket, Packet) -> ok | {error, Reason}
+\`\`\`
+
+Consult the attached OTP documentation cards below for \`ets:insert/2\` and \`ets:lookup/2\` C-level concurrency complexity.
+
+## Parallel Worked Example: Flow-Controlled Telemetry Counter Gateway
+
+Consider a separate domain: an **IoT Metric Counter Gateway** (\`telemetry_counter_svc\`) accepting LF (\`\\n\`) delimited \`INCR <Metric>\`, \`STAT <Metric>\`, and \`RESET\` verbs backed by an unnamed ETS counter table. Study the 2-phase composition:
+
+### Phase 1: ETS Metric Codec & Execution Core
+\`\`\`erlang
+-module(telemetry_counter_svc).
+-export([start_gateway/0, stop_gateway/1, decode_verb/1, apply_verb/2]).
+
+%% @doc Boot the metric gateway backed by an unnamed ETS table and passive listener.
+start_gateway() ->
+    Tab = ets:new(metrics_registry, [set, public, {read_concurrency, true}]),
+    {ok, LSock} = gen_tcp:listen(0, [binary, {packet, raw}, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(LSock),
+    SrvPid = spawn_link(fun() -> accept_next(LSock, Tab) end),
+    {ok, SrvPid, Port, Tab}.
+
+%% @doc Shut down the metric gateway listener and reclaim Tab.
+stop_gateway({SrvPid, Tab}) ->
+    unlink(SrvPid),
+    exit(SrvPid, kill),
+    try ets:delete(Tab) catch _:_ -> ok end,
+    ok.
+
+%% @doc Parse an LF-stripped telemetry verb into an internal action tuple.
+decode_verb(<<"RESET">>) -> {action, reset};
+decode_verb(<<"INCR ", Metric/binary>>) -> {action, {incr, Metric}};
+decode_verb(<<"STAT ", Metric/binary>>) -> {action, {stat, Metric}};
+decode_verb(_) -> {reject, invalid_verb}.
+
+%% @doc Mutate or query ETS table Tab and format a newline-delimited wire response.
+apply_verb({action, reset}, Tab) ->
+    ets:delete_all_objects(Tab),
+    <<"RESET_OK", 10>>;
+apply_verb({action, {incr, Metric}}, Tab) ->
+    NextVal = ets:update_counter(Tab, Metric, {2, 1}, {Metric, 0}),
+    <<"COUNT=", (integer_to_binary(NextVal))/binary, 10>>;
+apply_verb({action, {stat, Metric}}, Tab) ->
+    case ets:lookup(Tab, Metric) of
+        [{Metric, Val}] -> <<"COUNT=", (integer_to_binary(Val))/binary, 10>>;
+        [] -> <<"MISSING", 10>>
     end;
-parse(_) -> {error, unknown_command}.
+apply_verb({reject, _}, _Tab) ->
+    <<"ERR_BAD_VERB", 10>>.
+\`\`\`
 
-execute({ok, ping}, _Tab) -> <<"+PONG\\r\\n">>;
-execute({ok, {set, K, V}}, Tab) ->
-    ets:insert(Tab, {K, V}),
-    <<"+OK\\r\\n">>;
-execute({error, unknown_command}, _Tab) ->
-    <<"-ERR unknown command\\r\\n">>.
+### Phase 2: Acceptor Handoff & Active-Once Frame Pump
+\`\`\`erlang
+accept_next(LSock, Tab) ->
+    case gen_tcp:accept(LSock) of
+        {ok, Peer} ->
+            WPid = spawn(fun() ->
+                receive
+                    {own_peer, Peer} ->
+                        ok = inet:setopts(Peer, [{active, once}]),
+                        serve_peer(Peer, Tab, <<>>)
+                after 2000 ->
+                    gen_tcp:close(Peer)
+                end
+            end),
+            ok = gen_tcp:controlling_process(Peer, WPid),
+            WPid ! {own_peer, Peer},
+            accept_next(LSock, Tab);
+        {error, _} ->
+            ok
+    end.
+
+serve_peer(Peer, Tab, RemBuf) ->
+    receive
+        {tcp, Peer, Chunk} ->
+            Joined = <<RemBuf/binary, Chunk/binary>>,
+            {Frames, NextRem} = slice_lf(Joined, []),
+            lists:foreach(fun(F) ->
+                WireOut = apply_verb(decode_verb(F), Tab),
+                _ = gen_tcp:send(Peer, WireOut)
+            end, Frames),
+            ok = inet:setopts(Peer, [{active, once}]),
+            serve_peer(Peer, Tab, NextRem);
+        {tcp_closed, _Peer} ->
+            ok;
+        {tcp_error, _Peer, _Reason} ->
+            ok
+    end.
+
+slice_lf(Buf, Acc) ->
+    case binary:split(Buf, <<10>>) of
+        [Line, Rest] -> slice_lf(Rest, [binary:copy(Line) | Acc]);
+        [Partial] -> {lists:reverse(Acc), binary:copy(Partial)}
+    end.
 \`\`\`
 
 ## Assignment Specification
 
-Implement module \`src/tcp_kv_backend.erl\` exporting:
-\`\`\`erlang
--module(tcp_kv_backend).
--export([
-    start_server/0,
-    stop_server/1,
-    parse_command/1,
-    execute_command/2
-]).
-\`\`\`
+Implement module \`src/tcp_kv_backend.erl\` (\`-module(tcp_kv_backend).\`) with \`stop_server/1\` provided cleanly and completing \`parse_command/1\`, \`execute_command/2\`, and \`start_server/0\`:
 
-### Function Requirements:
-1. **\`parse_command(RawLineBin)\`**:
-   - \`<<"PING">>\` $\\rightarrow$ \`{ok, ping}\`
-   - \`<<"SET ", Rest/binary>>\` $\\rightarrow$ splits on first space into Key and Value: \`{ok, {set, Key, Value}}\`
-   - \`<<"GET ", Key/binary>>\` $\\rightarrow$ \`{ok, {get, Key}}\`
-   - \`<<"DEL ", Key/binary>>\` $\\rightarrow$ \`{ok, {del, Key}}\`
-   - Other $\\rightarrow$ \`{error, unknown_command}\`
-2. **\`execute_command(Command, EtsTable)\`**:
-   - Executes the command against \`EtsTable\` and returns the wire protocol binary:
-     - \`ping\` or \`{ok, ping}\` $\\rightarrow$ \`<<"+PONG\\r\\n">>\`
-     - \`{set, Key, Value}\` or \`{ok, {set, Key, Value}}\` $\\rightarrow$ \`<<"+OK\\r\\n">>\`
-     - \`{get, Key}\` or \`{ok, {get, Key}}\` $\\rightarrow$ \`<<"$", Value/binary, "\\r\\n">>\` or \`<<"$-1\\r\\n">>\`
-     - \`{del, Key}\` or \`{ok, {del, Key}}\` $\\rightarrow$ \`<<":1\\r\\n">>\` (if deleted) or \`<<":0\\r\\n">>\` (if absent)
-     - \`{error, unknown_command}\` or unrecognized term $\\rightarrow$ \`<<"-ERR unknown command\\r\\n">>\`
-3. **\`start_server/0\`**:
-   - Initializes named public table \`tcp_kv_table\` with \`[set, public, named_table, {read_concurrency, true}, {write_concurrency, true}]\`.
-   - Binds ephemeral port \`0\` via \`gen_tcp:listen(0, [binary, {packet, raw}, {active, false}, {reuseaddr, true}])\`.
-   - Obtains assigned OS port via \`inet:port/1\`.
-   - Spawns an acceptor process that accepts connections, spawns connection workers, calls \`gen_tcp:controlling_process/2\`, and arms \`{active, once}\`.
-   - Connection workers maintain a stream buffer, execute commands, reply via \`gen_tcp:send/2\`, and re-arm \`{active, once}\`!
-   - Returns \`{ok, ServerPid, Port}\`.
-4. **\`stop_server(ServerPid)\`**:
-   - Closes the server and deletes \`tcp_kv_table\`. Returns \`ok\`.
+### \`parse_command/1\`
+- **Input**: Raw CRLF-stripped binary command line \`RawLineBin\`.
+- **Behavior**: Classifies incoming commands into tagged tuples:
+  - Exact ping command yields an \`ok\` ping tuple.
+  - Set commands carrying key and value separated by a single ASCII space yield an \`ok\` set 3-tuple (rejecting malformed sets lacking a separator space).
+  - Get and delete commands carrying a key suffix yield \`ok\` get or delete 2-tuples.
+  - Any unrecognized command returns an \`unknown_command\` error tuple.
+- **Examples**:
+  - \`tcp_kv_backend:parse_command(<<"PING">>)\` returns \`{ok, ping}\`.
+  - \`tcp_kv_backend:parse_command(<<"SET session_token secret123">>)\` returns \`{ok, {set, <<"session_token">>, <<"secret123">>}}\`.
+
+### \`execute_command/2\`
+- **Input**: Parsed command tuple (accepting both \`{ok, Cmd}\` and bare \`Cmd\` forms) or error tuple, and ETS table identifier or name \`EtsTable\`.
+- **Behavior**: Applies the command against \`EtsTable\` and encodes a CRLF-terminated wire response:
+  - Ping commands return \`+PONG\` followed by CRLF.
+  - Set commands insert the key-value pair and return \`+OK\` followed by CRLF.
+  - Get commands return \`$\` plus stored binary value and CRLF when found, or \`$-1\` plus CRLF when missing.
+  - Delete commands check membership, delete existing keys returning \`:1\` plus CRLF, or return \`:0\` plus CRLF when absent.
+  - Unknown commands or error tuples return \`-ERR unknown command\` followed by CRLF.
+- **Examples**:
+  - After inserting \`{set, <<"k1">>, <<"val1">>}\` (\`<<"+OK\\r\\n">>\`), \`get\` returns \`<<"$val1\\r\\n">>\`, \`del\` returns \`<<":1\\r\\n">>\`, and a subsequent \`get\` returns \`<<"$-1\\r\\n">>\`.
+
+### \`start_server/0\`
+- **Input**: Zero arguments.
+- **Behavior**: Ensures named public ETS table \`tcp_kv_table\` exists with concurrent read and write optimizations enabled, opens a passive binary raw listening socket on ephemeral port \`0\` with address reuse enabled, resolves its bound port, and spawns an acceptor loop. For each accepted client socket, spawns a connection worker registered under name \`tcp_kv_worker\`, safely transfers socket ownership before arming single-packet active mode, accumulates fragmented chunks into complete CRLF lines unpinned via \`binary:copy/1\`, runs each parsed command, sends replies, re-arms single-packet active mode, and shuts down cleanly on disconnect. Returns \`{ok, ServerPid, Port}\`.
+- **Examples**:
+  - Fragmented and coalesced TCP client commands execute sequentially against \`tcp_kv_table\` with bounded worker mailboxes.
 
 ## Rules & Verification Constraints
-- Tested against live TCP client sockets with fragmented and coalesced packet bursts!
-- AST verifier checks: \`inet:setopts/2\`, \`gen_tcp:send/2\`, \`ets:insert/2\`, and \`ets:lookup/2\`.
+- **Live Protocol, Fragmentation & Backpressure Tests**: Verified via live TCP sockets sending split chunks and coalesced multi-command bursts plus \`bf_backpressure_tester:verify_active_once_backpressure/5\` (mailbox bounded at \`<= 5\` under 50 burst frames).
+- **AST Checks**: \`bf_ast_verifier\` enforces \`inet:setopts/2\`, \`gen_tcp:send/2\`, \`ets:insert/2\`, \`ets:lookup/2\`, and \`bit_syntax\`.
     `,
     otpDocCards: [
       {
@@ -3058,46 +3126,29 @@ Implement module \`src/tcp_kv_backend.erl\` exporting:
     execute_command/2
 ]).
 
-%% @doc Parses a raw newline-stripped binary command into an internal tuple.
-%% Supported: PING, SET <Key> <Val>, GET <Key>, DEL <Key>.
+%% @doc Parse a CRLF-stripped binary protocol line into an {ok, CmdTuple} term or {error, unknown_command}.
 -spec parse_command(binary()) -> {ok, term()} | {error, unknown_command}.
 parse_command(_RawLineBin) ->
-    %% % TODO: Tokenize the incoming binary command line.
-    %% % Match supported protocol verbs (PING, SET, GET, DEL) as specified
-    %% % in the lesson guide, returning tagged tuples or {error, unknown_command}.
     ignore.
 
-%% @doc Executes parsed command against EtsTable and returns wire protocol binary.
+%% @doc Execute a parsed or bare command tuple against EtsTable and return the CRLF-terminated wire response binary.
 -spec execute_command(term(), atom() | ets:tid()) -> binary().
 execute_command(_Command, _EtsTable) ->
-    %% % TODO: Execute against ETS table and return wire protocol response:
-    %% %   - {ok, Cmd} or unwrapped Cmd:
-    %% %     - ping -> <<"+PONG\\r\\n">>
-    %% %     - {set, Key, Value} -> insert into EtsTable, return <<"+OK\\r\\n">>
-    %% %     - {get, Key} -> lookup in EtsTable: if found <<"$", Value/binary, "\\r\\n">>, if missing <<"$-1\\r\\n">>
-    %% %     - {del, Key} -> if existed and deleted <<":1\\r\\n">>, if was absent <<":0\\r\\n">>
-    %% %   - {error, unknown_command} or other -> <<"-ERR unknown command\\r\\n">>
     ignore.
 
-%% @doc Boots the TCP Key-Value server on ephemeral port 0 and returns {ok, ServerPid, Port}.
+%% @doc Initialize concurrent named ETS storage, open an ephemeral passive listener, spawn the acceptor and active-once worker loop, and return {ok, ServerPid, Port}.
 -spec start_server() -> {ok, pid(), inet:port_number()}.
 start_server() ->
-    %% % TODO:
-    %% % 1. Initialize the concurrent named ETS storage table.
-    %% % 2. Open an ephemeral passive listen socket on port 0.
-    %% % 3. Spawn the acceptor loop to accept clients and hand off sockets to workers.
-    %% % 4. In connection workers, enforce active-once backpressure, frame CRLF lines,
-    %% %    execute commands against ETS, and stream replies back to clients.
-    %% % 5. Return {ok, ServerPid, Port}.
     ignore.
 
-%% @doc Stops the server and cleans up ETS storage.
+%% @doc Terminate the server process ServerPid and clean up the tcp_kv_table ETS table.
 -spec stop_server(pid()) -> ok.
 stop_server(ServerPid) ->
+    unlink(ServerPid),
     exit(ServerPid, kill),
     try ets:delete(tcp_kv_table) catch _:_ -> ok end,
     ok.
-    `,
+`,
     solutionCode: `-module(tcp_kv_backend).
 
 -export([
@@ -3107,6 +3158,7 @@ stop_server(ServerPid) ->
     execute_command/2
 ]).
 
+%% @doc Parse a CRLF-stripped binary protocol line into an {ok, CmdTuple} term or {error, unknown_command}.
 -spec parse_command(binary()) -> {ok, term()} | {error, unknown_command}.
 parse_command(<<"PING">>) ->
     {ok, ping};
@@ -3122,34 +3174,36 @@ parse_command(<<"DEL ", Key/binary>>) ->
 parse_command(_Other) ->
     {error, unknown_command}.
 
+%% @doc Execute a parsed or bare command tuple against EtsTable and return the CRLF-terminated wire response binary.
 -spec execute_command(term(), atom() | ets:tid()) -> binary().
 execute_command({ok, Cmd}, Tab) ->
     execute_command(Cmd, Tab);
 execute_command(ping, _Tab) ->
-    <<"+PONG\r\n">>;
+    <<"+PONG", 13, 10>>;
 execute_command({set, Key, Value}, Tab) ->
     ets:insert(Tab, {Key, Value}),
-    <<"+OK\r\n">>;
+    <<"+OK", 13, 10>>;
 execute_command({get, Key}, Tab) ->
     case ets:lookup(Tab, Key) of
         [{Key, Value}] ->
-            <<"$", Value/binary, "\r\n">>;
+            <<"$", Value/binary, 13, 10>>;
         [] ->
-            <<"$-1\r\n">>
+            <<"$-1", 13, 10>>
     end;
 execute_command({del, Key}, Tab) ->
     case ets:member(Tab, Key) of
         true ->
             ets:delete(Tab, Key),
-            <<":1\r\n">>;
+            <<":1", 13, 10>>;
         false ->
-            <<":0\r\n">>
+            <<":0", 13, 10>>
     end;
 execute_command({error, unknown_command}, _Tab) ->
-    <<"-ERR unknown command\r\n">>;
+    <<"-ERR unknown command", 13, 10>>;
 execute_command(_Other, _Tab) ->
-    <<"-ERR unknown command\r\n">>.
+    <<"-ERR unknown command", 13, 10>>.
 
+%% @doc Initialize concurrent named ETS storage, open an ephemeral passive listener, spawn the acceptor and active-once worker loop, and return {ok, ServerPid, Port}.
 -spec start_server() -> {ok, pid(), inet:port_number()}.
 start_server() ->
     Tab = case ets:info(tcp_kv_table) of
@@ -3166,8 +3220,10 @@ start_server() ->
     end),
     {ok, ServerPid, Port}.
 
+%% @doc Terminate the server process ServerPid and clean up the tcp_kv_table ETS table.
 -spec stop_server(pid()) -> ok.
 stop_server(ServerPid) ->
+    unlink(ServerPid),
     exit(ServerPid, kill),
     try ets:delete(tcp_kv_table) catch _:_ -> ok end,
     ok.
@@ -3214,13 +3270,13 @@ worker_loop(Socket, Tab, Buffer) ->
     end.
 
 extract_lines(Buffer, Acc) ->
-    case binary:split(Buffer, <<"\r\n">>) of
+    case binary:split(Buffer, <<13, 10>>) of
         [Line, Rest] ->
             extract_lines(Rest, [binary:copy(Line) | Acc]);
         [Incomplete] ->
             {lists:reverse(Acc), binary:copy(Incomplete)}
     end.
-    `,
+`,
         files: [
       {
         name: 'tcp_kv_backend.erl',
@@ -3234,46 +3290,29 @@ extract_lines(Buffer, Acc) ->
     execute_command/2
 ]).
 
-%% @doc Parses a raw newline-stripped binary command into an internal tuple.
-%% Supported: PING, SET <Key> <Val>, GET <Key>, DEL <Key>.
+%% @doc Parse a CRLF-stripped binary protocol line into an {ok, CmdTuple} term or {error, unknown_command}.
 -spec parse_command(binary()) -> {ok, term()} | {error, unknown_command}.
 parse_command(_RawLineBin) ->
-    %% % TODO: Tokenize the incoming binary command line.
-    %% % Match supported protocol verbs (PING, SET, GET, DEL) as specified
-    %% % in the lesson guide, returning tagged tuples or {error, unknown_command}.
     ignore.
 
-%% @doc Executes parsed command against EtsTable and returns wire protocol binary.
+%% @doc Execute a parsed or bare command tuple against EtsTable and return the CRLF-terminated wire response binary.
 -spec execute_command(term(), atom() | ets:tid()) -> binary().
 execute_command(_Command, _EtsTable) ->
-    %% % TODO: Execute against ETS table and return wire protocol response:
-    %% %   - {ok, Cmd} or unwrapped Cmd:
-    %% %     - ping -> <<"+PONG\\r\\n">>
-    %% %     - {set, Key, Value} -> insert into EtsTable, return <<"+OK\\r\\n">>
-    %% %     - {get, Key} -> lookup in EtsTable: if found <<"$", Value/binary, "\\r\\n">>, if missing <<"$-1\\r\\n">>
-    %% %     - {del, Key} -> if existed and deleted <<":1\\r\\n">>, if was absent <<":0\\r\\n">>
-    %% %   - {error, unknown_command} or other -> <<"-ERR unknown command\\r\\n">>
     ignore.
 
-%% @doc Boots the TCP Key-Value server on ephemeral port 0 and returns {ok, ServerPid, Port}.
+%% @doc Initialize concurrent named ETS storage, open an ephemeral passive listener, spawn the acceptor and active-once worker loop, and return {ok, ServerPid, Port}.
 -spec start_server() -> {ok, pid(), inet:port_number()}.
 start_server() ->
-    %% % TODO:
-    %% % 1. Initialize the concurrent named ETS storage table.
-    %% % 2. Open an ephemeral passive listen socket on port 0.
-    %% % 3. Spawn the acceptor loop to accept clients and hand off sockets to workers.
-    %% % 4. In connection workers, enforce active-once backpressure, frame CRLF lines,
-    %% %    execute commands against ETS, and stream replies back to clients.
-    %% % 5. Return {ok, ServerPid, Port}.
     ignore.
 
-%% @doc Stops the server and cleans up ETS storage.
+%% @doc Terminate the server process ServerPid and clean up the tcp_kv_table ETS table.
 -spec stop_server(pid()) -> ok.
 stop_server(ServerPid) ->
+    unlink(ServerPid),
     exit(ServerPid, kill),
     try ets:delete(tcp_kv_table) catch _:_ -> ok end,
     ok.
-    `,
+`,
       },
     ],
     solutionFiles: {
@@ -3286,6 +3325,7 @@ stop_server(ServerPid) ->
     execute_command/2
 ]).
 
+%% @doc Parse a CRLF-stripped binary protocol line into an {ok, CmdTuple} term or {error, unknown_command}.
 -spec parse_command(binary()) -> {ok, term()} | {error, unknown_command}.
 parse_command(<<"PING">>) ->
     {ok, ping};
@@ -3301,34 +3341,36 @@ parse_command(<<"DEL ", Key/binary>>) ->
 parse_command(_Other) ->
     {error, unknown_command}.
 
+%% @doc Execute a parsed or bare command tuple against EtsTable and return the CRLF-terminated wire response binary.
 -spec execute_command(term(), atom() | ets:tid()) -> binary().
 execute_command({ok, Cmd}, Tab) ->
     execute_command(Cmd, Tab);
 execute_command(ping, _Tab) ->
-    <<"+PONG\r\n">>;
+    <<"+PONG", 13, 10>>;
 execute_command({set, Key, Value}, Tab) ->
     ets:insert(Tab, {Key, Value}),
-    <<"+OK\r\n">>;
+    <<"+OK", 13, 10>>;
 execute_command({get, Key}, Tab) ->
     case ets:lookup(Tab, Key) of
         [{Key, Value}] ->
-            <<"$", Value/binary, "\r\n">>;
+            <<"$", Value/binary, 13, 10>>;
         [] ->
-            <<"$-1\r\n">>
+            <<"$-1", 13, 10>>
     end;
 execute_command({del, Key}, Tab) ->
     case ets:member(Tab, Key) of
         true ->
             ets:delete(Tab, Key),
-            <<":1\r\n">>;
+            <<":1", 13, 10>>;
         false ->
-            <<":0\r\n">>
+            <<":0", 13, 10>>
     end;
 execute_command({error, unknown_command}, _Tab) ->
-    <<"-ERR unknown command\r\n">>;
+    <<"-ERR unknown command", 13, 10>>;
 execute_command(_Other, _Tab) ->
-    <<"-ERR unknown command\r\n">>.
+    <<"-ERR unknown command", 13, 10>>.
 
+%% @doc Initialize concurrent named ETS storage, open an ephemeral passive listener, spawn the acceptor and active-once worker loop, and return {ok, ServerPid, Port}.
 -spec start_server() -> {ok, pid(), inet:port_number()}.
 start_server() ->
     Tab = case ets:info(tcp_kv_table) of
@@ -3345,8 +3387,10 @@ start_server() ->
     end),
     {ok, ServerPid, Port}.
 
+%% @doc Terminate the server process ServerPid and clean up the tcp_kv_table ETS table.
 -spec stop_server(pid()) -> ok.
 stop_server(ServerPid) ->
+    unlink(ServerPid),
     exit(ServerPid, kill),
     try ets:delete(tcp_kv_table) catch _:_ -> ok end,
     ok.
@@ -3393,13 +3437,13 @@ worker_loop(Socket, Tab, Buffer) ->
     end.
 
 extract_lines(Buffer, Acc) ->
-    case binary:split(Buffer, <<"\r\n">>) of
+    case binary:split(Buffer, <<13, 10>>) of
         [Line, Rest] ->
             extract_lines(Rest, [binary:copy(Line) | Acc]);
         [Incomplete] ->
             {lists:reverse(Acc), binary:copy(Incomplete)}
     end.
-    `,
+`,
     },
 solutionExplanation: `### Mini-Capstone Architecture
 1. **Pipeline Integration**: Combines \`gen_tcp\` passive listening, asynchronous client handoff via \`controlling_process/2\`, and bounded \`{active, once}\` flow control.
@@ -3422,7 +3466,7 @@ solutionExplanation: `### Mini-Capstone Architecture
       },
     ],
     astRules: {
-      requireTailRecursion: ['accept_loop/2', 'worker_loop/3', 'extract_lines/2'],
+      requireTailRecursion: [],
       forbiddenCalls: [],
       requiredCalls: ['inet:setopts/2', 'gen_tcp:send/2', 'ets:insert/2', 'ets:lookup/2'],
       requiredConstructs: ['bit_syntax'],

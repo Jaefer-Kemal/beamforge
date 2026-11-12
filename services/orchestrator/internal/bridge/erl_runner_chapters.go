@@ -3414,6 +3414,7 @@ T2_Res = try
       actual => list_to_binary(lists:flatten(io_lib:format("~p", [{R1, R2, R3, R4}]))),
       passed => Pass2, time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
+    (catch ets:delete(test_tab_run)),
     #{call_str => <<"tcp_kv_backend:execute_command(...)">>, expected => <<"Wire responses">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
@@ -8212,12 +8213,13 @@ CompileStage = case compile:file("%s/src/tcp_kv_backend.erl", [return_errors, {o
         #{id => <<"compile">>, title => <<"Compile tcp_kv_backend.erl">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("~p", [Err]))}
 end,
 S1_Ast = case bf_ast_verifier:verify_rules("%s/src/tcp_kv_backend.erl", #{
-    required_calls => [{inet, setopts, 2}, {gen_tcp, send, 2}, {ets, insert, 2}, {ets, lookup, 2}]
+    required_calls => [{inet, setopts, 2}, {gen_tcp, send, 2}, {ets, insert, 2}, {ets, lookup, 2}],
+    required_constructs => [bit_syntax]
 }) of
     {ok, _} ->
-        #{id => <<"ast_verification">>, title => <<"AST Analysis: Sockets & ETS Primitives">>, status => <<"passed">>, time_ms => 15, details => <<"Verified required socket and ETS function calls.">>};
+        #{id => <<"ast_verification">>, title => <<"AST Analysis: Sockets, ETS Primitives & Bit Syntax">>, status => <<"passed">>, time_ms => 15, details => <<"Verified inet:setopts/2, gen_tcp:send/2, ets:insert/2, ets:lookup/2, and bit_syntax.">>};
     {error, AstFailReason} ->
-        #{id => <<"ast_verification">>, title => <<"AST Analysis: Sockets & ETS Primitives">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST verification failed: ~p", [AstFailReason]))}
+        #{id => <<"ast_verification">>, title => <<"AST Analysis: Sockets, ETS Primitives & Bit Syntax">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST verification failed: ~p", [AstFailReason]))}
 end,
 S2_UnitParserAndExec = try
     Tab = case ets:info(test_kv_tab) of
