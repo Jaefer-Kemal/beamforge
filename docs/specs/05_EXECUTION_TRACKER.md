@@ -2595,6 +2595,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `TEST_CHAPTER=8 go test -count=1 -v -run TestDynamicVisibleTestsCurriculum ./internal/bridge`: Passed `ch08-l01` (`3/3 tests passed`) and all 7 Chapter 8 lessons (`10.98s`).
   - `go build ./...`, `npx tsc --noEmit`, `npm run build`: Passed cleanly with 0 errors.
 
+## Phase 149: Pedagogical Despoiling & Live Tri-Verification of Chapter 8 Lecture 2 (`ch08-l02`)
+- [x] **149.1: Audit & Eliminate Spoilers in Lecture 8.2 (`ch08-l02`: `child_spec_factory.erl`)**:
+  - Replaced the verbatim 1:1 find-and-replace clone `worker_spec_builder` (`build_task_spec/4`, `build_sub_supervisor_spec/2`, `should_restart/2`) with a genuinely domain-disjoint, proportionally simple parallel worked example `transcoder_sup_config.erl` (`-behaviour(supervisor)`, `init/1`, `is_clean_exit/1`, `validate_shutdown_opt/1`). Demonstrates `{shutdown, _}` clause ordering, nested `orelse`/`andalso` shutdown bounds validation, and `type => supervisor` (`shutdown => infinity`) vs `type => worker` child specs with 100% Example-Prose Parity.
+  - Upgraded `conceptMarkdown` to full Spec 04 structure: added `## Deep Concept Breakdown & Under the Hood`, eliminated duplicate strategy bullets beneath the Restart Type Truth Table (replacing them with `{shutdown, Term}` and process-role insights), and added `## Official Erlang Docs & Function Reference`.
+  - Structured Assignment Specification into clean `Input`, `Behavior`, and `Examples` blocks across `worker_spec/4`, `supervisor_spec/2`, and `classify_restart/2` with zero syntax spoilers in behavior text.
+  - Added strict 10/10 `@doc` contracts across `starterCode`, `files[0].content`, `solutionCode`, and `solutionFiles['src/child_spec_factory.erl']`, keeping neutral `ok.` starter bodies, zero in-body comments, and zero `-spec`.
+- [x] **149.2: Mandatory Live Tri-Verification & Compiler Suite (`ch08-l02`)**:
+  - **Parallel Worked Example (`transcoder_sup_config.erl`)**: Extracted from `ch08.ts`, compiled with `erlc.exe -Wall` (exit code 0, 0 warnings), and verified live via escript (`PWE_L02_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe` exit code 0), verified all 3 exports present, and executed stubs cleanly (`STARTER_L02 exports=true stubs={ok,ok,ok}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `erlc.exe -Wall +debug_info` (exit code 0, 0 warnings), passed `bf_ast_verifier` (`guards`), and passed `SOLUTION_L02_OK` checks.
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter8Verification/ch08-l02` (`VERIFIED 100% PASSED`, score=100, 5 stages in `1.37s`) and `TEST_CHAPTER=8 TestDynamicVisibleTestsCurriculum` (`ch08-l02 | 3/3 tests passed`, all 7 Ch. 8 lessons passed in `11.19s`).
+  - **Workspace Compilers**: `Select-String` confirmed `0` `-spec` declarations across `ch01`–`ch08`; `go build ./...`, `npx tsc --noEmit`, and `npm run build` (8/8 routes) all passed cleanly.
+
 
 
 

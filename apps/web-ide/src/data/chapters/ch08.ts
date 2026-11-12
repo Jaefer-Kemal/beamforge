@@ -370,32 +370,23 @@ calculate_restart_budget(MaxCrashes, WindowSeconds)
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-A supervisor does not spawn processes randomly. Every process supervised by an OTP supervisor is defined by a **Child Specification** (\`child_spec()\`).
+A supervisor does not spawn processes blindly. Every child managed by an OTP supervisor is declared through a **Child Specification** (\`child_spec()\`), which defines six operational contracts:
+1. Its unique registry key within that supervisor (\`id\`).
+2. The startup MFA entrypoint returning the process PID (\`start\`).
+3. Under which exit conditions the process is restarted (\`restart\`).
+4. How long the supervisor waits gracefully before escalating to \`kill\` (\`shutdown\`).
+5. Whether the node is a leaf \`worker\` or a nested child \`supervisor\` (\`type\`).
+6. Which modules OTP releases must lock or purge during hot-code upgrades (\`modules\`).
 
-The child specification tells the supervisor:
-1. What the child is named (\`id\`).
-2. How to start it (\`start => {M, F, A}\`).
-3. Under what conditions to restart it (\`restart\`).
-4. How long to wait before forcefully killing it (\`shutdown\`).
-5. Whether it is a leaf worker or an intermediate supervisor (\`type\`).
-6. What modules to purge during dynamic code hot-reloading (\`modules\`).
+## Deep Concept Breakdown & Under the Hood
 
 ### The Modern Map-Based \`child_spec()\` Anatomy
 
-\`\`\`erlang
-#{
-    id => term(),                        %% Unique identifier atom or tuple
-    start => {module(), atom(), list()}, %% {M, F, A} invocation returning {ok, Pid}
-    restart => restart_type(),           %% permanent | transient | temporary
-    shutdown => shutdown_timeout(),      %% brutal_kill | integer() ms | infinity
-    type => worker | supervisor,         %% Declares node role in the hierarchy
-    modules => [module()] | dynamic      %% Modules used for release packaging
-}
-\`\`\`
+Each entry returned in a supervisor's child list uses six standardized map keys: \`id\`, \`start\`, \`restart\`, \`shutdown\`, \`type\`, and \`modules\`.
 
 ### The Restart Type Truth Table
 
-The \`restart\` field defines the contract between process death reasons and restart behavior:
+The \`restart\` field defines how a supervisor reacts to different exit signals delivered to its trapped mailbox:
 
 | Restart Type | Crash (\`error\`, \`badmatch\`, \`exit(crash)\`) | Normal Exit (\`exit(normal)\`) | Clean Shutdown (\`shutdown\`, \`{shutdown, Term}\`) |
 | :--- | :--- | :--- | :--- |
@@ -403,70 +394,139 @@ The \`restart\` field defines the contract between process death reasons and res
 | **\`transient\`** | **Restart** | *Do NOT restart* | *Do NOT restart* |
 | **\`temporary\`** | *Do NOT restart* | *Do NOT restart* | *Do NOT restart* |
 
-- **\`permanent\`**: The process must NEVER be down (e.g. database connection pools, core message routers, listening sockets). Even if it exits with \`normal\`, the supervisor restarts it!
-- **\`transient\`**: The process represents a task that eventually finishes cleanly (e.g. a batch file processor, an account registration pipeline). If it crashes unexpectedly, it is restarted; if it completes its job and exits \`normal\`, the supervisor lets it stay stopped.
-- **\`temporary\`**: The process is disposable (e.g. dynamic client TCP sessions, rate-limit buckets). If it dies for *any* reason, it is never restarted.
+- **Why \`{shutdown, Term}\` Matters**: In production OTP systems (such as shutting down a TLS socket after client disconnect or terminating a timed-out HTTP handler), workers exit with \`{shutdown, Reason}\` to log context without triggering crash alarms. Supervisors treat both \`shutdown\` atoms and tagged \`{shutdown, Term}\` tuples as intentional clean exits so \`transient\` jobs stay stopped.
+- **Process Role Examples**: Long-lived connection pools and core routers run as \`permanent\`; one-off data migrations or finite batch workers run as \`transient\`; ephemeral client sessions that clients can re-dial cleanly run as \`temporary\`.
 
-### Shutdown Order & Timeouts
+### What the BEAM Does Under the Hood: Shutdown Order & Timeouts
 
-When a supervisor shuts down, or when \`rest_for_one\` / \`one_for_all\` restarts multiple children:
-1. **Startup is strictly forward (top-to-bottom):** \`[Child1, Child2, Child3]\`.
-2. **Shutdown is strictly reverse order:** \`Child3\` is terminated first, then \`Child2\`, then \`Child1\`.
-3. To terminate a child, the supervisor sends an exit signal: \`exit(ChildPid, shutdown)\`.
-4. If the child traps exits (\`process_flag(trap_exit, true)\`), it invokes its \`terminate(shutdown, State)\` callback to flush buffers and close sockets.
-5. If the child does not exit within the specified \`shutdown\` milliseconds, the supervisor forcefully terminates it with \`exit(ChildPid, kill)\`.
+When a supervisor shuts down, or when \`rest_for_one\` / \`one_for_all\` restarts downstream siblings:
+1. **Startup is strictly forward (top-to-bottom)**: \`[Child1, Child2, Child3]\`.
+2. **Shutdown is strictly reverse order**: \`Child3\` terminates first, then \`Child2\`, then \`Child1\`.
+3. To terminate a child gracefully, the supervisor sends an exit signal: \`exit(ChildPid, shutdown)\`.
+4. If the child enables \`process_flag(trap_exit, true)\`, its \`terminate(shutdown, State)\` callback runs to flush buffers and close sockets within the configured \`shutdown\` millisecond budget.
+5. If that deadline expires without exit, the supervisor sends an untrappable \`exit(ChildPid, kill)\`.
 
 > [!warning] Production Supervision Trap: Premature Killing of Child Supervisors
 > For nested child supervisors, \`shutdown\` **MUST** be set to \`infinity\`!
-> A child supervisor needs time to terminate all of its own children in reverse order before it can terminate itself. If a parent supervisor terminates a child supervisor with a 5,000ms timeout or \`brutal_kill\`, orphaned grandchild worker processes will leak into the BEAM VM.
+> A child supervisor needs sufficient time to walk through and terminate all of its own children in reverse order before exiting itself. Giving a child supervisor a 5,000ms limit or \`brutal_kill\` causes parent supervisors to kill the sub-supervisor early, leaking orphaned grandchild processes across the BEAM VM.
 
-### Parallel Worked Example
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
--module(worker_spec_builder).
--export([build_task_spec/4, build_sub_supervisor_spec/2, should_restart/2]).
-
-build_task_spec(Id, Mod, Args, Restart)
-  when is_atom(Mod), is_list(Args),
-       (Restart =:= permanent orelse Restart =:= transient orelse Restart =:= temporary) ->
-    #{
-        id => Id,
-        start => {Mod, start_link, Args},
-        restart => Restart,
-        shutdown => 5000,
-        type => worker,
-        modules => [Mod]
-    }.
-
-build_sub_supervisor_spec(Id, SupMod) when is_atom(SupMod) ->
-    #{
-        id => Id,
-        start => {SupMod, start_link, []},
-        restart => permanent,
-        shutdown => infinity,  %% Mandatory for nested supervisors!
-        type => supervisor,
-        modules => [SupMod]
-    }.
-
-should_restart(permanent, _Reason) -> restart;
-should_restart(temporary, _Reason) -> do_not_restart;
-should_restart(transient, normal) -> do_not_restart;
-should_restart(transient, shutdown) -> do_not_restart;
-should_restart(transient, {shutdown, _}) -> do_not_restart;
-should_restart(transient, _Abnormal) -> restart.
+%% Official OTP Type Spec (stdlib / supervisor)
+child_spec() = #{
+    id => child_id(),
+    start => mfargs(),
+    restart => restart(),
+    shutdown => shutdown(),
+    type => worker | supervisor,
+    modules => [module()] | dynamic
+}
+  Types:
+    child_id() = term()
+    mfargs() = {M :: module(), F :: atom(), A :: [term()]}
+    restart() = permanent | transient | temporary
+    shutdown() = brutal_kill | timeout() | infinity
 \`\`\`
 
-### Your Mission
+In the OTP \`supervisor\` documentation, \`timeout()\` stands for a non-negative integer millisecond budget (such as \`5000\`), whereas \`brutal_kill\` triggers immediate \`exit(ChildPid, kill)\` and \`infinity\` waits indefinitely for nested sub-trees. Consult the attached OTP Doc Card below for the live type schema.
 
-Implement module \`child_spec_factory\` exporting:
-1. \`worker_spec(Id, Module, Args, RestartType) -> map()\`:
-   - Validates that \`Module\` is an atom, \`Args\` is a list, and \`RestartType\` is \`permanent\`, \`transient\`, or \`temporary\`.
-   - Returns a child spec map with \`start => {Module, start_link, Args}\`, \`shutdown => 5000\`, \`type => worker\`, and \`modules => [Module]\`.
-2. \`supervisor_spec(Id, SupModule) -> map()\`:
-   - Validates that \`SupModule\` is an atom.
-   - Returns a child spec map with \`start => {SupModule, start_link, []}\`, \`restart => permanent\`, \`shutdown => infinity\`, \`type => supervisor\`, and \`modules => [SupModule]\`.
-3. \`classify_restart(RestartType, ExitReason) -> restart | do_not_restart\`:
-   - Implements the exact OTP Restart Type Truth Table.
+## Parallel Worked Example: Audio Transcoder Supervisor Config
+
+Consider \`transcoder_sup_config\`, a configuration and exit-classification module paired with an audio transcoder supervisor. Notice how it models tagged-tuple pattern matching for clean exits, compound guard validation with \`orelse\` and \`andalso\`, and explicit \`type => supervisor\` vs. \`type => worker\` specs inside \`init/1\`:
+
+\`\`\`erlang
+-module(transcoder_sup_config).
+-behaviour(supervisor).
+
+-export([
+    init/1,
+    is_clean_exit/1,
+    validate_shutdown_opt/1
+]).
+
+%% @doc Check whether an exit reason is a normal or graceful supervisor shutdown.
+is_clean_exit(normal)        -> true;
+is_clean_exit(shutdown)      -> true;
+is_clean_exit({shutdown, _}) -> true;
+is_clean_exit(_)             -> false.
+
+%% @doc Verify that a shutdown timeout option conforms to OTP supervisor constraints.
+validate_shutdown_opt(Timeout)
+  when Timeout =:= brutal_kill orelse Timeout =:= infinity orelse
+       (is_integer(Timeout) andalso Timeout >= 0) ->
+    ok;
+validate_shutdown_opt(_) ->
+    {error, invalid_shutdown}.
+
+%% @doc Return SupFlags and a two-tier child spec list for an audio pipeline.
+init({CodecMod, Channels}) when is_atom(CodecMod), is_list(Channels) ->
+    SupFlags = #{strategy => rest_for_one, intensity => 4, period => 10},
+    ArchiveSup = #{
+        id => archive_mgr_sup,
+        start => {archive_mgr_sup, start_link, []},
+        restart => permanent,
+        shutdown => infinity,
+        type => supervisor,
+        modules => [archive_mgr_sup]
+    },
+    AudioWorker = #{
+        id => codec_worker,
+        start => {CodecMod, start_link, Channels},
+        restart => transient,
+        shutdown => 2000,
+        type => worker,
+        modules => [CodecMod]
+    },
+    {ok, {SupFlags, [ArchiveSup, AudioWorker]}}.
+\`\`\`
+
+Key Erlang mechanics illustrated above:
+- **Clause Order & Tagged Shutdown Tuples**: Placing \`{shutdown, _}\` ahead of the \`_\` catch-all in \`is_clean_exit/1\` ensures tagged clean-shutdown reasons do not fall through into crash handling.
+- **Type Guards & Nested \`orelse\` / \`andalso\`**: Guard BIFs such as \`is_atom/1\`, \`is_list/1\`, and parenthesized numeric comparisons (\`is_integer(Timeout) andalso Timeout >= 0\`) prevent bad terms from bypassing validation.
+- **Hierarchical Child Specs in \`init/1\`**: Nested supervisors declare \`type => supervisor\` with \`shutdown => infinity\`, whereas leaf workers specify finite millisecond shutdown budgets and pass runtime initialization arguments in the \`start\` tuple.
+
+## Assignment Specification
+
+Implement \`src/child_spec_factory.erl\` with the following exports:
+
+\`\`\`erlang
+-module(child_spec_factory).
+
+-export([
+    worker_spec/4,
+    supervisor_spec/2,
+    classify_restart/2
+]).
+\`\`\`
+
+### Functional Requirements
+
+#### \`worker_spec/4\`
+- **Input**: \`Id\` (arbitrary term identifier), \`Module\` (atom), \`Args\` (list of arguments passed to initialization), \`RestartType\` (\`permanent\`, \`transient\`, or \`temporary\` atom).
+- **Behavior**: Enforces via guard clauses that \`Module\` is an atom, \`Args\` is a list, and \`RestartType\` is one of the three valid OTP restart strategies. Constructs and returns a child specification map for a leaf worker configured with a \`5000\` millisecond shutdown timeout, worker node \`type\`, startup target invoking \`start_link\` with \`Args\` on \`Module\`, and a single-element \`modules\` list referencing \`Module\`. Invalid arguments must trigger a function clause rejection.
+- **Examples**:
+  - \`child_spec_factory:worker_spec(cache_srv, my_cache, [100], transient)\` returns \`#{id => cache_srv, modules => [my_cache], restart => transient, shutdown => 5000, start => {my_cache, start_link, [100]}, type => worker}\`.
+
+#### \`supervisor_spec/2\`
+- **Input**: \`Id\` (arbitrary term identifier), \`SupModule\` (atom).
+- **Behavior**: Enforces via guard clauses that \`SupModule\` is an atom. Constructs and returns a child specification map configured as a nested supervisor node with \`permanent\` restart policy, \`infinity\` shutdown timeout (protecting child sub-trees from orphan leaks), startup target invoking \`start_link\` with an empty argument list on \`SupModule\`, and a single-element \`modules\` list referencing \`SupModule\`.
+- **Examples**:
+  - \`child_spec_factory:supervisor_spec(sub_sup, sub_sup_mod)\` returns \`#{id => sub_sup, modules => [sub_sup_mod], restart => permanent, shutdown => infinity, start => {sub_sup_mod, start_link, []}, type => supervisor}\`.
+
+#### \`classify_restart/2\`
+- **Input**: \`RestartType\` (\`permanent\`, \`transient\`, or \`temporary\` atom), \`ExitReason\` (exit reason term).
+- **Behavior**: Implements the full OTP Restart Type Truth Table, returning either \`restart\` or \`do_not_restart\`. Always restarts \`permanent\` processes regardless of reason; never restarts \`temporary\` processes regardless of reason; restarts \`transient\` processes strictly on unexpected crashes while treating \`normal\`, \`shutdown\`, and tagged \`shutdown\` tuples as clean exits that must not restart.
+- **Examples**:
+  - \`child_spec_factory:classify_restart(transient, normal)\` returns \`do_not_restart\`.
+  - \`child_spec_factory:classify_restart(permanent, normal)\` returns \`restart\`.
+  - \`child_spec_factory:classify_restart(transient, connection_lost)\` returns \`restart\`.
+
+## Rules & Verification Constraints
+
+- Must export \`worker_spec/4\`, \`supervisor_spec/2\`, and \`classify_restart/2\`.
+- Must use guard clauses (\`when\`) to enforce atom, list, and restart policy invariants.
+- Must enforce infinite shutdown timeouts on nested supervisor specs and properly match tagged clean-shutdown tuples.
 `,
     mentalModelCheck: {
       question: 'Why does OTP require nested child supervisors to have shutdown => infinity instead of a numeric timeout like 5000?',
@@ -519,12 +579,15 @@ Implement module \`child_spec_factory\` exporting:
     classify_restart/2
 ]).
 
+%% @doc Build a worker child specification map from an ID, module atom, start argument list, and restart policy atom; rejects invalid argument types or restart strategies.
 worker_spec(Id, Module, Args, RestartType) ->
     ok.
 
+%% @doc Build a nested supervisor child specification map enforcing hierarchical shutdown safety; rejects non-atom supervisor module names.
 supervisor_spec(Id, SupModule) ->
     ok.
 
+%% @doc Classify whether OTP restarts a child given its restart type and exit reason, distinguishing normal or clean shutdown exits from crashes.
 classify_restart(RestartType, ExitReason) ->
     ok.
 `,
@@ -536,6 +599,7 @@ classify_restart(RestartType, ExitReason) ->
     classify_restart/2
 ]).
 
+%% @doc Build a worker child specification map from an ID, module atom, start argument list, and restart policy atom; rejects invalid argument types or restart strategies.
 worker_spec(Id, Module, Args, RestartType)
   when is_atom(Module), is_list(Args),
        (RestartType =:= permanent orelse RestartType =:= transient orelse RestartType =:= temporary) ->
@@ -548,6 +612,7 @@ worker_spec(Id, Module, Args, RestartType)
         modules => [Module]
     }.
 
+%% @doc Build a nested supervisor child specification map enforcing hierarchical shutdown safety; rejects non-atom supervisor module names.
 supervisor_spec(Id, SupModule) when is_atom(SupModule) ->
     #{
         id => Id,
@@ -558,6 +623,7 @@ supervisor_spec(Id, SupModule) when is_atom(SupModule) ->
         modules => [SupModule]
     }.
 
+%% @doc Classify whether OTP restarts a child given its restart type and exit reason, distinguishing normal or clean shutdown exits from crashes.
 classify_restart(permanent, _Reason) ->
     restart;
 classify_restart(temporary, _Reason) ->
@@ -583,12 +649,15 @@ classify_restart(transient, _AbnormalReason) ->
     classify_restart/2
 ]).
 
+%% @doc Build a worker child specification map from an ID, module atom, start argument list, and restart policy atom; rejects invalid argument types or restart strategies.
 worker_spec(Id, Module, Args, RestartType) ->
     ok.
 
+%% @doc Build a nested supervisor child specification map enforcing hierarchical shutdown safety; rejects non-atom supervisor module names.
 supervisor_spec(Id, SupModule) ->
     ok.
 
+%% @doc Classify whether OTP restarts a child given its restart type and exit reason, distinguishing normal or clean shutdown exits from crashes.
 classify_restart(RestartType, ExitReason) ->
     ok.
 `,
@@ -603,6 +672,7 @@ classify_restart(RestartType, ExitReason) ->
     classify_restart/2
 ]).
 
+%% @doc Build a worker child specification map from an ID, module atom, start argument list, and restart policy atom; rejects invalid argument types or restart strategies.
 worker_spec(Id, Module, Args, RestartType)
   when is_atom(Module), is_list(Args),
        (RestartType =:= permanent orelse RestartType =:= transient orelse RestartType =:= temporary) ->
@@ -615,6 +685,7 @@ worker_spec(Id, Module, Args, RestartType)
         modules => [Module]
     }.
 
+%% @doc Build a nested supervisor child specification map enforcing hierarchical shutdown safety; rejects non-atom supervisor module names.
 supervisor_spec(Id, SupModule) when is_atom(SupModule) ->
     #{
         id => Id,
@@ -625,6 +696,7 @@ supervisor_spec(Id, SupModule) when is_atom(SupModule) ->
         modules => [SupModule]
     }.
 
+%% @doc Classify whether OTP restarts a child given its restart type and exit reason, distinguishing normal or clean shutdown exits from crashes.
 classify_restart(permanent, _Reason) ->
     restart;
 classify_restart(temporary, _Reason) ->
