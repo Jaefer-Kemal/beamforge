@@ -91,7 +91,7 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 
 		if messageType == websocket.BinaryMessage && len(data) > 0 {
 			channel := int(data[0])

@@ -225,6 +225,7 @@ export function CapstoneStudioView() {
   const [copiedCode, setCopiedCode] = useState(false);
   const [mobileTab, setMobileTab] = useState<'guide' | 'code' | 'results'>('guide');
   const [isColdBooting, setIsColdBooting] = useState(false);
+  const [lastVerifiedExerciseId, setLastVerifiedExerciseId] = useState<string | null>(null);
 
   // Render Cold-Start Notification (detects when cloud container on Render is waking up after inactivity)
   useEffect(() => {
@@ -442,6 +443,7 @@ export function CapstoneStudioView() {
 
   // Execute Submit for the active milestone (M1-M5 run per-milestone AST+unit checks; M6 runs full 6-stage Chaos suite)
   const handleSubmit = async () => {
+    setLastVerifiedExerciseId(targetExerciseId);
     setIsDrawerOpen(true);
     setDrawerTab('stages');
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -452,6 +454,7 @@ export function CapstoneStudioView() {
 
   // Execute full 6-stage E2E + Chaos verification explicitly from any milestone
   const handleSubmitFullCapstone = async () => {
+    setLastVerifiedExerciseId('ch12-capstone');
     setIsDrawerOpen(true);
     setDrawerTab('stages');
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -1231,7 +1234,11 @@ export function CapstoneStudioView() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between pb-1">
                     <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                      {isFullCapstoneStages ? '6-Stage E2E + Chaos Verification' : `Milestone ${activeMilestone.number} Stage Checks`}
+                      {isFullCapstoneStages
+                        ? '6-Stage E2E + Chaos Verification'
+                        : lastVerifiedExerciseId && lastVerifiedExerciseId !== targetExerciseId
+                        ? `Last Verification (${lastVerifiedExerciseId.toUpperCase()})`
+                        : `Milestone ${activeMilestone.number} Stage Checks`}
                     </span>
                     {activeMilestoneIndex < 5 && isBackendOnline && (
                       <button

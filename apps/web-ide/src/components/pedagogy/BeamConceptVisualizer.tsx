@@ -55,22 +55,22 @@ const SCENE_CONFIGS: Record<VisualSceneId, SceneConfig> = {
       {
         title: 'Step 1: Supervision Tree Boot (M1)',
         vmAction: 'xmpp_sup boots xmpp_session_registry (Child 1) followed by xmpp_router (Child 2) under rest_for_one.',
-        bifOpcode: 'supervisor:start_link({local, ?MODULE}, ?MODULE, [])',
+        bifOpcode: 'supervisor:start_link/3 · rest_for_one (5 restarts / 10s)',
       },
       {
         title: 'Step 2: Stream Framing & C2S Handshake (M2 & M4)',
         vmAction: 'Raw TCP packets enter xmpp_stream_parser:feed_chunk/2, advancing xmpp_c2s_statem through SASL PLAIN auth.',
-        bifOpcode: 'gen_statem:call(C2sPid, {feed_xml, Chunk})',
+        bifOpcode: 'gen_statem:call/2 -> xmpp_stream_parser:feed_chunk/2',
       },
       {
         title: 'Step 3: Resource Binding & ETS Registration (M3)',
         vmAction: 'C2S FSM binds user@domain/res, registers PID into public ETS table, and attaches unidirectional erlang:monitor/2.',
-        bifOpcode: 'erlang:monitor(process, C2sPid) + ets:insert(tab, ...)',
+        bifOpcode: 'erlang:monitor/2 + public ETS {read_concurrency, true}',
       },
       {
         title: 'Step 4: Stanza Routing & Offline Fallback (M5)',
-        vmAction: 'xmpp_router queries ETS for target JID. Direct PID dispatch if online, or spools into in-memory offline queue if disconnected.',
-        bifOpcode: 'TargetPid ! {deliver_stanza, Xml} | maps:put(BareJid, [Xml|...])',
+        vmAction: 'xmpp_router queries ETS for target JID. Direct PID dispatch if online, or spools into in-memory offline map if disconnected.',
+        bifOpcode: 'TargetPid ! {deliver_stanza, Copy} | offline_store map',
       },
     ],
   },

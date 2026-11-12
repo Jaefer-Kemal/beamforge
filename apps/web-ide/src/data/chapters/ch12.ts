@@ -334,8 +334,8 @@ Complete \`src/xmpp_stream_parser.erl\` exporting \`new_buffer/0\`, \`feed_chunk
     verificationHint: 'Register two sessions for the same bare JID with different priorities. Verify lookup_by_jid returns the highest-priority PID, and that killing that PID causes the monitor to fall back to the surviving session.',
     mentalModelCheck: {
       question: 'Why does xmpp_session_registry use erlang:monitor/2 instead of link/1 when tracking client C2S processes?',
-      codeSnippet: `MRef = erlang:monitor(process, C2sPid),
-ets:insert(?TAB, {FullJid, BareJid, Resource, Priority, C2sPid, MRef})`,
+      codeSnippet: `MonitorRef = erlang:monitor(process, ClientPid)
+%% Unidirectional failure notification vs link(ClientPid)`,
       options: [
         {
           id: 'A',
@@ -592,7 +592,7 @@ Implement \`src/xmpp_c2s_statem.erl\` (\`-behaviour(gen_statem)\`, \`callback_mo
 - **\`wait_for_sasl\` + \`{sasl_auth, _Mech, Payload}\`**: Extracts username from \`<<0, Authcid, 0, Pass>>\` (or non-empty single token, falling back to existing \`username\`), advances to \`authenticated\`, and emits \`<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>\`.
 - **Pre-Auth Guard (\`wait_for_sasl\` + any non-ping/non-close stanza)**: Remains in \`wait_for_sasl\` and emits \`<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>\`.
 - **\`authenticated\` + \`{stream_open, Domain}\`**: Remains in \`authenticated\`, updates \`domain\`, and emits \`<stream:stream ...><stream:features><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/></stream:features>\`.
-- **\`authenticated\` + \`{iq_bind, Id, ResourceBin}\`**: Defaults empty resource to \`<<"obsidian">>\`, builds \`FullJid = <<User/binary, "@", Domain/binary, "/", Res/binary>>\`, calls \`xmpp_session_registry:register_session(FullJid, Priority, self())\`, stores \`resource\` & \`full_jid\`, advances to \`session_established\`, and emits \`<iq type='result' id='<Id>'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid><FullJid></jid></bind></iq>\`.
+- **\`authenticated\` + \`{iq_bind, Id, ResourceBin}\`**: Defaults empty resource to \`<<"obsidian">>\`, constructs the Full JID binary formatted as \`User@Domain/Res\`, calls \`xmpp_session_registry:register_session(FullJid, Priority, self())\`, stores \`resource\` & \`full_jid\`, advances to \`session_established\`, and emits \`<iq type='result' id='<Id>'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid><FullJid></jid></bind></iq>\`.
 - **\`session_established\` + \`{chat_message, Id, ToJid, Body}\`**: Formats \`<message from='<FromJid>' to='<TargetJid>' id='<Id>' type='chat'><body><Body></body></message>\` (defaulting empty \`ToJid\` to \`FromJid\`) and routes via \`xmpp_router:route_stanza/3\`.
 - **Any state**: \`{ping, Id}\` replies \`<iq type='result' id='<Id>'/>\`; \`stream_close\` replies \`</stream:stream>\` and resets state to \`wait_for_stream\`.
 

@@ -34,6 +34,22 @@ func main() {
 	runner := bridge.NewRunner(poolMgr)
 	wsHandler := gateway.NewHandler(poolMgr, runner)
 
+	handler := buildRouter(poolMgr, runner, wsHandler)
+
+	serverAddr := ":" + port
+	log.Printf("====================================================================")
+	log.Printf("==> [BeamForge Orchestrator] Gateway running on http://localhost%s", serverAddr)
+	log.Printf("    Mode        : Native BEAM Bridge (Erlang/OTP %s)", poolMgr.OTPRelease())
+	log.Printf("    WebSocket   : ws://localhost%s/ws", serverAddr)
+	log.Printf("    REST Health : http://localhost%s/health", serverAddr)
+	log.Printf("====================================================================")
+
+	if err := http.ListenAndServe(serverAddr, handler); err != nil {
+		log.Fatalf("Server terminated: %v", err)
+	}
+}
+
+func buildRouter(poolMgr *pool.Manager, runner *bridge.Runner, wsHandler *gateway.Handler) http.Handler {
 	mux := http.NewServeMux()
 
 	// 1. Healthcheck Endpoint
@@ -280,19 +296,7 @@ func main() {
 	})
 
 	// CORS Wrapper
-	handler := enableCORS(mux)
-
-	serverAddr := ":" + port
-	log.Printf("====================================================================")
-	log.Printf("==> [BeamForge Orchestrator] Gateway running on http://localhost%s", serverAddr)
-	log.Printf("    Mode        : Native BEAM Bridge (Erlang/OTP %s)", poolMgr.OTPRelease())
-	log.Printf("    WebSocket   : ws://localhost%s/ws", serverAddr)
-	log.Printf("    REST Health : http://localhost%s/health", serverAddr)
-	log.Printf("====================================================================")
-
-	if err := http.ListenAndServe(serverAddr, handler); err != nil {
-		log.Fatalf("Server terminated: %v", err)
-	}
+	return enableCORS(mux)
 }
 
 func enableCORS(next http.Handler) http.Handler {

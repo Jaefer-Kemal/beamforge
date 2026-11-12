@@ -3023,6 +3023,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...` exited 0; `TestChapter12Verification` (all 6 milestones `15.44s`), `TestRunXmppChatLiveCluster` (all 7 scenarios `19.83s`), and `TEST_CHAPTER=12 TestDynamicVisibleTestsCurriculum` (`ch12-capstone | 6/6 tests passed` in `3.31s` / `3.331s`) all passed (`-count=1`).
   - `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited with code 0.
 
+## Phase 184: Deep Re-Audit of Chapter 12 — Spoiler Removal (`BeamConceptVisualizer` / `ch12-m3` / `ch12-m4`), WS Timeout, Stage Header Sync, & HTTP Endpoint Tests
+- [x] **184.1: Anti-Spoiler & Misconfiguration Remediation**:
+  - Removed exact `start_link` solution expression (`supervisor:start_link({local, ?MODULE}, ?MODULE, [])`) and erroneous `{feed_xml, Chunk}` tuple from `BeamConceptVisualizer.tsx` (`lines 54–74`), replacing them with non-spoiling VM-level step labels (`supervisor:start_link/3`, `xmpp_stream_parser:feed_chunk/2`, `erlang:monitor/2 + public ETS`, `offline_store map`).
+  - Replaced literal `?TAB` 6-tuple insert in `ch12-m3` `mentalModelCheck.codeSnippet` (`ch12.ts`, `lines 336–337`) with generic `MonitorRef = erlang:monitor(process, ClientPid)` illustration, and replaced the raw bit-syntax expression (`<<User/binary, ...>>`) in `ch12-m4` `Assignment Specification` (`line 595`) with plain English Spec 08 Pillar 2 wording.
+  - Added `lastVerifiedExerciseId` tracking in `apps/web-ide/src/components/workspace/CapstoneStudioView.tsx` (`lines 228`, `446`, `456`, `1238–1242`) so switching milestone pills after a prior run clearly labels stale stage results rather than mislabeling them as the newly selected milestone.
+  - Raised per-frame WebSocket grading context timeout in `services/orchestrator/internal/gateway/ws_mux.go` (`line 94`) from `15s` to `25s` so 6-stage `ch12-capstone` verification never times out on slower containers.
+  - Refactored `buildRouter` in `services/orchestrator/cmd/server/main.go` (`lines 37–54`, `298`) and added `services/orchestrator/cmd/server/main_test.go` (`TestXmppChatHTTPEndpoint`) verifying CORS preflight (`OPTIONS`), `GET` (`405`), bad JSON (`400`), and live `POST /api/v1/xmpp/chat` (`send` & `chaos_kill`) against `CH12_SOLUTION_FILES`.
+- [x] **184.2: Complete Live Re-Verification Suite**:
+  - `node reverify_ch12_complete.mjs` exited `0`: `0` spoilers, `0` stale simulator strings, `0` misconfigurations; all 4 Chunked References (`kv_line_framer`, `lease_tracker`, `proto_gate_statem`, `webhook_relay`), all 5 starter files, and all 5 solution files compiled cleanly (`erlc.exe -Wall -Werror`) and passed live OTP runs + `bf_ast_verifier`.
+  - `go build ./...` exited `0`; `TestXmppChatHTTPEndpoint` (`3.17s` / `3.204s`), `TestChapter12Verification` + `TestRunXmppChatLiveCluster` (`25.11s` / `47.048s`), and `TEST_CHAPTER=12 TestDynamicVisibleTestsCurriculum` (`ch12-capstone | 6/6 tests passed` in `1.72s` / `1.741s`) all passed (`-count=1`).
+  - `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
 
 
 
