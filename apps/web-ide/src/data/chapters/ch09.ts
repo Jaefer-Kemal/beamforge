@@ -12,115 +12,153 @@ export const CHAPTER_9_LESSONS: LessonContent[] = [
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-In mainstream backend languages such as Node.js, Python, Go, and Ruby, scaling high-throughput APIs requires deploying an external **Redis** or **Memcached** cluster over the network. Every single cache read incurs network TCP roundtrips (1–3ms), OS socket serialization, connection pooling overhead, and JSON or Protobuf parsing costs.
+In mainstream backend stacks (Node.js, Python, Go, Ruby), high-throughput caches and rate limiters usually require an external **Redis** or **Memcached** process over TCP. Every read pays socket serialization, connection-pool contention, and loopback or network latency.
 
-In Erlang and the BEAM VM, you do not need Redis for in-process memory caching. Erlang includes **ETS (Erlang Term Storage)** directly built into the BEAM virtual machine in optimized C:
-1. **Zero Network Latency**: Reads and writes execute in nanoseconds directly in memory via C pointers, bypassing network stacks completely.
-2. **Outside Garbage Collection (Off-Heap)**: ETS tables are allocated completely outside Erlang process heaps. An ETS table holding 10,000,000 active sessions will **never trigger garbage collection pauses** on worker processes!
-3. **Hardware Lock-Free Concurrency**: By configuring \`{read_concurrency, true}\` and \`{write_concurrency, true}\`, the BEAM VM utilizes decentralized cache-line locking and lock-free read paths across all CPU cores.
-4. **Hardware Atomic Operations**: Functions like \`ets:update_counter/4\` perform lock-free atomic increments, allowing thousands of concurrent workers to increment rate-limiters or telemetry metrics with zero race conditions.
+In the BEAM VM, **ETS (Erlang Term Storage)** is compiled directly into ERTS in C as off-heap mutable tables:
+1. **Sub-Microsecond In-Process Lookups**: Reads and writes copy terms straight between process heaps and ERTS C memory—no network stack, sockets, or JSON marshaling.
+2. **Zero Garbage Collection Overhead**: ETS tables live completely outside individual Erlang process heaps, so millions of cached sessions never trigger GC scans on worker processes.
+3. **Hardware Concurrency & Atomic Counters**: Enabling \`read_concurrency\` and \`write_concurrency\` distributes internal locks across scheduler cores, while \`ets:update_counter/4\` executes lock-free integer updates without serializing writers through a single \`gen_server\` mailbox.
 
 > [!NOTE]
-> **BEAM ETS vs External Cache (Redis):**
-> - **External Cache (Redis):** Network hop overhead (1-2ms), JSON serialization, TCP connection pool management.
-> - **BEAM ETS (In-Process Off-Heap):** Direct memory lookup via C pointers (nanosecond latency), zero garbage collection pause on process heaps, hardware lock-free atomic counters.
+> **Lifetime Ownership Invariant:** Every ETS table is owned by the BEAM process that creates it. If that owner process terminates cleanly or crashes without an heir, ERTS immediately deletes the table and frees its off-heap memory.
 
 ## Deep Concept Breakdown & Under the Hood
 
 ### The 4 ETS Table Types
 
-When calling \`ets:new(Name, Options)\`, you select one of four table archetypes:
-1. **\`set\` (Default)**: Unique keys. Exactly one tuple per key. Implemented as an $O(1)$ hash table. If you insert a tuple with an existing key, it overwrites the old tuple.
-2. **\`ordered_set\`**: Unique keys. Keys are ordered according to Erlang term precedence (\`number < atom < reference < fun < port < pid < tuple < map < list < bitstring\`). Implemented as an $O(\\log N)$ AVL balanced binary tree. Supports range scans and iteration via \`ets:first/1\`, \`ets:last/1\`, \`ets:next/2\`, and \`ets:prev/2\`.
-3. **\`bag\`**: Multiple tuples can have the identical key, provided the tuples themselves are not completely identical.
-4. **\`duplicate_bag\`**: Allows multiple identical tuples with identical keys.
+When allocating a table with \`ets:new/2\`, you pick one of four underlying data structures:
+1. **\`set\` (Default)**: Unique keys stored in an $O(1)$ hash table. Inserting a tuple whose key matches an existing entry overwrites the previous tuple.
+2. **\`ordered_set\`**: Unique keys stored in an $O(\\log N)$ AVL balanced binary tree ordered by BEAM term precedence (\`number < atom < reference < fun < port < pid < tuple < map < list < bitstring\`), supporting ordered traversal via \`ets:first/1\` and \`ets:next/2\`.
+3. **\`bag\`**: Allows multiple tuples per key as long as the complete tuples differ.
+4. **\`duplicate_bag\`**: Allows exact duplicate tuples under the same key.
 
-### Key Position (\`keypos\`)
+### Key Position (\`keypos\`) & Named vs. Unnamed Tables
 
-By default, Erlang uses element 1 of the stored tuple as the primary key (\`{keypos, 1}\`). If your tuples are tagged records like \`{user_profile, UserId, Name, Role}\`, you specify \`{keypos, 2}\` so \`UserId\` is the lookup index!
-
-### Atomic Counter Modification (\`ets:update_counter/4\`)
-
-\`\`\`erlang
-ets:update_counter(TableName, Key, {Pos, Increment}, DefaultTuple) -> NewValue
-\`\`\`
-
-If \`Key\` exists, element \`Pos\` is atomically incremented by \`Increment\`. If \`Key\` does NOT exist, \`DefaultTuple\` is inserted atomically and then modified!
-
-### Parallel Worked Example: In-Memory Rate Limiter
-
-Here is how a real-world API rate limiter initializes an ETS table and records hits:
-
-\`\`\`erlang
--module(api_rate_limiter).
--export([init_limiter/0, record_request/2, check_limit/2]).
-
-init_limiter() ->
-    case ets:whereis(rate_limit_tab) of
-        undefined ->
-            ets:new(rate_limit_tab, [
-                set,
-                public,
-                named_table,
-                {read_concurrency, true},
-                {write_concurrency, true}
-            ]),
-            ok;
-        _ ->
-            ok
-    end.
-
-record_request(ClientIpBin, Cost) ->
-    %% Atomically increment hit count at tuple pos 2, defaulting to {ClientIpBin, 0}
-    ets:update_counter(rate_limit_tab, ClientIpBin, {2, Cost}, {ClientIpBin, 0}).
-
-check_limit(ClientIpBin, MaxAllowed) ->
-    case ets:lookup(rate_limit_tab, ClientIpBin) of
-        [{ClientIpBin, Hits}] when Hits > MaxAllowed ->
-            {error, rate_limited};
-        [{ClientIpBin, Hits}] ->
-            {ok, Hits};
-        [] ->
-            {ok, 0}
-    end.
-\`\`\`
+By default, ETS extracts the lookup key from element \`1\` of every tuple (\`{keypos, 1}\`). If you store tagged tuples such as \`{quota, TenantAtom, Units}\`, passing \`{keypos, 2}\` tells ETS to index element \`2\` (\`TenantAtom\`). Passing \`named_table\` binds the atom passed as argument 1 so any process with table permissions can reference the table by atom instead of threading a numeric \`tid()\` reference.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Official ETS Calls (stdlib / ets)
+%% Official OTP Signatures (stdlib / ets)
 ets:new(Name, Options) -> tid() | atom()
-  Options = [Type | Access | named_table | {keypos, Pos} | {read_concurrency, boolean()} | {write_concurrency, boolean()}]
-  Type = set | ordered_set | bag | duplicate_bag
-  Access = public | protected | private
+  Types:
+    Name = atom()
+    Options = [Type | Access | named_table | {keypos, Pos :: pos_integer()} |
+               {read_concurrency, boolean()} | {write_concurrency, boolean()}]
+    Type = set | ordered_set | bag | duplicate_bag
+    Access = public | protected | private
 
-ets:insert(Tab, TupleOrList) -> true
-ets:lookup(Tab, Key) -> [tuple()]
-ets:update_counter(Tab, Key, {Pos, Incr}, DefaultTuple) -> integer()
+ets:insert(Tab, ObjectOrObjects) -> true
+  Types:
+    Tab = tid() | atom()
+    ObjectOrObjects = tuple() | [tuple()]
+
+ets:lookup(Tab, Key) -> [Object :: tuple()]
+  Types:
+    Tab = tid() | atom()
+    Key = term()
+
+ets:update_counter(Tab, Key, UpdateOp, Default) -> Result :: integer()
+  Types:
+    Tab = tid() | atom()
+    Key = term()
+    UpdateOp = {Pos :: pos_integer(), Incr :: integer()}
+    Default = tuple()
 \`\`\`
+
+Consult the attached reference cards below for table access modes (\`public\` lets any process read and write, whereas \`protected\` restricts writes to the owner) and atomicity guarantees.
+
+## Parallel Worked Example: GPU Quota & Tier Ledger
+
+Consider a separate domain: a multi-tenant GPU compute scheduler storing both atomic usage counters and tier capacity rules inside a single named off-heap table (\`gpu_quotas\`) indexed by tuple element \`2\`:
+
+\`\`\`erlang
+-module(gpu_quota_tab).
+-export([boot/0, add_usage/2, set_tier_cap/3, fetch_tier_cap/1]).
+
+%% @doc Create the named off-heap quota table if it is not yet initialized.
+boot() ->
+    case ets:info(gpu_quotas) of
+        undefined ->
+            ets:new(gpu_quotas, [
+                set,
+                public,
+                named_table,
+                {keypos, 2},
+                {read_concurrency, true},
+                {write_concurrency, true}
+            ]),
+            ok;
+        _Info ->
+            ok
+    end.
+
+%% @doc Atomically accumulate consumed GPU units at tuple element 3.
+add_usage(TenantAtom, Delta) ->
+    ets:update_counter(gpu_quotas, TenantAtom, {3, Delta}, {usage, TenantAtom, 0}).
+
+%% @doc Store a tenant tier and maximum unit cap under a composite tag key.
+set_tier_cap(TenantAtom, TierName, MaxUnits) ->
+    ets:insert(gpu_quotas, {tier_cfg, {cfg, TenantAtom}, TierName, MaxUnits}),
+    ok.
+
+%% @doc Read the configured tier name and limit for a tenant from ETS.
+fetch_tier_cap(TenantAtom) ->
+    case ets:lookup(gpu_quotas, {cfg, TenantAtom}) of
+        [{tier_cfg, {cfg, TenantAtom}, TierName, MaxUnits}] ->
+            {ok, {TierName, MaxUnits}};
+        [] ->
+            {error, unconfigured}
+    end.
+\`\`\`
+
+### What ERTS Does at Runtime
+
+- **Idempotent Table Allocation (\`ets:info/1\`)**: \`boot/0\` inspects whether \`gpu_quotas\` already exists before calling \`ets:new/2\`, avoiding \`badarg\` crashes if multiple workers invoke setup safely.
+- **Custom \`keypos\` & Atomic Position Updates**: Because \`{keypos, 2}\` selects element \`2\` as the lookup key inside \`{usage, TenantAtom, Units}\`, \`ets:update_counter/4\` targets element \`3\` (\`{3, Delta}\`), atomically inserting \`{usage, TenantAtom, 0}\` on a tenant's first call before adding \`Delta\`.
+- **Key Namespacing Inside a Single Table**: \`set_tier_cap/3\` namespaces tier rules using composite tuple key \`{cfg, TenantAtom}\` so tier configurations never collide with bare \`TenantAtom\` usage keys in the same \`set\`.
 
 ## Assignment Specification
 
-Implement module \`ets_telemetry\` exporting:
-1. \`init_table/0 -> ok\`:
-   - Creates a \`named_table\` named \`telemetry_store\` with \`set\`, \`public\`, \`{read_concurrency, true}\`, and \`{write_concurrency, true}\`.
-   - If the table already exists, returns \`ok\`.
-2. \`record_endpoint_hit(EndpointBin, Incr) -> integer()\`:
-   - Uses \`ets:update_counter/4\` to increment the hit count at position 2 for key \`EndpointBin\` by \`Incr\`.
-   - Default tuple if absent: \`{EndpointBin, 0}\`.
-   - Returns the new integer hit count.
-3. \`get_endpoint_hits(EndpointBin) -> integer()\`:
-   - Returns the hit count for \`EndpointBin\` from \`telemetry_store\`.
-   - If not found, returns \`0\`.
-4. \`put_user_profile(UserId, Name, Role) -> ok\`:
-   - Inserts \`{{user, UserId}, Name, Role}\` into \`telemetry_store\`.
-5. \`get_user_profile(UserId) -> {ok, #{name => Name, role => Role}} | {error, not_found}\`:
-   - Looks up \`{user, UserId}\`. Returns map if found, or \`{error, not_found}\`.
+Implement module \`src/ets_telemetry.erl\` exporting \`init_table/0\`, \`record_endpoint_hit/2\`, \`get_endpoint_hits/1\`, \`put_user_profile/3\`, and \`get_user_profile/1\`, storing all records inside the named table \`telemetry_store\`.
+
+### \`init_table/0\`
+- **Input**: None.
+- **Behavior**: Idempotently ensures the named table \`telemetry_store\` exists as a public \`set\` using default key position \`1\` with concurrent read and write optimizations enabled. Returns \`ok\` whether creating a fresh table or reusing an already active table.
+- **Examples**:
+  - \`ets_telemetry:init_table()\` returns \`ok\`.
+
+### \`record_endpoint_hit/2\`
+- **Input**: Binary endpoint identifier \`EndpointBin\`, integer increment \`Incr\`.
+- **Behavior**: Atomically increments the counter in element \`2\` of the entry keyed by \`EndpointBin\` inside \`telemetry_store\`, initializing a missing entry with zero before applying \`Incr\`. Returns the updated integer hit total.
+- **Examples**:
+  - \`ets_telemetry:record_endpoint_hit(<<"/auth">>, 1)\` returns \`1\`.
+  - Calling \`ets_telemetry:record_endpoint_hit(<<"/auth">>, 9)\` immediately after returns \`10\`.
+
+### \`get_endpoint_hits/1\`
+- **Input**: Binary endpoint identifier \`EndpointBin\`.
+- **Behavior**: Looks up \`EndpointBin\` in \`telemetry_store\` and returns its integer hit count, or \`0\` if no counter has been recorded yet.
+- **Examples**:
+  - \`ets_telemetry:get_endpoint_hits(<<"/unknown">>)\` returns \`0\`.
+
+### \`put_user_profile/3\`
+- **Input**: User identifier \`UserId\`, display name \`Name\`, role term \`Role\`.
+- **Behavior**: Stores a 3-element tuple in \`telemetry_store\` whose primary key at element \`1\` is a composite 2-tuple pairing atom \`user\` with \`UserId\`, overwriting any previous profile for that user and returning \`ok\`.
+- **Examples**:
+  - \`ets_telemetry:put_user_profile(101, <<"Alice">>, admin)\` returns \`ok\`.
+
+### \`get_user_profile/1\`
+- **Input**: User identifier \`UserId\`.
+- **Behavior**: Looks up the composite \`user\`-tagged key in \`telemetry_store\`. If found, returns an \`ok\`-tagged map containing keys \`name\` and \`role\`; otherwise returns \`{error, not_found}\`.
+- **Examples**:
+  - \`ets_telemetry:get_user_profile(101)\` returns \`{ok, #{name => <<"Alice">>, role => admin}}\`.
+  - \`ets_telemetry:get_user_profile(9999)\` returns \`{error, not_found}\`.
 
 ## Rules & Verification Constraints
-- Table \`telemetry_store\` must be a named, public set.
-- All counter operations must use \`ets:update_counter/4\`.
-- All operations must succeed concurrently with zero process bottlenecking.
+
+- **Required ETS Primitives**: \`bf_ast_verifier\` enforces calls to \`ets:new/2\`, \`ets:update_counter/4\`, \`ets:insert/2\`, and \`ets:lookup/2\`.
+- **Table Properties**: \`telemetry_store\` must be a named, \`public\` \`set\` (with \`read_concurrency\` and \`write_concurrency\` enabled).
+- **Concurrency Safety**: Counter increments must execute atomically via ETS rather than read-modify-write sequences.
 `,
     otpDocCards: [
       {
@@ -212,26 +250,32 @@ Implement module \`ets_telemetry\` exporting:
 
 -define(TAB, telemetry_store).
 
+%% @doc Create the named public ETS telemetry table idempotently if absent.
 init_table() ->
     ok.
 
+%% @doc Atomically add Incr to the hit count for EndpointBin and return the total.
 record_endpoint_hit(EndpointBin, Incr) ->
-    0.
+    ok.
 
+%% @doc Return the stored integer hit count for EndpointBin, or zero if absent.
 get_endpoint_hits(EndpointBin) ->
-    0.
+    ok.
 
+%% @doc Store Name and Role in telemetry_store keyed by UserId.
 put_user_profile(UserId, Name, Role) ->
     ok.
 
+%% @doc Look up the profile map for UserId, or return a not-found error value.
 get_user_profile(UserId) ->
-    {error, not_found}.
+    ok.
 `,
     solutionCode: `-module(ets_telemetry).
 -export([init_table/0, record_endpoint_hit/2, get_endpoint_hits/1, put_user_profile/3, get_user_profile/1]).
 
 -define(TAB, telemetry_store).
 
+%% @doc Create the named public ETS telemetry table idempotently if absent.
 init_table() ->
     case ets:whereis(?TAB) of
         undefined ->
@@ -247,19 +291,23 @@ init_table() ->
             ok
     end.
 
+%% @doc Atomically add Incr to the hit count for EndpointBin and return the total.
 record_endpoint_hit(EndpointBin, Incr) ->
     ets:update_counter(?TAB, EndpointBin, {2, Incr}, {EndpointBin, 0}).
 
+%% @doc Return the stored integer hit count for EndpointBin, or zero if absent.
 get_endpoint_hits(EndpointBin) ->
     case ets:lookup(?TAB, EndpointBin) of
         [{EndpointBin, Hits}] -> Hits;
         [] -> 0
     end.
 
+%% @doc Store Name and Role in telemetry_store keyed by UserId.
 put_user_profile(UserId, Name, Role) ->
     ets:insert(?TAB, {{user, UserId}, Name, Role}),
     ok.
 
+%% @doc Look up the profile map for UserId, or return a not-found error value.
 get_user_profile(UserId) ->
     case ets:lookup(?TAB, {user, UserId}) of
         [{{user, UserId}, Name, Role}] ->
@@ -277,20 +325,25 @@ get_user_profile(UserId) ->
 
 -define(TAB, telemetry_store).
 
+%% @doc Create the named public ETS telemetry table idempotently if absent.
 init_table() ->
     ok.
 
+%% @doc Atomically add Incr to the hit count for EndpointBin and return the total.
 record_endpoint_hit(EndpointBin, Incr) ->
-    0.
+    ok.
 
+%% @doc Return the stored integer hit count for EndpointBin, or zero if absent.
 get_endpoint_hits(EndpointBin) ->
-    0.
+    ok.
 
+%% @doc Store Name and Role in telemetry_store keyed by UserId.
 put_user_profile(UserId, Name, Role) ->
     ok.
 
+%% @doc Look up the profile map for UserId, or return a not-found error value.
 get_user_profile(UserId) ->
-    {error, not_found}.
+    ok.
 `,
       },
     ],
@@ -300,6 +353,7 @@ get_user_profile(UserId) ->
 
 -define(TAB, telemetry_store).
 
+%% @doc Create the named public ETS telemetry table idempotently if absent.
 init_table() ->
     case ets:whereis(?TAB) of
         undefined ->
@@ -315,19 +369,23 @@ init_table() ->
             ok
     end.
 
+%% @doc Atomically add Incr to the hit count for EndpointBin and return the total.
 record_endpoint_hit(EndpointBin, Incr) ->
     ets:update_counter(?TAB, EndpointBin, {2, Incr}, {EndpointBin, 0}).
 
+%% @doc Return the stored integer hit count for EndpointBin, or zero if absent.
 get_endpoint_hits(EndpointBin) ->
     case ets:lookup(?TAB, EndpointBin) of
         [{EndpointBin, Hits}] -> Hits;
         [] -> 0
     end.
 
+%% @doc Store Name and Role in telemetry_store keyed by UserId.
 put_user_profile(UserId, Name, Role) ->
     ets:insert(?TAB, {{user, UserId}, Name, Role}),
     ok.
 
+%% @doc Look up the profile map for UserId, or return a not-found error value.
 get_user_profile(UserId) ->
     case ets:lookup(?TAB, {user, UserId}) of
         [{{user, UserId}, Name, Role}] ->
@@ -348,7 +406,7 @@ get_user_profile(UserId) ->
       {
         id: 'tc2',
         title: 'Store and Lookup User Profile',
-        erlangCall: 'begin ok = ets_telemetry:init_table(), ok = ets_telemetry:put_user_profile(101, <<"Alice">>, admin), {ok, P} = ets_telemetry:get_user_profile(101), {maps:get(name, P), maps:get(role, P)} end',
+        erlangCall: 'begin catch ets:delete(telemetry_store), ok = ets_telemetry:init_table(), ok = ets_telemetry:put_user_profile(101, <<"Alice">>, admin), {ok, P} = ets_telemetry:get_user_profile(101), {maps:get(name, P), maps:get(role, P)} end',
         expectedOutput: '{<<"Alice">>, admin}',
         explanation: 'Verifies structured key indexing and map decoding.'
       }

@@ -2677,6 +2677,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Deployed Chapter 8 (`dpl_JJeBVhNWuKWGractSWezj8ePVoZR`, `readyState: READY`) to `https://beamforge-ej1azaaqt-jaefer-kemals-projects.vercel.app` aliased to `https://beamforge-eight.vercel.app`.
   - Verified live HTTP 200 responses via `npx vercel curl` across all Chapter 8 routes: `/syllabus`, `/learn/ch08-l01`, `/learn/ch08-l02`, `/learn/ch08-l03`, `/learn/ch08-l04`, `/learn/ch08-l05`, `/learn/ch08-l06`, and `/learn/ch08-l07`.
 
+## Phase 155: Pedagogical Despoiling & Live Tri-Verification of Chapter 9 Lecture 1 (`ch09-l01`)
+- [x] **155.1: Replace Clone PWE, Eliminate Spoilers & Add 10/10 `@doc` Contracts (`ch09-l01`: `ets_telemetry.erl`)**:
+  - Replaced the 1:1 `api_rate_limiter` clone (whose `init_limiter/0` and `record_request/2` duplicated `init_table/0` and `record_endpoint_hit/2` line-for-line) with a genuinely disjoint, runnable Parallel Worked Example: `gpu_quota_tab.erl` (`boot/0`, `add_usage/2`, `set_tier_cap/3`, `fetch_tier_cap/1`), using `ets:info/1 =:= undefined`, `{keypos, 2}`, tuple element `{3, Delta}`, and composite `{cfg, TenantAtom}` keys.
+  - Upgraded `conceptMarkdown` to strict Spec 04 section order (`## Why This Matters in Production`, `## Deep Concept Breakdown & Under the Hood`, `## Official Erlang Docs & Function Reference`, `## Parallel Worked Example`, structured `Input`/`Behavior`/`Examples` `## Assignment Specification` with zero syntax spoilers, and `## Rules & Verification Constraints`).
+  - Added 10/10 `@doc` contracts across `starterCode`, `files[0].content`, `solutionCode`, `solutionFiles['src/ets_telemetry.erl']`, and `ch09_verification_test.go`, converted `starterCode` stubs (`0.`, `{error, not_found}.`) to neutral `ok.` stubs with zero `-spec`, and hardened `visibleTestCases` `tc2` with `catch ets:delete(telemetry_store)`.
+- [x] **155.2: Mandatory Live Tri-Verification & Compiler Suite (`ch09-l01`)**:
+  - **Parallel Worked Example (`gpu_quota_tab.erl`)**: Extracted from `ch09.ts`, compiled with `erlc.exe -Wall` (exit code 0, 0 warnings), and verified live atomic updates and composite lookups (`PWE_CH09_L01_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe` exit code 0) and executed all 5 neutral stubs cleanly (`STARTER_CH09_L01 exports=true stubs={ok,ok,ok,ok,ok}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `erlc.exe -Wall +debug_info` (exit code 0, 0 warnings), passed `bf_ast_verifier` (`ets:new/2`, `ets:update_counter/4`, `ets:insert/2`, `ets:lookup/2`), and passed 2/2 visible tests (`SOLUTION_CH09_L01_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l01` (`VERIFIED 100% PASSED`, score=100, 5 stages in `1.38s`, `1.786s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l01 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `11.71s` / `11.736s` total).
+  - **Workspace Compilers**: `CH01_08_SPEC_COUNT=0` (zero `-spec` in `ch09-l01`); `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 

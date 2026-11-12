@@ -23,6 +23,7 @@ func TestChapter9Verification(t *testing.T) {
 
 -define(TAB, telemetry_store).
 
+%% @doc Create the named public ETS telemetry table idempotently if absent.
 init_table() ->
     case ets:whereis(?TAB) of
         undefined ->
@@ -38,19 +39,23 @@ init_table() ->
             ok
     end.
 
+%% @doc Atomically add Incr to the hit count for EndpointBin and return the total.
 record_endpoint_hit(EndpointBin, Incr) ->
     ets:update_counter(?TAB, EndpointBin, {2, Incr}, {EndpointBin, 0}).
 
+%% @doc Return the stored integer hit count for EndpointBin, or zero if absent.
 get_endpoint_hits(EndpointBin) ->
     case ets:lookup(?TAB, EndpointBin) of
         [{EndpointBin, Hits}] -> Hits;
         [] -> 0
     end.
 
+%% @doc Store Name and Role in telemetry_store keyed by UserId.
 put_user_profile(UserId, Name, Role) ->
     ets:insert(?TAB, {{user, UserId}, Name, Role}),
     ok.
 
+%% @doc Look up the profile map for UserId, or return a not-found error value.
 get_user_profile(UserId) ->
     case ets:lookup(?TAB, {user, UserId}) of
         [{{user, UserId}, Name, Role}] ->
