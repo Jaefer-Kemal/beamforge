@@ -1123,14 +1123,14 @@ init:stop().
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try comprehension_queries:active_user_names([{user, 1, "Alice", active}, {user, 2, "Bob", suspended}, {user, 3, "Charlie", active}]) of
     ["Alice", "Charlie"] = R1 ->
-        #{call_str => <<"comprehension_queries:active_user_names(...)">>, expected => <<"[\"Alice\", \"Charlie\"]">>,
+        #{call_str => <<"comprehension_queries:active_user_names([{user, 1, \"Alice\", active}, {user, 2, \"Bob\", suspended}, {user, 3, \"Charlie\", active}])">>, expected => <<"[\"Alice\", \"Charlie\"]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"comprehension_queries:active_user_names(...)">>, expected => <<"[\"Alice\", \"Charlie\"]">>,
+        #{call_str => <<"comprehension_queries:active_user_names([{user, 1, \"Alice\", active}, {user, 2, \"Bob\", suspended}, {user, 3, \"Charlie\", active}])">>, expected => <<"[\"Alice\", \"Charlie\"]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"comprehension_queries:active_user_names(...)">>, expected => <<"[...]">>,
+    #{call_str => <<"comprehension_queries:active_user_names([{user, 1, \"Alice\", active}, {user, 2, \"Bob\", suspended}, {user, 3, \"Charlie\", active}])">>, expected => <<"[\"Alice\", \"Charlie\"]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
@@ -1141,26 +1141,28 @@ T2_Res = try comprehension_queries:matrix_cartesian([1, 2], [x, y]) of
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"comprehension_queries:matrix_cartesian(...)">>,
+        #{call_str => <<"comprehension_queries:matrix_cartesian([1, 2], [x, y])">>,
           expected => <<"[{1, x}, {1, y}, {2, x}, {2, y}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
 catch C2:R2 ->
-    #{call_str => <<"comprehension_queries:matrix_cartesian(...)">>, expected => <<"[{...}]">>,
+    #{call_str => <<"comprehension_queries:matrix_cartesian([1, 2], [x, y])">>,
+      expected => <<"[{1, x}, {1, y}, {2, x}, {2, y}]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
 T3_Res = try comprehension_queries:fulfilled_order_receipts([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 1}], [{order, 1, 2}, {order, 2, 5}]) of
     [{receipt, 1, "Keyboard", 100}] = R3 ->
-        #{call_str => <<"comprehension_queries:fulfilled_order_receipts(...)">>,
+        #{call_str => <<"comprehension_queries:fulfilled_order_receipts([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 1}], [{order, 1, 2}, {order, 2, 5}])">>,
           expected => <<"[{receipt, 1, \"Keyboard\", 100}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T3_Start};
     Other3 ->
-        #{call_str => <<"comprehension_queries:fulfilled_order_receipts(...)">>,
+        #{call_str => <<"comprehension_queries:fulfilled_order_receipts([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 1}], [{order, 1, 2}, {order, 2, 5}])">>,
           expected => <<"[{receipt, 1, \"Keyboard\", 100}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
 catch C3:R3 ->
-    #{call_str => <<"comprehension_queries:fulfilled_order_receipts(...)">>, expected => <<"[{receipt, ...}]">>,
+    #{call_str => <<"comprehension_queries:fulfilled_order_receipts([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 1}], [{order, 1, 2}, {order, 2, 5}])">>,
+      expected => <<"[{receipt, 1, \"Keyboard\", 100}]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res],
@@ -5646,32 +5648,90 @@ Stages = [CompileStage_H05, S_Ast_H05, S1_Keylists]
 `, wsDir, wsDir), true
 
 	case "ch03-l06":
-		return `
+		return fmt.Sprintf(`
 CompileStage_H06 = case code:ensure_loaded(comprehension_queries) of
     {module, comprehension_queries} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"comprehension_queries.erl compiled cleanly">>};
+        Exports_H06 = comprehension_queries:module_info(exports),
+        Req_H06 = [{active_user_names, 1}, {matrix_cartesian, 2}, {fulfilled_order_receipts, 2}],
+        Missing_H06 = [FA || FA <- Req_H06, not lists:member(FA, Exports_H06)],
+        case Missing_H06 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"comprehension_queries.erl compiled cleanly and exported active_user_names/1, matrix_cartesian/2, fulfilled_order_receipts/2.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_H06]))}
+        end;
     {error, E_H06} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_H06]))}
 end,
+S_Ast_H06 = try
+    SourceCandidates_H06 = [
+        filename:join(["%s", "src", "comprehension_queries.erl"]),
+        filename:join(["%s", "comprehension_queries.erl"])
+    ],
+    SourceFile_H06 = case [P || P <- SourceCandidates_H06, filelib:is_regular(P)] of
+        [ValidSrc_H06 | _] -> ValidSrc_H06;
+        [] -> hd(SourceCandidates_H06)
+    end,
+    Rules_H06 = #{
+        required_constructs => [list_comprehension],
+        forbidden_constructs => [map_syntax, bit_syntax]
+    },
+    MissingLcFuns = case epp:parse_file(SourceFile_H06, []) of
+        {ok, Forms_H06} ->
+            HasLc_H06 = fun WalkLc(Node) when is_tuple(Node) ->
+                case element(1, Node) of
+                    lc -> true;
+                    _ -> WalkLc(tuple_to_list(Node))
+                end;
+                WalkLc([H | T]) -> WalkLc(H) orelse WalkLc(T);
+                WalkLc(_) -> false
+            end,
+            [{N, A} || {N, A} <- [{active_user_names, 1}, {matrix_cartesian, 2}, {fulfilled_order_receipts, 2}],
+                not lists:any(fun({function, _, FN, FA, Clauses}) when FN =:= N, FA =:= A -> HasLc_H06(Clauses); (_) -> false end, Forms_H06)];
+        _ ->
+            [parse_error]
+    end,
+    case {bf_ast_verifier:verify_rules(SourceFile_H06, <<>>, Rules_H06), MissingLcFuns} of
+        {{ok, _}, []} ->
+            #{id => <<"ast_comprehension_queries_audit">>, title => <<"AST List Comprehension Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified list comprehensions ([Expr || ...]) in all 3 functions and zero maps or binaries.">>};
+        {{ok, _}, MissingList_H06} ->
+            #{id => <<"ast_comprehension_queries_audit">>, title => <<"AST List Comprehension Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("All 3 functions must use list comprehensions (missing in: ~p).", [MissingList_H06]))};
+        {{error, AstViolations_H06}, _} ->
+            FirstMsg_H06 = case AstViolations_H06 of
+                [#{message := M_H06} | _] -> M_H06;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_H06]))
+            end,
+            #{id => <<"ast_comprehension_queries_audit">>, title => <<"AST List Comprehension Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_H06, error => AstViolations_H06}
+    end
+catch Class_Ast_H06:Err_Ast_H06 ->
+    #{id => <<"ast_comprehension_queries_audit">>, title => <<"AST List Comprehension Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [Class_Ast_H06, Err_Ast_H06]))}
+end,
 S1_Comprehensions = try
     Names = comprehension_queries:active_user_names([{user, 1, "Alice", active}, {user, 2, "Bob", suspended}, {user, 3, "Charlie", active}]),
+    NamesNoise = comprehension_queries:active_user_names([{user, 2, "Bob", suspended}, unrelated_atom, {bad, tuple}]),
     Cartesian = comprehension_queries:matrix_cartesian([1, 2], [a, b]),
+    CartesianEmpty = comprehension_queries:matrix_cartesian([1, 2], []),
     InvQ = [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 2}],
     OrdersQ = [{order, 1, 2}, {order, 2, 5}, {order, 3, 1}],
     Receipts = comprehension_queries:fulfilled_order_receipts(InvQ, OrdersQ),
-    case {Names, Cartesian, Receipts} of
+    ReceiptsEdge = comprehension_queries:fulfilled_order_receipts(
+        InvQ, [{order, 1, 0}, {order, 1, -2}, {order, 1, 10}, {order, 99, 1}, {order, 2, 2}]),
+    case {Names, NamesNoise, Cartesian, CartesianEmpty, Receipts, ReceiptsEdge} of
         {["Alice", "Charlie"],
+         [],
          [{1, a}, {1, b}, {2, a}, {2, b}],
-         [{receipt, 1, "Keyboard", 100}]} ->
-            #{id => <<"list_comprehensions">>, title => <<"List Comprehension Generators & Predicates">>, status => <<"passed">>, time_ms => 10, details => <<"Verified pattern filters, multi-generators, and relational joins">>};
+         [],
+         [{receipt, 1, "Keyboard", 100}],
+         [{receipt, 1, "Keyboard", 500}, {receipt, 2, "Mouse", 50}]} ->
+            #{id => <<"list_comprehensions">>, title => <<"List Comprehension Generators & Predicates">>, status => <<"passed">>, time_ms => 10, details => <<"Verified pattern filters (with silent skips), ordered Cartesian joins, and inclusive stock bounds">>};
         Got_H06 ->
             #{id => <<"list_comprehensions">>, title => <<"List Comprehension Generators & Predicates">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Comprehension mismatch: ~p", [Got_H06]))}
     end
 catch Class_H06:Err_H06 ->
     #{id => <<"list_comprehensions">>, title => <<"List Comprehension Generators & Predicates">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_H06, Err_H06]))}
 end,
-Stages = [CompileStage_H06, S1_Comprehensions]
-`, true
+Stages = [CompileStage_H06, S_Ast_H06, S1_Comprehensions]
+`, wsDir, wsDir), true
 
 	case "ch03-l07":
 		return `

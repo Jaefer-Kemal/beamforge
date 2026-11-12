@@ -132,6 +132,29 @@ read_socket_options(OptsList) ->
     {socket_cfg, Port, Active, IsBinary}.
 `
 
+	comprehensionQueriesSolution := `-module(comprehension_queries).
+-export([active_user_names/1, matrix_cartesian/2, fulfilled_order_receipts/2]).
+
+%% @doc Extract name strings from active user tuples in Users while silently omitting inactive or unrelated entries without raising exceptions.
+active_user_names(Users) ->
+    [Name || {user, _Id, Name, active} <- Users].
+
+%% @doc Return the Cartesian product list of 2-element pairs combining every element of Xs and Ys with Ys cycling fastest, or an empty list if either input is empty.
+matrix_cartesian(Xs, Ys) ->
+    [{X, Y} || X <- Xs, Y <- Ys].
+
+%% @doc Join Orders in caller sequence against Inventory by product identifier, keeping only positive quantities within available stock and emitting receipt tuples with total cost.
+fulfilled_order_receipts(Inventory, Orders) ->
+    [
+        {receipt, Id, Name, Qty * Price}
+     || {order, ProdId, Qty} <- Orders,
+        {product, Id, Name, Price, Stock} <- Inventory,
+        ProdId =:= Id,
+        Stock >= Qty,
+        Qty > 0
+    ].
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -161,6 +184,11 @@ read_socket_options(OptsList) ->
 			exerciseID:   "ch03-l05",
 			visibleCount: 4,
 			files:        map[string]string{"src/keylist_config.erl": keylistConfigSolution},
+		},
+		{
+			exerciseID:   "ch03-l06",
+			visibleCount: 3,
+			files:        map[string]string{"src/comprehension_queries.erl": comprehensionQueriesSolution},
 		},
 	}
 
@@ -702,6 +730,105 @@ read_socket_options(OptsList) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected keylist_and_proplist stage to fail for order/proplist bug, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch03-l06 rejects lists:filtermap bypass missing list comprehensions via AST audit", func(t *testing.T) {
+		sessionID := "test-ch03-l06-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		noLCBypass := map[string]string{
+			"src/comprehension_queries.erl": `-module(comprehension_queries).
+-export([active_user_names/1, matrix_cartesian/2, fulfilled_order_receipts/2]).
+
+active_user_names(Users) ->
+    lists:filtermap(fun({user, _Id, Name, active}) -> {true, Name}; (_) -> false end, Users).
+
+matrix_cartesian(Xs, Ys) ->
+    lists:flatmap(fun(X) -> lists:map(fun(Y) -> {X, Y} end, Ys) end, Xs).
+
+fulfilled_order_receipts(Inventory, Orders) ->
+    lists:filtermap(
+        fun({order, ProdId, Qty}) when Qty > 0 ->
+            case lists:keyfind(ProdId, 2, Inventory) of
+                {product, ProdId, Name, Price, Stock} when Stock >= Qty ->
+                    {true, {receipt, ProdId, Name, Qty * Price}};
+                _ -> false
+            end;
+           (_) -> false
+        end, Orders).
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch03-l06", noLCBypass)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when list comprehensions are bypassed, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_comprehension_queries_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_comprehension_queries_audit stage to fail when list comprehensions are missing, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch03-l06 rejects swapped generator order and boundary bugs in list_comprehensions", func(t *testing.T) {
+		sessionID := "test-ch03-l06-neg-edge"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badOrderAndBoundary := map[string]string{
+			"src/comprehension_queries.erl": `-module(comprehension_queries).
+-export([active_user_names/1, matrix_cartesian/2, fulfilled_order_receipts/2]).
+
+active_user_names(Users) ->
+    [Name || {user, _Id, Name, active} <- Users].
+
+matrix_cartesian(Xs, Ys) ->
+    [{X, Y} || Y <- Ys, X <- Xs].
+
+fulfilled_order_receipts(Inventory, Orders) ->
+    [{receipt, Id, Name, Qty * Price} ||
+        {order, ProdId, Qty} <- Orders,
+        Qty >= 0,
+        {product, Id, Name, Price, Stock} <- Inventory,
+        ProdId =:= Id,
+        Stock > Qty].
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch03-l06", badOrderAndBoundary)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict for swapped generator order and boundary bugs, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "list_comprehensions" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected list_comprehensions stage to fail for generator order and stock/qty boundary bugs, stages=%+v", report.Stages)
 		}
 	})
 }
