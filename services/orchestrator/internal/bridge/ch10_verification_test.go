@@ -283,6 +283,7 @@ extract_lines(Buffer, Acc) ->
     stop_pool/1
 ]).
 
+%% @doc Transfer ownership of ClientSocket to WorkerPid, notify WorkerPid of readiness, and close ClientSocket returning the error tuple on failure.
 -spec handoff_socket(gen_tcp:socket(), pid()) -> ok | {error, term()}.
 handoff_socket(ClientSocket, WorkerPid) ->
     case gen_tcp:controlling_process(ClientSocket, WorkerPid) of
@@ -295,6 +296,7 @@ handoff_socket(ClientSocket, WorkerPid) ->
             {error, Reason}
     end.
 
+%% @doc Open an ephemeral passive listening socket, start AcceptorCount concurrent acceptor workers running WorkerFun per connection, and return {ok, ListenSocket, Port, AcceptorPids}.
 -spec start_pooled_server(pos_integer(), fun((gen_tcp:socket()) -> any())) ->
     {ok, gen_tcp:socket(), inet:port_number(), [pid()]}.
 start_pooled_server(AcceptorCount, WorkerFun) ->
@@ -324,10 +326,12 @@ acceptor_worker_loop(ListenSocket, WorkerFun) ->
             ok
     end.
 
+%% @doc Close the listening socket ListenSocket and return ok.
 -spec stop_pooled_server(gen_tcp:socket()) -> ok.
 stop_pooled_server(ListenSocket) ->
     gen_tcp:close(ListenSocket).
 
+%% @doc Start a managed acceptor pool listening on Port with PoolSize acceptor processes.
 start_pool(Port, PoolSize) ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],
     {ok, ListenSocket} = gen_tcp:listen(Port, ListenOpts),
@@ -335,10 +339,12 @@ start_pool(Port, PoolSize) ->
     ManagerPid = spawn_link(fun() -> manager_init(ListenSocket, PoolSize) end),
     {ok, ManagerPid, ActualPort}.
 
+%% @doc Signal the pool manager process ManagerPid to shut down all acceptors, workers, and the listener socket.
 stop_pool(ManagerPid) ->
     ManagerPid ! stop,
     ok.
 
+%% @doc Query ManagerPid synchronously for the count of currently connected client worker processes.
 get_active_workers(ManagerPid) ->
     Ref = make_ref(),
     ManagerPid ! {get_worker_count, self(), Ref},

@@ -2823,6 +2823,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter10Verification/ch10-l04` (`VERIFIED 100% PASSED`, score=100, 3 stages in `3.42s`, `3.786s` package total); `TEST_CHAPTER=10 TestDynamicVisibleTestsCurriculum` (`ch10-l04 | 2/2 tests passed`, all 7 Ch. 10 lessons passed in `14.72s` / `14.751s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 167: Pedagogical Despoiling, Dual-Test `Run` Coverage & Live Tri-Verification of Chapter 10 Lecture 5 (`ch10-l05`)
+- [x] **167.1: Replace `connection_dispatcher` Clone with Domain-Disjoint PWE (`worker_relay_gate.erl`), Clean Starter Stubs & Expand `Run`/`Submit` Verification (`ch10-l05`: `tcp_acceptor_pool.erl`)**:
+  - Replaced the 1:1 `connection_dispatcher` clone in `apps/web-ide/src/data/chapters/ch10.ts` with a domain-disjoint runnable passive gate relay (`worker_relay_gate.erl`: `open_gate/0`, `await_one/2`, `relay_to/2`), converted Obsidian callouts to GFM alerts, added `gen_tcp:listen/2`, `gen_tcp:accept/1`, and card pointer to `## Official Erlang Docs & Function Reference`, rewrote `## Assignment Specification` to strict Spec 08 `Input`/`Behavior`/`Examples` layout with zero code spoilers, and added `after 3000` timeouts inside `tc-ch10-l05-2` `Receiver`.
+  - Replaced code-dictating `%% % TODO ...` hints in `starterCode` and `files[0].content` (`src/tcp_acceptor_pool.erl`) with clean Spec 08 `@doc` contracts across all 6 exports (`starterCode`, `files`, `solutionCode`, `solutionFiles`, and `services/orchestrator/internal/bridge/ch10_verification_test.go`) and neutral `ignore.` stubs.
+  - Updated `services/orchestrator/internal/bridge/erl_runner_chapters.go` (`case "ch10-l05"`) so `Run` executes both `T1_Res` (`start_pool`) and `T2_Res` (`handoff_socket/2`) matching `visibleTestCases` (2/2), and `Submit` enforces `require_tail_recursion => [{manager_loop, 3}, {pool_worker_loop, 2}]`, `required_constructs => [receive_after]`, `gen_tcp:controlling_process/2` / `listen/2` / `accept/1`, and live `start_pooled_server/2` + `stop_pooled_server/1`.
+- [x] **167.2: Mandatory Live Tri-Verification & Compiler Suite (`ch10-l05`)**:
+  - **Parallel Worked Example (`worker_relay_gate.erl`)**: Extracted from `ch10.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified live loopback handoff & dead-PID close (`PWE_CH10_L05_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe -Wall`) and executed stubs/pool safely (`STARTER_CH10_L05 exports=true stubs={ignore,ignore}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier:verify_rules/3` (TCO + required calls + `receive_after`), passed 2/2 visible tests and `start_pooled_server/2` (`SOLUTION_CH10_L05_OK ast=passed visible=2/2 pooled=passed`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter10Verification/ch10-l05` (`VERIFIED 100% PASSED`, score=100, 3 stages in `2.55s`, `3.004s` package total); `TEST_CHAPTER=10 TestDynamicVisibleTestsCurriculum` (`ch10-l05 | 2/2 tests passed`, all 7 Ch. 10 lessons passed in `10.30s` / `10.321s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 

@@ -3309,10 +3309,10 @@ init:stop().
 
 	case "ch10-l05":
 		return `
-T1_Start = erlang:system_time(millisecond),
-T1_Res = try
-    case code:ensure_loaded(tcp_acceptor_pool) of
-        {module, tcp_acceptor_pool} ->
+case code:ensure_loaded(tcp_acceptor_pool) of
+    {module, tcp_acceptor_pool} ->
+        T1_Start = erlang:system_time(millisecond),
+        T1_Res = try
             {ok, MgrPid, Port} = tcp_acceptor_pool:start_pool(0, 3),
             {ok, Sock1} = gen_tcp:connect("127.0.0.1", Port, [binary, {packet, raw}, {active, false}], 2000),
             {ok, Sock2} = gen_tcp:connect("127.0.0.1", Port, [binary, {packet, raw}, {active, false}], 2000),
@@ -3325,10 +3325,47 @@ T1_Res = try
             tcp_acceptor_pool:stop_pool(MgrPid),
             Pass = (ActiveCount =:= 2) andalso (Reply1 =:= <<"+REPLY: PING\r\n">>),
             #{call_str => <<"tcp_acceptor_pool:start_pool(0, 3) -> 2 clients connect">>,
-              expected => <<"Active: 2, Reply: +REPLY: PING\\r\\n">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("Active: ~p, Reply: ~s", [ActiveCount, Reply1]))),
-              passed => Pass, time_ms => erlang:system_time(millisecond) - T1_Start};
-        _ ->
+              expected => <<"{2,<<\"+REPLY: PING\\r\\n\">>}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [{ActiveCount, Reply1}]))),
+              passed => Pass, time_ms => erlang:system_time(millisecond) - T1_Start}
+        catch C1:R1 ->
+            #{call_str => <<"tcp_acceptor_pool:start_pool(0, 3) -> 2 clients connect">>,
+              expected => <<"{2,<<\"+REPLY: PING\\r\\n\">>}">>,
+              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+        end,
+        T2_Start = erlang:system_time(millisecond),
+        T2_Res = try
+            {ok, LSock} = gen_tcp:listen(0, [binary, {active, false}]),
+            {ok, HPort} = inet:port(LSock),
+            Receiver = spawn(fun() ->
+                receive
+                    {socket_assigned, S} ->
+                        inet:setopts(S, [{active, once}]),
+                        receive {tcp, S, <<"HI\r\n">>} -> ok = gen_tcp:send(S, <<"ACK\r\n">>) after 3000 -> ok end
+                after 3000 ->
+                    ok
+                end
+            end),
+            {ok, Client} = gen_tcp:connect("127.0.0.1", HPort, [binary, {active, false}], 2000),
+            {ok, ServerSock} = gen_tcp:accept(LSock, 2000),
+            ok = tcp_acceptor_pool:handoff_socket(ServerSock, Receiver),
+            ok = gen_tcp:send(Client, <<"HI\r\n">>),
+            {ok, Rep2} = gen_tcp:recv(Client, 0, 2000),
+            gen_tcp:close(Client),
+            gen_tcp:close(LSock),
+            #{call_str => <<"tcp_acceptor_pool:handoff_socket/2">>,
+              expected => <<"<<\"ACK\\r\\n\">>">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Rep2]))),
+              passed => (Rep2 =:= <<"ACK\r\n">>), time_ms => erlang:system_time(millisecond) - T2_Start}
+        catch C2:R2 ->
+            #{call_str => <<"tcp_acceptor_pool:handoff_socket/2">>, expected => <<"<<\"ACK\\r\\n\">>">>,
+              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+        end,
+        AllResults = [T1_Res, T2_Res],
+        io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]);
+    _ ->
+        T1_Start = erlang:system_time(millisecond),
+        T1_Res = try
             P1 = tcp_kv_backend:parse_command(<<"PING">>),
             P2 = tcp_kv_backend:parse_command(<<"SET session_token secret123">>),
             Pass = (P1 =:= {ok, ping}) andalso (P2 =:= {ok, {set, <<"session_token">>, <<"secret123">>}}),
@@ -3336,13 +3373,12 @@ T1_Res = try
               expected => <<"{ok, ping} & {ok, {set, ...}}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p, ~p", [P1, P2]))),
               passed => Pass, time_ms => erlang:system_time(millisecond) - T1_Start}
-    end
-catch C1:R1 ->
-    #{call_str => <<"tcp_acceptor_pool / tcp_kv_backend test">>, expected => <<"Success">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+        catch C1:R1 ->
+            #{call_str => <<"tcp_kv_backend test">>, expected => <<"Success">>,
+              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+        end,
+        io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => [T1_Res]})])
 end,
-AllResults = [T1_Res],
-io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
 
@@ -8075,13 +8111,21 @@ CompileStage = case TargetModule of
 end,
 S1_Ast = case TargetModule of
     tcp_acceptor_pool ->
-        case bf_ast_verifier:verify_rules("%s/src/tcp_acceptor_pool.erl", #{
-            required_calls => [{gen_tcp, controlling_process, 2}, {gen_tcp, listen, 2}, {gen_tcp, accept, 1}]
-        }) of
-            {ok, _} ->
-                #{id => <<"ast_verification">>, title => <<"AST Analysis: Controlling Process & Acceptor Primitives">>, status => <<"passed">>, time_ms => 15, details => <<"Verified gen_tcp:controlling_process/2, gen_tcp:listen/2, and gen_tcp:accept/1.">>};
-            {error, AstFailReason} ->
-                #{id => <<"ast_verification">>, title => <<"AST Analysis: Controlling Process & Acceptor Primitives">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST verification failed: ~p", [AstFailReason]))}
+        try
+            BeamPath = filename:join(["%s", "ebin", "tcp_acceptor_pool.beam"]),
+            {ok, BeamBin} = file:read_file(BeamPath),
+            case bf_ast_verifier:verify_rules("%s/src/tcp_acceptor_pool.erl", BeamBin, #{
+                require_tail_recursion => [{manager_loop, 3}, {pool_worker_loop, 2}],
+                required_calls => [{gen_tcp, controlling_process, 2}, {gen_tcp, listen, 2}, {gen_tcp, accept, 1}],
+                required_constructs => [receive_after]
+            }) of
+                {ok, _} ->
+                    #{id => <<"ast_verification">>, title => <<"AST Analysis: Controlling Process, Pooled Accept & TCO">>, status => <<"passed">>, time_ms => 15, details => <<"Verified controlling_process/2, listen/2, accept/1, receive_after, and tail-recursive pool loops.">>};
+                {error, AstFailReason} ->
+                    #{id => <<"ast_verification">>, title => <<"AST Analysis: Controlling Process, Pooled Accept & TCO">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST verification failed: ~p", [AstFailReason]))}
+            end
+        catch CAst:RAst ->
+            #{id => <<"ast_verification">>, title => <<"AST Analysis: Controlling Process, Pooled Accept & TCO">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [CAst, RAst]))}
         end;
     tcp_kv_backend ->
         case bf_ast_verifier:verify_rules("%s/src/tcp_kv_backend.erl", #{
@@ -8114,14 +8158,24 @@ S2_Execution = case TargetModule of
             gen_tcp:close(FirstClient),
             [gen_tcp:close(C) || C <- RemainingClients],
             tcp_acceptor_pool:stop_pool(MgrPid),
-            case {ActiveCount5, Reply, ActiveCount3} of
-                {5, <<"+REPLY: HELLO_POOL\r\n">>, 3} ->
-                    #{id => <<"concurrent_acceptors">>, title => <<"Verify Acceptor Pool: 5 Concurrent Clients & Handoff">>, status => <<"passed">>, time_ms => 65, details => <<"5 concurrent clients accepted, connection handoff verified, and disconnect cleanup verified.">>};
+            {ok, PooledLSock, PooledPort, Acceptors} = tcp_acceptor_pool:start_pooled_server(2, fun(S) ->
+                {ok, Req} = gen_tcp:recv(S, 0, 2000),
+                ok = gen_tcp:send(S, <<"+POOLED:", Req/binary>>),
+                gen_tcp:close(S)
+            end),
+            {ok, PooledClient} = gen_tcp:connect("127.0.0.1", PooledPort, [binary, {packet, raw}, {active, false}], 2000),
+            ok = gen_tcp:send(PooledClient, <<"OK\r\n">>),
+            {ok, <<"+POOLED:OK\r\n">>} = gen_tcp:recv(PooledClient, 0, 2000),
+            gen_tcp:close(PooledClient),
+            ok = tcp_acceptor_pool:stop_pooled_server(PooledLSock),
+            case {ActiveCount5, Reply, ActiveCount3, length(Acceptors)} of
+                {5, <<"+REPLY: HELLO_POOL\r\n">>, 3, 2} ->
+                    #{id => <<"concurrent_acceptors">>, title => <<"Verify Acceptor Pool: 5 Concurrent Clients & Pooled Server">>, status => <<"passed">>, time_ms => 65, details => <<"5 concurrent clients accepted, pooled WorkerFun handoff verified, and disconnect cleanup verified.">>};
                 OtherRes ->
-                    #{id => <<"concurrent_acceptors">>, title => <<"Verify Acceptor Pool: 5 Concurrent Clients & Handoff">>, status => <<"failed">>, time_ms => 65, details => list_to_binary(io_lib:format("Acceptor pool assertion failed: ~p", [OtherRes]))}
+                    #{id => <<"concurrent_acceptors">>, title => <<"Verify Acceptor Pool: 5 Concurrent Clients & Pooled Server">>, status => <<"failed">>, time_ms => 65, details => list_to_binary(io_lib:format("Acceptor pool assertion failed: ~p", [OtherRes]))}
             end
         catch C:R ->
-            #{id => <<"concurrent_acceptors">>, title => <<"Verify Acceptor Pool: 5 Concurrent Clients & Handoff">>, status => <<"failed">>, time_ms => 65, details => list_to_binary(io_lib:format("Pool test crashed: ~p:~p", [C, R]))}
+            #{id => <<"concurrent_acceptors">>, title => <<"Verify Acceptor Pool: 5 Concurrent Clients & Pooled Server">>, status => <<"failed">>, time_ms => 65, details => list_to_binary(io_lib:format("Pool test crashed: ~p:~p", [C, R]))}
         end;
     tcp_kv_backend ->
         try
@@ -8144,7 +8198,7 @@ S2_Execution = case TargetModule of
         end
 end,
 Stages = [CompileStage, S1_Ast, S2_Execution]
-`, wsDir, wsDir, wsDir, wsDir, wsDir, wsDir, wsDir, wsDir), true
+`, wsDir, wsDir, wsDir, wsDir, wsDir, wsDir, wsDir, wsDir, wsDir), true
 
 	case "ch10-l07":
 		return fmt.Sprintf(`

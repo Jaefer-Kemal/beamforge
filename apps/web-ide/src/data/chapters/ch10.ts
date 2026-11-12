@@ -1916,22 +1916,16 @@ solutionExplanation: `### Solution Breakdown: Zero-Leak Stream Framing
 
 In high-concurrency systems (like WhatsApp, Discord, or financial order matching engines), thousands of clients connect simultaneously.
 
-If your server runs a **single acceptor process** executing:
-\`\`\`erlang
-accept_loop(ListenSocket) ->
-    {ok, ClientSocket} = gen_tcp:accept(ListenSocket),
-    handle_client(ClientSocket),  %% BOTTLENECK!
-    accept_loop(ListenSocket).
-\`\`\`
-every incoming connection is blocked behind every other client's request!
+If your server runs a **single acceptor process** handling client I/O sequentially inside its accept loop, every new TCP handshake stalls behind the current client's request!
 
 Production-grade servers (such as Nine Nines' **Ranch**, used by the Cowboy HTTP server and MongooseIM XMPP server) solve this using the **Acceptor Pool Pattern**:
 1. A master listener opens a single shared \`ListenSocket\`.
 2. A pool of $N$ acceptor processes **concurrently call \`gen_tcp:accept(ListenSocket)\`** on that identical socket descriptor.
-3. The BEAM VM and Linux kernel dispatch incoming TCP SYN handshakes across the pool without lock contention.
+3. The BEAM VM and OS kernel dispatch incoming TCP SYN handshakes across the pool without lock contention.
 4. The instant an acceptor receives \`{ok, ClientSocket}\`, it spawns a dedicated connection worker and transfers ownership via **\`gen_tcp:controlling_process(ClientSocket, WorkerPid)\`**, then immediately loops back to accept the next client!
 
-> [!abstract] Ranch-Style Acceptor Pool Architecture
+> [!IMPORTANT]
+> **Ranch-Style Acceptor Pool Architecture:**
 > - Multiple acceptor processes concurrently wait on the same shared \`ListenSocket\`.
 > - When an incoming TCP handshake completes, one acceptor wakes up with \`{ok, ClientSocket}\`.
 > - The acceptor spawns a dedicated connection worker, executes \`gen_tcp:controlling_process(ClientSocket, WorkerPid)\`, and immediately loops back to accept more connections without blocking.
@@ -1939,80 +1933,102 @@ Production-grade servers (such as Nine Nines' **Ranch**, used by the Cowboy HTTP
 ## Deep Concept Breakdown & Under the Hood
 
 ### What is the "Controlling Process"?
-In Erlang, every socket has an owner known as the **controlling process**.
+In Erlang, every socket has an owner known as the **controlling process**:
 - By default, the controlling process is whichever process called \`gen_tcp:listen/2\` or \`gen_tcp:accept/1\`.
 - All incoming network events (\`{tcp, Socket, Data}\`, \`{tcp_closed, Socket}\`) are delivered **exclusively** to the controlling process's mailbox.
-- If the controlling process dies, the BEAM VM automatically closes the underlying socket!
+- If the controlling process dies, the BEAM VM automatically closes the underlying socket.
 
-To transfer a socket from an Acceptor to a Connection Worker, you MUST call:
+To transfer a socket from an Acceptor to a Connection Worker, you call:
 \`\`\`erlang
 ok = gen_tcp:controlling_process(ClientSocket, WorkerPid)
 \`\`\`
-And then notify \`WorkerPid\` that it is now safe to arm the socket with \`inet:setopts(ClientSocket, [{active, once}])\`!
+And then notify \`WorkerPid\` that ownership has settled so it is safe to arm the socket with \`inet:setopts(ClientSocket, [{active, once}])\`.
 
 ### The Safe Socket Handoff Protocol
-1. **Passive Listener**: The listener opens in \`{active, false}\`.
+1. **Passive Listener**: Open the listening socket in \`{active, false}\`.
 2. **Accept Handshake**: Acceptor process executes \`gen_tcp:accept(ListenSocket)\` $\\rightarrow$ \`{ok, ClientSocket}\`.
-3. **Worker Spawning**: Acceptor spawns \`WorkerPid\`.
+3. **Worker Spawning**: Acceptor spawns \`WorkerPid\` waiting in a bounded \`receive ... after\`.
 4. **Ownership Transfer**: Acceptor calls \`gen_tcp:controlling_process(ClientSocket, WorkerPid)\`.
-5. **Worker Activation**: Acceptor sends \`WorkerPid ! {socket_ready, ClientSocket}\`.
-6. **Flow Control Armed**: Inside \`WorkerPid\`, it calls \`inet:setopts(ClientSocket, [{active, once}])\` to begin receiving data!
+5. **Worker Activation**: Acceptor sends readiness signal to \`WorkerPid\`.
+6. **Flow Control Armed**: Inside \`WorkerPid\`, it calls \`inet:setopts(ClientSocket, [{active, once}])\` to begin receiving frames safely.
 
-> [!warning] Production Networking Trap: Race Conditions During Socket Handoff
-> If an acceptor arms \`{active, once}\` *before* calling \`gen_tcp:controlling_process/2\`, the client's initial handshake frame lands in the **acceptor's** mailbox! When ownership transfers to the worker, the initial message is lost in the acceptor, causing a protocol deadlock. Always transfer ownership before arming active mode!
+> [!WARNING]
+> **Production Networking Trap: Race Conditions During Socket Handoff:**
+> If an acceptor arms \`{active, once}\` *before* calling \`gen_tcp:controlling_process/2\`, the client's initial handshake frame lands in the **acceptor's** mailbox instead of the worker's! Always keep the listener passive and transfer ownership before arming active mode.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Official OTP Signature (kernel / gen_tcp)
+%% Official OTP Signatures (kernel / gen_tcp)
+gen_tcp:listen(Port, Options) -> {ok, ListenSocket} | {error, Reason}
+gen_tcp:accept(ListenSocket) -> {ok, Socket} | {error, Reason}
 gen_tcp:controlling_process(Socket, NewOwnerPid) -> ok | {error, Reason}
   Types:
-    Socket = gen_tcp:socket()
+    Socket = ListenSocket = gen_tcp:socket()
     NewOwnerPid = pid()
+    Options = [gen_tcp:listen_option()]
 \`\`\`
 
-## Parallel Worked Example
+Consult the attached OTP documentation cards below for \`gen_tcp:controlling_process/2\` pointer transfer and \`gen_tcp:accept/1\` handshake semantics.
 
-Here is a worker handoff function transferring ownership and notifying the worker:
+## Parallel Worked Example: Single-Slot Gate Socket Relay
+
+Consider a separate domain: a passive network gate (\`worker_relay_gate\`) that binds an ephemeral port, accepts one client connection, transfers ownership to a target worker using a domain tag, and closes the socket if ownership transfer fails:
 
 \`\`\`erlang
--module(connection_dispatcher).
--export([dispatch_socket/2]).
+-module(worker_relay_gate).
+-export([open_gate/0, await_one/2, relay_to/2]).
 
-dispatch_socket(ClientSocket, WorkerPid) ->
-    case gen_tcp:controlling_process(ClientSocket, WorkerPid) of
+%% @doc Open a passive loopback listening socket on an ephemeral port.
+open_gate() ->
+    {ok, LSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(LSock),
+    {ok, LSock, Port}.
+
+%% @doc Accept a single connection on LSock and transfer ownership to TargetPid.
+await_one(LSock, TargetPid) ->
+    case gen_tcp:accept(LSock, 3000) of
+        {ok, PeerSock} ->
+            relay_to(PeerSock, TargetPid);
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% @doc Assign PeerSock ownership to TargetPid with cleanup on invalid target processes.
+relay_to(PeerSock, TargetPid) ->
+    case gen_tcp:controlling_process(PeerSock, TargetPid) of
         ok ->
-            WorkerPid ! {socket_ready, ClientSocket},
+            TargetPid ! {gate_socket, PeerSock},
             ok;
         {error, Reason} ->
-            gen_tcp:close(ClientSocket),
+            ok = gen_tcp:close(PeerSock),
             {error, Reason}
     end.
 \`\`\`
 
+### What ERTS Does Under the Hood
+- **Exclusive Controlling Permission**: Only the current controlling process of \`PeerSock\` may legally invoke \`gen_tcp:controlling_process/2\`; if \`TargetPid\` has already exited, ERTS returns an error so closing \`PeerSock\` prevents file descriptor leaks.
+- **No Pre-Handoff Mailbox Drift**: Keeping \`LSock\` passive guarantees client bytes stay buffered in the OS kernel until \`TargetPid\` receives \`{gate_socket, PeerSock}\`.
+
 ## Assignment Specification
 
-Implement module \`src/tcp_acceptor_pool.erl\` exporting connection handoff and acceptor pool management functions:
+Pre-wired lifecycle and pool test helpers (\`stop_pooled_server/1\`, \`start_pool/2\`, \`stop_pool/1\`, \`get_active_workers/1\`, and worker loop helpers) are provided inside \`src/tcp_acceptor_pool.erl\`. Complete \`handoff_socket/2\` and \`start_pooled_server/2\` in \`src/tcp_acceptor_pool.erl\` (\`-module(tcp_acceptor_pool).\`):
 
-1. **\`handoff_socket(ClientSocket, WorkerPid)\`**:
-   - Calls \`gen_tcp:controlling_process(ClientSocket, WorkerPid)\`.
-   - If successful (\`ok\`), sends \`WorkerPid ! {socket_ready, ClientSocket}\` and returns \`ok\`.
-   - If error (\`{error, Reason}\`), closes \`ClientSocket\` and returns \`{error, Reason}\`.
-2. **\`start_pooled_server(AcceptorCount, WorkerFun)\`**:
-   - Opens a listening socket on port \`0\` with \`[binary, {packet, raw}, {active, false}, {reuseaddr, true}]\`.
-   - Retrieves actual port via \`inet:port/1\`.
-   - Spawns \`AcceptorCount\` concurrent acceptor processes that:
-     - Loop on \`gen_tcp:accept(ListenSocket)\`.
-     - Spawn a worker running \`WorkerFun(Socket)\` upon receiving \`{socket_ready, Socket}\`.
-     - Execute \`handoff_socket(ClientSocket, WorkerPid)\`.
-   - Returns \`{ok, ListenSocket, Port, AcceptorPidsList}\`.
-3. **\`stop_pooled_server(ListenSocket)\`**:
-   - Closes \`ListenSocket\` with \`gen_tcp:close/1\` and returns \`ok\`.
-4. (Also export \`start_pool/2\`, \`get_active_workers/1\`, and \`stop_pool/1\` for backward compatibility with automated test suites).
+### \`handoff_socket/2\`
+- **Input**: Accepted client socket \`ClientSocket\`, target worker process identifier \`WorkerPid\`.
+- **Behavior**: Transfers legal controlling ownership of \`ClientSocket\` to \`WorkerPid\`. Upon success, notifies \`WorkerPid\` with both \`socket_assigned\` and \`socket_ready\` readiness tuples paired with \`ClientSocket\`, and returns \`ok\`. Upon failure, closes \`ClientSocket\` immediately so no descriptor leaks and returns the error reason tuple.
+- **Examples**:
+  - Calling \`tcp_acceptor_pool:handoff_socket(ServerSock, ReceiverPid)\` transfers ownership so \`ReceiverPid\` can configure socket options, exchange \`"HI"\` / \`"ACK"\`, and complete with \`<<"ACK\\r\\n">>\`.
+
+### \`start_pooled_server/2\`
+- **Input**: Positive integer \`AcceptorCount\`, handler callback function \`WorkerFun\` taking a single socket argument.
+- **Behavior**: Opens a raw binary passive listening socket on ephemeral port \`0\` with address reuse enabled, resolves its assigned kernel port number, and spawns \`AcceptorCount\` linked concurrent acceptor loops. Each acceptor loop waits for an incoming connection, spawns a worker waiting with a bounded timeout for the socket readiness signal before invoking \`WorkerFun\`, delegates handoff via \`handoff_socket/2\`, and recurses to accept subsequent clients. Returns a 4-tuple pairing atom \`ok\`, the listening socket, bound port, and list of acceptor PIDs.
+- **Examples**:
+  - Starting the pool via \`tcp_acceptor_pool:start_pool(0, 3)\`, connecting two clients, and sending \`<<"PING\\r\\n">>\` yields active worker count \`2\` and reply \`<<"+REPLY: PING\\r\\n">>\`.
 
 ## Rules & Verification Constraints
-- Verified by connecting 5 clients concurrently and verifying active workers and echo replies.
-- AST verifier checks required calls: \`gen_tcp:controlling_process/2\`, \`gen_tcp:listen/2\`, and \`gen_tcp:accept/1\`.
+- Verified by running concurrent multi-client connections through \`start_pool/2\`, \`start_pooled_server/2\`, and direct \`handoff_socket/2\` handoff checks.
+- AST & Bytecode verifier enforces required calls \`gen_tcp:controlling_process/2\`, \`gen_tcp:listen/2\`, and \`gen_tcp:accept/1\`, tail recursion on \`manager_loop/3\` and \`pool_worker_loop/2\`, and bounded \`receive ... after\` blocks.
     `,
     otpDocCards: [
       {
@@ -2053,33 +2069,23 @@ Implement module \`src/tcp_acceptor_pool.erl\` exporting connection handoff and 
     stop_pool/1
 ]).
 
-%% @doc Transfers socket ownership to WorkerPid and sends {socket_ready, ClientSocket}.
-%% If controlling_process fails, closes ClientSocket and returns {error, Reason}.
+%% @doc Transfer ownership of ClientSocket to WorkerPid, notify WorkerPid of readiness, and close ClientSocket returning the error tuple on failure.
 -spec handoff_socket(gen_tcp:socket(), pid()) -> ok | {error, term()}.
 handoff_socket(_ClientSocket, _WorkerPid) ->
-    %% % TODO: Transfer socket ownership to WorkerPid via gen_tcp:controlling_process/2.
-    %% % On success, signal the worker process that the socket is ready and return ok.
-    %% % On failure, safely close the socket and return {error, Reason}.
     ignore.
 
-%% @doc Boots a pooled TCP server with AcceptorCount concurrent acceptors.
+%% @doc Open an ephemeral passive listening socket, start AcceptorCount concurrent acceptor workers running WorkerFun per connection, and return {ok, ListenSocket, Port, AcceptorPids}.
 -spec start_pooled_server(pos_integer(), fun((gen_tcp:socket()) -> any())) ->
     {ok, gen_tcp:socket(), inet:port_number(), [pid()]}.
 start_pooled_server(_AcceptorCount, _WorkerFun) ->
-    %% % TODO:
-    %% % 1. Bind an ephemeral listening socket on port 0 in passive raw binary mode.
-    %% % 2. Query the assigned kernel port number.
-    %% % 3. Spawn AcceptorCount concurrent acceptor loops that accept connections,
-    %% %    spawn handlers for WorkerFun, and transfer socket ownership via handoff_socket/2.
-    %% % 4. Return {ok, ListenSocket, Port, AcceptorPidsList}.
     ignore.
 
-%% @doc Stops the pooled server by closing ListenSocket.
+%% @doc Close the listening socket ListenSocket and return ok.
 -spec stop_pooled_server(gen_tcp:socket()) -> ok.
 stop_pooled_server(ListenSocket) ->
     gen_tcp:close(ListenSocket).
 
-%% Backward compatibility helpers for pool testing:
+%% @doc Start a managed acceptor pool listening on Port with PoolSize acceptor processes.
 start_pool(Port, PoolSize) ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],
     {ok, ListenSocket} = gen_tcp:listen(Port, ListenOpts),
@@ -2087,10 +2093,12 @@ start_pool(Port, PoolSize) ->
     ManagerPid = spawn_link(fun() -> manager_init(ListenSocket, PoolSize) end),
     {ok, ManagerPid, ActualPort}.
 
+%% @doc Signal the pool manager process ManagerPid to shut down all acceptors, workers, and the listener socket.
 stop_pool(ManagerPid) ->
     ManagerPid ! stop,
     ok.
 
+%% @doc Query ManagerPid synchronously for the count of currently connected client worker processes.
 get_active_workers(ManagerPid) ->
     Ref = make_ref(),
     ManagerPid ! {get_worker_count, self(), Ref},
@@ -2136,7 +2144,7 @@ pool_worker_loop(Socket, ManagerPid) ->
         {tcp_closed, Socket} -> ManagerPid ! {client_disconnected, self()}, ok;
         {tcp_error, Socket, _Reason} -> ManagerPid ! {client_disconnected, self()}, ok
     end.
-    `,
+`,
     solutionCode: `-module(tcp_acceptor_pool).
 
 -export([
@@ -2148,6 +2156,7 @@ pool_worker_loop(Socket, ManagerPid) ->
     stop_pool/1
 ]).
 
+%% @doc Transfer ownership of ClientSocket to WorkerPid, notify WorkerPid of readiness, and close ClientSocket returning the error tuple on failure.
 -spec handoff_socket(gen_tcp:socket(), pid()) -> ok | {error, term()}.
 handoff_socket(ClientSocket, WorkerPid) ->
     case gen_tcp:controlling_process(ClientSocket, WorkerPid) of
@@ -2160,6 +2169,7 @@ handoff_socket(ClientSocket, WorkerPid) ->
             {error, Reason}
     end.
 
+%% @doc Open an ephemeral passive listening socket, start AcceptorCount concurrent acceptor workers running WorkerFun per connection, and return {ok, ListenSocket, Port, AcceptorPids}.
 -spec start_pooled_server(pos_integer(), fun((gen_tcp:socket()) -> any())) ->
     {ok, gen_tcp:socket(), inet:port_number(), [pid()]}.
 start_pooled_server(AcceptorCount, WorkerFun) ->
@@ -2189,10 +2199,12 @@ acceptor_worker_loop(ListenSocket, WorkerFun) ->
             ok
     end.
 
+%% @doc Close the listening socket ListenSocket and return ok.
 -spec stop_pooled_server(gen_tcp:socket()) -> ok.
 stop_pooled_server(ListenSocket) ->
     gen_tcp:close(ListenSocket).
 
+%% @doc Start a managed acceptor pool listening on Port with PoolSize acceptor processes.
 start_pool(Port, PoolSize) ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],
     {ok, ListenSocket} = gen_tcp:listen(Port, ListenOpts),
@@ -2200,10 +2212,12 @@ start_pool(Port, PoolSize) ->
     ManagerPid = spawn_link(fun() -> manager_init(ListenSocket, PoolSize) end),
     {ok, ManagerPid, ActualPort}.
 
+%% @doc Signal the pool manager process ManagerPid to shut down all acceptors, workers, and the listener socket.
 stop_pool(ManagerPid) ->
     ManagerPid ! stop,
     ok.
 
+%% @doc Query ManagerPid synchronously for the count of currently connected client worker processes.
 get_active_workers(ManagerPid) ->
     Ref = make_ref(),
     ManagerPid ! {get_worker_count, self(), Ref},
@@ -2249,7 +2263,7 @@ pool_worker_loop(Socket, ManagerPid) ->
         {tcp_closed, Socket} -> ManagerPid ! {client_disconnected, self()}, ok;
         {tcp_error, Socket, _Reason} -> ManagerPid ! {client_disconnected, self()}, ok
     end.
-    `,
+`,
         files: [
       {
         name: 'tcp_acceptor_pool.erl',
@@ -2265,33 +2279,23 @@ pool_worker_loop(Socket, ManagerPid) ->
     stop_pool/1
 ]).
 
-%% @doc Transfers socket ownership to WorkerPid and sends {socket_ready, ClientSocket}.
-%% If controlling_process fails, closes ClientSocket and returns {error, Reason}.
+%% @doc Transfer ownership of ClientSocket to WorkerPid, notify WorkerPid of readiness, and close ClientSocket returning the error tuple on failure.
 -spec handoff_socket(gen_tcp:socket(), pid()) -> ok | {error, term()}.
 handoff_socket(_ClientSocket, _WorkerPid) ->
-    %% % TODO: Transfer socket ownership to WorkerPid via gen_tcp:controlling_process/2.
-    %% % On success, signal the worker process that the socket is ready and return ok.
-    %% % On failure, safely close the socket and return {error, Reason}.
     ignore.
 
-%% @doc Boots a pooled TCP server with AcceptorCount concurrent acceptors.
+%% @doc Open an ephemeral passive listening socket, start AcceptorCount concurrent acceptor workers running WorkerFun per connection, and return {ok, ListenSocket, Port, AcceptorPids}.
 -spec start_pooled_server(pos_integer(), fun((gen_tcp:socket()) -> any())) ->
     {ok, gen_tcp:socket(), inet:port_number(), [pid()]}.
 start_pooled_server(_AcceptorCount, _WorkerFun) ->
-    %% % TODO:
-    %% % 1. Bind an ephemeral listening socket on port 0 in passive raw binary mode.
-    %% % 2. Query the assigned kernel port number.
-    %% % 3. Spawn AcceptorCount concurrent acceptor loops that accept connections,
-    %% %    spawn handlers for WorkerFun, and transfer socket ownership via handoff_socket/2.
-    %% % 4. Return {ok, ListenSocket, Port, AcceptorPidsList}.
     ignore.
 
-%% @doc Stops the pooled server by closing ListenSocket.
+%% @doc Close the listening socket ListenSocket and return ok.
 -spec stop_pooled_server(gen_tcp:socket()) -> ok.
 stop_pooled_server(ListenSocket) ->
     gen_tcp:close(ListenSocket).
 
-%% Backward compatibility helpers for pool testing:
+%% @doc Start a managed acceptor pool listening on Port with PoolSize acceptor processes.
 start_pool(Port, PoolSize) ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],
     {ok, ListenSocket} = gen_tcp:listen(Port, ListenOpts),
@@ -2299,10 +2303,12 @@ start_pool(Port, PoolSize) ->
     ManagerPid = spawn_link(fun() -> manager_init(ListenSocket, PoolSize) end),
     {ok, ManagerPid, ActualPort}.
 
+%% @doc Signal the pool manager process ManagerPid to shut down all acceptors, workers, and the listener socket.
 stop_pool(ManagerPid) ->
     ManagerPid ! stop,
     ok.
 
+%% @doc Query ManagerPid synchronously for the count of currently connected client worker processes.
 get_active_workers(ManagerPid) ->
     Ref = make_ref(),
     ManagerPid ! {get_worker_count, self(), Ref},
@@ -2348,7 +2354,7 @@ pool_worker_loop(Socket, ManagerPid) ->
         {tcp_closed, Socket} -> ManagerPid ! {client_disconnected, self()}, ok;
         {tcp_error, Socket, _Reason} -> ManagerPid ! {client_disconnected, self()}, ok
     end.
-    `,
+`,
       },
     ],
     solutionFiles: {
@@ -2363,6 +2369,7 @@ pool_worker_loop(Socket, ManagerPid) ->
     stop_pool/1
 ]).
 
+%% @doc Transfer ownership of ClientSocket to WorkerPid, notify WorkerPid of readiness, and close ClientSocket returning the error tuple on failure.
 -spec handoff_socket(gen_tcp:socket(), pid()) -> ok | {error, term()}.
 handoff_socket(ClientSocket, WorkerPid) ->
     case gen_tcp:controlling_process(ClientSocket, WorkerPid) of
@@ -2375,6 +2382,7 @@ handoff_socket(ClientSocket, WorkerPid) ->
             {error, Reason}
     end.
 
+%% @doc Open an ephemeral passive listening socket, start AcceptorCount concurrent acceptor workers running WorkerFun per connection, and return {ok, ListenSocket, Port, AcceptorPids}.
 -spec start_pooled_server(pos_integer(), fun((gen_tcp:socket()) -> any())) ->
     {ok, gen_tcp:socket(), inet:port_number(), [pid()]}.
 start_pooled_server(AcceptorCount, WorkerFun) ->
@@ -2404,10 +2412,12 @@ acceptor_worker_loop(ListenSocket, WorkerFun) ->
             ok
     end.
 
+%% @doc Close the listening socket ListenSocket and return ok.
 -spec stop_pooled_server(gen_tcp:socket()) -> ok.
 stop_pooled_server(ListenSocket) ->
     gen_tcp:close(ListenSocket).
 
+%% @doc Start a managed acceptor pool listening on Port with PoolSize acceptor processes.
 start_pool(Port, PoolSize) ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],
     {ok, ListenSocket} = gen_tcp:listen(Port, ListenOpts),
@@ -2415,10 +2425,12 @@ start_pool(Port, PoolSize) ->
     ManagerPid = spawn_link(fun() -> manager_init(ListenSocket, PoolSize) end),
     {ok, ManagerPid, ActualPort}.
 
+%% @doc Signal the pool manager process ManagerPid to shut down all acceptors, workers, and the listener socket.
 stop_pool(ManagerPid) ->
     ManagerPid ! stop,
     ok.
 
+%% @doc Query ManagerPid synchronously for the count of currently connected client worker processes.
 get_active_workers(ManagerPid) ->
     Ref = make_ref(),
     ManagerPid ! {get_worker_count, self(), Ref},
@@ -2464,7 +2476,7 @@ pool_worker_loop(Socket, ManagerPid) ->
         {tcp_closed, Socket} -> ManagerPid ! {client_disconnected, self()}, ok;
         {tcp_error, Socket, _Reason} -> ManagerPid ! {client_disconnected, self()}, ok
     end.
-    `,
+`,
     },
 solutionExplanation: `### Solution Breakdown: High-Concurrency Socket Handoff
 1. **Controlling Process Transfer**: \`gen_tcp:controlling_process(ClientSocket, WorkerPid)\` assigns the worker as the designated port owner before any data packets are read.
@@ -2481,7 +2493,7 @@ solutionExplanation: `### Solution Breakdown: High-Concurrency Socket Handoff
       {
         id: 'tc-ch10-l05-2',
         title: 'Direct Socket Handoff to Worker',
-        erlangCall: 'begin {ok, L} = gen_tcp:listen(0, [binary, {active, false}]), {ok, Port} = inet:port(L), Receiver = spawn(fun() -> receive {socket_assigned, S} -> inet:setopts(S, [{active, once}]), receive {tcp, S, <<"HI\\r\\n">>} -> ok = gen_tcp:send(S, <<"ACK\\r\\n">>) end end end), {ok, Client} = gen_tcp:connect("127.0.0.1", Port, [binary, {active, false}], 2000), {ok, ServerSock} = gen_tcp:accept(L, 2000), ok = tcp_acceptor_pool:handoff_socket(ServerSock, Receiver), ok = gen_tcp:send(Client, <<"HI\\r\\n">>), {ok, Rep} = gen_tcp:recv(Client, 0, 2000), gen_tcp:close(Client), gen_tcp:close(L), Rep end',
+        erlangCall: 'begin {ok, L} = gen_tcp:listen(0, [binary, {active, false}]), {ok, Port} = inet:port(L), Receiver = spawn(fun() -> receive {socket_assigned, S} -> inet:setopts(S, [{active, once}]), receive {tcp, S, <<"HI\\r\\n">>} -> ok = gen_tcp:send(S, <<"ACK\\r\\n">>) after 3000 -> ok end after 3000 -> ok end end), {ok, Client} = gen_tcp:connect("127.0.0.1", Port, [binary, {active, false}], 2000), {ok, ServerSock} = gen_tcp:accept(L, 2000), ok = tcp_acceptor_pool:handoff_socket(ServerSock, Receiver), ok = gen_tcp:send(Client, <<"HI\\r\\n">>), {ok, Rep} = gen_tcp:recv(Client, 0, 2000), gen_tcp:close(Client), gen_tcp:close(L), Rep end',
         expectedOutput: '<<"ACK\\r\\n">>',
         explanation: 'Directly validates handoff_socket/2 transfers controlling process and signals receiver.',
       },
