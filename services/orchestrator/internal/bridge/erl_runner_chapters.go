@@ -1008,10 +1008,12 @@ T1_Res = try hof_fold:sum_ledger([{entry, 100, credit}, {entry, 40, debit}, {ent
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"hof_fold:sum_ledger(...)">>, expected => <<"{ledger_summary, 150, 40, 110}">>,
+        #{call_str => <<"hof_fold:sum_ledger([{entry, 100, credit}, {entry, 40, debit}, {entry, 50, credit}])">>,
+          expected => <<"{ledger_summary, 150, 40, 110}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"hof_fold:sum_ledger(...)">>, expected => <<"{ledger_summary, ...}">>,
+    #{call_str => <<"hof_fold:sum_ledger([{entry, 100, credit}, {entry, 40, debit}, {entry, 50, credit}])">>,
+      expected => <<"{ledger_summary, 150, 40, 110}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
@@ -1021,10 +1023,10 @@ T2_Res = try hof_fold:min_max_latency([45, 12, 88, 30, 95, 20]) of
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"hof_fold:min_max_latency(...)">>, expected => <<"{12, 95}">>,
+        #{call_str => <<"hof_fold:min_max_latency([45, 12, 88, 30, 95, 20])">>, expected => <<"{12, 95}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
 catch C2:R2 ->
-    #{call_str => <<"hof_fold:min_max_latency(...)">>, expected => <<"{Min, Max}">>,
+    #{call_str => <<"hof_fold:min_max_latency([45, 12, 88, 30, 95, 20])">>, expected => <<"{12, 95}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
@@ -1034,10 +1036,10 @@ T3_Res = try hof_fold:reverse_with_fold([alpha, beta, gamma]) of
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T3_Start};
     Other3 ->
-        #{call_str => <<"hof_fold:reverse_with_fold(...)">>, expected => <<"[gamma, beta, alpha]">>,
+        #{call_str => <<"hof_fold:reverse_with_fold([alpha, beta, gamma])">>, expected => <<"[gamma, beta, alpha]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
 catch C3:R3 ->
-    #{call_str => <<"hof_fold:reverse_with_fold(...)">>, expected => <<"[...]">>,
+    #{call_str => <<"hof_fold:reverse_with_fold([alpha, beta, gamma])">>, expected => <<"[gamma, beta, alpha]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res],
@@ -5481,28 +5483,88 @@ Stages = [CompileStage_H03, S_Ast_H03, S1_Predicates]
 `, wsDir, wsDir), true
 
 	case "ch03-l04":
-		return `
+		return fmt.Sprintf(`
 CompileStage_H04 = case code:ensure_loaded(hof_fold) of
     {module, hof_fold} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"hof_fold.erl compiled cleanly">>};
+        Exports_H04 = hof_fold:module_info(exports),
+        Req_H04 = [{sum_ledger, 1}, {min_max_latency, 1}, {reverse_with_fold, 1}],
+        Missing_H04 = [FA || FA <- Req_H04, not lists:member(FA, Exports_H04)],
+        case Missing_H04 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"hof_fold.erl compiled cleanly and exported sum_ledger/1, min_max_latency/1, reverse_with_fold/1.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_H04]))}
+        end;
     {error, E_H04} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_H04]))}
 end,
+S_Ast_H04 = try
+    SourceCandidates_H04 = [
+        filename:join(["%s", "src", "hof_fold.erl"]),
+        filename:join(["%s", "hof_fold.erl"])
+    ],
+    SourceFile_H04 = case [P || P <- SourceCandidates_H04, filelib:is_regular(P)] of
+        [ValidSrc_H04 | _] -> ValidSrc_H04;
+        [] -> hd(SourceCandidates_H04)
+    end,
+    Rules_H04 = #{
+        required_remote_calls => [{lists, foldl, 3}],
+        forbidden_remote_calls => [{lists, foldr, any}, {lists, reverse, any}, {lists, min, any}, {lists, max, any}],
+        forbidden_constructs => [list_comprehension, map_syntax, bit_syntax]
+    },
+    AllThreeUseFoldl = case epp:parse_file(SourceFile_H04, []) of
+        {ok, Forms_H04} ->
+            HasFoldl_H04 = fun WalkF(Node) when is_tuple(Node) ->
+                case Node of
+                    {call, _, {remote, _, {atom, _, lists}, {atom, _, foldl}}, [_, _, _]} -> true;
+                    _ -> WalkF(tuple_to_list(Node))
+                end;
+                WalkF([H | T]) -> WalkF(H) orelse WalkF(T);
+                WalkF(_) -> false
+            end,
+            MissingFoldIn = [FunName || FunName <- [sum_ledger, min_max_latency, reverse_with_fold],
+                not lists:any(fun({function, _, N, 1, Clauses}) when N =:= FunName -> HasFoldl_H04(Clauses); (_) -> false end, Forms_H04)],
+            MissingFoldIn;
+        _ ->
+            [parse_error]
+    end,
+    case {bf_ast_verifier:verify_rules(SourceFile_H04, <<>>, Rules_H04), AllThreeUseFoldl} of
+        {{ok, _}, []} ->
+            #{id => <<"ast_hof_fold_audit">>, title => <<"AST Left-Fold & BIF Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified lists:foldl/3 in all 3 functions; zero lists:foldr/reverse/min/max, comprehensions, maps, or binaries.">>};
+        {{ok, _}, MissingFuns_H04} ->
+            #{id => <<"ast_hof_fold_audit">>, title => <<"AST Left-Fold & BIF Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Each exported function must use lists:foldl/3 directly (missing in: ~p).", [MissingFuns_H04]))};
+        {{error, AstViolations_H04}, _} ->
+            FirstMsg_H04 = case AstViolations_H04 of
+                [#{message := M_H04} | _] -> M_H04;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_H04]))
+            end,
+            #{id => <<"ast_hof_fold_audit">>, title => <<"AST Left-Fold & BIF Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_H04, error => AstViolations_H04}
+    end
+catch Class_Ast_H04:Err_Ast_H04 ->
+    #{id => <<"ast_hof_fold_audit">>, title => <<"AST Left-Fold & BIF Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [Class_Ast_H04, Err_Ast_H04]))}
+end,
 S1_Fold = try
     Ledger = hof_fold:sum_ledger([{entry, 200, credit}, {entry, 50, debit}, {entry, 25, credit}]),
+    LedgerNeg = hof_fold:sum_ledger([{entry, 30, credit}, {entry, 80, debit}]),
+    LedgerEmpty = hof_fold:sum_ledger([]),
     Latencies = hof_fold:min_max_latency([85, 10, 42, 120, 5]),
+    LatSingle = hof_fold:min_max_latency([42]),
+    LatNeg = hof_fold:min_max_latency([-50, -10, -90, -5]),
     Reversed = hof_fold:reverse_with_fold([1, 2, 3, 4]),
-    case {Ledger, Latencies, Reversed} of
-        {{ledger_summary, 225, 50, 175}, {5, 120}, [4, 3, 2, 1]} ->
-            #{id => <<"foldl_state_reduction">>, title => <<"Tail-Recursive State Aggregation via lists:foldl/3">>, status => <<"passed">>, time_ms => 10, details => <<"Verified ledger reduction with tuple accumulator, min/max tracking, and fold list reversal">>};
+    ReversedEmpty = hof_fold:reverse_with_fold([]),
+    ReversedSingle = hof_fold:reverse_with_fold([solo]),
+    case {Ledger, LedgerNeg, LedgerEmpty, Latencies, LatSingle, LatNeg, Reversed, ReversedEmpty, ReversedSingle} of
+        {{ledger_summary, 225, 50, 175}, {ledger_summary, 30, 80, -50}, {ledger_summary, 0, 0, 0},
+         {5, 120}, {42, 42}, {-90, -5}, [4, 3, 2, 1], [], [solo]} ->
+            #{id => <<"foldl_state_reduction">>, title => <<"Tail-Recursive State Aggregation via lists:foldl/3">>, status => <<"passed">>, time_ms => 10, details => <<"Verified ledger reduction (including negative balance & empty), negative-latency min/max bounds, and fold reversal">>};
         Got_H04 ->
             #{id => <<"foldl_state_reduction">>, title => <<"Tail-Recursive State Aggregation via lists:foldl/3">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Fold mismatch: ~p", [Got_H04]))}
     end
 catch Class_H04:Err_H04 ->
     #{id => <<"foldl_state_reduction">>, title => <<"Tail-Recursive State Aggregation via lists:foldl/3">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_H04, Err_H04]))}
 end,
-Stages = [CompileStage_H04, S1_Fold]
-`, true
+Stages = [CompileStage_H04, S_Ast_H04, S1_Fold]
+`, wsDir, wsDir), true
 
 	case "ch03-l05":
 		return `

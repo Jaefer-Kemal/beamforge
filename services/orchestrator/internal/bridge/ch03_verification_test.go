@@ -82,6 +82,32 @@ split_orders_by_stock(Orders, MaxSingleOrderQty) ->
     end, Orders).
 `
 
+	hofFoldSolution := `-module(hof_fold).
+-export([sum_ledger/1, min_max_latency/1, reverse_with_fold/1]).
+
+%% @doc Aggregate credit, debit, and net balance totals from Entries in one left fold, returning a zeroed ledger summary tuple on empty input.
+sum_ledger(Entries) ->
+    {TotalCred, TotalDeb, Net} = lists:foldl(fun
+        ({entry, Amount, credit}, {CredAcc, DebAcc, NetAcc}) ->
+            {CredAcc + Amount, DebAcc, NetAcc + Amount};
+        ({entry, Amount, debit}, {CredAcc, DebAcc, NetAcc}) ->
+            {CredAcc, DebAcc + Amount, NetAcc - Amount}
+    end, {0, 0, 0}, Entries),
+    {ledger_summary, TotalCred, TotalDeb, Net}.
+
+%% @doc Return a pair containing the minimum and maximum integer values in the non-empty Latencies list using a left fold.
+min_max_latency([First | Rest]) ->
+    lists:foldl(fun(Ms, {MinSoFar, MaxSoFar}) ->
+        NewMin = case Ms < MinSoFar of true -> Ms; false -> MinSoFar end,
+        NewMax = case Ms > MaxSoFar of true -> Ms; false -> MaxSoFar end,
+        {NewMin, NewMax}
+    end, {First, First}, Rest).
+
+%% @doc Reverse element order of List in linear time via a left fold without calling standard library reversal helpers.
+reverse_with_fold(List) ->
+    lists:foldl(fun(Elem, Acc) -> [Elem | Acc] end, [], List).
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -101,6 +127,11 @@ split_orders_by_stock(Orders, MaxSingleOrderQty) ->
 			exerciseID:   "ch03-l03",
 			visibleCount: 4,
 			files:        map[string]string{"src/hof_predicates.erl": hofPredicatesSolution},
+		},
+		{
+			exerciseID:   "ch03-l04",
+			visibleCount: 3,
+			files:        map[string]string{"src/hof_fold.erl": hofFoldSolution},
 		},
 	}
 
@@ -444,6 +475,105 @@ split_orders_by_stock(Orders, MaxSingleOrderQty) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected boolean_predicates stage to fail for non-positive quantity leak, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch03-l04 rejects lists:reverse/1 and lists:min/max shortcuts bypassing lists:foldl/3", func(t *testing.T) {
+		sessionID := "test-ch03-l04-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/hof_fold.erl": `-module(hof_fold).
+-export([sum_ledger/1, min_max_latency/1, reverse_with_fold/1]).
+
+sum_ledger(Entries) ->
+    {TotalCred, TotalDeb, Net} = lists:foldl(fun
+        ({entry, Amount, credit}, {C, D, N}) -> {C + Amount, D, N + Amount};
+        ({entry, Amount, debit}, {C, D, N}) -> {C, D + Amount, N - Amount}
+    end, {0, 0, 0}, Entries),
+    {ledger_summary, TotalCred, TotalDeb, Net}.
+
+min_max_latency(Latencies) ->
+    {lists:min(Latencies), lists:max(Latencies)}.
+
+reverse_with_fold(List) ->
+    lists:reverse(List).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch03-l04", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected lists:reverse/lists:min/lists:max shortcuts in ch03-l04 to fail AST audit, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_hof_fold_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_hof_fold_audit stage to fail for lists:reverse/min/max shortcut, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch03-l04 rejects zero-seeded min_max_latency failing negative latencies", func(t *testing.T) {
+		sessionID := "test-ch03-l04-neg-seed"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		buggy := map[string]string{
+			"src/hof_fold.erl": `-module(hof_fold).
+-export([sum_ledger/1, min_max_latency/1, reverse_with_fold/1]).
+
+sum_ledger(Entries) ->
+    {TotalCred, TotalDeb, Net} = lists:foldl(fun
+        ({entry, Amount, credit}, {C, D, N}) -> {C + Amount, D, N + Amount};
+        ({entry, Amount, debit}, {C, D, N}) -> {C, D + Amount, N - Amount}
+    end, {0, 0, 0}, Entries),
+    {ledger_summary, TotalCred, TotalDeb, Net}.
+
+%% Bug: initializes {0, 0} instead of seeding from head element, breaking negative lists.
+min_max_latency(Latencies) ->
+    lists:foldl(fun(Ms, {MinSoFar, MaxSoFar}) ->
+        {min(Ms, MinSoFar), max(Ms, MaxSoFar)}
+    end, {0, 0}, Latencies).
+
+reverse_with_fold(List) ->
+    lists:foldl(fun(Elem, Acc) -> [Elem | Acc] end, [], List).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch03-l04", buggy)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected zero-seeded min_max_latency to fail ch03-l04, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "foldl_state_reduction" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected foldl_state_reduction stage to fail for zero-seeded min/max bug, stages=%+v", report.Stages)
 		}
 	})
 }

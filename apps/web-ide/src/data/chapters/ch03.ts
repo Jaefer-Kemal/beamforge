@@ -1029,79 +1029,75 @@ end, InitialAcc, MatchEvents).
 
 99% of production Erlang code strictly uses \`lists:foldl/3\`.
 
-## Parallel Worked Example: Freight Manifest Auditor
+## Parallel Worked Example
 
-The following module processes shipping cargo manifests. Notice how a single fold reduces a stream of container records into a multi-metric summary tracking hazards, gross weight, and peak container weight:
+Consider a network telemetry collector counting threshold breaches alongside a rolling index annotator. Notice how \`lists:foldl/3\` threads multi-field state or builds an indexed list in a single stackless pass:
 
 \`\`\`erlang
--module(cargo_manifest).
--export([audit_freight/1]).
+-module(telemetry_digest).
+-export([count_thresholds/2, annotate_events/1]).
 
-%% @doc Tallies hazardous containers, total cargo tonnage, and peak crate weight.
-audit_freight([FirstCrate | OtherCrates]) ->
-    {crate, _Id0, InitWeight, InitHazard} = FirstCrate,
-    InitHazardCount = case InitHazard of true -> 1; false -> 0 end,
-    InitAcc = {InitHazardCount, InitWeight, InitWeight},  %% {Hazards, TotalKg, PeakKg}
+%% ── Phase 1: Multi-Counter Tuple Reduction (lists:foldl/3) ─────────────────
+%% Tracks how many numeric readings stay below vs. reach/exceed Ceiling.
+count_thresholds(Readings, Ceiling) ->
+    lists:foldl(fun
+        (Val, {BelowAcc, BreachAcc}) when Val < Ceiling ->
+            {BelowAcc + 1, BreachAcc};
+        (_Val, {BelowAcc, BreachAcc}) ->
+            {BelowAcc, BreachAcc + 1}
+    end, {0, 0}, Readings).
 
-    {HazardCount, TotalKg, PeakKg} = lists:foldl(fun({crate, _Id, Weight, IsHazard}, {HazAcc, SumAcc, PeakAcc}) ->
-        NewHaz = case IsHazard of true -> HazAcc + 1; false -> HazAcc end,
-        NewPeak = case Weight > PeakAcc of true -> Weight; false -> PeakAcc end,
-        {NewHaz, SumAcc + Weight, NewPeak}
-    end, InitAcc, OtherCrates),
-    {manifest_summary, HazardCount, TotalKg, PeakKg}.
+%% ── Phase 2: Sequential Accumulator State + LIFO Prepending ────────────────
+%% Labels incoming atoms with 1-based positions, storing newest-first in Acc.
+annotate_events(Tags) ->
+    {_FinalSeq, IndexedRev} = lists:foldl(fun(Tag, {Seq, Acc}) ->
+        {Seq + 1, [{Seq, Tag} | Acc]}
+    end, {1, []}, Tags),
+    IndexedRev.
 \`\`\`
 
-## Standard Library Function Reference
+How the BEAM executes both folds:
+- **Phase 1 (\`count_thresholds/2\`)**: Passes each element first and the running 2-tuple \`{BelowAcc, BreachAcc}\` second into \`fun/2\`; because \`lists:foldl/3\` recurses in tail position, counting arbitrarily long streams uses $O(1)$ stack frames.
+- **Phase 2 (\`annotate_events/1\`)**: Bundles both the sequence counter and a growing list inside \`{Seq, Acc}\`, demonstrating why prepending with \`[Item | Acc]\` inside \`foldl\` naturally yields elements in reversed arrival order unless explicitly reversed afterward.
+
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 lists:foldl(Fun, Acc0, List) -> Acc1
   types: Fun = fun((Elem :: term(), AccIn :: term()) -> AccOut :: term())
 \`\`\`
 
+> How to read this signature: Notice the parameter ordering in \`Fun\` — \`Elem\` comes **first** and \`AccIn\` comes **second**, returning the updated accumulator \`AccOut\` for the next iteration (or \`Acc0\` immediately if \`List\` is \`[]\`). Open the attached **Reference Cards** for full \`lists:foldl/3\` documentation.
+
 ## Assignment Specification
 
 Implement three folding aggregators in \`src/hof_fold.erl\`:
 
-### 1. \`sum_ledger/1\`
-- **Input**: A list of financial entry records: \`[{entry, Amount, Type}, ...]\`, where \`Amount\` is an integer quantity and \`Type\` is an atom (\`credit\` or \`debit\`).
-- **Behavior**: Traverse the entries in a single pass using \`lists:foldl/3\` with an initial 3-tuple accumulator \`{0, 0, 0}\` representing total credits, total debits, and net balance.
-  - A \`credit\` entry increases total credits and net balance by \`Amount\`.
-  - A \`debit\` entry increases total debits by \`Amount\` and decreases net balance by \`Amount\`.
-  - Returns a tagged 4-tuple: \`{ledger_summary, TotalCredit, TotalDebit, NetBalance}\`.
-  - An empty ledger list \`[]\` returns \`{ledger_summary, 0, 0, 0}\`.
+### 1. \`sum_ledger(Entries)\`
+- **Input**: \`Entries\` — A list of zero or more 3-element \`entry\` tuples (carrying an integer amount and a direction atom, either \`credit\` or \`debit\`).
+- **Behavior**: Traverse \`Entries\` once from left to right using \`lists:foldl/3\` while tracking running totals for credits, debits, and net balance (credits add to total credits and net balance; debits add to total debits and subtract from net balance). Return a 4-element \`ledger_summary\` tuple containing total credits, total debits, and net balance (all zeros when \`Entries\` is empty).
 - **Examples**:
-  \`\`\`erlang
-  hof_fold:sum_ledger([{entry, 100, credit}, {entry, 40, debit}, {entry, 50, credit}])
-  %% => {ledger_summary, 150, 40, 110}
-  \`\`\`
+  - \`hof_fold:sum_ledger([{entry, 100, credit}, {entry, 40, debit}, {entry, 50, credit}])\` returns \`{ledger_summary, 150, 40, 110}\`.
+  - \`hof_fold:sum_ledger([])\` returns \`{ledger_summary, 0, 0, 0}\`.
 
-### 2. \`min_max_latency/1\`
-- **Input**: A non-empty list of integer millisecond latency values: \`[First | Rest]\`.
-- **Behavior**: Identify the minimum and maximum latency values in a single pass using \`lists:foldl/3\`.
-  - Initialize the accumulator using the head element \`First\` as both the initial minimum and maximum: \`{First, First}\`.
-  - Fold over the remaining elements (\`Rest\`), updating the minimum if a smaller latency is encountered and updating the maximum if a larger latency is encountered.
-  - Returns a 2-tuple: \`{MinLatency, MaxLatency}\`.
+### 2. \`min_max_latency(Latencies)\`
+- **Input**: \`Latencies\` — A non-empty list of integer latency measurements (may include zero or negative values).
+- **Behavior**: Find the smallest and largest latency values in a single left-to-right fold over the list without assuming all numbers are positive or using built-in min/max list helpers. Seed the running bounds from the initial list element so negative-only lists work accurately, returning a 2-tuple pairing minimum latency first and maximum latency second.
 - **Examples**:
-  \`\`\`erlang
-  hof_fold:min_max_latency([45, 12, 88, 30, 95, 20])
-  %% => {12, 95}
-  \`\`\`
+  - \`hof_fold:min_max_latency([45, 12, 88, 30, 95, 20])\` returns \`{12, 95}\`.
+  - \`hof_fold:min_max_latency([-50, -10, -90, -5])\` returns \`{-90, -5}\`.
 
-### 3. \`reverse_with_fold/1\`
-- **Input**: Any list of elements \`List\`.
-- **Behavior**: Invert the order of \`List\` using \`lists:foldl/3\` with an initial empty list accumulator \`[]\`.
-  - Take advantage of the LIFO (last-in, first-out) order resulting from head-cons prepending (\`[Elem | Acc]\`) during the left-to-right fold.
-  - Returns the reversed list.
+### 3. \`reverse_with_fold(List)\`
+- **Input**: \`List\` — A list of zero or more arbitrary Erlang terms.
+- **Behavior**: Reverse the order of \`List\` in linear time and constant stack space using \`lists:foldl/3\` without calling \`lists:reverse/1\` or \`lists:foldr/3\`.
 - **Examples**:
-  \`\`\`erlang
-  hof_fold:reverse_with_fold([alpha, beta, gamma])
-  %% => [gamma, beta, alpha]
-  \`\`\`
+  - \`hof_fold:reverse_with_fold([alpha, beta, gamma])\` returns \`[gamma, beta, alpha]\`.
+  - \`hof_fold:reverse_with_fold([])\` returns \`[]\`.
 
-## Verification Constraints
+## Rules & Verification Constraints
 
-- You must employ \`lists:foldl/3\` in all three functions.
-- Strictly no Maps (\`#{}\`) or Bit-Syntax Binaries (\`<<...>>\`). Tuples, lists, atoms, and numbers only.`,
+- \`bf_ast_verifier\` enforces \`lists:foldl/3\` in all three functions, and forbids \`lists:foldr/3\`, \`lists:reverse/1\`, \`lists:min/1\`, \`lists:max/1\`, list comprehensions (\`[Expr || ...]\`), maps (\`#{}\`), and bit-syntax binaries (\`<<...>>\`).
+- Tuples, lists, atoms, and numbers only.`,
     otpDocCards: [
       {
         functionName: 'lists:foldl/3',
@@ -1114,13 +1110,13 @@ Implement three folding aggregators in \`src/hof_fold.erl\`:
       },
     ],
     mentalModelCheck: {
-      question: 'Why does lists:foldl(fun(Elem, Acc) -> [Elem | Acc] end, [], [1, 2, 3]) return [3, 2, 1] instead of [1, 2, 3]?',
+      question: 'Why does lists:foldl(fun(X, Acc) -> [X * 10 | Acc] end, [], [1, 2, 3]) return [30, 20, 10] instead of [10, 20, 30]?',
       options: [
         {
           id: 'A',
-          label: 'Because foldl visits elements from left to right, prepending each new element onto the head of the accumulator list (LIFO stack behavior)',
+          label: 'Because foldl visits elements from left to right, prepending each transformed value onto the head of the accumulator list (LIFO stack behavior)',
           isCorrect: true,
-          explanation: '1 is prepended -> [1]; then 2 is prepended -> [2, 1]; then 3 is prepended -> [3, 2, 1].',
+          explanation: '10 is prepended -> [10]; then 20 is prepended -> [20, 10]; then 30 is prepended -> [30, 20, 10].',
         },
         {
           id: 'B',
@@ -1161,8 +1157,10 @@ Implement three folding aggregators in \`src/hof_fold.erl\`:
     ],
     astRules: {
       requiredCalls: ['lists:foldl/3'],
+      forbiddenCalls: ['lists:foldr', 'lists:reverse', 'lists:min', 'lists:max'],
+      forbiddenConstructs: ['list_comprehension', 'map_syntax', 'bit_syntax'],
     },
-    solutionExplanation: 'Demonstrates tail-recursive state aggregation using lists:foldl/3 with multi-accumulator tuples and list inversion patterns.',
+    solutionExplanation: 'Demonstrates tail-recursive state aggregation using lists:foldl/3 with multi-accumulator tuples, head-seeded numeric bounds, and O(N) list inversion.',
     files: [
       {
         name: 'hof_fold.erl',
@@ -1170,15 +1168,15 @@ Implement three folding aggregators in \`src/hof_fold.erl\`:
         content: `-module(hof_fold).
 -export([sum_ledger/1, min_max_latency/1, reverse_with_fold/1]).
 
-%% @doc Computes credit, debit, and net balance totals from ledger entries.
+%% @doc Aggregate credit, debit, and net balance totals from Entries in one left fold, returning a zeroed ledger summary tuple on empty input.
 sum_ledger(_Entries) ->
     ok.
 
-%% @doc Finds the minimum and maximum latency values in a non-empty sample list.
-min_max_latency([_First | _Rest]) ->
+%% @doc Return a pair containing the minimum and maximum integer values in the non-empty Latencies list using a left fold.
+min_max_latency(_Latencies) ->
     ok.
 
-%% @doc Inverts list element order using a left fold.
+%% @doc Reverse element order of List in linear time via a left fold without calling standard library reversal helpers.
 reverse_with_fold(_List) ->
     ok.`,
       },
@@ -1187,6 +1185,7 @@ reverse_with_fold(_List) ->
       'src/hof_fold.erl': `-module(hof_fold).
 -export([sum_ledger/1, min_max_latency/1, reverse_with_fold/1]).
 
+%% @doc Aggregate credit, debit, and net balance totals from Entries in one left fold, returning a zeroed ledger summary tuple on empty input.
 sum_ledger(Entries) ->
     {TotalCred, TotalDeb, Net} = lists:foldl(fun
         ({entry, Amount, credit}, {CredAcc, DebAcc, NetAcc}) ->
@@ -1196,6 +1195,7 @@ sum_ledger(Entries) ->
     end, {0, 0, 0}, Entries),
     {ledger_summary, TotalCred, TotalDeb, Net}.
 
+%% @doc Return a pair containing the minimum and maximum integer values in the non-empty Latencies list using a left fold.
 min_max_latency([First | Rest]) ->
     lists:foldl(fun(Ms, {MinSoFar, MaxSoFar}) ->
         NewMin = case Ms < MinSoFar of true -> Ms; false -> MinSoFar end,
@@ -1203,26 +1203,28 @@ min_max_latency([First | Rest]) ->
         {NewMin, NewMax}
     end, {First, First}, Rest).
 
+%% @doc Reverse element order of List in linear time via a left fold without calling standard library reversal helpers.
 reverse_with_fold(List) ->
     lists:foldl(fun(Elem, Acc) -> [Elem | Acc] end, [], List).`,
     },
     starterCode: `-module(hof_fold).
 -export([sum_ledger/1, min_max_latency/1, reverse_with_fold/1]).
 
-%% @doc Computes credit, debit, and net balance totals from ledger entries.
+%% @doc Aggregate credit, debit, and net balance totals from Entries in one left fold, returning a zeroed ledger summary tuple on empty input.
 sum_ledger(_Entries) ->
     ok.
 
-%% @doc Finds the minimum and maximum latency values in a non-empty sample list.
-min_max_latency([_First | _Rest]) ->
+%% @doc Return a pair containing the minimum and maximum integer values in the non-empty Latencies list using a left fold.
+min_max_latency(_Latencies) ->
     ok.
 
-%% @doc Inverts list element order using a left fold.
+%% @doc Reverse element order of List in linear time via a left fold without calling standard library reversal helpers.
 reverse_with_fold(_List) ->
     ok.`,
     solutionCode: `-module(hof_fold).
 -export([sum_ledger/1, min_max_latency/1, reverse_with_fold/1]).
 
+%% @doc Aggregate credit, debit, and net balance totals from Entries in one left fold, returning a zeroed ledger summary tuple on empty input.
 sum_ledger(Entries) ->
     {TotalCred, TotalDeb, Net} = lists:foldl(fun
         ({entry, Amount, credit}, {CredAcc, DebAcc, NetAcc}) ->
@@ -1232,6 +1234,7 @@ sum_ledger(Entries) ->
     end, {0, 0, 0}, Entries),
     {ledger_summary, TotalCred, TotalDeb, Net}.
 
+%% @doc Return a pair containing the minimum and maximum integer values in the non-empty Latencies list using a left fold.
 min_max_latency([First | Rest]) ->
     lists:foldl(fun(Ms, {MinSoFar, MaxSoFar}) ->
         NewMin = case Ms < MinSoFar of true -> Ms; false -> MinSoFar end,
@@ -1239,6 +1242,7 @@ min_max_latency([First | Rest]) ->
         {NewMin, NewMax}
     end, {First, First}, Rest).
 
+%% @doc Reverse element order of List in linear time via a left fold without calling standard library reversal helpers.
 reverse_with_fold(List) ->
     lists:foldl(fun(Elem, Acc) -> [Elem | Acc] end, [], List).`,
   },
