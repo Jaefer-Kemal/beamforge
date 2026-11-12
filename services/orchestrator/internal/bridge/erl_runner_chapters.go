@@ -8765,21 +8765,29 @@ S2 = try
     Strat = maps:get(strategy, SupFlags, undefined),
     Int = maps:get(intensity, SupFlags, undefined),
     Per = maps:get(period, SupFlags, undefined),
-    ChildIds = [maps:get(id, Spec) || Spec <- ChildSpecs],
+    ChildIds = [maps:get(id, Spec, undefined) || Spec <- ChildSpecs],
     CheckStrat = (Strat =:= rest_for_one),
     CheckLimits = (Int =:= 5) andalso (Per =:= 10),
     CheckOrder = (ChildIds =:= [xmpp_session_registry, xmpp_router]),
-    case CheckStrat andalso CheckLimits andalso CheckOrder of
+    CheckChildDetails = lists:all(fun(Spec) ->
+        Id = maps:get(id, Spec, undefined),
+        maps:get(restart, Spec, undefined) =:= permanent andalso
+        maps:get(type, Spec, undefined) =:= worker andalso
+        maps:get(shutdown, Spec, undefined) =:= 2000 andalso
+        maps:get(start, Spec, undefined) =:= {Id, start_link, []} andalso
+        maps:get(modules, Spec, undefined) =:= [Id]
+    end, ChildSpecs),
+    case CheckStrat andalso CheckLimits andalso CheckOrder andalso CheckChildDetails of
         true ->
             #{id => <<"m1_ast_supervision_spec">>,
               title => <<"Supervision Spec: rest_for_one & Ordered Child Specs">>,
               status => <<"passed">>, time_ms => 20,
-              details => <<"Strategy rest_for_one with intensity 5, period 10, and ordered children [xmpp_session_registry, xmpp_router] verified.">>};
+              details => <<"Strategy rest_for_one with intensity 5, period 10, permanent workers (shutdown 2000), and order [xmpp_session_registry, xmpp_router] verified.">>};
         false ->
             #{id => <<"m1_ast_supervision_spec">>,
               title => <<"Supervision Spec: rest_for_one & Ordered Child Specs">>,
               status => <<"failed">>, time_ms => 20,
-              details => list_to_binary(io_lib:format("Strat: ~p (expected rest_for_one), Int: ~p (exp 5), Per: ~p (exp 10), Order: ~p (exp [xmpp_session_registry, xmpp_router])", [Strat, Int, Per, ChildIds]))}
+              details => list_to_binary(io_lib:format("Strat: ~p, Int: ~p, Per: ~p, Order: ~p, DetailsOk: ~p", [Strat, Int, Per, ChildIds, CheckChildDetails]))}
     end
 catch C2:R2 ->
     #{id => <<"m1_ast_supervision_spec">>,

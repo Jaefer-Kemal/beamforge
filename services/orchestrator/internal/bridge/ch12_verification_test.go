@@ -12,15 +12,21 @@ const (
 
 -export([start_link/0, stop/0, init/1]).
 
+%% @doc Starts and locally registers the root XMPP OTP supervisor process,
+%% returning {ok, Pid} on success or an error tuple if startup fails.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% @doc Synchronously stops the locally registered root supervisor if running,
+%% or returns ok immediately when already stopped.
 stop() ->
     case whereis(?MODULE) of
         undefined -> ok;
         Pid -> supervisor:stop(Pid)
     end.
 
+%% @doc Returns the root supervisor flags and ordered child specifications
+%% governing the session registry and message router workers.
 init([]) ->
     SupFlags = #{
         strategy => rest_for_one,

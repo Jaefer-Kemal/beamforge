@@ -7,11 +7,11 @@ export const CH12_CAPSTONE_MILESTONES: CapstoneMilestone[] = [
     number: 1,
     title: 'Root Supervisor Tree (xmpp_sup)',
     targetFile: 'src/xmpp_sup.erl',
-    targetFunctions: ['start_link/0', 'init/1'],
+    targetFunctions: ['start_link/0', 'stop/0', 'init/1'],
     description:
-      'Configure the root OTP supervisor using rest_for_one restart strategy with intensity 5 and period 10. Order child specs so xmpp_session_registry boots before xmpp_router to prevent stale ETS lookups.',
+      'Configure the root OTP supervisor using rest_for_one restart strategy with intensity 5 and period 10, booting xmpp_session_registry before xmpp_router as permanent workers with clean stop/0 lifecycle shutdown.',
     verificationHint:
-      'Call xmpp_sup:start_link(), inspect child processes with supervisor:which_children(xmpp_sup), and verify both xmpp_session_registry and xmpp_router are running as supervised permanent workers.',
+      'Call xmpp_sup:start_link(), inspect child processes with supervisor:which_children(xmpp_sup) to confirm two permanent workers, and verify xmpp_sup:stop() shuts down cleanly.',
   },
   {
     id: 'm2-parser',
@@ -97,8 +97,8 @@ export const CH12_MILESTONE_LESSONS: MilestoneLesson[] = [
     milestoneNumber: 1,
     title: 'Milestone 1: The Root OTP Supervisor Hierarchy (xmpp_sup)',
     targetFile: 'src/xmpp_sup.erl',
-    targetFunctions: ['start_link/0', 'init/1'],
-    verificationHint: 'Call xmpp_sup:start_link(), inspect child processes with supervisor:which_children(xmpp_sup), and verify both xmpp_session_registry and xmpp_router are running as supervised permanent workers.',
+    targetFunctions: ['start_link/0', 'stop/0', 'init/1'],
+    verificationHint: 'Call xmpp_sup:start_link(), inspect child processes with supervisor:which_children(xmpp_sup), and verify xmpp_sup:stop() returns ok with xmpp_sup unregistered.',
     mentalModelCheck: {
       question: 'In xmpp_sup, why is xmpp_session_registry ordered before xmpp_router under rest_for_one?',
       codeSnippet: `#{strategy => rest_for_one, intensity => 5, period => 10}
@@ -124,7 +124,115 @@ export const CH12_MILESTONE_LESSONS: MilestoneLesson[] = [
         },
       ],
     },
-    conceptMarkdown: "## Milestone 1: The Root OTP Supervisor Hierarchy\n\n### Why This Matters in Production\nIn production telecom backends, distributed message brokers, and mission-critical chat platforms (like WhatsApp, Discord, or ejabberd), software failure is not an unexpected anomaly—it is a guaranteed certainty. Hardware degrades, network sockets terminate abruptly, out-of-spec client frames trigger badmatch exceptions, and memory spikes occur under load.\n\nThe Erlang/OTP philosophy does not attempt to wrap every single line of code in defensive try/catch blocks. Instead, it embraces the **\"Let It Crash\"** design pattern. By structuring processes into a strict, hierarchical **Supervision Tree**, crashes are localized to small worker processes, while supervisor actors immediately restore deterministic state through automated, ordered restarts.\n\n> **Supervision Hierarchy:** `xmpp_sup` (`rest_for_one`) supervises `xmpp_session_registry` (Child 1: ETS Shared Table Owner) and `xmpp_router` (Child 2: Message Dispatcher & Offline Spooler).\n\n### Deep Concept Breakdown: Choosing the Supervisor Strategy\nThe core architectural decision in any supervisor is selecting the correct restart strategy from the 4 OTP strategies:\n\n1. **`one_for_one`**: If a child terminates, only that child is restarted.\n   - *Why it is DANGEROUS here:* The message router (`xmpp_router`) directly queries the in-memory ETS table owned by the session registry (`xmpp_session_registry`). If the registry crashes and restarts under `one_for_one`, its in-memory ETS table is deleted and recreated. If `xmpp_router` were left running, any concurrent lookup against the old table identifier causes silent routing dropouts or crashes!\n\n2. **`one_for_all`**: If any child terminates, all other children are terminated and restarted.\n   - *Why it is UNNECESSARILY DISRUPTIVE here:* If `xmpp_router` crashes due to a malformed XML stanza, there is zero reason to kill `xmpp_session_registry` and disconnect thousands of active client sessions!\n\n3. **`rest_for_one`**: If a child process terminates, any child process started **after** it in the specification list is terminated and restarted in order.\n   - *Why it is PERFECT here:* `xmpp_session_registry` is child #1, and `xmpp_router` is child #2. If the registry terminates, the router (started *after* it) is automatically terminated and cleanly restarted against the newly initialized registry. But if the router crashes, the registry is left untouched!\n\n```\nProcess Startup Order:     1. xmpp_session_registry  -->  2. xmpp_router\nShutdown on Crash of #1:   1. Terminate xmpp_router  -->  2. Restart xmpp_session_registry  -->  3. Restart xmpp_router\nShutdown on Crash of #2:   1. Restart xmpp_router only (Registry untouched!)\n```\n\n### Supervisor Specification Anatomy\nA supervisor callback module implements `init/1` and returns `{ok, {SupFlags, ChildSpecs}}`.\n\n```erlang\nSupFlags = #{\n    strategy  => rest_for_one, %% Restart subsequent siblings on crash\n    intensity => 5,            %% Maximum 5 restarts...\n    period    => 10            %% ...within a 10-second sliding time window\n}.\n```\n\nEach child specification in `ChildSpecs` is defined as a map:\n- **`id`**: Unique atom identifier (`xmpp_session_registry`, `xmpp_router`).\n- **`start`**: The MFA tuple `{Module, Function, Args}` invoked by the supervisor to spawn the process (e.g., `{xmpp_session_registry, start_link, []}`).\n- **`restart`**: `permanent` specifies that the child worker must always be restarted if it terminates.\n- **`shutdown`**: Grace period in milliseconds (`2000`) allowing the process to execute its `terminate/2` callback before the supervisor issues a brutal kill.\n- **`type`**: `worker` (designating an actor performing business logic, as opposed to a nested `supervisor`).\n- **`modules`**: `[Module]` containing callback modules for BEAM code hot-reloading.\n\n### Step-by-Step Assignment Task\n1. Open `src/xmpp_sup.erl`.\n2. In `start_link/0`, register and boot the root supervisor locally under `?MODULE`:\n   `supervisor:start_link({local, ?MODULE}, ?MODULE, []).`\n3. In `init/1`, configure `SupFlags` with:\n   - `strategy => rest_for_one`\n   - `intensity => 5`\n   - `period => 10`\n4. In `ChildSpecs`, declare:\n   - Child 1: `xmpp_session_registry` (permanent worker, 2000ms shutdown, start MFA `{xmpp_session_registry, start_link, []}`)\n   - Child 2: `xmpp_router` (permanent worker, 2000ms shutdown, start MFA `{xmpp_router, start_link, []}`)\n5. Return `{ok, {SupFlags, ChildSpecs}}`.\n\n### Verification & Testing\nWhen you click **Submit Milestone**, the test runner boots `xmpp_sup:start_link()`, calls `supervisor:which_children(xmpp_sup)`, verifies that both worker PIDs are alive, and validates that the restart strategy is strictly `rest_for_one`.",
+    conceptMarkdown: `## Milestone 1: The Root OTP Supervisor Hierarchy
+
+### Why This Matters in Production
+In production telecom switches, distributed brokers, and real-time chat backends (WhatsApp, ejabberd, MongooseIM), faults are inevitable: sockets drop mid-frame, out-of-spec client payloads raise exceptions, and memory pressure hits individual workers.
+
+Rather than burying every line inside defensive \`try/catch\` blocks, Erlang/OTP embraces **"Let It Crash"**: workers fail cleanly inside isolated processes while a **Supervision Tree** deterministically restores a known-good topology around them.
+
+> [!IMPORTANT]
+> **Architectural Dependency:** \`xmpp_router\` queries the in-memory ETS session table owned by \`xmpp_session_registry\`. Because child startup order defines dependency direction in OTP, \`xmpp_sup\` must guarantee the registry always starts first and any registry restart resets the downstream router.
+
+---
+
+### Deep Concept Breakdown & Under the Hood
+
+| Strategy | Crash on Child #1 (\`registry\`) | Crash on Child #2 (\`router\`) | Verdict for XMPP Core |
+| :--- | :--- | :--- | :--- |
+| \`one_for_one\` | Restarts #1 only; #2 holds stale table state | Restarts #2 only | Unsafe on #1 reset |
+| \`one_for_all\` | Restarts #1 and #2 | Kills healthy #1 unnecessarily | Disruptive on #2 crash |
+| \`rest_for_one\` | Terminates #2 first, restarts #1 then #2 | Restarts #2 only (#1 stays alive) | Ideal dependency isolation |
+
+Under the hood, the OTP \`supervisor\` terminates downstream siblings in **reverse start order** before starting recovered children in **forward start order**, using \`shutdown\` timeouts so each \`terminate/2\` runs cleanly before forced termination. If restarts exceed \`intensity\` within \`period\` seconds, the supervisor gives up and propagates failure upward rather than spinning in an infinite crash loop.
+
+---
+
+### Official OTP Supervisor API Reference
+
+\`\`\`erlang
+%% Official OTP Signatures (stdlib / supervisor)
+supervisor:start_link(SupName, Module, Args) -> StartLinkRet
+  Types: SupName = {local, Name :: atom()} | {global, term()} | {via, module(), term()}
+         Module = module(), Args = term()
+         StartLinkRet = {ok, pid()} | ignore | {error, term()}
+
+supervisor:stop(SupRef) -> ok
+  Types: SupRef = pid() | atom() | {global, term()} | {via, module(), term()} | {atom(), node()}
+\`\`\`
+
+Attach to local process registration with \`whereis/1\` when implementing \`stop/0\` so calling \`stop/0\` on an already-stopped supervisor returns \`ok\` instead of raising \`noproc\` *(see attached OTP \`supervisor\` card below)*.
+
+---
+
+### Chunked Reference Architecture (Domain-Neutral OTP Anatomy)
+
+The generic \`billing_sup\` skeleton below shows how \`start_link/0\`, \`stop/0\`, and \`init/1\` fit together using OTP 29 map-based flags and child specifications (for a separate billing pipeline with different strategy and budget limits):
+
+\`\`\`erlang
+-module(billing_sup).
+-behaviour(supervisor).
+-export([start_link/0, stop/0, init/1]).
+
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+stop() ->
+    case whereis(?MODULE) of
+        undefined -> ok;
+        Pid -> supervisor:stop(Pid)
+    end.
+
+init([]) ->
+    SupFlags = #{strategy => one_for_all, intensity => 3, period => 30},
+    Children = [
+        #{
+            id => tax_rate_cache,
+            start => {tax_rate_cache, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [tax_rate_cache]
+        }
+    ],
+    {ok, {SupFlags, Children}}.
+\`\`\`
+
+---
+
+## Assignment Specification
+
+Implement \`src/xmpp_sup.erl\` with \`-behaviour(supervisor)\`, exporting \`start_link/0\`, \`stop/0\`, and \`init/1\`:
+
+### 1. \`start_link()\`
+- **Input**: None.
+- **Behavior**: Starts the OTP supervisor locally registered as \`?MODULE\` with initialization arguments \`[]\`.
+- **Examples**:
+  - \`xmpp_sup:start_link()\` boots both children and returns \`{ok, SupPid}\` where \`is_pid(SupPid)\` is \`true\`.
+
+### 2. \`stop()\`
+- **Input**: None.
+- **Behavior**: Looks up the locally registered \`?MODULE\` process; if unregistered (\`undefined\`), returns \`ok\` idempotently; if alive, stops the supervisor cleanly and returns \`ok\` so \`whereis(xmpp_sup)\` becomes \`undefined\`.
+- **Examples**:
+  - \`xmpp_sup:stop()\` returns \`ok\` both when running and when already stopped.
+
+### 3. \`init([])\`
+- **Input**: Empty list \`[]\`.
+- **Behavior**: Returns \`{ok, {SupFlags, ChildSpecs}}\` configuring:
+  - \`SupFlags\`: \`rest_for_one\` strategy, max restart intensity \`5\`, sliding period \`10\` seconds.
+  - \`ChildSpecs\`: Two \`permanent\` \`worker\` child maps in strict startup order with \`shutdown => 2000\`:
+    1. \`id => xmpp_session_registry\`, start MFA calling \`xmpp_session_registry:start_link/0\`, modules \`[xmpp_session_registry]\`.
+    2. \`id => xmpp_router\`, start MFA calling \`xmpp_router:start_link/0\`, modules \`[xmpp_router]\`.
+- **Examples**:
+  - \`xmpp_sup:init([])\` yields child IDs \`[xmpp_session_registry, xmpp_router]\` in exact order under \`rest_for_one\`.
+
+---
+
+## Rules & Verification Constraints
+- Compile cleanly with \`erlc -Wall\` (zero warnings under \`-behaviour(supervisor)\`).
+- \`start_link/0\`, \`stop/0\`, and \`init/1\` must all be exported.
+- Child specification order MUST place \`xmpp_session_registry\` first and \`xmpp_router\` second as \`permanent\` workers (\`shutdown => 2000\`).
+- Live boot verification executes \`xmpp_sup:start_link()\`, \`supervisor:which_children(SupPid)\`, and \`xmpp_sup:stop()\`.`,
   },
   {
     id: 'ch12-m2',
@@ -361,15 +469,21 @@ export const CH12_SOLUTION_FILES: Record<string, string> = {
 
 -export([start_link/0, stop/0, init/1]).
 
+%% @doc Starts and locally registers the root XMPP OTP supervisor process,
+%% returning {ok, Pid} on success or an error tuple if startup fails.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% @doc Synchronously stops the locally registered root supervisor if running,
+%% or returns ok immediately when already stopped.
 stop() ->
     case whereis(?MODULE) of
         undefined -> ok;
         Pid -> supervisor:stop(Pid)
     end.
 
+%% @doc Returns the root supervisor flags and ordered child specifications
+%% governing the session registry and message router workers.
 init([]) ->
     SupFlags = #{
         strategy => rest_for_one,
@@ -911,7 +1025,26 @@ terminate(_Reason, _State) ->
 
 // ── Starter Code Files (SCAFFOLDED WITH % TODO CHALLENGES - NOT PRE-SOLVED!) ─
 export const CH12_STARTER_FILES: Record<string, string> = {
-  'src/xmpp_sup.erl': "-module(xmpp_sup).\n-behaviour(supervisor).\n\n-export([start_link/0, stop/0, init/1]).\n\nstart_link() ->\n    supervisor:start_link({local, ?MODULE}, ?MODULE, []).\n\nstop() ->\n    case whereis(?MODULE) of\n        undefined -> ok;\n        Pid -> supervisor:stop(Pid)\n    end.\n\ninit([]) ->\n    %% % TODO [Milestone 1 - Step 1]: Configure the Root Supervisor Flags\n    %% Set:\n    %%   strategy  => rest_for_one  (router depends on registry, so if registry restarts, router must too)\n    %%   intensity => 5             (allow up to 5 restarts)\n    %%   period    => 10            (within a 10-second window)\n    SupFlags = #{\n        strategy => rest_for_one,\n        intensity => 5,\n        period => 10\n    },\n\n    %% % TODO [Milestone 1 - Step 2]: Declare the Ordered Child Specifications\n    %% Under rest_for_one, child startup order is critical!\n    %% Child 1 (xmpp_session_registry):\n    %%   - id: xmpp_session_registry\n    %%   - start: {xmpp_session_registry, start_link, []}\n    %%   - restart: permanent\n    %%   - shutdown: 2000\n    %%   - type: worker\n    %%   - modules: [xmpp_session_registry]\n    %%\n    %% Child 2 (xmpp_router):\n    %%   - id: xmpp_router\n    %%   - start: {xmpp_router, start_link, []}\n    %%   - restart: permanent\n    %%   - shutdown: 2000\n    %%   - type: worker\n    %%   - modules: [xmpp_router]\n    ChildSpecs = [\n        %% Add child specification map for xmpp_session_registry here:\n\n        %% Add child specification map for xmpp_router here:\n\n    ],\n    {ok, {SupFlags, ChildSpecs}}.\n",
+  'src/xmpp_sup.erl': `-module(xmpp_sup).
+-behaviour(supervisor).
+
+-export([start_link/0, stop/0, init/1]).
+
+%% @doc Starts and locally registers the root XMPP OTP supervisor process,
+%% returning {ok, Pid} on success or an error tuple if startup fails.
+start_link() ->
+    {error, not_implemented}.
+
+%% @doc Synchronously stops the locally registered root supervisor if running,
+%% or returns ok immediately when already stopped.
+stop() ->
+    ok.
+
+%% @doc Returns the root supervisor flags and ordered child specifications
+%% governing the session registry and message router workers.
+init([]) ->
+    {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, []}}.
+`,
   'src/xmpp_stream_parser.erl': "-module(xmpp_stream_parser).\n-export([new_buffer/0, feed_chunk/2, extract_attr/2, extract_tag_body/2]).\n\nnew_buffer() ->\n    <<>>.\n\nfeed_chunk(BufferBin, IncomingBin) when is_binary(BufferBin), is_binary(IncomingBin) ->\n    Combined = <<BufferBin/binary, IncomingBin/binary>>,\n    extract_events(Combined, []).\n\nextract_events(Bin, Acc) ->\n    CleanBin = trim_leading_ws(Bin),\n    case CleanBin of\n        <<>> ->\n            {lists:reverse(Acc), <<>>};\n\n        <<\"</stream:stream>\", Rest/binary>> ->\n            extract_events(Rest, [stream_close | Acc]);\n\n        <<\"<stream:stream\", _/binary>> ->\n            case binary:match(CleanBin, <<\">\">>) of\n                {Pos, 1} ->\n                    HeaderLen = Pos + 1,\n                    <<HeaderBin:HeaderLen/binary, Rest/binary>> = CleanBin,\n                    Domain = binary:copy(extract_attr(HeaderBin, <<\"to\">>, <<\"localhost\">>)),\n                    extract_events(Rest, [{stream_open, Domain} | Acc]);\n                nomatch ->\n                    {lists:reverse(Acc), binary:copy(CleanBin)}\n            end;\n\n        %% % TODO [Milestone 2 - Step 1]: Parse self-closing <ping id='...'/>\n        %% 1. Match prefix <<\"<ping\", _/binary>>.\n        %% 2. Check for closing <<\"/>\">>. If incomplete, return {lists:reverse(Acc), binary:copy(CleanBin)}.\n        %% 3. Extract the \"id\" attribute (default <<\"ping_1\">>).\n        %% 4. CRITICAL: Unpin with binary:copy/1!\n        %% 5. Recurse with [{ping, Id} | Acc].\n        <<\"<ping\", _/binary>> ->\n            %% Implement ping stanza extraction here:\n            {lists:reverse(Acc), binary:copy(CleanBin)};\n\n        %% % TODO [Milestone 2 - Step 2]: Parse <auth mechanism='...'>payload</auth>\n        %% 1. Use extract_closed_tag(CleanBin, <<\"</auth>\">>, Fun, Acc).\n        %% 2. In Fun, extract attribute \"mechanism\" (default <<\"PLAIN\">>).\n        %% 3. Extract tag body using extract_tag_body(FrameBin, <<\"auth\">>).\n        %% 4. CRITICAL: Unpin both strings with binary:copy/1!\n        %% 5. Return event: {sasl_auth, Mech, Payload}.\n        <<\"<auth\", _/binary>> ->\n            %% Implement sasl auth stanza extraction here:\n            {lists:reverse(Acc), binary:copy(CleanBin)};\n\n        %% % TODO [Milestone 2 - Step 3]: Parse <iq id='...'><resource>res</resource></iq>\n        %% 1. Use extract_closed_tag(CleanBin, <<\"</iq>\">>, Fun, Acc).\n        %% 2. In Fun, extract attribute \"id\" (default <<\"bind_1\">>).\n        %% 3. Extract resource body using extract_tag_body(FrameBin, <<\"resource\">>).\n        %% 4. Unpin with binary:copy/1, and return: {iq_bind, Id, Res}.\n        <<\"<iq\", _/binary>> ->\n            %% Implement iq bind stanza extraction here:\n            {lists:reverse(Acc), binary:copy(CleanBin)};\n\n        %% % TODO [Milestone 2 - Step 4]: Parse <message id='...' to='...'><body>body</body></message>\n        %% 1. Use extract_closed_tag(CleanBin, <<\"</message>\">>, Fun, Acc).\n        %% 2. In Fun, extract \"id\" (default <<\"msg_1\">>), \"to\" (default <<>>), and body with extract_tag_body/2.\n        %% 3. Unpin all three with binary:copy/1, and return: {chat_message, Id, To, Body}.\n        <<\"<message\", _/binary>> ->\n            %% Implement chat message stanza extraction here:\n            {lists:reverse(Acc), binary:copy(CleanBin)};\n\n        Other ->\n            {lists:reverse(Acc), binary:copy(Other)}\n    end.\n\n%% ── Helper Framing Utilities (Pre-built for you) ─────────────────────────────\nextract_closed_tag(Bin, CloseTag, Fun, Acc) ->\n    CloseTagLen = byte_size(CloseTag),\n    case binary:match(Bin, CloseTag) of\n        {Pos, CloseTagLen} ->\n            TotalLen = Pos + CloseTagLen,\n            <<FrameBin:TotalLen/binary, Rest/binary>> = Bin,\n            Event = Fun(FrameBin),\n            extract_events(Rest, [Event | Acc]);\n        nomatch ->\n            {lists:reverse(Acc), binary:copy(Bin)}\n    end.\n\nextract_attr(Bin, AttrName) ->\n    extract_attr(Bin, AttrName, <<>>).\n\nextract_attr(Bin, AttrName, Default) ->\n    Key1 = <<AttrName/binary, 61, 34>>,\n    Key2 = <<AttrName/binary, 61, 39>>,\n    case find_attr_val(Bin, Key1, <<34>>) of\n        {ok, Val} -> Val;\n        nomatch ->\n            case find_attr_val(Bin, Key2, <<39>>) of\n                {ok, Val} -> Val;\n                nomatch -> Default\n            end\n    end.\n\nfind_attr_val(Bin, Key, QuoteChar) ->\n    case binary:match(Bin, Key) of\n        {Pos, Len} ->\n            Start = Pos + Len,\n            <<_:Start/binary, Rem/binary>> = Bin,\n            case binary:match(Rem, QuoteChar) of\n                {ValLen, _} ->\n                    <<Val:ValLen/binary, _/binary>> = Rem,\n                    {ok, Val};\n                nomatch ->\n                    nomatch\n            end;\n        nomatch ->\n            nomatch\n    end.\n\nextract_tag_body(Bin, TagName) ->\n    OpenTag = <<\"<\", TagName/binary>>,\n    CloseTag = <<\"</\", TagName/binary, \">\">>,\n    case binary:match(Bin, OpenTag) of\n        {PosOpen, _} ->\n            <<_:PosOpen/binary, Rem1/binary>> = Bin,\n            case binary:match(Rem1, <<\">\">>) of\n                {PosCloseOpen, 1} ->\n                    ContentStart = PosCloseOpen + 1,\n                    <<_:ContentStart/binary, Rem2/binary>> = Rem1,\n                    case binary:match(Rem2, CloseTag) of\n                        {BodyLen, _} ->\n                            <<Body:BodyLen/binary, _/binary>> = Rem2,\n                            Body;\n                        nomatch ->\n                            <<>>\n                    end;\n                nomatch ->\n                    <<>>\n            end;\n        nomatch ->\n            <<>>\n    end.\n\ntrim_leading_ws(<<C, Rest/binary>>) when C =:= 32; C =:= 9; C =:= 10; C =:= 13 ->\n    trim_leading_ws(Rest);\ntrim_leading_ws(Bin) ->\n    Bin.\n",
   'src/xmpp_session_registry.erl': "-module(xmpp_session_registry).\n-behaviour(gen_server).\n\n-export([\n    start_link/0,\n    stop/0,\n    register_session/3,\n    unregister_session/1,\n    lookup_by_jid/1,\n    list_all_sessions/0,\n    parse_jid/1\n]).\n-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).\n\n-define(TAB, xmpp_sessions_tab).\n\nstart_link() ->\n    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).\n\nstop() ->\n    case whereis(?MODULE) of\n        undefined -> ok;\n        Pid -> gen_server:stop(Pid)\n    end.\n\nregister_session(FullJid, Priority, C2sPid)\n  when is_binary(FullJid), is_integer(Priority), is_pid(C2sPid) ->\n    gen_server:call(?MODULE, {register_session, FullJid, Priority, C2sPid}).\n\nunregister_session(FullJid) when is_binary(FullJid) ->\n    gen_server:call(?MODULE, {unregister_session, FullJid}).\n\n%% % TODO [Milestone 3 - Step 1]: Direct Concurrent ETS Lookup\n%% 1. Ensure table exists with ensure_table().\n%% 2. Check if TargetJid contains <<\"/\">>:\n%%    - If YES (Full JID): Use ets:lookup(?TAB, TargetJid).\n%%      If found, return [Pid]. If not found, return [].\n%%    - If NO (Bare JID): Find all sessions in ?TAB matching BareJid.\n%%      Sort matching sessions by Priority descending.\n%%      Return the list containing the single highest-priority PID: [TopPid], or [] if none.\nlookup_by_jid(TargetJid) when is_binary(TargetJid) ->\n    ensure_table(),\n    %% Implement lookup logic here:\n    [].\n\nlist_all_sessions() ->\n    ensure_table(),\n    ets:tab2list(?TAB).\n\nparse_jid(JidBin) when is_binary(JidBin) ->\n    case binary:split(JidBin, <<\"/\">>) of\n        [Bare, Res] -> {Bare, Res};\n        [Bare] -> {Bare, <<>>}\n    end.\n\nensure_table() ->\n    case ets:info(?TAB) of\n        undefined ->\n            ets:new(?TAB, [named_table, public, set, {read_concurrency, true}]);\n        _ ->\n            ?TAB\n    end.\n\ninit([]) ->\n    ensure_table(),\n    {ok, #{monitors => #{}}}.\n\n%% % TODO [Milestone 3 - Step 2]: Implement Session Registration & Monitoring\n%% 1. Call parse_jid(FullJidBin) to get {BareJid, Resource}.\n%% 2. Call MRef = erlang:monitor(process, C2sPid).\n%% 3. Insert record into ?TAB: {FullJidBin, BareJid, Resource, Priority, C2sPid, MRef}.\n%% 4. Save MRef => FullJidBin in State.monitors map.\n%% 5. Return {reply, ok, NewState}.\nhandle_call({register_session, FullJidBin, Priority, C2sPid}, _From, State) ->\n    ensure_table(),\n    %% Implement registration here:\n    {reply, ok, State};\n\n%% % TODO [Milestone 3 - Step 3]: Implement Session Unregistration\n%% 1. Look up FullJidBin in ?TAB to find MRef.\n%% 2. Demonitor with erlang:demonitor(MRef, [flush]).\n%% 3. Delete from ?TAB with ets:delete(?TAB, FullJidBin).\n%% 4. Return {reply, ok, State}.\nhandle_call({unregister_session, FullJidBin}, _From, State) ->\n    ensure_table(),\n    %% Implement unregistration here:\n    {reply, ok, State};\n\nhandle_call(_Req, _From, State) ->\n    {reply, {error, unknown_request}, State}.\n\nhandle_cast(_Msg, State) ->\n    {noreply, State}.\n\n%% % TODO [Milestone 3 - Step 4]: Process Monitor Termination Handler\n%% When a monitored C2S process terminates, the BEAM delivers:\n%% {'DOWN', MRef, process, DeadPid, Reason}\n%% 1. Find FullJid mapped to MRef in State.monitors.\n%% 2. Delete entry from ?TAB with ets:delete(?TAB, FullJid).\n%% 3. Remove MRef from the monitors map.\n%% 4. Return {noreply, NewState}.\nhandle_info({'DOWN', MRef, process, _DeadPid, _Reason}, State) ->\n    ensure_table(),\n    %% Implement monitor cleanup here:\n    {noreply, State};\n\nhandle_info(_Info, State) ->\n    {noreply, State}.\n\nterminate(_Reason, _State) ->\n    ok.\n",
   'src/xmpp_c2s_statem.erl': `-module(xmpp_c2s_statem).
