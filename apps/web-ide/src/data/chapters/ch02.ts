@@ -1922,142 +1922,129 @@ Now, you will synthesize all of these concepts into a production-grade **Invento
 
 ## Deep Concept Breakdown & Under the Hood
 
-### System Architecture
-You will implement the \`inventory\` module managing an e-commerce catalog represented as a list of 5-tuples:
-\`\`\`erlang
-[{product, Id, Name, Price, Stock}, ...]
-\`\`\`
+### The Outer-Inner State-Threading Pipeline
+In an imperative language, processing a batch of incoming commands mutates an array or map in place. On the BEAM VM, where every term is immutable, processing a transaction stream requires threading updated state through nested recursion:
 
-Incoming orders arrive as a list of 2-tuples:
-\`\`\`erlang
-[{order, ProductId, Quantity}, ...]
-\`\`\`
-
-### The Outer-Inner Pipeline Architecture
-To process a list of transactions against a state list immutably:
-1. The **Outer Loop** steps through the incoming transactions one by one.
-2. For each transaction, an **Inner Helper** performs an $O(1)$-stack tail-recursive search and update over the state dataset.
-3. The newly transformed dataset is passed as the state argument into the next outer recursive step.
+1. **The Outer Transaction Loop**: Steps through each incoming request one item at a time.
+2. **The Inner State Helper**: Searches or transforms the immutable state list in $O(1)$ stack space using tail-recursive accumulators and \`lists:reverse/1\`.
+3. **Sequential State Progression**: Passes the newly constructed state list as the state argument into the next outer recursive call, ensuring later requests observe earlier mutations (such as depleted balances or stock).
 
 \`\`\`erlang
-%% Generic Outer-Inner Batch Processor:
+%% Generic Outer-Inner Sequential State Threading:
 process_batch(StateList, []) ->
     StateList;
-process_batch(StateList, [Transaction | Rest]) ->
-    NewStateList = apply_transaction(StateList, Transaction),
-    process_batch(NewStateList, Rest).
+process_batch(StateList, [Command | RestCommands]) ->
+    NextStateList = apply_command(StateList, Command),
+    process_batch(NextStateList, RestCommands).
 \`\`\`
 
 ## Parallel Worked Example
 
-Managing mobile subscriber data quotas and billing in a telecom engine:
+Consider a banking clearing-house engine settling sequential account debits and auditing cleared transaction volume:
 
 \`\`\`erlang
--module(quota_engine).
--export([deduct_usage/2, audit_billable_total/3, top_up_data/2]).
+-module(ledger_batch).
+-export([apply_debits/2, sum_cleared_volume/2]).
 
-%% Deduct data usage for sessions if account has sufficient remaining MB:
-deduct_usage(Accounts, Sessions) ->
-    sessions_loop(Accounts, Sessions).
-
-sessions_loop(Accounts, []) ->
+%% ── Phase 1: Sequential State Threading Across Debit Commands ─────────────
+%% Only deduct Amount when the target account exists with sufficient Balance.
+apply_debits(Accounts, []) ->
     Accounts;
-sessions_loop(Accounts, [{session, AccountId, ConsumedMb} | Rest]) ->
-    NewAccounts = apply_session_deduction(Accounts, AccountId, ConsumedMb),
-    sessions_loop(NewAccounts, Rest).
+apply_debits(Accounts, [{debit, AcctId, Amount} | Rest]) ->
+    NextAccounts = try_debit(Accounts, AcctId, Amount),
+    apply_debits(NextAccounts, Rest);
+apply_debits(Accounts, [_UnknownCmd | Rest]) ->
+    apply_debits(Accounts, Rest).
 
-apply_session_deduction(Accounts, AccountId, ConsumedMb) ->
-    case find_account(Accounts, AccountId) of
-        {ok, {account, AccountId, _Plan, _Bal, RemMb}} when RemMb >= ConsumedMb ->
-            update_data_balance(Accounts, AccountId, -ConsumedMb);
+try_debit(Accounts, AcctId, Amount) ->
+    case lookup_account(Accounts, AcctId) of
+        {ok, {acct, AcctId, _Currency, Balance}} when Balance >= Amount ->
+            rewrite_balance(Accounts, AcctId, Balance - Amount, []);
         _ ->
             Accounts
     end.
 
-update_data_balance(Accounts, TargetId, DeltaMb) ->
-    update_data_loop(Accounts, TargetId, DeltaMb, []).
-
-update_data_loop([], _TargetId, _Delta, Acc) ->
+rewrite_balance([], _TargetId, _NewBal, Acc) ->
     lists:reverse(Acc);
-update_data_loop([{account, Id, Plan, Bal, RemMb} | Rest], TargetId, Delta, Acc)
-  when Id =:= TargetId ->
-    Updated = {account, Id, Plan, Bal, RemMb + Delta},
-    update_data_loop(Rest, TargetId, Delta, [Updated | Acc]);
-update_data_loop([Other | Rest], TargetId, Delta, Acc) ->
-    update_data_loop(Rest, TargetId, Delta, [Other | Acc]).
+rewrite_balance([{acct, TargetId, Currency, _OldBal} | Rest], TargetId, NewBal, Acc) ->
+    rewrite_balance(Rest, TargetId, NewBal, [{acct, TargetId, Currency, NewBal} | Acc]);
+rewrite_balance([Other | Rest], TargetId, NewBal, Acc) ->
+    rewrite_balance(Rest, TargetId, NewBal, [Other | Acc]).
 
-%% Calculate total revenue from valid usage charges:
-audit_billable_total(Accounts, Sessions, RatePerMb) ->
-    audit_loop(Sessions, Accounts, RatePerMb, 0).
+%% ── Phase 2: Read-Only Tail-Recursive Audit Tuple Accumulation ────────────
+%% Count how many debits clear against the snapshot and total cleared cents.
+sum_cleared_volume(Accounts, Debits) ->
+    audit_loop(Debits, Accounts, 0, 0).
 
-audit_loop([], _Accounts, _Rate, TotalAcc) ->
-    TotalAcc;
-audit_loop([{session, AccountId, ConsumedMb} | Rest], Accounts, Rate, TotalAcc) ->
-    case find_account(Accounts, AccountId) of
-        {ok, {account, AccountId, _Plan, _Bal, RemMb}} when RemMb >= ConsumedMb ->
-            audit_loop(Rest, Accounts, Rate, TotalAcc + (ConsumedMb * Rate));
+audit_loop([], _Accounts, ClearedCount, ClearedCents) ->
+    {ClearedCount, ClearedCents};
+audit_loop([{debit, AcctId, Amount} | Rest], Accounts, ClearedCount, ClearedCents) ->
+    case lookup_account(Accounts, AcctId) of
+        {ok, {acct, AcctId, _Currency, Balance}} when Balance >= Amount ->
+            audit_loop(Rest, Accounts, ClearedCount + 1, ClearedCents + Amount);
         _ ->
-            audit_loop(Rest, Accounts, Rate, TotalAcc)
-    end.
+            audit_loop(Rest, Accounts, ClearedCount, ClearedCents)
+    end;
+audit_loop([_Other | Rest], Accounts, ClearedCount, ClearedCents) ->
+    audit_loop(Rest, Accounts, ClearedCount, ClearedCents).
 
-%% Top up data allowances:
-top_up_data(Accounts, TopUps) ->
-    top_up_loop(TopUps, Accounts).
-
-top_up_loop([], Accounts) ->
-    Accounts;
-top_up_loop([{AccountId, AddedMb} | Rest], Accounts) ->
-    NewAccounts = update_data_balance(Accounts, AccountId, AddedMb),
-    top_up_loop(Rest, NewAccounts).
-
-%% Lookup helper
-find_account([], _TargetId) ->
+lookup_account([], _TargetId) ->
     not_found;
-find_account([{account, TargetId, _Plan, _Bal, _RemMb} = Acct | _Rest], TargetId) ->
+lookup_account([{acct, TargetId, _Currency, _Bal} = Acct | _Rest], TargetId) ->
     {ok, Acct};
-find_account([_Other | Rest], TargetId) ->
-    find_account(Rest, TargetId).
+lookup_account([_Other | Rest], TargetId) ->
+    lookup_account(Rest, TargetId).
 \`\`\`
+
+Notice how the BEAM executes these two phases:
+- **Phase 1 (\`apply_debits/2\`)**: Threads \`NextAccounts\` from step to step; if two \`{debit, ...}\` entries hit the same \`AcctId\`, the second command reads the updated balance from the first, and \`rewrite_balance/4\` preserves original list order via \`lists:reverse/1\`.
+- **Phase 2 (\`sum_cleared_volume/2\`)**: Aggregates two running counters (\`ClearedCount\` and \`ClearedCents\`) in tail-recursive arguments so zero heap lists or stack frames accumulate across iterations.
+
+## Official Erlang Docs & Function Reference
+
+\`\`\`erlang
+%% OTP Efficiency Guide: Tail-Recursive Function Composition
+%% All recursive calls sit cleanly in tail position to bound stack depth at O(1).
+Loop(State, [Head | Tail]) -> Loop(NextState, Tail).
+\`\`\`
+> Note: All exported functions and private helpers must remain tail-recursive in $O(1)$ stack space. See the Erlang Reference Card for BEAM stack-word limits.
 
 ## Assignment Specification
 
 Implement the core order fulfillment engine in \`inventory.erl\`:
 
-### \`process_order/2\`
+### 1. \`process_order(Inventory, Orders)\`
 - **Input**:
-  - \`Inventory\` — A list of zero or more 5-element tuples: \`{product, Id, Name, Price, Stock}\`, where \`Id\` is an integer, \`Name\` is a string, and \`Price\` and \`Stock\` are non-negative integers.
-  - \`Orders\` — A list of zero or more 3-element tuples: \`{order, ProductId, Quantity}\`, where \`ProductId\` and \`Quantity\` are positive integers.
-- **Behavior**: Processes each order sequentially against the inventory:
-  1. For each order \`{order, ProductId, Quantity}\`, locate the product matching \`ProductId\`.
-  2. If the product exists and its available stock is greater than or equal to \`Quantity\`, deduct \`Quantity\` from its \`Stock\`.
-  3. If the product does not exist, or if available stock is less than \`Quantity\`, the order cannot be fulfilled; skip it and leave that product's stock unchanged.
-  4. Returns the updated inventory list with all products in their exact original relative order. Must be strictly tail-recursive executing in $O(1)$ stack space.
+  - \`Inventory\` — A list of zero or more 5-element \`product\` tuples (each holding an integer \`Id\`, a string \`Name\`, a non-negative integer \`Price\`, and a non-negative integer \`Stock\`).
+  - \`Orders\` — A list of zero or more 3-element \`order\` tuples (each holding positive integers \`ProductId\` and \`Quantity\`).
+- **Behavior**: Process \`Orders\` sequentially against \`Inventory\` in $O(1)$ stack space:
+  - For each order, locate the product matching \`ProductId\`.
+  - If the product exists and its current \`Stock\` is at least \`Quantity\`, deduct \`Quantity\` from that product's stock before evaluating subsequent orders while keeping original product ordering intact via tail-recursive accumulation and \`lists:reverse/1\`.
+  - If the product does not exist or available \`Stock\` is less than \`Quantity\`, leave \`Inventory\` unchanged for that order and continue.
 - **Examples**:
   - \`inventory:process_order([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}, {product, 3, "Monitor", 200, 2}], [{order, 1, 2}, {order, 2, 3}, {order, 3, 5}])\` returns \`[{product, 1, "Keyboard", 50, 8}, {product, 2, "Mouse", 25, 2}, {product, 3, "Monitor", 200, 2}]\`.
   - \`inventory:process_order([{product, 1, "Keyboard", 50, 10}], [])\` returns \`[{product, 1, "Keyboard", 50, 10}]\`.
 
-### \`calculate_order_total/2\`
-- **Input**:
-  - \`Inventory\` — A list of \`{product, Id, Name, Price, Stock}\` tuples.
-  - \`Orders\` — A list of \`{order, ProductId, Quantity}\` tuples.
-- **Behavior**: Traverses the orders and calculates the total purchase price for all fulfillable orders. An order is fulfillable if the product exists in inventory and its available stock is greater than or equal to \`Quantity\`. Each fulfillable order contributes \`Price * Quantity\` to the total. Unfulfillable orders contribute \`0\`. Returns the accumulated integer sum using a tail-recursive accumulator running in $O(1)$ stack space. Returns \`0\` if orders are empty or no orders can be fulfilled.
+### 2. \`calculate_order_total(Inventory, Orders)\`
+- **Input**: Same \`Inventory\` (\`product\` tuples) and \`Orders\` (\`order\` tuples) lists.
+- **Behavior**: Traverse \`Orders\` using a tail-recursive integer accumulator in constant $O(1)$ stack space, adding \`Price * Quantity\` for every order whose matching product exists in \`Inventory\` with \`Stock\` at least \`Quantity\`, and adding \`0\` for unfulfillable orders or empty inputs.
 - **Examples**:
   - \`inventory:calculate_order_total([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}, {product, 3, "Monitor", 200, 2}], [{order, 1, 2}, {order, 2, 3}, {order, 3, 5}])\` returns \`175\`.
   - \`inventory:calculate_order_total([], [{order, 1, 5}])\` returns \`0\`.
 
-### \`restock/2\`
+### 3. \`restock(Inventory, Restocks)\`
 - **Input**:
-  - \`Inventory\` — A list of \`{product, Id, Name, Price, Stock}\` tuples.
-  - \`Restocks\` — A list of zero or more 2-element tuples: \`{ProductId, AddQuantity}\`, where \`ProductId\` is an integer and \`AddQuantity\` is a non-negative integer.
-- **Behavior**: Iterates through the restock list and increments the stock of each matching product by \`AddQuantity\`. Products not mentioned in \`Restocks\` remain unchanged. Returns the updated inventory list with product order strictly preserved. Must be tail-recursive in $O(1)$ stack space.
+  - \`Inventory\` — A list of \`product\` tuples.
+  - \`Restocks\` — A list of zero or more 2-element tuples (each pairing an integer \`ProductId\` with a non-negative integer \`AddQuantity\`).
+- **Behavior**: Iterate sequentially through \`Restocks\` in $O(1)$ stack space, incrementing the matching product's \`Stock\` by \`AddQuantity\` (ignoring unknown product IDs) while strictly preserving original \`Inventory\` element order via tail-recursive accumulation and \`lists:reverse/1\`.
 - **Examples**:
   - \`inventory:restock([{product, 1, "Keyboard", 50, 8}, {product, 2, "Mouse", 25, 2}, {product, 3, "Monitor", 200, 2}], [{1, 5}, {2, 10}])\` returns \`[{product, 1, "Keyboard", 50, 13}, {product, 2, "Mouse", 25, 12}, {product, 3, "Monitor", 200, 2}]\`.
   - \`inventory:restock([{product, 1, "Keyboard", 50, 8}], [])\` returns \`[{product, 1, "Keyboard", 50, 8}]\`.
 
 ## Rules & Verification Constraints
 
-- **Strict Tail Recursion Required**: \`process_order/2\`, \`calculate_order_total/2\`, and \`restock/2\` and all recursive helpers must run in $O(1)$ stack space (enforced by \`bf_ast_verifier\` and \`beam_disasm\`).
-- **Forbidden Built-Ins**: Do NOT use \`lists:sum/1\`, \`lists:map/2\`, \`lists:foldl/3\`, \`lists:filter/2\`, or \`lists:foldr/3\`. (Higher-order functions are taught in Chapter 3).
+- **Strict Tail Recursion Required**: \`process_order/2\`, \`calculate_order_total/2\`, and \`restock/2\` and all recursive helpers must run in $O(1)$ stack space (enforced by \`bf_ast_verifier\` AST tail-call verification and \`bf_beam_inspector\` runtime stack sampling).
+- **Forbidden Built-Ins & Operators**: Do NOT use \`lists:sum/1\`, \`lists:map/2\`, \`lists:foldl/3\`, \`lists:filter/2\`, \`lists:foldr/3\`, or quadratic \`++\` list appending inside recursive loops.
 - **Forbidden Constructs**: List comprehensions (\`[X || ...]\`) are forbidden.
 - Order of products in \`Inventory\` must be strictly preserved across all operations.`,
     visualScene: 'tco_vs_body_stack',
@@ -2073,7 +2060,7 @@ Implement the core order fulfillment engine in \`inventory.erl\`:
       },
     ],
     mentalModelCheck: {
-      question: 'Why does calculate_order_total/2 return 175 for orders [{order, 1, 2}, {order, 2, 3}, {order, 3, 5}] against products P1($50, stock 10), P2($25, stock 5), and P3($200, stock 2)?',
+      question: 'Why does calculate_order_total/2 return 175 for orders [{order, 1, 2}, {order, 2, 3}, {order, 3, 5}] against products P1 (price 50, stock 10), P2 (price 25, stock 5), and P3 (price 200, stock 2)?',
       options: [
         {
           id: 'A',
@@ -2131,16 +2118,16 @@ Implement the core order fulfillment engine in \`inventory.erl\`:
         content: `-module(inventory).
 -export([process_order/2, calculate_order_total/2, restock/2]).
 
-%% @doc Process orders against inventory, deducting stock only when sufficient inventory exists.
-process_order(Inventory, Orders) ->
+%% @doc Sequentially process incoming order tuples against Inventory in constant O(1) stack space, deducting ordered quantities from matching products with sufficient stock while skipping unfulfillable orders and strictly preserving product order.
+process_order(_Inventory, _Orders) ->
     ok.
 
-%% @doc Calculate total cost of fulfilled orders. Unfulfillable orders contribute 0.
-calculate_order_total(Inventory, Orders) ->
+%% @doc Accumulate in constant O(1) stack space the integer revenue total of fulfillable order tuples whose matching product exists in Inventory with sufficient stock, contributing zero for unfulfillable orders.
+calculate_order_total(_Inventory, _Orders) ->
     0.
 
-%% @doc Restock inventory items from [{ProductId, RestockQty}, ...].
-restock(Inventory, Restocks) ->
+%% @doc Sequentially apply restock quantity pairs to matching products in Inventory in constant O(1) stack space while preserving exact product order and ignoring unrecognized product identifiers.
+restock(_Inventory, _Restocks) ->
     ok.`,
       },
     ],
@@ -2148,7 +2135,7 @@ restock(Inventory, Restocks) ->
       'src/inventory.erl': `-module(inventory).
 -export([process_order/2, calculate_order_total/2, restock/2]).
 
-%% ── process_order/2 ───────────────────────────────────────────────────────
+%% @doc Sequentially process incoming order tuples against Inventory in constant O(1) stack space, deducting ordered quantities from matching products with sufficient stock while skipping unfulfillable orders and strictly preserving product order.
 process_order(Inventory, Orders) ->
     process_orders_loop(Inventory, Orders).
 
@@ -2178,7 +2165,7 @@ update_stock_loop([{product, Id, Name, Price, Stock} | Rest], TargetId, Delta, A
 update_stock_loop([Other | Rest], TargetId, Delta, Acc) ->
     update_stock_loop(Rest, TargetId, Delta, [Other | Acc]).
 
-%% ── calculate_order_total/2 ───────────────────────────────────────────────
+%% @doc Accumulate in constant O(1) stack space the integer revenue total of fulfillable order tuples whose matching product exists in Inventory with sufficient stock, contributing zero for unfulfillable orders.
 calculate_order_total(Inventory, Orders) ->
     calc_total_loop(Orders, Inventory, 0).
 
@@ -2192,7 +2179,7 @@ calc_total_loop([{order, ProdId, Qty} | RestOrders], Inventory, Acc) ->
             calc_total_loop(RestOrders, Inventory, Acc)
     end.
 
-%% ── restock/2 ─────────────────────────────────────────────────────────────
+%% @doc Sequentially apply restock quantity pairs to matching products in Inventory in constant O(1) stack space while preserving exact product order and ignoring unrecognized product identifiers.
 restock(Inventory, Restocks) ->
     restock_loop(Restocks, Inventory).
 
@@ -2202,7 +2189,7 @@ restock_loop([{ProdId, AddQty} | Rest], Inventory) ->
     NewInv = update_stock(Inventory, ProdId, AddQty),
     restock_loop(Rest, NewInv).
 
-%% ── Helper: find_product/2 ────────────────────────────────────────────────
+%% Lookup helper
 find_product([], _TargetId) ->
     not_found;
 find_product([{product, TargetId, _Name, _Price, _Stock} = Prod | _Rest], TargetId) ->
@@ -2213,21 +2200,21 @@ find_product([_Other | Rest], TargetId) ->
     starterCode: `-module(inventory).
 -export([process_order/2, calculate_order_total/2, restock/2]).
 
-%% @doc Process orders against inventory, deducting stock only when sufficient inventory exists.
-process_order(Inventory, Orders) ->
+%% @doc Sequentially process incoming order tuples against Inventory in constant O(1) stack space, deducting ordered quantities from matching products with sufficient stock while skipping unfulfillable orders and strictly preserving product order.
+process_order(_Inventory, _Orders) ->
     ok.
 
-%% @doc Calculate total cost of fulfilled orders. Unfulfillable orders contribute 0.
-calculate_order_total(Inventory, Orders) ->
+%% @doc Accumulate in constant O(1) stack space the integer revenue total of fulfillable order tuples whose matching product exists in Inventory with sufficient stock, contributing zero for unfulfillable orders.
+calculate_order_total(_Inventory, _Orders) ->
     0.
 
-%% @doc Restock inventory items from [{ProductId, RestockQty}, ...].
-restock(Inventory, Restocks) ->
+%% @doc Sequentially apply restock quantity pairs to matching products in Inventory in constant O(1) stack space while preserving exact product order and ignoring unrecognized product identifiers.
+restock(_Inventory, _Restocks) ->
     ok.`,
     solutionCode: `-module(inventory).
 -export([process_order/2, calculate_order_total/2, restock/2]).
 
-%% ── process_order/2 ───────────────────────────────────────────────────────
+%% @doc Sequentially process incoming order tuples against Inventory in constant O(1) stack space, deducting ordered quantities from matching products with sufficient stock while skipping unfulfillable orders and strictly preserving product order.
 process_order(Inventory, Orders) ->
     process_orders_loop(Inventory, Orders).
 
@@ -2257,7 +2244,7 @@ update_stock_loop([{product, Id, Name, Price, Stock} | Rest], TargetId, Delta, A
 update_stock_loop([Other | Rest], TargetId, Delta, Acc) ->
     update_stock_loop(Rest, TargetId, Delta, [Other | Acc]).
 
-%% ── calculate_order_total/2 ───────────────────────────────────────────────
+%% @doc Accumulate in constant O(1) stack space the integer revenue total of fulfillable order tuples whose matching product exists in Inventory with sufficient stock, contributing zero for unfulfillable orders.
 calculate_order_total(Inventory, Orders) ->
     calc_total_loop(Orders, Inventory, 0).
 
@@ -2271,7 +2258,7 @@ calc_total_loop([{order, ProdId, Qty} | RestOrders], Inventory, Acc) ->
             calc_total_loop(RestOrders, Inventory, Acc)
     end.
 
-%% ── restock/2 ─────────────────────────────────────────────────────────────
+%% @doc Sequentially apply restock quantity pairs to matching products in Inventory in constant O(1) stack space while preserving exact product order and ignoring unrecognized product identifiers.
 restock(Inventory, Restocks) ->
     restock_loop(Restocks, Inventory).
 
@@ -2281,7 +2268,7 @@ restock_loop([{ProdId, AddQty} | Rest], Inventory) ->
     NewInv = update_stock(Inventory, ProdId, AddQty),
     restock_loop(Rest, NewInv).
 
-%% ── Helper: find_product/2 ────────────────────────────────────────────────
+%% Lookup helper
 find_product([], _TargetId) ->
     not_found;
 find_product([{product, TargetId, _Name, _Price, _Stock} = Prod | _Rest], TargetId) ->

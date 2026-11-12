@@ -10242,8 +10242,8 @@ T1_Res = try inventory:process_order(Inv, Orders) of
           passed => Res1 =:= Exp1,
           time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"inventory:process_order(Inventory, Orders)">>,
-      expected => <<"[{product, 1, ...}]">>,
+    #{call_str => <<"inventory:process_order([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}, {product, 3, \"Monitor\", 200, 2}], [{order, 1, 2}, {order, 2, 3}, {order, 3, 5}])">>,
+      expected => <<"[{product, 1, \"Keyboard\", 50, 8}, {product, 2, \"Mouse\", 25, 2}, {product, 3, \"Monitor\", 200, 2}]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])),
       passed => false,
       time_ms => erlang:system_time(millisecond) - T1_Start}
@@ -10252,13 +10252,13 @@ end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try inventory:calculate_order_total(Inv, Orders) of
     Res2 ->
-        #{call_str => <<"inventory:calculate_order_total(Inventory, Orders)">>,
+        #{call_str => <<"inventory:calculate_order_total([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}, {product, 3, \"Monitor\", 200, 2}], [{order, 1, 2}, {order, 2, 3}, {order, 3, 5}])">>,
           expected => <<"175">>,
           actual => list_to_binary(integer_to_list(Res2)),
           passed => Res2 =:= 175,
           time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
-    #{call_str => <<"inventory:calculate_order_total(Inventory, Orders)">>,
+    #{call_str => <<"inventory:calculate_order_total([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}, {product, 3, \"Monitor\", 200, 2}], [{order, 1, 2}, {order, 2, 3}, {order, 3, 5}])">>,
       expected => <<"175">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])),
       passed => false,
@@ -10269,14 +10269,14 @@ T3_Start = erlang:system_time(millisecond),
 T3_Res = try inventory:restock(Inv, [{1, 5}, {2, 10}]) of
     Res3 ->
         Exp3 = [{product, 1, "Keyboard", 50, 15}, {product, 2, "Mouse", 25, 15}, {product, 3, "Monitor", 200, 2}],
-        #{call_str => <<"inventory:restock(Inventory, [{1, 5}, {2, 10}])">>,
+        #{call_str => <<"inventory:restock([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}, {product, 3, \"Monitor\", 200, 2}], [{1, 5}, {2, 10}])">>,
           expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp3]))),
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res3]))),
           passed => Res3 =:= Exp3,
           time_ms => erlang:system_time(millisecond) - T3_Start}
 catch C3:R3 ->
-    #{call_str => <<"inventory:restock(Inventory, [{1, 5}, {2, 10}])">>,
-      expected => <<"[{product, 1, ...}]">>,
+    #{call_str => <<"inventory:restock([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}, {product, 3, \"Monitor\", 200, 2}], [{1, 5}, {2, 10}])">>,
+      expected => <<"[{product, 1, \"Keyboard\", 50, 15}, {product, 2, \"Mouse\", 25, 15}, {product, 3, \"Monitor\", 200, 2}]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])),
       passed => false,
       time_ms => erlang:system_time(millisecond) - T3_Start}
@@ -10326,10 +10326,25 @@ S1_Ast = try
         forbidden_remote_calls => [{lists, sum, any}, {lists, map, any}, {lists, foldl, any}, {lists, filter, any}, {lists, foldr, any}],
         forbidden_constructs => [list_comprehension]
     },
-    case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
-        {ok, _} ->
-            #{id => <<"ast_and_tco_invariants">>, title => <<"AST & Bytecode Tail-Recursion Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 18, details => <<"Tail-recursion verified; no forbidden BIFs (lists:sum/map/foldl) or list comprehensions detected.">>};
-        {error, Violations} ->
+    NoAppend = case epp:parse_file(SrcPath, []) of
+        {ok, Forms} ->
+            HasAppend = (fun Walk(T) when is_tuple(T) ->
+                case element(1, T) of
+                    op when tuple_size(T) >= 3, element(3, T) =:= '++' -> true;
+                    _ -> Walk(tuple_to_list(T))
+                end;
+                Walk([H | Tail]) -> Walk(H) orelse Walk(Tail);
+                Walk(_) -> false
+            end)(Forms),
+            not HasAppend;
+        _ -> false
+    end,
+    case {bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules), NoAppend} of
+        {{ok, _}, true} ->
+            #{id => <<"ast_and_tco_invariants">>, title => <<"AST & Bytecode Tail-Recursion Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 18, details => <<"Tail-recursion verified; zero forbidden BIFs (lists:sum/map/foldl/filter/foldr), list comprehensions, or ++ appends detected.">>};
+        {{ok, _}, false} ->
+            #{id => <<"ast_and_tco_invariants">>, title => <<"AST & Bytecode Tail-Recursion Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 18, details => <<"Forbidden O(N^2) list append operator (++) detected; prepend onto accumulators and reverse once with lists:reverse/1.">>};
+        {{error, Violations}, _} ->
             FirstMsg = case Violations of
                 [#{message := M} | _] -> M;
                 _ -> list_to_binary(io_lib:format("AST violations: ~p", [Violations]))
@@ -10353,18 +10368,20 @@ S2_Tests = try
     EmptyOrders = inventory:process_order(SampleInv, []),
     EmptyTotal = inventory:calculate_order_total([], SampleOrders),
     NonExistentOrder = inventory:calculate_order_total(SampleInv, [{order, 999, 10}]),
+    SequentialDup = inventory:process_order([{product, 1, "Keyboard", 50, 10}], [{order, 1, 6}, {order, 1, 6}]),
+    RestockUnknown = inventory:restock(SampleInv, [{999, 5}]),
 
-    case {ProcInv =:= ExpectedProc, Total =:= 175, Restocked =:= ExpectedRestock, EmptyOrders =:= SampleInv, EmptyTotal =:= 0, NonExistentOrder =:= 0} of
-        {true, true, true, true, true, true} ->
-            #{id => <<"visible_and_hidden_test_suite">>, title => <<"Visible & Hidden Edge-Case Test Suite">>, status => <<"passed">>, time_ms => 14, details => <<"All 6/6 test vectors passed (order deduction, total sum, restock, empty orders, non-existent products).">>};
-        {false, _, _, _, _, _} ->
+    case {ProcInv =:= ExpectedProc, Total =:= 175, Restocked =:= ExpectedRestock, EmptyOrders =:= SampleInv, EmptyTotal =:= 0, NonExistentOrder =:= 0, SequentialDup =:= [{product, 1, "Keyboard", 50, 4}], RestockUnknown =:= SampleInv} of
+        {true, true, true, true, true, true, true, true} ->
+            #{id => <<"visible_and_hidden_test_suite">>, title => <<"Visible & Hidden Edge-Case Test Suite">>, status => <<"passed">>, time_ms => 14, details => <<"All 8/8 test vectors passed (order deduction, sequential depletion, total sum, restock, empty orders, unknown IDs).">>};
+        {false, _, _, _, _, _, _, _} ->
             #{id => <<"visible_and_hidden_test_suite">>, title => <<"Visible & Hidden Edge-Case Test Suite">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("process_order mismatch. Expected: ~p, Got: ~p", [ExpectedProc, ProcInv]))};
-        {_, false, _, _, _, _} ->
+        {_, false, _, _, _, _, _, _} ->
             #{id => <<"visible_and_hidden_test_suite">>, title => <<"Visible & Hidden Edge-Case Test Suite">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("calculate_order_total expected 175, got: ~p", [Total]))};
-        {_, _, false, _, _, _} ->
+        {_, _, false, _, _, _, _, _} ->
             #{id => <<"visible_and_hidden_test_suite">>, title => <<"Visible & Hidden Edge-Case Test Suite">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("restock mismatch. Expected: ~p, Got: ~p", [ExpectedRestock, Restocked]))};
         _ ->
-            #{id => <<"visible_and_hidden_test_suite">>, title => <<"Visible & Hidden Edge-Case Test Suite">>, status => <<"failed">>, time_ms => 14, details => <<"Hidden edge cases failed: empty orders/inventory or non-existent product handling mismatch.">>}
+            #{id => <<"visible_and_hidden_test_suite">>, title => <<"Visible & Hidden Edge-Case Test Suite">>, status => <<"failed">>, time_ms => 14, details => <<"Hidden edge cases failed: sequential order depletion, empty orders/inventory, or unknown product handling mismatch.">>}
     end
 catch C2:R2 ->
     #{id => <<"visible_and_hidden_test_suite">>, title => <<"Visible & Hidden Edge-Case Test Suite">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Test execution crashed: ~p:~p", [C2, R2]))}

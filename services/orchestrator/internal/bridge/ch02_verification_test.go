@@ -173,6 +173,71 @@ partition_orders([O | Rest], MinQty, ValidAcc, RejAcc) ->
     partition_orders(Rest, MinQty, ValidAcc, [O | RejAcc]).
 `
 
+	inventorySolution := `-module(inventory).
+-export([process_order/2, calculate_order_total/2, restock/2]).
+
+%% @doc Sequentially process incoming order tuples against Inventory in constant O(1) stack space, deducting ordered quantities from matching products with sufficient stock while skipping unfulfillable orders and strictly preserving product order.
+process_order(Inventory, Orders) ->
+    process_orders_loop(Inventory, Orders).
+
+process_orders_loop(Inventory, []) ->
+    Inventory;
+process_orders_loop(Inventory, [{order, ProdId, Qty} | RestOrders]) ->
+    NewInv = deduct_stock_if_available(Inventory, ProdId, Qty),
+    process_orders_loop(NewInv, RestOrders).
+
+deduct_stock_if_available(Inventory, ProdId, Qty) ->
+    case find_product(Inventory, ProdId) of
+        {ok, {product, ProdId, _Name, _Price, Stock}} when Stock >= Qty ->
+            update_stock(Inventory, ProdId, -Qty);
+        _ ->
+            Inventory
+    end.
+
+update_stock(Inventory, TargetId, DeltaQty) ->
+    update_stock_loop(Inventory, TargetId, DeltaQty, []).
+
+update_stock_loop([], _TargetId, _Delta, Acc) ->
+    lists:reverse(Acc);
+update_stock_loop([{product, Id, Name, Price, Stock} | Rest], TargetId, Delta, Acc)
+  when Id =:= TargetId ->
+    Updated = {product, Id, Name, Price, Stock + Delta},
+    update_stock_loop(Rest, TargetId, Delta, [Updated | Acc]);
+update_stock_loop([Other | Rest], TargetId, Delta, Acc) ->
+    update_stock_loop(Rest, TargetId, Delta, [Other | Acc]).
+
+%% @doc Accumulate in constant O(1) stack space the integer revenue total of fulfillable order tuples whose matching product exists in Inventory with sufficient stock, contributing zero for unfulfillable orders.
+calculate_order_total(Inventory, Orders) ->
+    calc_total_loop(Orders, Inventory, 0).
+
+calc_total_loop([], _Inventory, Acc) ->
+    Acc;
+calc_total_loop([{order, ProdId, Qty} | RestOrders], Inventory, Acc) ->
+    case find_product(Inventory, ProdId) of
+        {ok, {product, ProdId, _Name, Price, Stock}} when Stock >= Qty ->
+            calc_total_loop(RestOrders, Inventory, Acc + (Price * Qty));
+        _ ->
+            calc_total_loop(RestOrders, Inventory, Acc)
+    end.
+
+%% @doc Sequentially apply restock quantity pairs to matching products in Inventory in constant O(1) stack space while preserving exact product order and ignoring unrecognized product identifiers.
+restock(Inventory, Restocks) ->
+    restock_loop(Restocks, Inventory).
+
+restock_loop([], Inventory) ->
+    Inventory;
+restock_loop([{ProdId, AddQty} | Rest], Inventory) ->
+    NewInv = update_stock(Inventory, ProdId, AddQty),
+    restock_loop(Rest, NewInv).
+
+find_product([], _TargetId) ->
+    not_found;
+find_product([{product, TargetId, _Name, _Price, _Stock} = Prod | _Rest], TargetId) ->
+    {ok, Prod};
+find_product([_Other | Rest], TargetId) ->
+    find_product(Rest, TargetId).
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -212,6 +277,11 @@ partition_orders([O | Rest], MinQty, ValidAcc, RejAcc) ->
 			exerciseID:   "ch02-l07",
 			visibleCount: 3,
 			files:        map[string]string{"src/tuple_updater.erl": tupleUpdaterSolution},
+		},
+		{
+			exerciseID:   "ch02-l08",
+			visibleCount: 3,
+			files:        map[string]string{"src/inventory.erl": inventorySolution},
 		},
 	}
 
@@ -973,6 +1043,141 @@ partition_orders([O | Rest], MinQty, ValidAcc, RejAcc) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected tuple_update_and_partition stage to fail for dropped prefix items, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l08 rejects quadratic ++ append and body recursion via AST/TCO audit", func(t *testing.T) {
+		sessionID := "test-ch02-l08-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badCode := map[string]string{
+			"src/inventory.erl": `-module(inventory).
+-export([process_order/2, calculate_order_total/2, restock/2]).
+
+process_order(Inv, []) -> Inv;
+process_order(Inv, [{order, Id, Qty} | Rest]) ->
+    process_order(deduct_one(Id, Qty, Inv, []), Rest).
+
+deduct_one(_Id, _Qty, [], Acc) -> lists:reverse(Acc);
+deduct_one(Id, Qty, [{product, Id, Name, Price, Stock} | Rest], Acc) when Stock >= Qty ->
+    lists:reverse(Acc) ++ [{product, Id, Name, Price, Stock - Qty} | Rest];
+deduct_one(Id, Qty, [H | T], Acc) ->
+    deduct_one(Id, Qty, T, [H | Acc]).
+
+calculate_order_total(_Inv, []) -> 0;
+calculate_order_total(Inv, [{order, Id, Qty} | Rest]) ->
+    LineVal = case find_prod(Inv, Id) of
+        {ok, {product, Id, _Name, Price, Stock}} when Stock >= Qty -> Price * Qty;
+        _ -> 0
+    end,
+    LineVal + calculate_order_total(Inv, Rest).
+
+restock(Inv, []) -> Inv;
+restock(Inv, [{Id, Add} | Rest]) ->
+    restock(restock_one(Id, Add, Inv, []), Rest).
+
+restock_one(_Id, _Add, [], Acc) -> lists:reverse(Acc);
+restock_one(Id, Add, [{product, Id, Name, Price, Stock} | Rest], Acc) ->
+    lists:reverse(Acc) ++ [{product, Id, Name, Price, Stock + Add} | Rest];
+restock_one(Id, Add, [H | T], Acc) ->
+    restock_one(Id, Add, T, [H | Acc]).
+
+find_prod([], _Id) -> not_found;
+find_prod([{product, Id, _Name, _Price, _Stock} = P | _], Id) -> {ok, P};
+find_prod([_ | T], Id) -> find_prod(T, Id).
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch02-l08", badCode)
+		if err != nil {
+			t.Fatalf("RunVerification error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected quadratic ++ / body recursion to fail ch02-l08, got PASSED (score=%d)", report.Score)
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_and_tco_invariants" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_and_tco_invariants stage to fail for ++ append / body recursion, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l08 rejects stale-inventory sequential order bug", func(t *testing.T) {
+		sessionID := "test-ch02-l08-neg-stale"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		staleCode := map[string]string{
+			"src/inventory.erl": `-module(inventory).
+-export([process_order/2, calculate_order_total/2, restock/2]).
+
+%% Deliberate bug: ignores Stock >= Qty on deduction so sequential [{order, 1, 6}, {order, 1, 6}]
+%% against initial stock 10 leaves negative stock (-2) instead of 4.
+process_order(Inv, []) -> Inv;
+process_order(Inv, [{order, Id, Qty} | Rest]) ->
+    process_order(update_stock(Inv, Id, -Qty), Rest).
+
+update_stock(Inv, Id, Delta) ->
+    update_stock_loop(Inv, Id, Delta, []).
+
+update_stock_loop([], _Id, _Delta, Acc) -> lists:reverse(Acc);
+update_stock_loop([{product, Id, Name, Price, Stock} | Rest], Id, Delta, Acc) ->
+    update_stock_loop(Rest, Id, Delta, [{product, Id, Name, Price, Stock + Delta} | Acc]);
+update_stock_loop([H | T], Id, Delta, Acc) ->
+    update_stock_loop(T, Id, Delta, [H | Acc]).
+
+calculate_order_total(Inv, Orders) ->
+    calc_total_loop(Orders, Inv, 0).
+
+calc_total_loop([], _Inv, Acc) -> Acc;
+calc_total_loop([{order, Id, Qty} | Rest], Inv, Acc) ->
+    case find_product(Inv, Id) of
+        {ok, {product, Id, _Name, Price, Stock}} when Stock >= Qty ->
+            calc_total_loop(Rest, Inv, Acc + (Price * Qty));
+        _ ->
+            calc_total_loop(Rest, Inv, Acc)
+    end.
+
+restock(Inv, []) -> Inv;
+restock(Inv, [{Id, Add} | Rest]) ->
+    restock(update_stock(Inv, Id, Add), Rest).
+
+find_product([], _Id) -> not_found;
+find_product([{product, Id, _Name, _Price, _Stock} = P | _], Id) -> {ok, P};
+find_product([_ | T], Id) -> find_product(T, Id).
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch02-l08", staleCode)
+		if err != nil {
+			t.Fatalf("RunVerification error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected stale/unbounded order deduction to fail ch02-l08, got PASSED (score=%d)", report.Score)
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "visible_and_hidden_test_suite" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected visible_and_hidden_test_suite stage to fail for stale sequential order bug, stages=%+v", report.Stages)
 		}
 	})
 }
