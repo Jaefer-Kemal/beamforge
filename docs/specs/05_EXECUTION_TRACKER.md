@@ -2984,6 +2984,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter12Verification/ch12-l02` (`VERIFIED 100% PASSED`, score=100, 4 stages in `3.05s` / `3.509s` total); `TEST_CHAPTER=12 TestDynamicVisibleTestsCurriculum` (`ch12-capstone | 6/6 tests passed` in `1.70s` / `1.761s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 181: Pillar 5 Milestone Despoiling, ETS/Monitor AST & Full Coverage Rework of Chapter 12 Milestone 3 (`ch12-m3`)
+- [x] **181.1: Rework `ch12-m3` Textbook, Starter Stubs, AST & Full Lookup/Unregister Coverage (`src/xmpp_session_registry.erl`, `ch12-l03`)**:
+  - Updated `ch12-m3` `conceptMarkdown` in `apps/web-ide/src/data/chapters/ch12.ts` (`lines 395–515`): converted links vs. monitors into GFM `> [!IMPORTANT]`, added official OTP signatures (`ets:new/2`, `erlang:monitor/2`, `erlang:demonitor/2`) with `Types:`, authored a domain-neutral **Chunked Reference Architecture** (`lease_tracker`), and replaced verbatim ETS/monitor/lookup code with Spec 08 Pillar 2 (`Input`/`Behavior`/`Examples`) specs.
+  - Scrubbed pre-solved `ensure_table/0` (`public`, `{read_concurrency, true}`), pre-solved `parse_jid/1`, `list_all_sessions/0`, and all `%% % TODO [Milestone 3 ...]` recipes from `CH12_STARTER_FILES['src/xmpp_session_registry.erl']` (`lines 1344–1413`), replacing them with Spec 08 `%% @doc` contracts and neutral stubs (`[].`, `{JidBin, <<>>}.`, `{ok, #{monitors => #{}}}.`) compiling cleanly under `erlc.exe -Wall -Werror` while remaining 100% boot-compatible with Milestone 1 `xmpp_sup`; synced matching `%% @doc` contracts into `CH12_SOLUTION_FILES['src/xmpp_session_registry.erl']` (`lines 864–989`) and `services/orchestrator/internal/bridge/ch12_verification_test.go` (`lines 197–322`).
+  - Hardened `services/orchestrator/internal/bridge/erl_runner_chapters.go` (`case "ch12-l03"`, `lines 9002–9074`): `S2` (`m3_ast_ets_spec`) enforces `bf_ast_verifier` `required_remote_calls => [{ets, new, 2}, {erlang, monitor, 2}, {erlang, demonitor, 2}]` alongside `{public, read_concurrency}`, and `S3` (`m3_priority_routing`) now exercises exact Full JID lookup, `parse_jid/1`, `list_all_sessions/0`, and `unregister_session/1`.
+- [x] **181.2: Mandatory Live Tri-Verification & Compiler Suite (`ch12-m3`)**:
+  - **Chunked OTP Reference (`lease_tracker.erl`)**: Extracted from `ch12.ts`, compiled with `erlc.exe -Wall -Werror`, and verified ETS insertion + automatic `'DOWN'` cleanup (`REF={1,[]}`).
+  - **Starter Pack (`CH12_STARTER_FILES['src/xmpp_session_registry.erl']`)**: Compiled cleanly (`erlc.exe -Wall -Werror`), ran neutral stubs safely, and verified Milestone 1 `xmpp_sup:start_link()` / `stop()` compatibility (`STARTER={ok,[],{<<"a@h/r">>,<<>>},[],ok}`).
+  - **Solution Pack (`CH12_SOLUTION_FILES['src/xmpp_session_registry.erl']`)**: Compiled `+debug_info -Wall -Werror`, passed `bf_ast_verifier:verify_rules/3` (`ets:new/2`, `erlang:monitor/2`, `erlang:demonitor/2`), and verified ETS flags, Bare highest-priority, exact Full JID, `parse_jid/1`, `list_all_sessions/0`, `unregister_session/1`, and `'DOWN'` crash pruning.
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter12Verification/ch12-l03` (`VERIFIED 100% PASSED`, score=100, 4 stages in `2.61s` / `2.954s` total); `TEST_CHAPTER=12 TestDynamicVisibleTestsCurriculum` (`ch12-capstone | 6/6 tests passed` in `2.08s` / `2.104s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 

@@ -392,7 +392,127 @@ ets:insert(?TAB, {FullJid, BareJid, Resource, Priority, C2sPid, MRef})`,
         },
       ],
     },
-    conceptMarkdown: "## Milestone 3: High-Concurrency ETS Tables & Process Monitors\n\n### Why This Matters in Production\nIn an enterprise messaging backend, hundreds of thousands of users are concurrently online, sending stanzas and presence updates. If every routing lookup had to be processed synchronously through a single coordinator actor's message queue, that actor's mailbox would quickly become a massive CPU bottleneck.\n\nTo achieve maximum throughput, BeamForge uses a **hybrid Actor + ETS architecture**:\n- **State Writes (Registration / Teardown)**: Handled by the `xmpp_session_registry` gen_server to establish process monitors and maintain consistency.\n- **State Reads (Message Routing Lookups)**: Any routing worker executes direct, concurrent, lock-free reads from the public ETS table using `{read_concurrency, true}`.\n\n> **ETS Registration Pipeline:** Client C2S processes register via `xmpp_session_registry:register_session/3`, which creates a unidirectional monitor (`erlang:monitor/2`) and inserts a record into the public ETS table `xmpp_sessions_tab` (`{read_concurrency, true}`).\n\n### Deep Concept Breakdown: Process Monitors vs Links\nWhy does the registry use `erlang:monitor(process, C2sPid)` instead of `link(C2sPid)`?\n- **Process Links (`link/1`)**: Links are **bidirectional**. If process A links to process B, and process B crashes with reason `killed` or `badmatch`, an exit signal is sent to process A. Unless process A explicitly traps exits with `process_flag(trap_exit, true)`, process A crashes too! In a registry tracking 50,000 client sockets, a bug in a client parser could bring down the entire registry.\n- **Process Monitors (`monitor/2`)**: Monitors are **unidirectional**. The registry monitors `C2sPid`, receiving a unique reference (`MonitorRef`). If `C2sPid` crashes or its TCP socket drops, the BEAM VM automatically delivers an asynchronous message to the registry's mailbox:\n  ```erlang\n  {'DOWN', MonitorRef, process, DeadPid, Reason}\n  ```\n  The registry handles this message inside `handle_info/2`, purges the dead process from the ETS table, and cleans up without disturbing any other connection!\n\n### Full JIDs vs Bare JIDs & Priority Dispatch (RFC 6121)\nIn the XMPP protocol:\n- **Full JID**: `alice@localhost/desktop` (identifies a specific client socket connection).\n- **Bare JID**: `alice@localhost` (identifies the account).\n\nA user may be logged in simultaneously from multiple devices (e.g. iPhone with priority `5`, Desktop workstation with priority `10`). When another user sends a message to the bare JID `alice@localhost`:\n1. The registry scans the ETS table for all sessions matching that bare JID.\n2. It sorts the matching sessions in descending order of `Priority`.\n3. It returns the PID of the session with the **highest numerical priority** (`[TopPid]`).\n\n### Step-by-Step Assignment Task\n1. Open `src/xmpp_session_registry.erl`.\n2. In `ensure_table/0`, create a named public table `xmpp_sessions_tab` with `[named_table, public, set, {read_concurrency, true}]`.\n3. In `handle_call({register_session, FullJidBin, Priority, C2sPid}, ...)`:\n   - Parse `{BareJid, Resource}` with `parse_jid/1`.\n   - Monitor the PID: `MRef = erlang:monitor(process, C2sPid)`.\n   - Insert into ETS: `ets:insert(?TAB, {FullJidBin, BareJid, Resource, Priority, C2sPid, MRef})`.\n   - Store `MRef => FullJidBin` in the `monitors` map in state.\n4. In `lookup_by_jid/1`:\n   - If `TargetJid` contains `<<\"/\">>` (Full JID): return `[Pid]` from `ets:lookup(?TAB, TargetJid)` or `[]`.\n   - If `TargetJid` is a Bare JID: query all records matching `BareJid`, sort by priority descending, and return `[TopPid]` (or `[]` if none online).\n5. In `handle_info({'DOWN', MRef, process, _DeadPid, _Reason}, State)`:\n   - Find the registered `FullJid` mapped to `MRef` in `State.monitors`.\n   - Delete the entry from the ETS table with `ets:delete(?TAB, FullJid)`.\n   - Remove `MRef` from the monitors map.",
+    conceptMarkdown: `## Milestone 3: High-Concurrency ETS Tables & Process Monitors
+
+### Why This Matters in Production
+In an enterprise messaging backend with hundreds of thousands of online sockets, routing every incoming stanza synchronously through a single registry \`gen_server\` mailbox serializes the entire cluster behind one queue.
+
+BeamForge avoids that bottleneck with a **hybrid Actor + Public ETS architecture**:
+- **Writes & Monitor Lifecycle**: Serialized safely inside \`xmpp_session_registry\` (\`gen_server\`), which binds process monitors and updates rows.
+- **Reads (Hot Path Lookups)**: Executed directly by callers against a named \`public\` ETS table configured with \`{read_concurrency, true}\`, bypassing the registry mailbox completely.
+
+> [!IMPORTANT]
+> **Links vs Monitors:** \`link/1\` is bidirectional—if a buggy client C2S process crashes, it sends a lethal exit signal back into the registry unless trapped. \`erlang:monitor(process, C2sPid)\` is **unidirectional**: the registry stays insulated and receives an ordinary \`{'DOWN', MonitorRef, process, DeadPid, Reason}\` message in \`handle_info/2\` to purge the dead session from ETS.
+
+---
+
+### Deep Concept Breakdown & Under the Hood
+
+1. **Named Public ETS Table with \`{read_concurrency, true}\`**: \`public\` allows \`register_session/3\` writes from the owning \`gen_server\` while permitting any router worker calling \`lookup_by_jid/1\` to read lock-optimistically without mailbox hops.
+2. **Idempotent Table Guard**: Always inspect \`ets:whereis(xmpp_sessions_tab)\` before creating the table so concurrent reads or restarts never crash on duplicate table creation.
+3. **Demonitor Flush on Graceful Unregister**: When a client disconnects cleanly via \`unregister_session/1\`, calling \`erlang:demonitor(MRef, [flush])\` cancels the monitor and discards any already-enqueued \`'DOWN'\` message in one atomic step.
+
+---
+
+### Official OTP ETS & Monitor API Reference
+
+\`\`\`erlang
+%% Official OTP Signatures (stdlib / ets & erts / erlang)
+ets:new(Name, Options) -> tid() | atom()
+  Types: Name = atom(), Options = [Option]
+
+erlang:monitor(Type, Item) -> MonitorRef
+  Types: Type = process, Item = pid() | RegName, MonitorRef = reference()
+
+erlang:demonitor(MonitorRef, OptionList) -> boolean()
+  Types: MonitorRef = reference(), OptionList = [flush | info]
+\`\`\`
+
+Compare how ETS key lookups and unidirectional monitors pair *(see attached \`ets:lookup/2\` and \`erlang:monitor/2\` reference cards below)*.
+
+---
+
+### Chunked Reference Architecture (Domain-Neutral ETS + Monitor Pattern)
+
+The compact \`lease_tracker\` module below demonstrates ETS table initialization, unidirectional worker monitoring, \`'DOWN'\` cleanup, and \`demonitor(MRef, [flush])\` teardown (for a generic compute-lease registry unrelated to XMPP JIDs or priority sorting):
+
+\`\`\`erlang
+-module(lease_tracker).
+-behaviour(gen_server).
+-export([start_link/0, claim/2, release/1, init/1, handle_call/3, handle_cast/2, handle_info/2]).
+-define(LEASE_TAB, lease_tracker_tab).
+
+start_link() -> gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+claim(TaskId, WorkerPid) -> gen_server:call(?MODULE, {claim, TaskId, WorkerPid}).
+release(TaskId) -> gen_server:call(?MODULE, {release, TaskId}).
+
+init([]) ->
+    case ets:whereis(?LEASE_TAB) of
+        undefined -> ets:new(?LEASE_TAB, [set, named_table, public, {read_concurrency, true}]);
+        _ -> ?LEASE_TAB
+    end,
+    {ok, #{refs => #{}}}.
+
+handle_call({claim, TaskId, Pid}, _From, State = #{refs := Refs}) ->
+    MRef = erlang:monitor(process, Pid),
+    ets:insert(?LEASE_TAB, {TaskId, Pid, MRef}),
+    {reply, ok, State#{refs => Refs#{MRef => TaskId}}};
+handle_call({release, TaskId}, _From, State) ->
+    case ets:lookup(?LEASE_TAB, TaskId) of
+        [{TaskId, _Pid, MRef}] ->
+            erlang:demonitor(MRef, [flush]),
+            ets:delete(?LEASE_TAB, TaskId);
+        [] -> ok
+    end,
+    {reply, ok, State}.
+
+handle_cast(_Msg, State) -> {noreply, State}.
+handle_info({'DOWN', MRef, process, _Pid, _Reason}, State = #{refs := Refs}) ->
+    case maps:take(MRef, Refs) of
+        {TaskId, RestRefs} ->
+            ets:delete(?LEASE_TAB, TaskId),
+            {noreply, State#{refs => RestRefs}};
+        error -> {noreply, State}
+    end.
+\`\`\`
+
+---
+
+## Assignment Specification
+
+Implement \`src/xmpp_session_registry.erl\` (\`-behaviour(gen_server)\`) maintaining the public ETS table \`xmpp_sessions_tab\` with 6-tuple entries \`{FullJidBin, BareJidBin, ResourceBin, PriorityInt, C2sPid, MRef}\`:
+
+### 1. \`start_link()\` & \`stop()\`
+- **Input**: None.
+- **Behavior**: Boots and locally registers \`?MODULE\`, ensuring \`xmpp_sessions_tab\` exists with \`[set, named_table, public, {read_concurrency, true}]\`. \`stop/0\` halts the server cleanly if running or returns \`ok\`.
+
+### 2. \`parse_jid(JidBin)\`
+- **Input**: JID binary (Full \`<<"user@host/res">>\` or Bare \`<<"user@host">>\`).
+- **Behavior**: Splits on \`<<"/">>\`, returning \`{BareJidBin, ResourceBin}\` (or \`{BareJidBin, <<>>}\` when no resource slash is present).
+- **Examples**:
+  - \`parse_jid(<<"alice@localhost/mobile">>)\` -> \`{<<"alice@localhost">>, <<"mobile">>}\`
+
+### 3. \`register_session(FullJid, Priority, C2sPid)\` & \`unregister_session(FullJid)\`
+- **Input**: \`FullJid :: binary()\`, \`Priority :: integer()\`, \`C2sPid :: pid()\`.
+- **Behavior**:
+  - \`register_session/3\`: Parses JID, attaches \`erlang:monitor(process, C2sPid)\`, inserts the 6-tuple row into \`xmpp_sessions_tab\`, records \`MRef => FullJid\` in state, and returns \`ok\`.
+  - \`unregister_session/1\`: Looks up \`FullJid\`, calls \`erlang:demonitor(MRef, [flush])\`, deletes the ETS row, and returns \`ok\`.
+  - When a monitored \`C2sPid\` crashes, \`handle_info/2\` handles \`{'DOWN', MRef, process, DeadPid, _Reason}\`, deletes the ETS row, and removes \`MRef\` from state.
+
+### 4. \`lookup_by_jid(TargetJid)\` & \`list_all_sessions()\`
+- **Input**: Full or Bare JID binary for \`lookup_by_jid/1\`; none for \`list_all_sessions/0\`.
+- **Behavior**:
+  - If \`TargetJid\` is a **Full JID** (contains \`"/"\`): returns \`[Pid]\` via direct \`ets:lookup/2\`, or \`[]\` if absent.
+  - If \`TargetJid\` is a **Bare JID**: scans \`xmpp_sessions_tab\` for matching \`BareJid\`, sorts descending by \`Priority\`, and returns \`[HighestPriorityPid]\` (or \`[]\` if offline).
+  - \`list_all_sessions/0\` returns all ETS rows via \`ets:tab2list/1\`.
+
+---
+
+## Rules & Verification Constraints
+- Compile cleanly with \`erlc -Wall\` (zero warnings under \`-behaviour(gen_server)\`).
+- Must invoke \`ets:new/2\`, \`erlang:monitor/2\`, and \`erlang:demonitor/2\`.
+- \`xmpp_sessions_tab\` MUST have \`protection =:= public\` and \`read_concurrency =:= true\`.
+- Killing a monitored client PID must automatically purge its row so subsequent \`lookup_by_jid/1\` returns \`[]\` (or falls back to a surviving session).`,
   },
   {
     id: 'ch12-m4',
@@ -757,22 +877,28 @@ trim_leading_ws(Bin) ->
 
 -define(TAB, xmpp_sessions_tab).
 
+%% @doc Starts and locally registers the ETS session registry gen_server.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc Synchronously stops the locally registered session registry if running.
 stop() ->
     case whereis(?MODULE) of
         undefined -> ok;
         Pid -> gen_server:stop(Pid)
     end.
 
+%% @doc Registers FullJid with integer Priority and monitors C2sPid in ETS.
 register_session(FullJid, Priority, C2sPid)
   when is_binary(FullJid), is_integer(Priority), is_pid(C2sPid) ->
     gen_server:call(?MODULE, {register_session, FullJid, Priority, C2sPid}).
 
+%% @doc Unregisters FullJid, flushes its process monitor, and removes its ETS row.
 unregister_session(FullJid) when is_binary(FullJid) ->
     gen_server:call(?MODULE, {unregister_session, FullJid}).
 
+%% @doc Looks up recipient PIDs concurrently in ETS by exact Full JID or highest
+%% numerical priority matching a Bare JID.
 lookup_by_jid(TargetJid) when is_binary(TargetJid) ->
     ensure_table(),
     case binary:match(TargetJid, <<"/">>) of
@@ -791,10 +917,12 @@ lookup_by_jid(TargetJid) when is_binary(TargetJid) ->
             end
     end.
 
+%% @doc Returns all active 6-tuple session records stored in xmpp_sessions_tab.
 list_all_sessions() ->
     ensure_table(),
     ets:tab2list(?TAB).
 
+%% @doc Splits a JID binary into {BareJid, Resource} (empty resource when absent).
 parse_jid(JidBin) when is_binary(JidBin) ->
     case binary:split(JidBin, <<"/">>) of
         [Bare, Res] -> {Bare, Res};
@@ -1213,7 +1341,76 @@ extract_tag_body(Bin, TagName) ->
             <<>>
     end.
 `,
-  'src/xmpp_session_registry.erl': "-module(xmpp_session_registry).\n-behaviour(gen_server).\n\n-export([\n    start_link/0,\n    stop/0,\n    register_session/3,\n    unregister_session/1,\n    lookup_by_jid/1,\n    list_all_sessions/0,\n    parse_jid/1\n]).\n-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).\n\n-define(TAB, xmpp_sessions_tab).\n\nstart_link() ->\n    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).\n\nstop() ->\n    case whereis(?MODULE) of\n        undefined -> ok;\n        Pid -> gen_server:stop(Pid)\n    end.\n\nregister_session(FullJid, Priority, C2sPid)\n  when is_binary(FullJid), is_integer(Priority), is_pid(C2sPid) ->\n    gen_server:call(?MODULE, {register_session, FullJid, Priority, C2sPid}).\n\nunregister_session(FullJid) when is_binary(FullJid) ->\n    gen_server:call(?MODULE, {unregister_session, FullJid}).\n\n%% % TODO [Milestone 3 - Step 1]: Direct Concurrent ETS Lookup\n%% 1. Ensure table exists with ensure_table().\n%% 2. Check if TargetJid contains <<\"/\">>:\n%%    - If YES (Full JID): Use ets:lookup(?TAB, TargetJid).\n%%      If found, return [Pid]. If not found, return [].\n%%    - If NO (Bare JID): Find all sessions in ?TAB matching BareJid.\n%%      Sort matching sessions by Priority descending.\n%%      Return the list containing the single highest-priority PID: [TopPid], or [] if none.\nlookup_by_jid(TargetJid) when is_binary(TargetJid) ->\n    ensure_table(),\n    %% Implement lookup logic here:\n    [].\n\nlist_all_sessions() ->\n    ensure_table(),\n    ets:tab2list(?TAB).\n\nparse_jid(JidBin) when is_binary(JidBin) ->\n    case binary:split(JidBin, <<\"/\">>) of\n        [Bare, Res] -> {Bare, Res};\n        [Bare] -> {Bare, <<>>}\n    end.\n\nensure_table() ->\n    case ets:info(?TAB) of\n        undefined ->\n            ets:new(?TAB, [named_table, public, set, {read_concurrency, true}]);\n        _ ->\n            ?TAB\n    end.\n\ninit([]) ->\n    ensure_table(),\n    {ok, #{monitors => #{}}}.\n\n%% % TODO [Milestone 3 - Step 2]: Implement Session Registration & Monitoring\n%% 1. Call parse_jid(FullJidBin) to get {BareJid, Resource}.\n%% 2. Call MRef = erlang:monitor(process, C2sPid).\n%% 3. Insert record into ?TAB: {FullJidBin, BareJid, Resource, Priority, C2sPid, MRef}.\n%% 4. Save MRef => FullJidBin in State.monitors map.\n%% 5. Return {reply, ok, NewState}.\nhandle_call({register_session, FullJidBin, Priority, C2sPid}, _From, State) ->\n    ensure_table(),\n    %% Implement registration here:\n    {reply, ok, State};\n\n%% % TODO [Milestone 3 - Step 3]: Implement Session Unregistration\n%% 1. Look up FullJidBin in ?TAB to find MRef.\n%% 2. Demonitor with erlang:demonitor(MRef, [flush]).\n%% 3. Delete from ?TAB with ets:delete(?TAB, FullJidBin).\n%% 4. Return {reply, ok, State}.\nhandle_call({unregister_session, FullJidBin}, _From, State) ->\n    ensure_table(),\n    %% Implement unregistration here:\n    {reply, ok, State};\n\nhandle_call(_Req, _From, State) ->\n    {reply, {error, unknown_request}, State}.\n\nhandle_cast(_Msg, State) ->\n    {noreply, State}.\n\n%% % TODO [Milestone 3 - Step 4]: Process Monitor Termination Handler\n%% When a monitored C2S process terminates, the BEAM delivers:\n%% {'DOWN', MRef, process, DeadPid, Reason}\n%% 1. Find FullJid mapped to MRef in State.monitors.\n%% 2. Delete entry from ?TAB with ets:delete(?TAB, FullJid).\n%% 3. Remove MRef from the monitors map.\n%% 4. Return {noreply, NewState}.\nhandle_info({'DOWN', MRef, process, _DeadPid, _Reason}, State) ->\n    ensure_table(),\n    %% Implement monitor cleanup here:\n    {noreply, State};\n\nhandle_info(_Info, State) ->\n    {noreply, State}.\n\nterminate(_Reason, _State) ->\n    ok.\n",
+  'src/xmpp_session_registry.erl': `-module(xmpp_session_registry).
+-behaviour(gen_server).
+
+-export([
+    start_link/0,
+    stop/0,
+    register_session/3,
+    unregister_session/1,
+    lookup_by_jid/1,
+    list_all_sessions/0,
+    parse_jid/1
+]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+
+-define(TAB, xmpp_sessions_tab).
+
+%% @doc Starts and locally registers the ETS session registry gen_server.
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+%% @doc Synchronously stops the locally registered session registry if running.
+stop() ->
+    case whereis(?MODULE) of
+        undefined -> ok;
+        Pid -> gen_server:stop(Pid)
+    end.
+
+%% @doc Registers FullJid with integer Priority and monitors C2sPid in ETS.
+register_session(FullJid, Priority, C2sPid)
+  when is_binary(FullJid), is_integer(Priority), is_pid(C2sPid) ->
+    gen_server:call(?MODULE, {register_session, FullJid, Priority, C2sPid}).
+
+%% @doc Unregisters FullJid, flushes its process monitor, and removes its ETS row.
+unregister_session(FullJid) when is_binary(FullJid) ->
+    gen_server:call(?MODULE, {unregister_session, FullJid}).
+
+%% @doc Looks up recipient PIDs concurrently in ETS by exact Full JID or highest
+%% numerical priority matching a Bare JID.
+lookup_by_jid(TargetJid) when is_binary(TargetJid) ->
+    [].
+
+%% @doc Returns all active 6-tuple session records stored in xmpp_sessions_tab.
+list_all_sessions() ->
+    [].
+
+%% @doc Splits a JID binary into {BareJid, Resource} (empty resource when absent).
+parse_jid(JidBin) when is_binary(JidBin) ->
+    {JidBin, <<>>}.
+
+init([]) ->
+    {ok, #{monitors => #{}}}.
+
+handle_call({register_session, _FullJidBin, _Priority, _C2sPid}, _From, State) ->
+    {reply, ok, State};
+handle_call({unregister_session, _FullJidBin}, _From, State) ->
+    {reply, ok, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_request}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info({'DOWN', _MRef, process, _DeadPid, _Reason}, State) ->
+    {noreply, State};
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+`,
   'src/xmpp_c2s_statem.erl': `-module(xmpp_c2s_statem).
 -behaviour(gen_statem).
 

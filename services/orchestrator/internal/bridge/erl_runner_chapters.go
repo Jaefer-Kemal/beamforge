@@ -9000,25 +9000,37 @@ catch C1:R1 ->
 end,
 
 S2 = try
+    BeamPath = code:which(xmpp_session_registry),
+    WsRoot = filename:dirname(filename:dirname(BeamPath)),
+    SrcPath = filename:join([WsRoot, "src", "xmpp_session_registry.erl"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    AstRes = bf_ast_verifier:verify_rules(SrcPath, BeamBin, #{
+        required_remote_calls => [{ets, new, 2}, {erlang, monitor, 2}, {erlang, demonitor, 2}]
+    }),
     {ok, _} = xmpp_session_registry:start_link(),
     TabInfo = ets:info(xmpp_sessions_tab),
-    Protection = proplists:get_value(protection, TabInfo),
-    ReadConc = proplists:get_value(read_concurrency, TabInfo),
-    case (Protection =:= public) andalso (ReadConc =:= true) of
-        true ->
+    Protection = case is_list(TabInfo) of true -> proplists:get_value(protection, TabInfo); false -> undefined end,
+    ReadConc = case is_list(TabInfo) of true -> proplists:get_value(read_concurrency, TabInfo); false -> undefined end,
+    case {AstRes, Protection =:= public andalso ReadConc =:= true} of
+        {{ok, _}, true} ->
             #{id => <<"m3_ast_ets_spec">>,
-              title => <<"ETS Configuration: Public Table & Read Concurrency">>,
+              title => <<"ETS & AST Spec: Public Table, Read Concurrency & Monitors">>,
               status => <<"passed">>, time_ms => 20,
-              details => <<"xmpp_sessions_tab configured as public with {read_concurrency, true}.">>};
-        false ->
+              details => <<"Verified ets:new/2, erlang:monitor/2, erlang:demonitor/2 AST calls and xmpp_sessions_tab {public, read_concurrency}.">>};
+        {{error, AstErr}, _} ->
             #{id => <<"m3_ast_ets_spec">>,
-              title => <<"ETS Configuration: Public Table & Read Concurrency">>,
+              title => <<"ETS & AST Spec: Public Table, Read Concurrency & Monitors">>,
+              status => <<"failed">>, time_ms => 20,
+              details => list_to_binary(io_lib:format("AST violation: ~p", [AstErr]))};
+        {_, false} ->
+            #{id => <<"m3_ast_ets_spec">>,
+              title => <<"ETS & AST Spec: Public Table, Read Concurrency & Monitors">>,
               status => <<"failed">>, time_ms => 20,
               details => list_to_binary(io_lib:format("Protection: ~p (exp public), ReadConc: ~p (exp true)", [Protection, ReadConc]))}
     end
 catch C2:R2 ->
     #{id => <<"m3_ast_ets_spec">>,
-      title => <<"ETS Configuration">>,
+      title => <<"ETS & AST Spec">>,
       status => <<"failed">>, time_ms => 20,
       details => list_to_binary(io_lib:format("ETS info crashed: ~p:~p", [C2, R2]))}
 end,
@@ -9029,19 +9041,30 @@ S3 = try
     ok = xmpp_session_registry:register_session(<<"carol@localhost/phone">>, 5, PPhone),
     ok = xmpp_session_registry:register_session(<<"carol@localhost/desktop">>, 10, PDesk),
     Highest = xmpp_session_registry:lookup_by_jid(<<"carol@localhost">>),
+    ExactPhone = xmpp_session_registry:lookup_by_jid(<<"carol@localhost/phone">>),
+    AllSessions = xmpp_session_registry:list_all_sessions(),
+    ParsedWithRes = xmpp_session_registry:parse_jid(<<"carol@localhost/desktop">>),
+    ParsedBare = xmpp_session_registry:parse_jid(<<"carol@localhost">>),
+    ok = xmpp_session_registry:unregister_session(<<"carol@localhost/phone">>),
+    AfterUnreg = xmpp_session_registry:lookup_by_jid(<<"carol@localhost/phone">>),
     exit(PDesk, kill),
     exit(PPhone, kill),
-    case Highest =:= [PDesk] of
+    CheckAll = (Highest =:= [PDesk]) andalso (ExactPhone =:= [PPhone]) andalso
+        (length(AllSessions) >= 2) andalso
+        (ParsedWithRes =:= {<<"carol@localhost">>, <<"desktop">>}) andalso
+        (ParsedBare =:= {<<"carol@localhost">>, <<>>}) andalso
+        (AfterUnreg =:= []),
+    case CheckAll of
         true ->
             #{id => <<"m3_priority_routing">>,
-              title => <<"Priority Resolution: Highest-Priority Session Routing">>,
+              title => <<"Priority, Full JID, Unregister & JID Parse Verification">>,
               status => <<"passed">>, time_ms => 25,
-              details => <<"lookup_by_jid correctly prioritized desktop (prio 10) over phone (prio 5).">>};
+              details => <<"Verified bare highest-priority lookup, exact Full JID lookup, parse_jid/1, list_all_sessions/0, and unregister_session/1.">>};
         false ->
             #{id => <<"m3_priority_routing">>,
-              title => <<"Priority Resolution: Highest-Priority Session Routing">>,
+              title => <<"Priority, Full JID, Unregister & JID Parse Verification">>,
               status => <<"failed">>, time_ms => 25,
-              details => list_to_binary(io_lib:format("Expected [~p], got: ~p", [PDesk, Highest]))}
+              details => list_to_binary(io_lib:format("Highest=~p Exact=~p AfterUnreg=~p Parsed=~p", [Highest, ExactPhone, AfterUnreg, {ParsedWithRes, ParsedBare}]))}
     end
 catch C3:R3 ->
     #{id => <<"m3_priority_routing">>,

@@ -210,22 +210,28 @@ trim_leading_ws(Bin) ->
 
 -define(TAB, xmpp_sessions_tab).
 
+%% @doc Starts and locally registers the ETS session registry gen_server.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc Synchronously stops the locally registered session registry if running.
 stop() ->
     case whereis(?MODULE) of
         undefined -> ok;
         Pid -> gen_server:stop(Pid)
     end.
 
+%% @doc Registers FullJid with integer Priority and monitors C2sPid in ETS.
 register_session(FullJid, Priority, C2sPid)
   when is_binary(FullJid), is_integer(Priority), is_pid(C2sPid) ->
     gen_server:call(?MODULE, {register_session, FullJid, Priority, C2sPid}).
 
+%% @doc Unregisters FullJid, flushes its process monitor, and removes its ETS row.
 unregister_session(FullJid) when is_binary(FullJid) ->
     gen_server:call(?MODULE, {unregister_session, FullJid}).
 
+%% @doc Looks up recipient PIDs concurrently in ETS by exact Full JID or highest
+%% numerical priority matching a Bare JID.
 lookup_by_jid(TargetJid) when is_binary(TargetJid) ->
     ensure_table(),
     case binary:match(TargetJid, <<"/">>) of
@@ -244,10 +250,12 @@ lookup_by_jid(TargetJid) when is_binary(TargetJid) ->
             end
     end.
 
+%% @doc Returns all active 6-tuple session records stored in xmpp_sessions_tab.
 list_all_sessions() ->
     ensure_table(),
     ets:tab2list(?TAB).
 
+%% @doc Splits a JID binary into {BareJid, Resource} (empty resource when absent).
 parse_jid(JidBin) when is_binary(JidBin) ->
     case binary:split(JidBin, <<"/">>) of
         [Bare, Res] -> {Bare, Res};
