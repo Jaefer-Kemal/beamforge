@@ -267,7 +267,97 @@ Implement \`src/xmpp_sup.erl\` with \`-behaviour(supervisor)\`, exporting \`star
         },
       ],
     },
-    conceptMarkdown: "## Milestone 2: Binary TCP Stream Framing & Memory Unpinning\n\n### Why This Matters in Production\nTCP is a streaming byte protocol, not a message-oriented protocol. When an XMPP client on an iPhone or Android device sends a packet over cellular LTE or Wi-Fi, the network stack does **not** preserve application message boundaries.\n\nAn XML stanza like `<message to='alice@localhost'><body>Hello</body></message>` can be fragmented across two separate TCP packets by OS buffer flushing, IP MTU segmentation, or Nagle's algorithm:\n\n```\nTCP Packet 1: <<\"<message to='alice@localhost'><body>Hel\">>\nTCP Packet 2: <<\"lo</body></message><ping id='p1'/>\">>\n```\n\nIf your server attempts to parse each TCP packet in isolation with a standard XML parser, it will crash with a syntax error on Packet 1! A production network server must implement an **incremental accumulator pattern** that buffers incomplete trailing bytes and extracts complete protocol frames across packet arrivals.\n\n### Deep Concept Breakdown: Sub-Binary Heap Retention Leaks\nErlang's binary pattern matching is the fastest in the industry because binary slicing (`<<Slice:Len/binary, Rest/binary>> = Bin`) is an **O(1)** operation. It does not copy memory; it creates a lightweight `sub_binary` reference pointing directly into the original parent binary allocation.\n\nHowever, this creates a notorious BEAM memory leak known as **Sub-Binary Retention**:\n- In Erlang, binaries larger than 64 bytes are allocated in a global off-heap memory area called **ProcBins** (reference-counted binaries).\n- Suppose your server reads a 64KB TCP buffer from a socket.\n- Your parser slices out a 4-byte username `<<\"alex\">>` and stores it inside the user's persistent session state.\n- **THE PITFALL:** The BEAM garbage collector *cannot* free the 64KB parent binary as long as that 4-byte slice exists! If your server handles 100,000 users, you have just pinned 6.4 GB of dead TCP buffer memory in RAM!\n\n> **Memory Pinning Rule:** Without `binary:copy/1`, a 4-byte username slice pins the entire 64 KB TCP buffer in RAM. With `binary:copy/1`, the slice is copied to the local process heap, allowing the 64 KB off-heap ProcBin buffer to be reclaimed immediately.\n\n> **MANDATORY PRODUCTION RULE:** Whenever you extract an attribute string or XML body payload that will outlive the current function call, always pass it through `binary:copy/1`. This forces a fresh, unpinned heap allocation and allows the underlying TCP buffer to be immediately reclaimed by garbage collection.\n\n### Protocol Stanzas to Recognize\nYour framer must recognize and emit:\n- `<stream:stream to='...'>` -> `{stream_open, Domain}`\n- `</stream:stream>` -> `stream_close`\n- `<ping id='...'/>` -> `{ping, Id}`\n- `<auth mechanism='...'>user</auth>` -> `{sasl_auth, Mechanism, Payload}`\n- `<iq id='...'><resource>res</resource></iq>` -> `{iq_bind, Id, Resource}`\n- `<message id='...' to='...'><body>text</body></message>` -> `{chat_message, Id, To, Body}`\n\n### Step-by-Step Assignment Task\n1. Open `src/xmpp_stream_parser.erl`.\n2. In `feed_chunk(BufferBin, IncomingBin)`, concatenate `<<BufferBin/binary, IncomingBin/binary>>` and invoke `extract_events(Combined, [])`.\n3. In `extract_events/2`, handle whitespace trimming and pattern match each stanza:\n   - For `<ping`: match `<<\"/>\">>`, extract `\"id\"` attribute with `binary:copy/1`, and emit `{ping, Id}`.\n   - For `<auth`: match closing `<<\"</auth>\">>`, extract `\"mechanism\"` attribute and body, copy with `binary:copy/1`, and emit `{sasl_auth, Mech, Payload}`.\n   - For `<iq`: match closing `<<\"</iq>\">>`, extract `\"id\"` and `<resource>` body, copy with `binary:copy/1`, and emit `{iq_bind, Id, Res}`.\n   - For `<message`: match closing `<<\"</message>\">>`, extract `\"id\"`, `\"to\"`, and `<body>` body, copy with `binary:copy/1`, and emit `{chat_message, Id, To, Body}`.\n4. If the trailing bytes contain an incomplete XML element, return `{lists:reverse(Acc), binary:copy(CleanBin)}` so the leftover bytes are preserved for the next chunk!",
+    conceptMarkdown: `## Milestone 2: Binary TCP Stream Framing & Memory Unpinning
+
+### Why This Matters in Production
+TCP is a streaming byte protocol rather than a message-oriented transport: cellular or Wi-Fi segments split and coalesce application payloads arbitrarily. A single \`<message>\` element can span two OS reads, or two complete stanzas can arrive glued together inside one TCP packet. Parsing chunks without an accumulator crashes on partial frames, whereas keeping raw binary slices forever leaks off-heap socket buffers.
+
+> [!IMPORTANT]
+> **Sub-Binary Retention Invariant:** Binaries larger than 64 bytes live on the shared off-heap allocator (\`ProcBin\`). Slicing a short field such as an attribute value with \`<<Slice:Len/binary, _/binary>>\` creates an $O(1)$ \`sub_binary\` reference that keeps the entire parent \`ProcBin\` pinned until GC reclaims every slice. Passing extracted fields and leftover buffers through \`binary:copy/1\` detaches long-lived events from the incoming chunk immediately.
+
+---
+
+### Deep Concept Breakdown & Under the Hood
+
+1. **Concatenate and Scan Incrementally**: Append incoming bytes onto the caller's trailing buffer (\`<<BufferBin/binary, IncomingBin/binary>>\`), skip leading XML whitespace (space \`32\`, tab \`9\`, LF \`10\`, CR \`13\`), and decode as many complete frames in order as fit in the combined buffer.
+2. **Accumulate Leftover Incomplete Bytes**: Whenever a tag header lacks its closing delimiter (\`>\`, \`/>\`, or closing element tag), stop scanning, reverse the decoded events accumulator, and return a detached copy of the unparsed tail so the next \`feed_chunk/2\` call resumes seamlessly.
+
+---
+
+### Official OTP Binary Framing API Reference
+
+\`\`\`erlang
+%% Official OTP Signatures (stdlib / binary)
+binary:match(Subject, Pattern) -> {Pos, Length} | nomatch
+  Types: Subject = binary(), Pattern = binary() | [binary()], Pos = non_neg_integer(), Length = non_neg_integer()
+
+binary:copy(Subject) -> binary()
+  Types: Subject = binary()
+\`\`\`
+
+\`binary:match/2\` performs fast C-implemented byte search without list conversion; combine its \`{Pos, Length}\` match offset with binary bit-syntax slicing, then unpin retained attributes, bodies, and leftover fragments with \`binary:copy/1\`.
+
+---
+
+### Chunked Reference Architecture (Domain-Neutral Byte Framer)
+
+The small \`kv_line_framer\` example below shows how a stateless accumulator appends buffers, slices complete semicolon-delimited records with \`binary:match/2\`, unpins retained values with \`binary:copy/1\`, and returns any trailing incomplete fragment (for a separate key-value wire format unrelated to XMPP):
+
+\`\`\`erlang
+-module(kv_line_framer).
+-export([push/2]).
+
+push(Buf, Chunk) ->
+    scan(<<Buf/binary, Chunk/binary>>, []).
+
+scan(<<>>, Acc) ->
+    {lists:reverse(Acc), <<>>};
+scan(Bin, Acc) ->
+    case binary:match(Bin, <<";">>) of
+        {Pos, 1} ->
+            <<Frame:Pos/binary, ";", Rest/binary>> = Bin,
+            scan(Rest, [{record, binary:copy(Frame)} | Acc]);
+        nomatch ->
+            {lists:reverse(Acc), binary:copy(Bin)}
+    end.
+\`\`\`
+
+---
+
+## Assignment Specification
+
+Complete \`src/xmpp_stream_parser.erl\` exporting \`new_buffer/0\`, \`feed_chunk/2\`, \`extract_attr/2\`, and \`extract_tag_body/2\` (clean EDoc XML slice helpers \`extract_attr/2\` and \`extract_tag_body/2\` are pre-provided in the starter file—their slices still reference parent binaries, so callers must unpin extracted fields):
+
+### 1. \`new_buffer()\`
+- **Input**: None.
+- **Behavior**: Returns an empty binary \`<<>>\` representing an initial stream buffer.
+
+### 2. \`extract_attr(Bin, AttrName)\` & \`extract_tag_body(Bin, TagName)\`
+- **Input**: XML frame binary and attribute/tag name binary.
+- **Behavior**:
+  - \`extract_attr/2\` returns the attribute value quoted with \`"\` or \`'\`, or \`<<>>\` if absent.
+  - \`extract_tag_body/2\` returns the inner bytes between \`<TagName ...>\` and \`</TagName>\`, or \`<<>>\` if absent.
+
+### 3. \`feed_chunk(BufferBin, IncomingBin)\`
+- **Input**: Existing leftover buffer binary and newly arrived TCP chunk binary.
+- **Behavior**: Concatenates both binaries, strips leading whitespace before each frame, parses all complete XMPP elements in order into event terms, unpins extracted strings and incomplete remainders via \`binary:copy/1\`, and returns \`{EventsList, NewBufferBin}\`. Recognize all 6 protocol frames:
+  - \`<stream:stream ...>\` -> \`{stream_open, Domain}\` (default \`to\` fallback \`<<"localhost">>\`)
+  - \`</stream:stream>\` -> \`stream_close\`
+  - \`<ping .../>\` -> \`{ping, Id}\` (default \`id\` fallback \`<<"ping_1">>\`)
+  - \`<auth ...>Payload</auth>\` -> \`{sasl_auth, Mechanism, Payload}\` (default \`mechanism\` fallback \`<<"PLAIN">>\`)
+  - \`<iq ...>...<resource>Res</resource>...</iq>\` -> \`{iq_bind, Id, Resource}\` (default \`id\` fallback \`<<"bind_1">>\`)
+  - \`<message ...>...<body>Body</body>...</message>\` -> \`{chat_message, Id, To, Body}\` (default \`id\` fallback \`<<"msg_1">>\`, default \`to\` fallback \`<<>>\`)
+- **Examples**:
+  - \`feed_chunk(<<"<stream:str">>, <<"eam to='localhost'><ping id='p1'/>">>)\` -> \`{[{stream_open, <<"localhost">>}, {ping, <<"p1">>}], <<>>}\`
+  - \`feed_chunk(<<>>, <<"<auth mechanism='PLAIN'>token">>) \` -> \`{[], <<"<auth mechanism='PLAIN'>token">>}\`
+
+---
+
+## Rules & Verification Constraints
+- Compile cleanly with \`erlc -Wall\` (zero warnings).
+- Export \`new_buffer/0\`, \`feed_chunk/2\`, \`extract_attr/2\`, and \`extract_tag_body/2\`.
+- Must invoke \`binary:copy/1\` and \`binary:match/2\`; live heap safety verification asserts \`binary:referenced_byte_size(Id) < 500\` on a 4 KB source frame.
+- Must handle arbitrary TCP splits across all 6 stanza types (\`stream_open\`, \`stream_close\`, \`ping\`, \`sasl_auth\`, \`iq_bind\`, \`chat_message\`).`,
   },
   {
     id: 'ch12-m3',
@@ -514,9 +604,12 @@ init([]) ->
   'src/xmpp_stream_parser.erl': `-module(xmpp_stream_parser).
 -export([new_buffer/0, feed_chunk/2, extract_attr/2, extract_tag_body/2]).
 
+%% @doc Returns an empty initial framing buffer binary.
 new_buffer() ->
     <<>>.
 
+%% @doc Appends IncomingBin onto BufferBin, decodes all complete XMPP stream
+%% frames into event tuples with unpinned binaries, and returns leftover bytes.
 feed_chunk(BufferBin, IncomingBin) when is_binary(BufferBin), is_binary(IncomingBin) ->
     Combined = <<BufferBin/binary, IncomingBin/binary>>,
     extract_events(Combined, []).
@@ -583,6 +676,8 @@ extract_closed_tag(Bin, CloseTag, Fun, Acc) ->
             {lists:reverse(Acc), binary:copy(Bin)}
     end.
 
+%% @doc Extracts the unquoted value of AttrName from an XML element binary,
+%% returning empty binary if the attribute is absent.
 extract_attr(Bin, AttrName) ->
     extract_attr(Bin, AttrName, <<>>).
 
@@ -614,6 +709,8 @@ find_attr_val(Bin, Key, QuoteChar) ->
             nomatch
     end.
 
+%% @doc Extracts the inner text bytes delimited by <TagName ...> and </TagName>,
+%% returning empty binary if the element is absent or unclosed.
 extract_tag_body(Bin, TagName) ->
     OpenTag = <<"<", TagName/binary>>,
     CloseTag = <<"</", TagName/binary, ">">>,
@@ -1045,7 +1142,77 @@ stop() ->
 init([]) ->
     {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, []}}.
 `,
-  'src/xmpp_stream_parser.erl': "-module(xmpp_stream_parser).\n-export([new_buffer/0, feed_chunk/2, extract_attr/2, extract_tag_body/2]).\n\nnew_buffer() ->\n    <<>>.\n\nfeed_chunk(BufferBin, IncomingBin) when is_binary(BufferBin), is_binary(IncomingBin) ->\n    Combined = <<BufferBin/binary, IncomingBin/binary>>,\n    extract_events(Combined, []).\n\nextract_events(Bin, Acc) ->\n    CleanBin = trim_leading_ws(Bin),\n    case CleanBin of\n        <<>> ->\n            {lists:reverse(Acc), <<>>};\n\n        <<\"</stream:stream>\", Rest/binary>> ->\n            extract_events(Rest, [stream_close | Acc]);\n\n        <<\"<stream:stream\", _/binary>> ->\n            case binary:match(CleanBin, <<\">\">>) of\n                {Pos, 1} ->\n                    HeaderLen = Pos + 1,\n                    <<HeaderBin:HeaderLen/binary, Rest/binary>> = CleanBin,\n                    Domain = binary:copy(extract_attr(HeaderBin, <<\"to\">>, <<\"localhost\">>)),\n                    extract_events(Rest, [{stream_open, Domain} | Acc]);\n                nomatch ->\n                    {lists:reverse(Acc), binary:copy(CleanBin)}\n            end;\n\n        %% % TODO [Milestone 2 - Step 1]: Parse self-closing <ping id='...'/>\n        %% 1. Match prefix <<\"<ping\", _/binary>>.\n        %% 2. Check for closing <<\"/>\">>. If incomplete, return {lists:reverse(Acc), binary:copy(CleanBin)}.\n        %% 3. Extract the \"id\" attribute (default <<\"ping_1\">>).\n        %% 4. CRITICAL: Unpin with binary:copy/1!\n        %% 5. Recurse with [{ping, Id} | Acc].\n        <<\"<ping\", _/binary>> ->\n            %% Implement ping stanza extraction here:\n            {lists:reverse(Acc), binary:copy(CleanBin)};\n\n        %% % TODO [Milestone 2 - Step 2]: Parse <auth mechanism='...'>payload</auth>\n        %% 1. Use extract_closed_tag(CleanBin, <<\"</auth>\">>, Fun, Acc).\n        %% 2. In Fun, extract attribute \"mechanism\" (default <<\"PLAIN\">>).\n        %% 3. Extract tag body using extract_tag_body(FrameBin, <<\"auth\">>).\n        %% 4. CRITICAL: Unpin both strings with binary:copy/1!\n        %% 5. Return event: {sasl_auth, Mech, Payload}.\n        <<\"<auth\", _/binary>> ->\n            %% Implement sasl auth stanza extraction here:\n            {lists:reverse(Acc), binary:copy(CleanBin)};\n\n        %% % TODO [Milestone 2 - Step 3]: Parse <iq id='...'><resource>res</resource></iq>\n        %% 1. Use extract_closed_tag(CleanBin, <<\"</iq>\">>, Fun, Acc).\n        %% 2. In Fun, extract attribute \"id\" (default <<\"bind_1\">>).\n        %% 3. Extract resource body using extract_tag_body(FrameBin, <<\"resource\">>).\n        %% 4. Unpin with binary:copy/1, and return: {iq_bind, Id, Res}.\n        <<\"<iq\", _/binary>> ->\n            %% Implement iq bind stanza extraction here:\n            {lists:reverse(Acc), binary:copy(CleanBin)};\n\n        %% % TODO [Milestone 2 - Step 4]: Parse <message id='...' to='...'><body>body</body></message>\n        %% 1. Use extract_closed_tag(CleanBin, <<\"</message>\">>, Fun, Acc).\n        %% 2. In Fun, extract \"id\" (default <<\"msg_1\">>), \"to\" (default <<>>), and body with extract_tag_body/2.\n        %% 3. Unpin all three with binary:copy/1, and return: {chat_message, Id, To, Body}.\n        <<\"<message\", _/binary>> ->\n            %% Implement chat message stanza extraction here:\n            {lists:reverse(Acc), binary:copy(CleanBin)};\n\n        Other ->\n            {lists:reverse(Acc), binary:copy(Other)}\n    end.\n\n%% ── Helper Framing Utilities (Pre-built for you) ─────────────────────────────\nextract_closed_tag(Bin, CloseTag, Fun, Acc) ->\n    CloseTagLen = byte_size(CloseTag),\n    case binary:match(Bin, CloseTag) of\n        {Pos, CloseTagLen} ->\n            TotalLen = Pos + CloseTagLen,\n            <<FrameBin:TotalLen/binary, Rest/binary>> = Bin,\n            Event = Fun(FrameBin),\n            extract_events(Rest, [Event | Acc]);\n        nomatch ->\n            {lists:reverse(Acc), binary:copy(Bin)}\n    end.\n\nextract_attr(Bin, AttrName) ->\n    extract_attr(Bin, AttrName, <<>>).\n\nextract_attr(Bin, AttrName, Default) ->\n    Key1 = <<AttrName/binary, 61, 34>>,\n    Key2 = <<AttrName/binary, 61, 39>>,\n    case find_attr_val(Bin, Key1, <<34>>) of\n        {ok, Val} -> Val;\n        nomatch ->\n            case find_attr_val(Bin, Key2, <<39>>) of\n                {ok, Val} -> Val;\n                nomatch -> Default\n            end\n    end.\n\nfind_attr_val(Bin, Key, QuoteChar) ->\n    case binary:match(Bin, Key) of\n        {Pos, Len} ->\n            Start = Pos + Len,\n            <<_:Start/binary, Rem/binary>> = Bin,\n            case binary:match(Rem, QuoteChar) of\n                {ValLen, _} ->\n                    <<Val:ValLen/binary, _/binary>> = Rem,\n                    {ok, Val};\n                nomatch ->\n                    nomatch\n            end;\n        nomatch ->\n            nomatch\n    end.\n\nextract_tag_body(Bin, TagName) ->\n    OpenTag = <<\"<\", TagName/binary>>,\n    CloseTag = <<\"</\", TagName/binary, \">\">>,\n    case binary:match(Bin, OpenTag) of\n        {PosOpen, _} ->\n            <<_:PosOpen/binary, Rem1/binary>> = Bin,\n            case binary:match(Rem1, <<\">\">>) of\n                {PosCloseOpen, 1} ->\n                    ContentStart = PosCloseOpen + 1,\n                    <<_:ContentStart/binary, Rem2/binary>> = Rem1,\n                    case binary:match(Rem2, CloseTag) of\n                        {BodyLen, _} ->\n                            <<Body:BodyLen/binary, _/binary>> = Rem2,\n                            Body;\n                        nomatch ->\n                            <<>>\n                    end;\n                nomatch ->\n                    <<>>\n            end;\n        nomatch ->\n            <<>>\n    end.\n\ntrim_leading_ws(<<C, Rest/binary>>) when C =:= 32; C =:= 9; C =:= 10; C =:= 13 ->\n    trim_leading_ws(Rest);\ntrim_leading_ws(Bin) ->\n    Bin.\n",
+  'src/xmpp_stream_parser.erl': `-module(xmpp_stream_parser).
+-export([new_buffer/0, feed_chunk/2, extract_attr/2, extract_tag_body/2]).
+
+%% @doc Returns an empty initial framing buffer binary.
+new_buffer() ->
+    <<>>.
+
+%% @doc Appends IncomingBin onto BufferBin, decodes all complete XMPP stream
+%% frames into event tuples with unpinned binaries, and returns leftover bytes.
+feed_chunk(_BufferBin, _IncomingBin) ->
+    {[], <<>>}.
+
+%% @doc Extracts the unquoted value of AttrName from an XML element binary,
+%% returning empty binary if the attribute is absent.
+extract_attr(Bin, AttrName) ->
+    extract_attr(Bin, AttrName, <<>>).
+
+extract_attr(Bin, AttrName, Default) ->
+    Key1 = <<AttrName/binary, 61, 34>>,
+    Key2 = <<AttrName/binary, 61, 39>>,
+    case find_attr_val(Bin, Key1, <<34>>) of
+        {ok, Val} -> Val;
+        nomatch ->
+            case find_attr_val(Bin, Key2, <<39>>) of
+                {ok, Val} -> Val;
+                nomatch -> Default
+            end
+    end.
+
+find_attr_val(Bin, Key, QuoteChar) ->
+    case binary:match(Bin, Key) of
+        {Pos, Len} ->
+            Start = Pos + Len,
+            <<_:Start/binary, Rem/binary>> = Bin,
+            case binary:match(Rem, QuoteChar) of
+                {ValLen, _} ->
+                    <<Val:ValLen/binary, _/binary>> = Rem,
+                    {ok, Val};
+                nomatch ->
+                    nomatch
+            end;
+        nomatch ->
+            nomatch
+    end.
+
+%% @doc Extracts the inner text bytes delimited by <TagName ...> and </TagName>,
+%% returning empty binary if the element is absent or unclosed.
+extract_tag_body(Bin, TagName) ->
+    OpenTag = <<"<", TagName/binary>>,
+    CloseTag = <<"</", TagName/binary, ">">>,
+    case binary:match(Bin, OpenTag) of
+        {PosOpen, _} ->
+            <<_:PosOpen/binary, Rem1/binary>> = Bin,
+            case binary:match(Rem1, <<">">>) of
+                {PosCloseOpen, 1} ->
+                    ContentStart = PosCloseOpen + 1,
+                    <<_:ContentStart/binary, Rem2/binary>> = Rem1,
+                    case binary:match(Rem2, CloseTag) of
+                        {BodyLen, _} ->
+                            <<Body:BodyLen/binary, _/binary>> = Rem2,
+                            Body;
+                        nomatch ->
+                            <<>>
+                    end;
+                nomatch ->
+                    <<>>
+            end;
+        nomatch ->
+            <<>>
+    end.
+`,
   'src/xmpp_session_registry.erl': "-module(xmpp_session_registry).\n-behaviour(gen_server).\n\n-export([\n    start_link/0,\n    stop/0,\n    register_session/3,\n    unregister_session/1,\n    lookup_by_jid/1,\n    list_all_sessions/0,\n    parse_jid/1\n]).\n-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).\n\n-define(TAB, xmpp_sessions_tab).\n\nstart_link() ->\n    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).\n\nstop() ->\n    case whereis(?MODULE) of\n        undefined -> ok;\n        Pid -> gen_server:stop(Pid)\n    end.\n\nregister_session(FullJid, Priority, C2sPid)\n  when is_binary(FullJid), is_integer(Priority), is_pid(C2sPid) ->\n    gen_server:call(?MODULE, {register_session, FullJid, Priority, C2sPid}).\n\nunregister_session(FullJid) when is_binary(FullJid) ->\n    gen_server:call(?MODULE, {unregister_session, FullJid}).\n\n%% % TODO [Milestone 3 - Step 1]: Direct Concurrent ETS Lookup\n%% 1. Ensure table exists with ensure_table().\n%% 2. Check if TargetJid contains <<\"/\">>:\n%%    - If YES (Full JID): Use ets:lookup(?TAB, TargetJid).\n%%      If found, return [Pid]. If not found, return [].\n%%    - If NO (Bare JID): Find all sessions in ?TAB matching BareJid.\n%%      Sort matching sessions by Priority descending.\n%%      Return the list containing the single highest-priority PID: [TopPid], or [] if none.\nlookup_by_jid(TargetJid) when is_binary(TargetJid) ->\n    ensure_table(),\n    %% Implement lookup logic here:\n    [].\n\nlist_all_sessions() ->\n    ensure_table(),\n    ets:tab2list(?TAB).\n\nparse_jid(JidBin) when is_binary(JidBin) ->\n    case binary:split(JidBin, <<\"/\">>) of\n        [Bare, Res] -> {Bare, Res};\n        [Bare] -> {Bare, <<>>}\n    end.\n\nensure_table() ->\n    case ets:info(?TAB) of\n        undefined ->\n            ets:new(?TAB, [named_table, public, set, {read_concurrency, true}]);\n        _ ->\n            ?TAB\n    end.\n\ninit([]) ->\n    ensure_table(),\n    {ok, #{monitors => #{}}}.\n\n%% % TODO [Milestone 3 - Step 2]: Implement Session Registration & Monitoring\n%% 1. Call parse_jid(FullJidBin) to get {BareJid, Resource}.\n%% 2. Call MRef = erlang:monitor(process, C2sPid).\n%% 3. Insert record into ?TAB: {FullJidBin, BareJid, Resource, Priority, C2sPid, MRef}.\n%% 4. Save MRef => FullJidBin in State.monitors map.\n%% 5. Return {reply, ok, NewState}.\nhandle_call({register_session, FullJidBin, Priority, C2sPid}, _From, State) ->\n    ensure_table(),\n    %% Implement registration here:\n    {reply, ok, State};\n\n%% % TODO [Milestone 3 - Step 3]: Implement Session Unregistration\n%% 1. Look up FullJidBin in ?TAB to find MRef.\n%% 2. Demonitor with erlang:demonitor(MRef, [flush]).\n%% 3. Delete from ?TAB with ets:delete(?TAB, FullJidBin).\n%% 4. Return {reply, ok, State}.\nhandle_call({unregister_session, FullJidBin}, _From, State) ->\n    ensure_table(),\n    %% Implement unregistration here:\n    {reply, ok, State};\n\nhandle_call(_Req, _From, State) ->\n    {reply, {error, unknown_request}, State}.\n\nhandle_cast(_Msg, State) ->\n    {noreply, State}.\n\n%% % TODO [Milestone 3 - Step 4]: Process Monitor Termination Handler\n%% When a monitored C2S process terminates, the BEAM delivers:\n%% {'DOWN', MRef, process, DeadPid, Reason}\n%% 1. Find FullJid mapped to MRef in State.monitors.\n%% 2. Delete entry from ?TAB with ets:delete(?TAB, FullJid).\n%% 3. Remove MRef from the monitors map.\n%% 4. Return {noreply, NewState}.\nhandle_info({'DOWN', MRef, process, _DeadPid, _Reason}, State) ->\n    ensure_table(),\n    %% Implement monitor cleanup here:\n    {noreply, State};\n\nhandle_info(_Info, State) ->\n    {noreply, State}.\n\nterminate(_Reason, _State) ->\n    ok.\n",
   'src/xmpp_c2s_statem.erl': `-module(xmpp_c2s_statem).
 -behaviour(gen_statem).

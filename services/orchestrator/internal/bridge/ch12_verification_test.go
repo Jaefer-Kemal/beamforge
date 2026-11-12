@@ -57,9 +57,12 @@ init([]) ->
 	ch12ParserSol = `-module(xmpp_stream_parser).
 -export([new_buffer/0, feed_chunk/2, extract_attr/2, extract_tag_body/2]).
 
+%% @doc Returns an empty initial framing buffer binary.
 new_buffer() ->
     <<>>.
 
+%% @doc Appends IncomingBin onto BufferBin, decodes all complete XMPP stream
+%% frames into event tuples with unpinned binaries, and returns leftover bytes.
 feed_chunk(BufferBin, IncomingBin) when is_binary(BufferBin), is_binary(IncomingBin) ->
     Combined = <<BufferBin/binary, IncomingBin/binary>>,
     extract_events(Combined, []).
@@ -126,6 +129,8 @@ extract_closed_tag(Bin, CloseTag, Fun, Acc) ->
             {lists:reverse(Acc), binary:copy(Bin)}
     end.
 
+%% @doc Extracts the unquoted value of AttrName from an XML element binary,
+%% returning empty binary if the attribute is absent.
 extract_attr(Bin, AttrName) ->
     extract_attr(Bin, AttrName, <<>>).
 
@@ -157,6 +162,8 @@ find_attr_val(Bin, Key, QuoteChar) ->
             nomatch
     end.
 
+%% @doc Extracts the inner text bytes delimited by <TagName ...> and </TagName>,
+%% returning empty binary if the element is absent or unclosed.
 extract_tag_body(Bin, TagName) ->
     OpenTag = <<"<", TagName/binary>>,
     CloseTag = <<"</", TagName/binary, ">">>,

@@ -8877,25 +8877,37 @@ catch C1:R1 ->
 end,
 
 S2 = try
+    BeamPath = code:which(xmpp_stream_parser),
+    WsRoot = filename:dirname(filename:dirname(BeamPath)),
+    SrcPath = filename:join([WsRoot, "src", "xmpp_stream_parser.erl"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    AstRes = bf_ast_verifier:verify_rules(SrcPath, BeamBin, #{
+        required_remote_calls => [{binary, copy, 1}, {binary, match, 2}]
+    }),
     %% Heap memory unpinning check
     BigBin = <<"  <message id='msg_secret_123' to='bob@localhost'><body>Data: ", (binary:copy(<<"Z">>, 4096))/binary, "</body></message>">>,
     {[{chat_message, Id, _To, _Body}], <<>>} = xmpp_stream_parser:feed_chunk(<<>>, BigBin),
     RefSize = binary:referenced_byte_size(Id),
-    case RefSize < 500 of
-        true ->
+    case {AstRes, RefSize < 500} of
+        {{ok, _}, true} ->
             #{id => <<"m2_ast_memory_safety">>,
-              title => <<"Memory Safety: Sub-Binary Heap Unpinning (binary:copy/1)">>,
+              title => <<"AST & Memory Safety: Sub-Binary Heap Unpinning (binary:copy/1)">>,
               status => <<"passed">>, time_ms => 20,
-              details => list_to_binary(io_lib:format("Id unpinned from 4KB source binary (referenced_byte_size: ~p bytes).", [RefSize]))};
-        false ->
+              details => list_to_binary(io_lib:format("Verified binary:copy/1 + binary:match/2 AST calls; Id unpinned from 4KB source (referenced_byte_size: ~p bytes).", [RefSize]))};
+        {{error, AstErr}, _} ->
             #{id => <<"m2_ast_memory_safety">>,
-              title => <<"Memory Safety: Sub-Binary Heap Unpinning (binary:copy/1)">>,
+              title => <<"AST & Memory Safety: Sub-Binary Heap Unpinning (binary:copy/1)">>,
+              status => <<"failed">>, time_ms => 20,
+              details => list_to_binary(io_lib:format("AST violation: ~p", [AstErr]))};
+        {_, false} ->
+            #{id => <<"m2_ast_memory_safety">>,
+              title => <<"AST & Memory Safety: Sub-Binary Heap Unpinning (binary:copy/1)">>,
               status => <<"failed">>, time_ms => 20,
               details => list_to_binary(io_lib:format("Sub-binary retention leak detected! referenced_byte_size: ~p bytes (expected < 500). Call binary:copy/1 on extracted values.", [RefSize]))}
     end
 catch C2:R2 ->
     #{id => <<"m2_ast_memory_safety">>,
-      title => <<"Memory Safety: Sub-Binary Heap Unpinning">>,
+      title => <<"AST & Memory Safety: Sub-Binary Heap Unpinning">>,
       status => <<"failed">>, time_ms => 20,
       details => list_to_binary(io_lib:format("Memory test crashed: ~p:~p", [C2, R2]))}
 end,
@@ -8904,20 +8916,28 @@ S3 = try
     B0 = xmpp_stream_parser:new_buffer(),
     {E1, B1} = xmpp_stream_parser:feed_chunk(B0, <<"<stream:st">>),
     {E2, B2} = xmpp_stream_parser:feed_chunk(B1, <<"ream to='localhost'>">>),
-    {E3, B3} = xmpp_stream_parser:feed_chunk(B2, <<"<ping id='p1'/><auth mechanism='PLAIN'>token</auth>">>),
-    All = E1 ++ E2 ++ E3,
-    Expected = [{stream_open, <<"localhost">>}, {ping, <<"p1">>}, {sasl_auth, <<"PLAIN">>, <<"token">>}],
-    case (All =:= Expected) andalso (B3 =:= <<>>) of
+    {E3, B3} = xmpp_stream_parser:feed_chunk(B2, <<"<ping id='p1'/><auth mechanism='PLAIN'>token</auth><iq id='b1'><resource>desk</resource></iq><message id='m1' to='bob@localhost'><body>Hel">>),
+    {E4, B4} = xmpp_stream_parser:feed_chunk(B3, <<"lo</body></message></stream:stream>">>),
+    All = E1 ++ E2 ++ E3 ++ E4,
+    Expected = [
+        {stream_open, <<"localhost">>},
+        {ping, <<"p1">>},
+        {sasl_auth, <<"PLAIN">>, <<"token">>},
+        {iq_bind, <<"b1">>, <<"desk">>},
+        {chat_message, <<"m1">>, <<"bob@localhost">>, <<"Hello">>},
+        stream_close
+    ],
+    case (All =:= Expected) andalso (B4 =:= <<>>) of
         true ->
             #{id => <<"m2_fragmented_stream_parsing">>,
-              title => <<"Incremental Framing: Stream Open, Ping & SASL Auth">>,
+              title => <<"Incremental Framing: All 6 Stanza Types Across TCP Splits">>,
               status => <<"passed">>, time_ms => 25,
-              details => <<"Successfully assembled fragmented TCP chunks and emitted structured event tuples.">>};
+              details => <<"Successfully assembled fragmented TCP chunks for stream_open, ping, sasl_auth, iq_bind, chat_message, and stream_close.">>};
         false ->
             #{id => <<"m2_fragmented_stream_parsing">>,
-              title => <<"Incremental Framing: Stream Open, Ping & SASL Auth">>,
+              title => <<"Incremental Framing: All 6 Stanza Types Across TCP Splits">>,
               status => <<"failed">>, time_ms => 25,
-              details => list_to_binary(io_lib:format("Events: ~p, Buf: ~p", [All, B3]))}
+              details => list_to_binary(io_lib:format("Events: ~p, Buf: ~p", [All, B4]))}
     end
 catch C3:R3 ->
     #{id => <<"m2_fragmented_stream_parsing">>,
