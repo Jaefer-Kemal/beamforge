@@ -1243,25 +1243,79 @@ init:stop().
 	case "ch04-l01":
 		return `
 T1_Start = erlang:system_time(millisecond),
-T1_Res = try
-    S0 = map_registry:create_session(alice, admin),
-    S1 = map_registry:update_presence(S0, alice, online),
-    IsAdmin = map_registry:is_admin_session(S1),
-    case {S1, IsAdmin} of
-        {#{user_id := alice, role := admin, presence := online, login_count := 1}, true} ->
-            #{call_str => <<"map_registry:create_session(alice, admin) + update_presence(S0, alice, online)">>,
-              expected => <<"#{user_id => alice, role => admin, presence => online, login_count => 1}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [S1]))), passed => true,
-              time_ms => erlang:system_time(millisecond) - T1_Start};
-        Got1 ->
-            #{call_str => <<"map_registry:update_presence(...)">>, expected => <<"#{...}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got1]))), passed => false, time_ms => 0}
-    end
-catch C1:R1 ->
-    #{call_str => <<"map_registry:create_session(...)">>, expected => <<"#{...}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+T1_Res = try map_registry:create_session(alice, admin) of
+    #{login_count := 0, presence := offline, role := admin, user_id := alice} = S_R1 when map_size(S_R1) =:= 4 ->
+        #{call_str => <<"map_registry:create_session(alice, admin)">>,
+          expected => <<"#{login_count => 0, presence => offline, role => admin, user_id => alice}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [S_R1]))), passed => true,
+          time_ms => erlang:system_time(millisecond) - T1_Start};
+    Other1 ->
+        #{call_str => <<"map_registry:create_session(alice, admin)">>,
+          expected => <<"#{login_count => 0, presence => offline, role => admin, user_id => alice}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
+catch C1:Err1 ->
+    #{call_str => <<"map_registry:create_session(alice, admin)">>,
+      expected => <<"#{login_count => 0, presence => offline, role => admin, user_id => alice}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    S_T2 = map_registry:create_session(alice, admin),
+    case map_registry:update_presence(S_T2, alice, online) of
+        #{login_count := 1, presence := online, role := admin, user_id := alice} = S2_R2 when map_size(S2_R2) =:= 4 ->
+            #{call_str => <<"begin S = map_registry:create_session(alice, admin), map_registry:update_presence(S, alice, online) end">>,
+              expected => <<"#{login_count => 1, presence => online, role => admin, user_id => alice}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [S2_R2]))), passed => true,
+              time_ms => erlang:system_time(millisecond) - T2_Start};
+        Other2 ->
+            #{call_str => <<"begin S = map_registry:create_session(alice, admin), map_registry:update_presence(S, alice, online) end">>,
+              expected => <<"#{login_count => 1, presence => online, role => admin, user_id => alice}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
+    end
+catch C2:Err2 ->
+    #{call_str => <<"begin S = map_registry:create_session(alice, admin), map_registry:update_presence(S, alice, online) end">>,
+      expected => <<"#{login_count => 1, presence => online, role => admin, user_id => alice}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    S_T3 = map_registry:create_session(alice, admin),
+    case map_registry:update_presence(S_T3, bob, online) of
+        {error, session_mismatch} = R3 ->
+            #{call_str => <<"begin S = map_registry:create_session(alice, admin), map_registry:update_presence(S, bob, online) end">>,
+              expected => <<"{error, session_mismatch}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))), passed => true,
+              time_ms => erlang:system_time(millisecond) - T3_Start};
+        Other3 ->
+            #{call_str => <<"begin S = map_registry:create_session(alice, admin), map_registry:update_presence(S, bob, online) end">>,
+              expected => <<"{error, session_mismatch}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
+    end
+catch C3:Err3 ->
+    #{call_str => <<"begin S = map_registry:create_session(alice, admin), map_registry:update_presence(S, bob, online) end">>,
+      expected => <<"{error, session_mismatch}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3])), passed => false, time_ms => 0}
+end,
+T4_Start = erlang:system_time(millisecond),
+T4_Res = try
+    S_T4 = map_registry:create_session(alice, admin),
+    S2_T4 = map_registry:update_presence(S_T4, alice, online),
+    case map_registry:is_admin_session(S2_T4) of
+        true ->
+            #{call_str => <<"begin S = map_registry:create_session(alice, admin), S2 = map_registry:update_presence(S, alice, online), map_registry:is_admin_session(S2) end">>,
+              expected => <<"true">>, actual => <<"true">>, passed => true,
+              time_ms => erlang:system_time(millisecond) - T4_Start};
+        Other4 ->
+            #{call_str => <<"begin S = map_registry:create_session(alice, admin), S2 = map_registry:update_presence(S, alice, online), map_registry:is_admin_session(S2) end">>,
+              expected => <<"true">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other4]))), passed => false, time_ms => 0}
+    end
+catch C4:Err4 ->
+    #{call_str => <<"begin S = map_registry:create_session(alice, admin), S2 = map_registry:update_presence(S, alice, online), map_registry:is_admin_session(S2) end">>,
+      expected => <<"true">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, Err4])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -5822,33 +5876,89 @@ Stages = [CompileStage_H07, S_Ast_H07, S1_HofSuite]
 		return fmt.Sprintf(`
 CompileStage_M01 = case code:ensure_loaded(map_registry) of
     {module, map_registry} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"map_registry.erl compiled cleanly; create_session/2, update_presence/3, and is_admin_session/1 exported">>};
+        Exports_M01 = map_registry:module_info(exports),
+        Req_M01 = [{create_session, 2}, {update_presence, 3}, {is_admin_session, 1}],
+        Missing_M01 = [FA || FA <- Req_M01, not lists:member(FA, Exports_M01)],
+        case Missing_M01 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"map_registry.erl compiled cleanly; create_session/2, update_presence/3, and is_admin_session/1 exported">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_M01]))}
+        end;
     {error, E_M01} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_M01]))}
 end,
+S_Ast_M01 = try
+    SourceCandidates_M01 = [
+        filename:join(["%s", "src", "map_registry.erl"]),
+        filename:join(["%s", "map_registry.erl"])
+    ],
+    SourceFile_M01 = case [P || P <- SourceCandidates_M01, filelib:is_regular(P)] of
+        [ValidSrc_M01 | _] -> ValidSrc_M01;
+        [] -> hd(SourceCandidates_M01)
+    end,
+    Rules_M01 = #{
+        required_constructs => [map_exact_match]
+    },
+    MissingExactFuns_M01 = case epp:parse_file(SourceFile_M01, []) of
+        {ok, Forms_M01} ->
+            HasExact_M01 = fun WalkEx(Node) when is_tuple(Node) ->
+                case element(1, Node) of
+                    map_field_exact -> true;
+                    _ -> WalkEx(tuple_to_list(Node))
+                end;
+                WalkEx([H | T]) -> WalkEx(H) orelse WalkEx(T);
+                WalkEx(_) -> false
+            end,
+            [{N, A} || {N, A} <- [{update_presence, 3}, {is_admin_session, 1}],
+                not lists:any(fun({function, _, FN, FA, Clauses}) when FN =:= N, FA =:= A -> HasExact_M01(Clauses); (_) -> false end, Forms_M01)];
+        _ ->
+            [parse_error]
+    end,
+    case {bf_ast_verifier:verify_rules(SourceFile_M01, <<>>, Rules_M01), MissingExactFuns_M01} of
+        {{ok, _}, []} ->
+            #{id => <<"ast_map_registry_audit">>, title => <<"AST Map Exact Match (:=) Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified map_exact_match (:=) in both update_presence/3 and is_admin_session/1.">>};
+        {{ok, _}, MissingExList_M01} ->
+            #{id => <<"ast_map_registry_audit">>, title => <<"AST Map Exact Match (:=) Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Exact map matching/updating (:=) required in update_presence/3 and is_admin_session/1 (missing in: ~p).", [MissingExList_M01]))};
+        {{error, AstViolations_M01}, _} ->
+            FirstMsg_M01 = case AstViolations_M01 of
+                [#{message := M_M01} | _] -> M_M01;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_M01]))
+            end,
+            #{id => <<"ast_map_registry_audit">>, title => <<"AST Map Exact Match (:=) Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_M01, error => AstViolations_M01}
+    end
+catch Class_Ast_M01:Err_Ast_M01 ->
+    #{id => <<"ast_map_registry_audit">>, title => <<"AST Map Exact Match (:=) Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [Class_Ast_M01, Err_Ast_M01]))}
+end,
 S1_Maps = try
     S0 = map_registry:create_session(alice, admin),
+    SInt = map_registry:create_session(42, guest),
     S1 = map_registry:update_presence(S0, alice, online),
     S2 = map_registry:update_presence(S1, alice, busy),
     Mismatch = map_registry:update_presence(S1, bob, online),
+    NonMapUpd = map_registry:update_presence(not_a_map, alice, online),
     AdminCheck1 = map_registry:is_admin_session(S1),
     AdminCheck2 = map_registry:is_admin_session(S0),
     AdminCheck3 = map_registry:is_admin_session(#{role => member, presence => online}),
-    case {S0, S1, S2, Mismatch, AdminCheck1, AdminCheck2, AdminCheck3} of
+    AdminCheck4 = map_registry:is_admin_session(#{role => admin}),
+    AdminCheck5 = map_registry:is_admin_session(not_a_map),
+    case {S0, SInt, S1, S2, Mismatch, NonMapUpd, AdminCheck1, AdminCheck2, AdminCheck3, AdminCheck4, AdminCheck5} of
         {#{user_id := alice, role := admin, presence := offline, login_count := 0},
+         #{user_id := 42, role := guest, presence := offline, login_count := 0},
          #{user_id := alice, role := admin, presence := online, login_count := 1},
          #{user_id := alice, role := admin, presence := busy, login_count := 2},
          {error, session_mismatch},
-         true, false, false} ->
-            #{id => <<"maps_operations">>, title => <<"Map Creation, Exact Matching (:=), & Login Presence Counter">>, status => <<"passed">>, time_ms => 8, details => <<"Verified #{key := Val} exact matching, bound variable checks, session mismatch rejection, and admin checks">>};
+         {error, session_mismatch},
+         true, false, false, false, false} when map_size(S0) =:= 4, map_size(SInt) =:= 4 ->
+            #{id => <<"maps_operations">>, title => <<"Map Creation, Exact Matching (:=), & Login Presence Counter">>, status => <<"passed">>, time_ms => 8, details => <<"Verified #{key := Val} exact matching, bound variable checks, non-map safety, incomplete-map rejection, and login counter">>};
         Got_M01 ->
             #{id => <<"maps_operations">>, title => <<"Map Creation, Exact Matching (:=), & Login Presence Counter">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Map mismatch: ~p", [Got_M01]))}
     end
 catch Class_M01:Err_M01 ->
     #{id => <<"maps_operations">>, title => <<"Map Creation, Exact Matching (:=), & Login Presence Counter">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_M01, Err_M01]))}
 end,
-Stages = [CompileStage_M01, S1_Maps]
-`), true
+Stages = [CompileStage_M01, S_Ast_M01, S1_Maps]
+`, wsDir, wsDir), true
 
 	case "ch04-l02":
 		return fmt.Sprintf(`

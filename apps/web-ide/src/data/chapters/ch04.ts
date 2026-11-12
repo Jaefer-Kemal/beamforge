@@ -12,149 +12,145 @@ export const CHAPTER_4_LESSONS: LessonContent[] = [
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-In distributed systems, REST APIs, and actor process state stores, data structures need to evolve dynamically. While tuples require knowing fixed numerical offsets and records require compile-time headers, **Maps (\`#{}\`)** provide arbitrary key-value associations where keys can be added, updated, or removed dynamically at runtime.
+In distributed systems, REST APIs, and actor process state stores, data structures need to evolve cleanly as schemas grow. While tuples depend on fixed positional offsets and records require compile-time header macros, **Maps (\`#{}\`)** provide associative key-value collections indexed directly by key name.
 
-Maps are the foundation of modern Erlang architectures: they represent JSON payloads, database rows, telemetry metadata, and dynamic process state in high-throughput OTP clusters.
+Maps are the backbone of modern Erlang architectures: they represent decoded JSON payloads, database rows, telemetry tags, and actor state records across high-throughput OTP clusters.
 
 ## Deep Concept Breakdown & Under the Hood
 
 ### 1. Two Engine Architectures: FlatMap vs. HAMT
 
-Under the hood, the BEAM Run-Time System (ERTS) does not implement a one-size-fits-all hash table. Instead, it dynamically transitions between two distinct data representations based on key count:
+Under the hood, the BEAM Run-Time System (ERTS) switches dynamically between two internal representations based on map size:
 
 1. **FlatMap (=< 32 keys):**
-   - Implemented as two contiguous arrays: a sorted tuple of keys (\`{K1, K2, ...}\`) and an array of values (\`{V1, V2, ...}\`).
-   - Key lookups execute via binary search in $O(\log N)$ or fast linear CPU cache scans.
-   - **Massive Memory Optimization:** When you update a field in a 20-key map (\`Map#{status := active}\`), the new map version shares the exact same key tuple pointer with the original! Only a new value tuple is allocated, drastically reducing process heap memory churn.
+   - Stored as two contiguous tuples: a sorted tuple of keys (\`{K1, K2, ...}\`) paired with a tuple of values (\`{V1, V2, ...}\`).
+   - Updates like \`Map#{Key := NewVal}\` share the exact existing keys tuple pointer with the prior version on the process heap—allocating only a new values array and minimizing GC pressure.
 2. **HAMT Map (> 32 keys):**
-   - Automatically promoted into a **Hash Array Mapped Trie** with 32-way branching trees.
-   - Lookups and updates execute in $O(\log_{32} N)$—near-constant time—with optimal structural sharing across nodes.
+   - Automatically promoted to a 32-way **Hash Array Mapped Trie**, providing $O(\log_{32} N)$ lookups and updates with structural path sharing across trie nodes.
 
 ### 2. The Two Map Arrows: Association (\`=>\`) vs. Exact Matching (\`:=\`)
 
-Erlang distinguishes sharply between creating/inserting a key and asserting its prior existence:
+Erlang separates inserting keys from asserting prior key existence:
 
 #### Association (\`Key => Value\`)
-- Used when constructing a map or inserting/overwriting a key regardless of whether it exists.
-- **Strictly Illegal in Pattern Matching!** Writing \`#{player_id => PId} = Map\` causes an immediate compile error.
+- Used when building a new map literal or inserting/overwriting a key regardless of whether it existed before.
+- **Strictly illegal in pattern matching!** Writing \`#{k => V} = Map\` fails to compile.
 
 \`\`\`erlang
-%% Construction:
-Profile0 = #{player_id => hero_1, class => warrior, health => 100, mana => 50}.
+%% Construction of a fresh FlatMap:
+Config0 = #{region => us_east, retries => 3, tls => true}.
 \`\`\`
 
 #### Exact Match / Update (\`Key := Value\`)
-1. **In Pattern Matching:** Matches existing keys and extracts their values. Since OTP 18, the key can even be a **previously bound variable**:
+1. **In Pattern Matching:** Matches only when the named key already exists in the map and extracts or compares its value. Keys or matched values can even reference **previously bound variables**:
    \`\`\`erlang
-   %% Matches only if Task has id equal to the bound variable TargetId:
-   update_task_status(#{id := TargetId, retries := RetryCount} = Task, TargetId, NewStatus) ->
-       Task#{status := NewStatus, retries := RetryCount + 1}.
+   %% Succeeds only when the route's bound TargetPort matches the parameter TargetPort:
+   rebind_port(#{port := TargetPort} = Endpoint, TargetPort, NewProto) ->
+       Endpoint#{protocol := NewProto}.
    \`\`\`
-2. **In Map Updates:** \`Map#{status := NewStatus}\` asserts that \`status\` already exists.
-   If you make a typo like \`Map#{statuss := active}\`, the BEAM VM **fails fast** with an immediate \`{badkey, statuss}\` crash instead of silently corrupting your state!
+2. **In Map Updates:** \`Map#{key := Val}\` asserts that \`key\` already exists before creating the updated map. If a key name is misspelled, ERTS raises an immediate \`{badkey, Key}\` runtime error rather than silently adding a stray bogus key.
 
 > [!warning] Common Beginner Trap: The Map Arrow Inversion
-> Always remember:
-> - **In map pattern matching:** ALWAYS use \`:=\` (\`#{role := admin} = Map\`).
-> - **When creating new maps:** Use \`=>\` (\`#{user_id => alice}\`).
-> - **When updating existing fields:** Use \`:=\` (\`Map#{presence := online}\`) to catch field name typos at runtime.
+> - **Pattern matching keys:** ALWAYS use \`:=\` (\`#{role := admin} = Map\`).
+> - **Constructing new maps:** Use \`=>\` (\`#{node_id => n1, weight => 10}\`).
+> - **Updating existing keys:** Prefer \`:=\` (\`Map#{health := degraded}\`) so typos fail fast instead of mutating schema shape silently.
 
-### 3. Multi-Clause Matching on Map Keys
+### 3. Multi-Clause Matching on Map Shapes
 
-You can match specific key values directly in function heads:
+Function heads can match multiple exact map keys simultaneously and fall through safely when given partial maps or non-map terms:
 
 \`\`\`erlang
 is_primary_coordinator(#{role := coordinator, health := healthy}) -> true;
 is_primary_coordinator(_) -> false.
 \`\`\`
 
-## Parallel Worked Example: IoT Device Telemetry Registry
+## Parallel Worked Example
 
-The following module manages connected IoT devices. Notice how \`register_device/2\` constructs a map with \`=>\`, \`update_ping/3\` asserts matching identity and updates existing fields with \`:=\`, and \`is_active_gateway/1\` uses multi-clause head pattern matching:
-
-\`\`\`erlang
--module(device_registry).
--export([register_device/2, update_ping/3, is_active_gateway/1]).
-
-%% 1. Construct map using =>
-register_device(DeviceId, Type) ->
-    #{device_id => DeviceId, type => Type, status => idle, heartbeat_count => 0}.
-
-%% 2. Exact match on bound variable DeviceId and update using :=
-update_ping(#{device_id := ExpectedId, heartbeat_count := Cnt} = Device, ExpectedId, NewStatus) ->
-    Device#{status := NewStatus, heartbeat_count := Cnt + 1};
-update_ping(_MismatchedDevice, _ExpectedId, _NewStatus) ->
-    {error, device_mismatch}.
-
-%% 3. Head matching on specific atom values
-is_active_gateway(#{type := gateway, status := active}) -> true;
-is_active_gateway(_) -> false.
-\`\`\`
-
-## Standard Library Function Reference
+The module below manages cryptographic vault leases. Notice how \`open_lease/3\` initializes a fresh map with \`=>\`, while \`extend_or_seal/3\` uses multi-clause pattern matching with \`:=\`, bound-variable equality, and exact key updates:
 
 \`\`\`erlang
-%% Map construction
-#{Key => Value, ...}
+-module(vault_lease).
+-export([open_lease/3, extend_or_seal/3]).
 
-%% Exact pattern matching and update
-#{Key := Value} = Map
-Map#{Key := NewValue}
+%% ── Phase 1: Map Construction with => ─────────────────────────────────────
+%% Creates a 4-field lease map initialized in unsealed state.
+open_lease(ScopeTag, TenantKey, TtlSeconds) ->
+    #{
+        scope => ScopeTag,
+        owner => TenantKey,
+        ttl => TtlSeconds,
+        sealed => false
+    }.
+
+%% ── Phase 2: Bound Exact Matching & Stateful Updating with := ─────────────
+%% Only unsealed leases matching ExpectedScope can be extended or sealed.
+extend_or_seal(#{scope := ExpectedScope, sealed := false, ttl := Ttl} = Lease, ExpectedScope, {extend, ExtraSec})
+  when is_integer(ExtraSec), ExtraSec > 0 ->
+    Lease#{ttl := Ttl + ExtraSec};
+extend_or_seal(#{scope := ExpectedScope, sealed := false} = Lease, ExpectedScope, seal) ->
+    Lease#{sealed := true};
+extend_or_seal(_LeaseOrBadTerm, _ExpectedScope, _Action) ->
+    {error, scope_locked}.
 \`\`\`
+
+How the BEAM executes these clauses:
+- **Phase 1 (\`open_lease/3\`)**: Allocates a 4-key FlatMap sharing a static sorted key tuple across leases with identical field names.
+- **Phase 2 (\`extend_or_seal/3\`)**: Matches \`scope\` against the bound argument \`ExpectedScope\` and asserts \`sealed := false\` directly in the VM head instruction before allocating an updated value tuple sharing the original keys tuple; mismatched scopes, already-sealed leases, or non-map terms fall safely to clause 3.
+
+## Official Erlang Docs & Function Reference
+
+\`\`\`erlang
+%% Map construction & key insertion (expressions)
+#{Key => Value} -> map()
+Map#{Key => Value} -> NewMap
+
+%% Exact key pattern matching & exact key update (expressions)
+#{Key := Pattern} = Map
+Map#{Key := NewValue} -> NewMap
+  Types:
+    Key = term()
+    Value = Pattern = NewValue = term()
+    Map = NewMap = map()
+\`\`\`
+
+> How to read these expressions: A map literal matching \`Map\` on the left-hand side MUST use \`:=\` for every matched key (and non-matching clauses fall through cleanly without raising \`badmatch\` in multi-clause functions). On the right-hand side, \`=>\` inserts or overwrites whereas \`:=\` requires the key to already exist. Open the attached **Reference Card** for \`map_expressions\` documentation.
 
 ## Assignment Specification
 
 Implement user session tracking functions in \`src/map_registry.erl\`:
 
-### 1. \`create_session/2\`
+### 1. \`create_session(UserId, Role)\`
 - **Input**:
-  - \`UserId\`: An atom or integer identifier for the user.
-  - \`Role\`: An atom designating permissions (e.g., \`admin\`, \`member\`, \`guest\`).
-- **Behavior**: Construct and return a map using the association operator (\`=>\`) with four initial fields:
-  - \`user_id => UserId\`
-  - \`role => Role\`
-  - \`presence => offline\`
-  - \`login_count => 0\`
+  - \`UserId\` — An atom or integer identifier for the user.
+  - \`Role\` — An atom designating permissions (such as \`admin\`, \`member\`, or \`guest\`).
+- **Behavior**: Construct and return a 4-key session map storing \`user_id\` set to \`UserId\`, \`role\` set to \`Role\`, initial \`presence\` set to \`offline\`, and initial \`login_count\` set to \`0\`.
 - **Examples**:
-  \`\`\`erlang
-  map_registry:create_session(alice, admin)
-  %% => #{login_count => 0, presence => offline, role => admin, user_id => alice}
-  \`\`\`
+  - \`map_registry:create_session(alice, admin)\` returns \`#{login_count => 0, presence => offline, role => admin, user_id => alice}\`.
 
-### 2. \`update_presence/3\`
+### 2. \`update_presence(Session, ExpectedUserId, NewPresence)\`
 - **Input**:
-  - \`Session\`: An existing session map.
-  - \`ExpectedUserId\`: The expected user identifier atom or integer.
-  - \`NewPresence\`: The updated presence atom (e.g., \`online\`, \`busy\`, \`away\`).
-- **Behavior**: Update the session using exact pattern matching (\`:=\`):
-  - If \`Session\` contains a \`user_id\` matching the bound argument \`ExpectedUserId\`, update the map by setting \`presence\` to \`NewPresence\` and incrementing \`login_count\` by \`1\` using the exact update operator (\`:=\`).
-  - If the session belongs to a different user (the user ID does not match \`ExpectedUserId\`), return the error tuple: \`{error, session_mismatch}\`.
+  - \`Session\` — An existing session map (or arbitrary term if invalid).
+  - \`ExpectedUserId\` — The expected user identifier atom or integer.
+  - \`NewPresence\` — The updated presence atom (such as \`online\`, \`busy\`, or \`away\`).
+- **Behavior**: Verify identity via exact map pattern matching against the bound \`ExpectedUserId\`:
+  - If \`Session\` is a map containing a \`user_id\` equal to \`ExpectedUserId\`, update \`presence\` to \`NewPresence\` and increment \`login_count\` by \`1\` using exact key update semantics.
+  - Otherwise (wrong user, missing required keys, or non-map term), return \`{error, session_mismatch}\`.
 - **Examples**:
-  \`\`\`erlang
-  S0 = map_registry:create_session(alice, admin),
-  map_registry:update_presence(S0, alice, online)
-  %% => #{login_count => 1, presence => online, role => admin, user_id => alice}
+  - Calling \`update_presence(S0, alice, online)\` on \`S0 = map_registry:create_session(alice, admin)\` returns \`#{login_count => 1, presence => online, role => admin, user_id => alice}\`.
+  - Calling \`update_presence(S0, bob, online)\` on that same \`S0\` returns \`{error, session_mismatch}\`.
 
-  map_registry:update_presence(S0, bob, online)
-  %% => {error, session_mismatch}
-  \`\`\`
-
-### 3. \`is_admin_session/1\`
-- **Input**: Any term or map \`Session\`.
-- **Behavior**: Determine whether \`Session\` corresponds to an active administrator:
-  - Return \`true\` if \`Session\` is a map where \`role\` matches the atom \`admin\` and \`presence\` matches the atom \`online\`.
-  - Return \`false\` for any other map, non-admin role, offline/busy state, or non-map terms.
+### 3. \`is_admin_session(Session)\`
+- **Input**: \`Session\` — An arbitrary Erlang term or map.
+- **Behavior**: Return \`true\` if and only if \`Session\` is a map whose \`role\` equals \`admin\` and \`presence\` equals \`online\`; return \`false\` for any other map (including offline/busy admins, incomplete maps lacking either key, non-admin roles) or any non-map term without crashing.
 - **Examples**:
-  \`\`\`erlang
-  map_registry:is_admin_session(#{role => admin, presence => online}) -> true
-  map_registry:is_admin_session(#{role => admin, presence => offline}) -> false
-  map_registry:is_admin_session(#{role => member, presence => online}) -> false
-  \`\`\`
+  - \`map_registry:is_admin_session(#{role => admin, presence => online})\` returns \`true\`.
+  - \`map_registry:is_admin_session(#{role => admin, presence => offline})\` returns \`false\`.
+  - \`map_registry:is_admin_session(#{role => member, presence => online})\` returns \`false\`.
 
-## Verification Constraints
+## Rules & Verification Constraints
 
-- Must use map exact matching (\`:=\`) in pattern matching and state updates.
-- All IDs, roles, and status fields must use atoms or integers.`,
+- \`bf_ast_verifier\` and per-function AST inspection enforce exact map matching/updating (\`:=\`) inside \`update_presence/3\` and \`is_admin_session/1\` (avoiding \`maps:get\`/\`maps:put\` workarounds).
+- All IDs, roles, and presence values in test cases use atoms or integers.`,
     otpDocCards: [
       {
         functionName: 'map_expressions',
@@ -230,23 +226,24 @@ Implement user session tracking functions in \`src/map_registry.erl\`:
         content: `-module(map_registry).
 -export([create_session/2, update_presence/3, is_admin_session/1]).
 
-%% @doc Initializes a new session state map with default offline presence.
+%% @doc Construct a new session map initialized for UserId and Role with offline presence and zero logins.
 create_session(_UserId, _Role) ->
-    #{}.
+    ok.
 
-%% @doc Verifies user identity and updates presence while incrementing login count.
+%% @doc Update Session presence and increment login count when user identity matches ExpectedUserId, otherwise returning a session mismatch error tuple.
 update_presence(_Session, _ExpectedUserId, _NewPresence) ->
-    {error, session_mismatch}.
+    ok.
 
-%% @doc Verifies whether a session possesses active online administrator privileges.
+%% @doc Return true when Session is a map representing an active online administrator, and false for any other map or non-map input.
 is_admin_session(_Session) ->
-    false.`,
+    ok.`,
       },
     ],
     solutionFiles: {
       'src/map_registry.erl': `-module(map_registry).
 -export([create_session/2, update_presence/3, is_admin_session/1]).
 
+%% @doc Construct a new session map initialized for UserId and Role with offline presence and zero logins.
 create_session(UserId, Role) ->
     #{
         user_id => UserId,
@@ -255,6 +252,7 @@ create_session(UserId, Role) ->
         login_count => 0
     }.
 
+%% @doc Update Session presence and increment login count when user identity matches ExpectedUserId, otherwise returning a session mismatch error tuple.
 update_presence(#{user_id := ExpectedUserId, login_count := Count} = Session, ExpectedUserId, NewPresence) ->
     Session#{
         presence := NewPresence,
@@ -263,6 +261,7 @@ update_presence(#{user_id := ExpectedUserId, login_count := Count} = Session, Ex
 update_presence(_Session, _ExpectedUserId, _NewPresence) ->
     {error, session_mismatch}.
 
+%% @doc Return true when Session is a map representing an active online administrator, and false for any other map or non-map input.
 is_admin_session(#{role := admin, presence := online}) ->
     true;
 is_admin_session(_) ->
@@ -271,20 +270,21 @@ is_admin_session(_) ->
     starterCode: `-module(map_registry).
 -export([create_session/2, update_presence/3, is_admin_session/1]).
 
-%% @doc Initializes a new session state map with default offline presence.
+%% @doc Construct a new session map initialized for UserId and Role with offline presence and zero logins.
 create_session(_UserId, _Role) ->
-    #{}.
+    ok.
 
-%% @doc Verifies user identity and updates presence while incrementing login count.
+%% @doc Update Session presence and increment login count when user identity matches ExpectedUserId, otherwise returning a session mismatch error tuple.
 update_presence(_Session, _ExpectedUserId, _NewPresence) ->
-    {error, session_mismatch}.
+    ok.
 
-%% @doc Verifies whether a session possesses active online administrator privileges.
+%% @doc Return true when Session is a map representing an active online administrator, and false for any other map or non-map input.
 is_admin_session(_Session) ->
-    false.`,
+    ok.`,
     solutionCode: `-module(map_registry).
 -export([create_session/2, update_presence/3, is_admin_session/1]).
 
+%% @doc Construct a new session map initialized for UserId and Role with offline presence and zero logins.
 create_session(UserId, Role) ->
     #{
         user_id => UserId,
@@ -293,6 +293,7 @@ create_session(UserId, Role) ->
         login_count => 0
     }.
 
+%% @doc Update Session presence and increment login count when user identity matches ExpectedUserId, otherwise returning a session mismatch error tuple.
 update_presence(#{user_id := ExpectedUserId, login_count := Count} = Session, ExpectedUserId, NewPresence) ->
     Session#{
         presence := NewPresence,
@@ -301,6 +302,7 @@ update_presence(#{user_id := ExpectedUserId, login_count := Count} = Session, Ex
 update_presence(_Session, _ExpectedUserId, _NewPresence) ->
     {error, session_mismatch}.
 
+%% @doc Return true when Session is a map representing an active online administrator, and false for any other map or non-map input.
 is_admin_session(#{role := admin, presence := online}) ->
     true;
 is_admin_session(_) ->
