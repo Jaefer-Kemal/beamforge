@@ -3142,6 +3142,7 @@ T1_Res = try
       actual => list_to_binary(lists:flatten(io_lib:format("~p", [Hits]))),
       passed => (Hits =:= 2), time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
+    (try session_cache:stop_pipeline() catch _:_ -> ok end),
     #{call_str => <<"session_cache:increment_hits(...)">>, expected => <<"2">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
@@ -3151,19 +3152,22 @@ T2_Res = try
     timer:sleep(20),
     {ok, _} = session_cache:start_pipeline(),
     ok = session_cache:put_session(<<"sess_a">>, 999, #{role => admin}),
+    {ok, 1} = session_cache:increment_hits(<<"sess_a">>),
     OldPid = whereis(session_cache),
     exit(OldPid, kill),
-    timer:sleep(50),
+    timer:sleep(80),
     NewPid = whereis(session_cache),
     {ok, Sess2} = session_cache:get_session(<<"sess_a">>),
     session_cache:stop_pipeline(),
-    Pass = (OldPid =/= NewPid) andalso is_pid(NewPid) andalso (maps:get(user_id, Sess2) =:= 999),
+    ActualPair = {OldPid =/= NewPid, maps:get(hit_count, Sess2)},
+    Pass = (ActualPair =:= {true, 1}) andalso is_pid(NewPid) andalso (maps:get(user_id, Sess2) =:= 999),
     #{call_str => <<"session_cache: kill worker -> check heir failover">>,
-      expected => <<"restarted with new pid and preserved session">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("~p", [{OldPid =/= NewPid, is_pid(NewPid), maps:get(user_id, Sess2)}]))),
+      expected => <<"{true, 1}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [ActualPair]))),
       passed => Pass, time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
-    #{call_str => <<"session_cache: kill worker">>, expected => <<"preserved session">>,
+    (try session_cache:stop_pipeline() catch _:_ -> ok end),
+    #{call_str => <<"session_cache: kill worker">>, expected => <<"{true, 1}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res],
@@ -7762,17 +7766,26 @@ CompileStage = case code:ensure_loaded(session_cache) of
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
 S1_Ast = try
-    SrcPath = filename:join(["%s", "src", "session_cache.erl"]),
-    BeamPath = filename:join(["%s", "ebin", "session_cache.beam"]),
+    SrcRoot = "%s",
+    BeamRoot = "%s",
+    SrcPath = filename:join([SrcRoot, "src", "session_cache.erl"]),
+    BeamPath = filename:join([BeamRoot, "ebin", "session_cache.beam"]),
+    TmSrcPath = filename:join([SrcRoot, "src", "table_manager.erl"]),
+    TmBeamPath = filename:join([BeamRoot, "ebin", "table_manager.beam"]),
     {ok, BeamBin} = file:read_file(BeamPath),
-    Rules = #{
-        required_remote_calls => [{ets, new, 2}, {ets, insert, 2}, {ets, lookup, 2}]
+    {ok, TmBeamBin} = file:read_file(TmBeamPath),
+    CacheRules = #{
+        required_remote_calls => [{ets, new, 2}, {ets, insert, 2}, {ets, lookup, 2}, {ets, update_counter, 3}]
     },
-    case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
-        {ok, _} ->
-            #{id => <<"ast_session_cache_contract">>, title => <<"AST Analysis: ETS Operations & Heir Ownership Contract">>, status => <<"passed">>, time_ms => 15, details => <<"Verified ets:new/2 with heir, ets:insert/2, and ets:lookup/2 calls.">>};
-        {error, Violations} ->
-            #{id => <<"ast_session_cache_contract">>, title => <<"AST Analysis: ETS Operations & Heir Ownership Contract">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
+    TmRules = #{
+        required_remote_calls => [{ets, give_away, 3}]
+    },
+    case {bf_ast_verifier:verify_rules(SrcPath, BeamBin, CacheRules),
+          bf_ast_verifier:verify_rules(TmSrcPath, TmBeamBin, TmRules)} of
+        {{ok, _}, {ok, _}} ->
+            #{id => <<"ast_session_cache_contract">>, title => <<"AST Analysis: ETS Operations & Heir Ownership Contract">>, status => <<"passed">>, time_ms => 15, details => <<"Verified ets:new/2, ets:insert/2, ets:lookup/2, ets:update_counter/3 in session_cache and ets:give_away/3 in table_manager.">>};
+        {Res1, Res2} ->
+            #{id => <<"ast_session_cache_contract">>, title => <<"AST Analysis: ETS Operations & Heir Ownership Contract">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p ~p", [Res1, Res2]))}
     end
 catch C1:R1 ->
     #{id => <<"ast_session_cache_contract">>, title => <<"AST Analysis: ETS Operations & Heir Ownership Contract">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}

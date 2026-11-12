@@ -2763,6 +2763,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l07` (`VERIFIED 100% PASSED`, score=100, 3 stages in `1.52s`, `1.903s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l07 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `15.64s` / `15.699s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 162: Pedagogical Despoiling & Live Tri-Verification of Chapter 9 Lecture 8 (`ch09-l08`)
+- [x] **162.1: De-Spoil Problem Set Guide, Add OTP Doc Cards & Chunked PWE (`telemetry_quota_demo.erl`), Clean Starter `@doc`/Stubs & Align AST/Chaos Grader (`ch09-l08`)**:
+  - Removed exact `table_manager` / `session_cache` clause spoilers from `## Deep Concept Breakdown & Under the Hood` (`apps/web-ide/src/data/chapters/ch09.ts`) and inline code-dictating `%% % TODO ...` hints inside `starterCode` and `files[2].content` (`src/session_cache.erl`), replacing `init([])` and API stubs with neutral minimal returns (`{ok, #{}}.`, `ok.`, `0.`).
+  - Added `## Official Erlang Docs & Function Reference` (signatures for `ets:new/2`, `ets:give_away/3`, `ets:update_counter/3`) plus matching `new` and `update_counter` `otpDocCards`, added a chunked, domain-disjoint runnable Parallel Worked Example (`telemetry_quota_demo.erl`: `ordered_set`, 3-tuple buckets, negative counter deduction `{2, -Units}`, custodian failover handshake), and converted `## Assignment Specification` to strict Spec 08 `Input`/`Behavior`/`Examples` layout clearly separating pre-wired infrastructure (`session_sup.erl`, `table_manager.erl`) from `session_cache.erl`.
+  - Added EDoc `%% @doc` contracts across all exported functions and callbacks in all 3 modules (`session_sup.erl`, `table_manager.erl`, `session_cache.erl`) across `starterCode`, `files`, `solutionCode`, `solutionFiles`, and `services/orchestrator/internal/bridge/ch09_verification_test.go`.
+  - Aligned `astRules.requiredCalls` in `ch09.ts` to `['ets:new/2', 'ets:insert/2', 'ets:lookup/2', 'ets:update_counter/3']` and updated `services/orchestrator/internal/bridge/erl_runner_chapters.go` (`case "ch09-l08"`) so `Submit` verifies all 4 ETS primitives on `session_cache.erl` plus `ets:give_away/3` on `table_manager.erl`, and `Run` cleans up pipeline processes on catch and verifies both `tc1` (`2`) and `tc2` (`{true, 1}`).
+- [x] **162.2: Mandatory Live Tri-Verification & Compiler Suite (`ch09-l08`)**:
+  - **Parallel Worked Example (`telemetry_quota_demo.erl`)**: Extracted from `ch09.ts`, compiled cleanly with `erlc.exe -Wall -Werror`, and verified live custodian failover and atomic decrement (`PWE_CH09_L08_OK`).
+  - **Starter Pack (`starterCode === files[2].content`, all 3 starter files)**: Compiled cleanly (`erlc.exe -Wall`) and executed all stubs safely without hangs (`STARTER_CH09_L08 exports=true stubs=safe`).
+  - **Solution Pack (`solutionCode === solutionFiles['src/session_cache.erl']`, all 3 solution files)**: Compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` on `session_cache.erl` and `table_manager.erl`, and passed 2/2 visible tests (`SOLUTION_CH09_L08_OK ast=passed visible=2/2`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l08` (`VERIFIED 100% PASSED`, score=100, 4 stages in `1.44s`, `1.784s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l08 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `11.16s` / `11.183s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 

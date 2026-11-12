@@ -3173,61 +3173,213 @@ test_heir_handover() ->
     visualScene: 'supervision_rest_for_one_ets_heir',
     conceptMarkdown: `## Why This Matters in Production
 
-In a high-scale production backend, authentication tokens and session payloads are checked on every single inbound HTTP or WebSocket request. If your session store lives in an ordinary \`gen_server\`, that process becomes a single-threaded bottleneck for thousands of concurrent requests.
+In a high-scale production backend, authentication tokens and session payloads are checked on every single inbound HTTP or WebSocket request. Routing every read through a single \`gen_server\` mailbox quickly creates a single-process bottleneck.
 
-By combining **ETS** with the **Heir Failover Handshake**, you achieve the holy grail of distributed backend architecture:
-1. **Unbounded Read Concurrency**: Reads query the ETS table directly in memory in C without messaging the server.
-2. **Zero Data Loss on Crash**: If the worker process crashes (e.g. unhandled payload or OOM crash), a dedicated **Heir Guardian** process catches the table via \`{'ETS-TRANSFER', ...}\`.
-3. **Transparent Recovery**: When the supervisor restarts the worker, the new worker reclaims the existing ETS table from the guardian via \`ets:give_away/3\`, preserving 100% of user sessions and rate-limit counters!
-
-> [!IMPORTANT]
-> **Supervision Topology:**
-> - \`session_sup\` (\`one_for_one\`) boots \`table_manager\` (heir guardian) first, then \`session_cache\` (worker).
-> - If \`session_cache\` crashes, BEAM immediately delivers \`{'ETS-TRANSFER', Tab, ...}\` to \`table_manager\`.
-> - Supervisor restarts \`session_cache\`, and \`table_manager\` transfers the table back via \`ets:give_away/3\` with 0% data loss!
+By pairing a public **ETS** table with a dedicated **Heir Custodian** under OTP supervision, your service achieves both lock-free concurrent reads and crash-resilient state:
+1. **Direct Concurrent Access**: Reader processes query ETS directly in ERTS C memory without queuing behind a worker mailbox.
+2. **Crash Survival**: Because an ETS table dies with its owner unless guarded, attaching a living heir guarantees the VM hands table custody to the custodian on worker exit.
+3. **Transparent Failover Recovery**: When the supervisor restarts the crashed worker, the replacement process reclaims ownership in $O(1)$ time with zero row copying or session loss.
 
 ## Deep Concept Breakdown & Under the Hood
 
-### Multi-File Workspace Separation
-This problem set is organized into three clean production modules:
-1. **\`src/session_sup.erl\`**: A \`one_for_one\` supervisor starting \`table_manager\` first, followed by \`session_cache\`.
-2. **\`src/table_manager.erl\`**: A dedicated guardian \`gen_server\` registered as \`table_manager\`.
-   - Traps or receives \`{'ETS-TRANSFER', Tab, _OldOwner, _Data}\` and tracks held tables.
-   - Handles \`handle_call({claim_table, Tab}, {CallerPid, _}, State)\` by calling \`ets:give_away(Tab, CallerPid, restored)\`.
-3. **\`src/session_cache.erl\`**: The active session worker \`gen_server\` registered as \`session_cache\`.
-   - On \`init([])\`: Checks if \`session_cache_tab\` exists. If not, creates it with \`{heir, whereis(table_manager), session_backup}\`. If it exists, calls \`table_manager:claim_table(session_cache_tab)\`.
-   - Reads directly from ETS via \`ets:lookup/2\`.
-   - Atomic increments via \`ets:update_counter/3\`.
+### 1. Supervisor Ordering & Guardian Separation
+Why place a lightweight heir custodian ahead of the worker under a \`one_for_one\` supervisor?
+- **Boot Dependency**: Supervisors start children strictly in list order. Booting the guardian worker first guarantees its registered name already resolves to a live PID before the table-owning worker enters \`init/1\`.
+- **Failure Isolation**: Under \`one_for_one\`, killing the table-owning worker leaves the custodian undisturbed, preserving the in-flight \`{'ETS-TRANSFER', Tab, OldOwner, Tag}\` mailbox event and off-heap ETS memory across the restart boundary.
+
+### 2. Cold Boot vs. Warm Reclaim in \`init/1\`
+Because OTP invokes the exact same \`init/1\` callback on both initial launch and post-crash restart, a persistent ETS worker cannot unconditionally allocate a fresh named table on every start:
+- Checking table presence via \`ets:info/1\` cleanly separates **first boot** (\`undefined\`, allocate table with concurrent read/write flags and register the custodian as heir) from **supervisor recovery** (table already exists in RAM owned by the custodian, reclaim ownership immediately).
+
+### 3. Atomic Counter Fields & Missing Keys
+ETS tables store tuples indexed at 1-based positions. Mutating a nested counter via \`ets:update_counter/3\` executes atomically inside ERTS without fetching or re-inserting the whole tuple, avoiding lost increments under concurrent traffic. However, updating a key that does not exist raises \`badarg\`, so boundary handlers wrap updates cleanly rather than crashing callers.
+
+## Official Erlang Docs & Function Reference
+
+\`\`\`erlang
+%% Official OTP ETS Table, Ownership & Counter Signatures (stdlib / ets)
+ets:new(Name, Options) -> tid() | atom()
+  Types:
+    Name = atom()
+    Options = [set | ordered_set | public | named_table |
+               {read_concurrency, boolean()} | {write_concurrency, boolean()} |
+               {heir, pid() | none, HeirData :: term()}]
+
+ets:give_away(Tab, Pid, GiftData) -> true
+  Types:
+    Tab = tid() | atom()
+    Pid = pid()
+    GiftData = term()
+
+ets:update_counter(Tab, Key, UpdateOp) -> Result
+  Types:
+    Tab = tid() | atom()
+    Key = term()
+    UpdateOp = {Pos :: pos_integer(), Incr :: integer()}
+    Result = integer()
+\`\`\`
+
+Consult the attached OTP documentation cards below for transfer complexity, concurrency flags, and \`update_counter/3\` error semantics.
+
+## Parallel Worked Example: Custodian-Backed Edge Quota Store
+
+Consider a separate domain: an \`ordered_set\` tenant API quota store (\`telemetry_quota_demo\`) tracked with 3-tuples \`{TenantBin, RemainingInt, UpdatedMs}\` and guarded by an independent custodian process. Study how its 3 phases compose cleanly:
+
+### Phase 1: Custodian Actor & Table Handover
+\`\`\`erlang
+-module(telemetry_quota_demo).
+-behaviour(gen_server).
+
+-export([start_custodian/0, start_worker/1, open_bucket/2, consume_quota/2, inspect_bucket/1]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+
+-define(QUOTA_TAB, telemetry_quota_buckets).
+
+%% @doc Spawn a standalone custodian process that guards transferred tables and hands them back on request.
+start_custodian() ->
+    spawn(fun() -> custodian_loop(#{}) end).
+
+custodian_loop(Held) ->
+    receive
+        {'ETS-TRANSFER', Tab, _DeadOwner, quota_snapshot} ->
+            custodian_loop(Held#{Tab => true});
+        {reclaim, Tab, NewOwnerPid, From} ->
+            case maps:is_key(Tab, Held) of
+                true ->
+                    ets:give_away(Tab, NewOwnerPid, restored_custody),
+                    From ! {reclaimed, ok},
+                    custodian_loop(maps:remove(Tab, Held));
+                false ->
+                    From ! {reclaimed, not_held},
+                    custodian_loop(Held)
+            end;
+        stop ->
+            ok
+    end.
+\`\`\`
+
+### Phase 2: Worker Startup (Create vs. Reclaim) & Atomic Counter Updates
+\`\`\`erlang
+%% @doc Start the quota worker linked to CustodianPid.
+start_worker(CustodianPid) ->
+    gen_server:start_link(?MODULE, [CustodianPid], []).
+
+%% @doc Allocate the ordered_set quota table on cold boot, or reclaim it from CustodianPid on restart.
+init([CustodianPid]) ->
+    case ets:info(?QUOTA_TAB) of
+        undefined ->
+            ets:new(?QUOTA_TAB, [
+                ordered_set,
+                public,
+                named_table,
+                {read_concurrency, true},
+                {heir, CustodianPid, quota_snapshot}
+            ]);
+        _ ->
+            CustodianPid ! {reclaim, ?QUOTA_TAB, self(), self()},
+            receive {reclaimed, ok} -> ok after 1000 -> ok end
+    end,
+    {ok, #{custodian => CustodianPid}}.
+
+%% @doc Open a tenant allowance bucket with Remaining tokens.
+open_bucket(TenantBin, InitialBudget) ->
+    ets:insert(?QUOTA_TAB, {TenantBin, InitialBudget, erlang:system_time(millisecond)}),
+    ok.
+
+%% @doc Atomically deduct Units from position 2 of a tenant bucket, returning empty error on missing key.
+consume_quota(TenantBin, Units) ->
+    try
+        Remaining = ets:update_counter(?QUOTA_TAB, TenantBin, {2, -Units}),
+        {remaining, Remaining}
+    catch
+        error:badarg ->
+            unknown_tenant
+    end.
+
+%% @doc Inspect a tenant quota tuple directly from public ETS memory.
+inspect_bucket(TenantBin) ->
+    case ets:lookup(?QUOTA_TAB, TenantBin) of
+        [{TenantBin, Remaining, UpdatedMs}] -> {tenant, TenantBin, Remaining, UpdatedMs};
+        [] -> unknown_tenant
+    end.
+
+handle_call(_Req, _From, State) -> {reply, ok, State}.
+handle_cast(_Msg, State) -> {noreply, State}.
+handle_info({'ETS-TRANSFER', _Tab, _From, _Data}, State) -> {noreply, State};
+handle_info(_Msg, State) -> {noreply, State}.
+terminate(_Reason, _State) -> ok.
+\`\`\`
+
+### What the BEAM Does Across Phases
+- **Custody Continuity**: Notice how \`init/1\` branches on \`ets:info(?QUOTA_TAB)\` before touching any rows—creating the \`ordered_set\` with \`{heir, CustodianPid, quota_snapshot}\` when absent, or negotiating restitution with the custodian when already alive.
+- **Direct Positional Counter**: \`consume_quota/2\` targets slot \`2\` of the 3-tuple atomically with \`{2, -Units}\` and catches \`error:badarg\` cleanly if the tenant was never registered.
 
 ## Assignment Specification
 
-Implement the 3 modules:
+Notice that two infrastructure modules are already wired in your multi-file editor:
+- **\`src/session_sup.erl\`**: Boots a registered \`one_for_one\` supervisor starting \`table_manager\` first and \`session_cache\` second (intensity 10, period 5).
+- **\`src/table_manager.erl\`**: Pre-wired heir guardian \`gen_server\` that captures \`'ETS-TRANSFER'\` notifications and transfers ownership back to callers via \`claim_table/1\`.
 
-### 1. \`src/session_sup.erl\`
-- \`start_link/0\`: Starts supervisor registered as \`session_sup\`.
-- \`init/1\`: Defines \`one_for_one\` supervisor with intensity 10, period 5, starting \`table_manager\` then \`session_cache\`.
+Complete the worker module **\`src/session_cache.erl\`** (\`-module(session_cache).\`, keeping all exported pipeline and \`gen_server\` signatures intact):
 
-### 2. \`src/table_manager.erl\`
-- \`start_link/0\`: Starts gen_server registered as \`table_manager\`.
-- \`claim_table(Tab)\`: Calls \`gen_server:call(table_manager, {claim_table, Tab})\`.
-- \`handle_info({'ETS-TRANSFER', Tab, _From, _Data}, State)\`: Keeps track of the held table.
-- \`handle_call({claim_table, Tab}, {Caller, _}, State)\`: Calls \`ets:give_away(Tab, Caller, restored)\`.
+### \`init/1\`
+- **Input**: Empty initialization argument list \`[]\`.
+- **Behavior**: Resolves the live heir custodian PID via process registration lookup for \`table_manager\` and inspects whether named table \`session_cache_tab\` already exists. On fresh boot, creates the named public \`set\` table with read and write concurrency enabled and attaches the custodian as heir using tag \`session_backup\`. If the table already exists from before a crash, safely reclaims custody from \`table_manager\` via its exported claim API when available, then returns an \`ok\` state tuple tracking the table.
+- **Examples**:
+  - Booting \`session_cache:start_pipeline()\` allocates \`session_cache_tab\` and leaves both \`table_manager\` and \`session_cache\` registered.
+  - Killing \`session_cache\` causes \`session_sup\` to restart it while preserving existing table contents via \`table_manager\`.
 
-### 3. \`src/session_cache.erl\`
-- \`start_link/0\`: Starts gen_server registered as \`session_cache\`.
-- \`start_pipeline/0\`: Boots \`session_sup:start_link()\`.
-- \`stop_pipeline/0\`: Stops \`session_sup\` and all children.
-- \`put_session(SessionId, UserId, MetaMap) -> ok\`: Inserts \`{SessionId, UserId, MetaMap, 0}\` into \`session_cache_tab\`.
-- \`get_session(SessionId) -> {ok, #{user_id => UserId, meta => MetaMap, hit_count => HitCount}} | {error, not_found}\`.
-- \`increment_hits(SessionId) -> {ok, integer()} | {error, not_found}\`: Uses \`ets:update_counter/3\` at position 4.
-- \`delete_session(SessionId) -> ok\`.
-- \`count_sessions() -> integer()\`: Returns total row count.
+### \`put_session/3\`
+- **Input**: Binary session ID \`SessionId\`, integer or term user ID \`UserId\`, map metadata \`MetaMap\`.
+- **Behavior**: Inserts a 4-field session record into \`session_cache_tab\` storing the session identifier, user identifier, metadata map, and an initial hit count of \`0\` in $O(1)$ time, returning \`ok\`.
+- **Examples**:
+  - \`session_cache:put_session(<<"s1">>, 101, #{ip => <<"127.0.0.1">>})\` returns \`ok\`.
+
+### \`get_session/1\`
+- **Input**: Binary session ID \`SessionId\`.
+- **Behavior**: Performs a direct $O(1)$ lookup for \`SessionId\` in \`session_cache_tab\`. When found, unpacks the 4-field entry into an \`ok\` tuple wrapping a map with keys for user ID, metadata, and hit count; when missing, returns a structured not-found error tuple.
+- **Examples**:
+  - \`session_cache:get_session(<<"s1">>)\` returns \`{ok, #{user_id => 101, meta => #{ip => <<"127.0.0.1">>}, hit_count => 0}}\` immediately after insertion.
+  - \`session_cache:get_session(<<"missing">>)\` returns \`{error, not_found}\`.
+
+### \`increment_hits/1\`
+- **Input**: Binary session ID \`SessionId\`.
+- **Behavior**: Atomically increments the 4th tuple slot (hit counter) by \`1\` in place inside \`session_cache_tab\`. Returns an \`ok\` tuple containing the updated counter integer, or returns a structured not-found error tuple if no matching session exists.
+- **Examples**:
+  - Two consecutive calls to \`session_cache:increment_hits(<<"s1">>)\` return \`{ok, 1}\` and \`{ok, 2}\`.
+  - \`session_cache:increment_hits(<<"unknown">>)\` returns \`{error, not_found}\`.
+
+### \`delete_session/1\`
+- **Input**: Binary session ID \`SessionId\`.
+- **Behavior**: Removes any session entry keyed by \`SessionId\` from \`session_cache_tab\` and returns \`ok\`.
+- **Examples**:
+  - \`session_cache:delete_session(<<"s1">>)\` removes the entry and returns \`ok\`.
+
+### \`count_sessions/0\`
+- **Input**: Zero arguments.
+- **Behavior**: Queries table metadata for the current number of stored rows in \`session_cache_tab\`, returning \`0\` safely if the table does not currently exist.
+- **Examples**:
+  - Returns \`2\` when two sessions are active, or \`0\` when the table is empty or uninitialized.
 
 ## Rules & Verification Constraints
-- Table name must be \`session_cache_tab\`.
-- Must survive \`exit(whereis(session_cache), kill)\` with supervisor restart, table restitution, and 100% data preservation!
+- **Table & Heir Contract**: The ETS table must remain named \`session_cache_tab\` and register \`table_manager\` as its failover heir.
+- **Required ETS Operations**: \`bf_ast_verifier\` enforces usage of \`ets:new/2\`, \`ets:insert/2\`, \`ets:lookup/2\`, and \`ets:update_counter/3\` inside \`session_cache.erl\`.
+- **Chaos Failover Invariant**: Must survive \`exit(whereis(session_cache), kill)\` with supervisor restart, custody restitution from \`table_manager\`, and 100% preservation of all sessions and hit counters.
 `,
     otpDocCards: [
+      {
+        functionName: 'new',
+        module: 'ets',
+        signature: 'ets:new(Name, Options) -> tid() | atom()',
+        typesSpec: [
+          'Name = atom()',
+          'Options = [set | public | named_table | {read_concurrency, boolean()} | {write_concurrency, boolean()} | {heir, pid() | none, term()}]'
+        ],
+        description: 'Creates a new ETS table owned by the calling process, optionally registering it under a global atom name and designating an heir guardian PID.',
+        complexityNote: 'O(1) off-heap table allocation in ERTS.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/ets.html#new/2',
+        githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl'
+      },
       {
         functionName: 'give_away',
         module: 'ets',
@@ -3240,6 +3392,21 @@ Implement the 3 modules:
         description: 'Transfers ownership of an ETS table to another process without table destruction.',
         complexityNote: 'O(1) pointer transfer.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/ets.html#give_away/3',
+        githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl'
+      },
+      {
+        functionName: 'update_counter',
+        module: 'ets',
+        signature: 'ets:update_counter(Tab, Key, UpdateOp) -> Result',
+        typesSpec: [
+          'Tab = tab()',
+          'Key = term()',
+          'UpdateOp = {Pos :: pos_integer(), Incr :: integer()}',
+          'Result = integer()'
+        ],
+        description: 'Atomically updates an integer tuple slot inside an ETS table in place; raises badarg if Key is absent.',
+        complexityNote: 'O(1) atomic update on set tables.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/ets.html#update_counter/3',
         githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl'
       }
     ],
@@ -3281,12 +3448,15 @@ Implement the 3 modules:
 
 -define(TAB, session_cache_tab).
 
+%% @doc Start and register the session_cache gen_server worker under the supervisor.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc Start the session_sup supervision tree and both managed workers.
 start_pipeline() ->
     session_sup:start_link().
 
+%% @doc Stop the session_sup supervision tree and clean up any lingering registered processes.
 stop_pipeline() ->
     case whereis(session_sup) of
         undefined -> ok;
@@ -3297,55 +3467,45 @@ stop_pipeline() ->
     [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [session_cache, table_manager, session_sup]],
     ok.
 
+%% @doc Create the public concurrent ETS session table with table_manager as heir on cold boot, or reclaim custody on worker restart.
 init([]) ->
-    %% % TODO [Heir Failover Handshake]:
-    %% % 1. Check if ?TAB already exists using ets:info(?TAB).
-    %% % 2. If undefined (fresh boot):
-    %% %    - Look up HeirPid via whereis(table_manager).
-    %% %    - Create named table ?TAB with opts: [set, public, named_table,
-    %% %      {read_concurrency, true}, {write_concurrency, true},
-    %% %      {heir, HeirPid, session_backup}].
-    %% % 3. If table already exists (worker restarted by supervisor after crash):
-    %% %    - Reclaim table ownership from table_manager via table_manager:claim_table(?TAB).
-    %% % 4. Return {ok, #{table => ?TAB}}.
-    ok.
+    {ok, #{}}.
 
+%% @doc Store a 4-field session tuple initialized at zero hits into session_cache_tab and return ok.
 put_session(_SessionId, _UserId, _MetaMap) ->
-    %% % TODO: Insert 4-tuple {SessionId, UserId, MetaMap, 0} into ?TAB and return ok.
     ok.
 
+%% @doc Look up SessionId in session_cache_tab and return {ok, SessionMap} with user_id, meta, and hit_count, or a not_found error tuple.
 get_session(_SessionId) ->
-    %% % TODO: Look up SessionId in ?TAB:
-    %% % If found [{SessionId, UserId, MetaMap, HitCount}], return:
-    %% %   {ok, #{user_id => UserId, meta => MetaMap, hit_count => HitCount}}
-    %% % If not found [], return {error, not_found}.
     ok.
 
+%% @doc Atomically increment the hit counter field for SessionId by 1, returning {ok, NewCount} or a not_found error tuple if absent.
 increment_hits(_SessionId) ->
-    %% % TODO: Atomically increment 4th element (hit_count) by 1 via ets:update_counter/3:
-    %% % On success, return {ok, NewCount}.
-    %% % If SessionId does not exist, return {error, not_found}.
     ok.
 
+%% @doc Remove any stored session entry matching SessionId from session_cache_tab and return ok.
 delete_session(_SessionId) ->
-    %% % TODO: Delete SessionId from ?TAB via ets:delete/2 and return ok.
     ok.
 
+%% @doc Return the current entry count stored in session_cache_tab, or 0 if the table does not exist.
 count_sessions() ->
-    %% % TODO: Return number of items in ?TAB via ets:info(?TAB, size). Return 0 if undefined.
     0.
 
+%% @doc Handle synchronous gen_server call requests.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous gen_server cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band messages including ETS custody handover notifications.
 handle_info({'ETS-TRANSFER', _Tab, _OldOwner, _GiftData}, State) ->
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up worker state prior to termination.
 terminate(_Reason, _State) ->
     ok.`,
     solutionCode: `-module(session_cache).
@@ -3357,12 +3517,15 @@ terminate(_Reason, _State) ->
 
 -define(TAB, session_cache_tab).
 
+%% @doc Start and register the session_cache gen_server worker under the supervisor.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc Start the session_sup supervision tree and both managed workers.
 start_pipeline() ->
     session_sup:start_link().
 
+%% @doc Stop the session_sup supervision tree and clean up any lingering registered processes.
 stop_pipeline() ->
     case whereis(session_sup) of
         undefined -> ok;
@@ -3373,6 +3536,7 @@ stop_pipeline() ->
     [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [session_cache, table_manager, session_sup]],
     ok.
 
+%% @doc Create the public concurrent ETS session table with table_manager as heir on cold boot, or reclaim custody on worker restart.
 init([]) ->
     HeirPid = whereis(table_manager),
     case ets:info(?TAB) of
@@ -3393,10 +3557,12 @@ init([]) ->
     end,
     {ok, #{table => ?TAB}}.
 
+%% @doc Store a 4-field session tuple initialized at zero hits into session_cache_tab and return ok.
 put_session(SessionId, UserId, MetaMap) ->
     ets:insert(?TAB, {SessionId, UserId, MetaMap, 0}),
     ok.
 
+%% @doc Look up SessionId in session_cache_tab and return {ok, SessionMap} with user_id, meta, and hit_count, or a not_found error tuple.
 get_session(SessionId) ->
     case ets:lookup(?TAB, SessionId) of
         [{SessionId, UserId, MetaMap, HitCount}] ->
@@ -3409,6 +3575,7 @@ get_session(SessionId) ->
             {error, not_found}
     end.
 
+%% @doc Atomically increment the hit counter field for SessionId by 1, returning {ok, NewCount} or a not_found error tuple if absent.
 increment_hits(SessionId) ->
     try
         NewCount = ets:update_counter(?TAB, SessionId, {4, 1}),
@@ -3418,27 +3585,33 @@ increment_hits(SessionId) ->
             {error, not_found}
     end.
 
+%% @doc Remove any stored session entry matching SessionId from session_cache_tab and return ok.
 delete_session(SessionId) ->
     ets:delete(?TAB, SessionId),
     ok.
 
+%% @doc Return the current entry count stored in session_cache_tab, or 0 if the table does not exist.
 count_sessions() ->
     case ets:info(?TAB, size) of
         undefined -> 0;
         Count -> Count
     end.
 
+%% @doc Handle synchronous gen_server call requests.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous gen_server cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band messages including ETS custody handover notifications.
 handle_info({'ETS-TRANSFER', _Tab, _OldOwner, _GiftData}, State) ->
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up worker state prior to termination.
 terminate(_Reason, _State) ->
     ok.
 `,
@@ -3452,9 +3625,11 @@ terminate(_Reason, _State) ->
 
 -export([start_link/0, init/1]).
 
+%% @doc Start the registered one_for_one session supervision tree.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% @doc Configure supervisor flags and start table_manager before session_cache.
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,
@@ -3492,15 +3667,19 @@ init([]) ->
 -export([start_link/0, claim_table/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
+%% @doc Start and register the table_manager ETS heir custodian worker.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc Request zero-copy ownership transfer of Tab back to the calling worker process.
 claim_table(Tab) ->
     gen_server:call(?MODULE, {claim_table, Tab}, 5000).
 
+%% @doc Initialize empty custody registry state for the heir guardian.
 init([]) ->
     {ok, #{tables => #{}}}.
 
+%% @doc Transfer custody of held table Tab back to CallerPid or ignore unknown call requests.
 handle_call({claim_table, Tab}, {CallerPid, _Tag}, State = #{tables := Tables}) ->
     case maps:is_key(Tab, Tables) of
         true ->
@@ -3518,14 +3697,17 @@ handle_call({claim_table, Tab}, {CallerPid, _Tag}, State = #{tables := Tables}) 
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Record ETS tables inherited from terminated owner processes or ignore unknown info messages.
 handle_info({'ETS-TRANSFER', Tab, _OldOwner, _GiftData}, State = #{tables := Tables}) ->
     {noreply, State#{tables := Tables#{Tab => true}}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up guardian process state on termination.
 terminate(_Reason, _State) ->
     ok.
 `
@@ -3543,12 +3725,15 @@ terminate(_Reason, _State) ->
 
 -define(TAB, session_cache_tab).
 
+%% @doc Start and register the session_cache gen_server worker under the supervisor.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc Start the session_sup supervision tree and both managed workers.
 start_pipeline() ->
     session_sup:start_link().
 
+%% @doc Stop the session_sup supervision tree and clean up any lingering registered processes.
 stop_pipeline() ->
     case whereis(session_sup) of
         undefined -> ok;
@@ -3559,55 +3744,45 @@ stop_pipeline() ->
     [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [session_cache, table_manager, session_sup]],
     ok.
 
+%% @doc Create the public concurrent ETS session table with table_manager as heir on cold boot, or reclaim custody on worker restart.
 init([]) ->
-    %% % TODO [Heir Failover Handshake]:
-    %% % 1. Check if ?TAB already exists using ets:info(?TAB).
-    %% % 2. If undefined (fresh boot):
-    %% %    - Look up HeirPid via whereis(table_manager).
-    %% %    - Create named table ?TAB with opts: [set, public, named_table,
-    %% %      {read_concurrency, true}, {write_concurrency, true},
-    %% %      {heir, HeirPid, session_backup}].
-    %% % 3. If table already exists (worker restarted by supervisor after crash):
-    %% %    - Reclaim table ownership from table_manager via table_manager:claim_table(?TAB).
-    %% % 4. Return {ok, #{table => ?TAB}}.
-    ok.
+    {ok, #{}}.
 
+%% @doc Store a 4-field session tuple initialized at zero hits into session_cache_tab and return ok.
 put_session(_SessionId, _UserId, _MetaMap) ->
-    %% % TODO: Insert 4-tuple {SessionId, UserId, MetaMap, 0} into ?TAB and return ok.
     ok.
 
+%% @doc Look up SessionId in session_cache_tab and return {ok, SessionMap} with user_id, meta, and hit_count, or a not_found error tuple.
 get_session(_SessionId) ->
-    %% % TODO: Look up SessionId in ?TAB:
-    %% % If found [{SessionId, UserId, MetaMap, HitCount}], return:
-    %% %   {ok, #{user_id => UserId, meta => MetaMap, hit_count => HitCount}}
-    %% % If not found [], return {error, not_found}.
     ok.
 
+%% @doc Atomically increment the hit counter field for SessionId by 1, returning {ok, NewCount} or a not_found error tuple if absent.
 increment_hits(_SessionId) ->
-    %% % TODO: Atomically increment 4th element (hit_count) by 1 via ets:update_counter/3:
-    %% % On success, return {ok, NewCount}.
-    %% % If SessionId does not exist, return {error, not_found}.
     ok.
 
+%% @doc Remove any stored session entry matching SessionId from session_cache_tab and return ok.
 delete_session(_SessionId) ->
-    %% % TODO: Delete SessionId from ?TAB via ets:delete/2 and return ok.
     ok.
 
+%% @doc Return the current entry count stored in session_cache_tab, or 0 if the table does not exist.
 count_sessions() ->
-    %% % TODO: Return number of items in ?TAB via ets:info(?TAB, size). Return 0 if undefined.
     0.
 
+%% @doc Handle synchronous gen_server call requests.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous gen_server cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band messages including ETS custody handover notifications.
 handle_info({'ETS-TRANSFER', _Tab, _OldOwner, _GiftData}, State) ->
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up worker state prior to termination.
 terminate(_Reason, _State) ->
     ok.`
       }
@@ -3618,9 +3793,11 @@ terminate(_Reason, _State) ->
 
 -export([start_link/0, init/1]).
 
+%% @doc Start the registered one_for_one session supervision tree.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% @doc Configure supervisor flags and start table_manager before session_cache.
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,
@@ -3653,15 +3830,19 @@ init([]) ->
 -export([start_link/0, claim_table/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
+%% @doc Start and register the table_manager ETS heir custodian worker.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc Request zero-copy ownership transfer of Tab back to the calling worker process.
 claim_table(Tab) ->
     gen_server:call(?MODULE, {claim_table, Tab}, 5000).
 
+%% @doc Initialize empty custody registry state for the heir guardian.
 init([]) ->
     {ok, #{tables => #{}}}.
 
+%% @doc Transfer custody of held table Tab back to CallerPid or ignore unknown call requests.
 handle_call({claim_table, Tab}, {CallerPid, _Tag}, State = #{tables := Tables}) ->
     case maps:is_key(Tab, Tables) of
         true ->
@@ -3679,14 +3860,17 @@ handle_call({claim_table, Tab}, {CallerPid, _Tag}, State = #{tables := Tables}) 
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Record ETS tables inherited from terminated owner processes or ignore unknown info messages.
 handle_info({'ETS-TRANSFER', Tab, _OldOwner, _GiftData}, State = #{tables := Tables}) ->
     {noreply, State#{tables := Tables#{Tab => true}}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up guardian process state on termination.
 terminate(_Reason, _State) ->
     ok.
 `,
@@ -3699,12 +3883,15 @@ terminate(_Reason, _State) ->
 
 -define(TAB, session_cache_tab).
 
+%% @doc Start and register the session_cache gen_server worker under the supervisor.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc Start the session_sup supervision tree and both managed workers.
 start_pipeline() ->
     session_sup:start_link().
 
+%% @doc Stop the session_sup supervision tree and clean up any lingering registered processes.
 stop_pipeline() ->
     case whereis(session_sup) of
         undefined -> ok;
@@ -3715,6 +3902,7 @@ stop_pipeline() ->
     [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [session_cache, table_manager, session_sup]],
     ok.
 
+%% @doc Create the public concurrent ETS session table with table_manager as heir on cold boot, or reclaim custody on worker restart.
 init([]) ->
     HeirPid = whereis(table_manager),
     case ets:info(?TAB) of
@@ -3735,10 +3923,12 @@ init([]) ->
     end,
     {ok, #{table => ?TAB}}.
 
+%% @doc Store a 4-field session tuple initialized at zero hits into session_cache_tab and return ok.
 put_session(SessionId, UserId, MetaMap) ->
     ets:insert(?TAB, {SessionId, UserId, MetaMap, 0}),
     ok.
 
+%% @doc Look up SessionId in session_cache_tab and return {ok, SessionMap} with user_id, meta, and hit_count, or a not_found error tuple.
 get_session(SessionId) ->
     case ets:lookup(?TAB, SessionId) of
         [{SessionId, UserId, MetaMap, HitCount}] ->
@@ -3751,6 +3941,7 @@ get_session(SessionId) ->
             {error, not_found}
     end.
 
+%% @doc Atomically increment the hit counter field for SessionId by 1, returning {ok, NewCount} or a not_found error tuple if absent.
 increment_hits(SessionId) ->
     try
         NewCount = ets:update_counter(?TAB, SessionId, {4, 1}),
@@ -3760,27 +3951,33 @@ increment_hits(SessionId) ->
             {error, not_found}
     end.
 
+%% @doc Remove any stored session entry matching SessionId from session_cache_tab and return ok.
 delete_session(SessionId) ->
     ets:delete(?TAB, SessionId),
     ok.
 
+%% @doc Return the current entry count stored in session_cache_tab, or 0 if the table does not exist.
 count_sessions() ->
     case ets:info(?TAB, size) of
         undefined -> 0;
         Count -> Count
     end.
 
+%% @doc Handle synchronous gen_server call requests.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous gen_server cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band messages including ETS custody handover notifications.
 handle_info({'ETS-TRANSFER', _Tab, _OldOwner, _GiftData}, State) ->
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up worker state prior to termination.
 terminate(_Reason, _State) ->
     ok.
 `
@@ -3802,7 +3999,7 @@ terminate(_Reason, _State) ->
       }
     ],
     astRules: {
-      requiredCalls: ['ets:new/2', 'ets:insert/2', 'ets:lookup/2', 'ets:give_away/3']
+      requiredCalls: ['ets:new/2', 'ets:insert/2', 'ets:lookup/2', 'ets:update_counter/3']
     },
     solutionExplanation: 'Implements a fault-tolerant session cache architecture using a supervisor, an heir table manager, and a gen_server worker with atomic hit tracking.'
   }

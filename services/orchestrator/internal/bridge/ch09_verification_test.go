@@ -516,9 +516,11 @@ test_heir_handover() ->
 
 -export([start_link/0, init/1]).
 
+%% @doc Start the registered one_for_one session supervision tree.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% @doc Configure supervisor flags and start table_manager before session_cache.
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,
@@ -551,15 +553,19 @@ init([]) ->
 -export([start_link/0, claim_table/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
+%% @doc Start and register the table_manager ETS heir custodian worker.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc Request zero-copy ownership transfer of Tab back to the calling worker process.
 claim_table(Tab) ->
     gen_server:call(?MODULE, {claim_table, Tab}, 5000).
 
+%% @doc Initialize empty custody registry state for the heir guardian.
 init([]) ->
     {ok, #{tables => #{}}}.
 
+%% @doc Transfer custody of held table Tab back to CallerPid or ignore unknown call requests.
 handle_call({claim_table, Tab}, {CallerPid, _Tag}, State = #{tables := Tables}) ->
     case maps:is_key(Tab, Tables) of
         true ->
@@ -577,14 +583,17 @@ handle_call({claim_table, Tab}, {CallerPid, _Tag}, State = #{tables := Tables}) 
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Record ETS tables inherited from terminated owner processes or ignore unknown info messages.
 handle_info({'ETS-TRANSFER', Tab, _OldOwner, _GiftData}, State = #{tables := Tables}) ->
     {noreply, State#{tables := Tables#{Tab => true}}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up guardian process state on termination.
 terminate(_Reason, _State) ->
     ok.
 `,
@@ -597,12 +606,15 @@ terminate(_Reason, _State) ->
 
 -define(TAB, session_cache_tab).
 
+%% @doc Start and register the session_cache gen_server worker under the supervisor.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc Start the session_sup supervision tree and both managed workers.
 start_pipeline() ->
     session_sup:start_link().
 
+%% @doc Stop the session_sup supervision tree and clean up any lingering registered processes.
 stop_pipeline() ->
     case whereis(session_sup) of
         undefined -> ok;
@@ -613,6 +625,7 @@ stop_pipeline() ->
     [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [session_cache, table_manager, session_sup]],
     ok.
 
+%% @doc Create the public concurrent ETS session table with table_manager as heir on cold boot, or reclaim custody on worker restart.
 init([]) ->
     HeirPid = whereis(table_manager),
     case ets:info(?TAB) of
@@ -633,10 +646,12 @@ init([]) ->
     end,
     {ok, #{table => ?TAB}}.
 
+%% @doc Store a 4-field session tuple initialized at zero hits into session_cache_tab and return ok.
 put_session(SessionId, UserId, MetaMap) ->
     ets:insert(?TAB, {SessionId, UserId, MetaMap, 0}),
     ok.
 
+%% @doc Look up SessionId in session_cache_tab and return {ok, SessionMap} with user_id, meta, and hit_count, or a not_found error tuple.
 get_session(SessionId) ->
     case ets:lookup(?TAB, SessionId) of
         [{SessionId, UserId, MetaMap, HitCount}] ->
@@ -649,6 +664,7 @@ get_session(SessionId) ->
             {error, not_found}
     end.
 
+%% @doc Atomically increment the hit counter field for SessionId by 1, returning {ok, NewCount} or a not_found error tuple if absent.
 increment_hits(SessionId) ->
     try
         NewCount = ets:update_counter(?TAB, SessionId, {4, 1}),
@@ -658,27 +674,33 @@ increment_hits(SessionId) ->
             {error, not_found}
     end.
 
+%% @doc Remove any stored session entry matching SessionId from session_cache_tab and return ok.
 delete_session(SessionId) ->
     ets:delete(?TAB, SessionId),
     ok.
 
+%% @doc Return the current entry count stored in session_cache_tab, or 0 if the table does not exist.
 count_sessions() ->
     case ets:info(?TAB, size) of
         undefined -> 0;
         Count -> Count
     end.
 
+%% @doc Handle synchronous gen_server call requests.
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous gen_server cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band messages including ETS custody handover notifications.
 handle_info({'ETS-TRANSFER', _Tab, _OldOwner, _GiftData}, State) ->
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up worker state prior to termination.
 terminate(_Reason, _State) ->
     ok.
 `,
