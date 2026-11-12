@@ -262,7 +262,7 @@ T2_Res = try arity_calc:connect(localhost, 8080) of
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
-    #{call_str => <<"arity_calc:connect(...)">>, expected => <<"{connection, arity_calc, localhost, 8080, 5000}">>,
+    #{call_str => <<"arity_calc:connect(localhost, 8080)">>, expected => <<"{connection, arity_calc, localhost, 8080, 5000}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
@@ -273,12 +273,12 @@ T3_Res = try arity_calc:connect(localhost, 8080, 2500) of
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))),
           passed => true, time_ms => erlang:system_time(millisecond) - T3_Start};
     Other3 ->
-        #{call_str => <<"arity_calc:connect(...)">>,
+        #{call_str => <<"arity_calc:connect(localhost, 8080, 2500)">>,
           expected => <<"{connection, arity_calc, localhost, 8080, 2500}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T3_Start}
 catch C3:R3 ->
-    #{call_str => <<"arity_calc:connect(...)">>, expected => <<"{connection, arity_calc, localhost, 8080, 2500}">>,
+    #{call_str => <<"arity_calc:connect(localhost, 8080, 2500)">>, expected => <<"{connection, arity_calc, localhost, 8080, 2500}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res],
@@ -4399,14 +4399,53 @@ Stages = [CompileStage, S1_Ast, S2_Lists]
 `, wsDir, wsDir), true
 
 	case "ch01-l06":
-		return `
+		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(arity_calc) of
     {module, arity_calc} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"arity_calc.erl compiled cleanly">>};
+        Exports = arity_calc:module_info(exports),
+        Required = [{connect, 1}, {connect, 2}, {connect, 3}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"arity_calc.erl compiled cleanly and exported connect/1, connect/2, and connect/3.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Arity = try
+S1_Ast = try
+    SourceCandidates = [
+        filename:join(["%s", "src", "arity_calc.erl"]),
+        filename:join(["%s", "arity_calc.erl"])
+    ],
+    SourceFile = case [P || P <- SourceCandidates, filelib:is_regular(P)] of
+        [ValidSrc | _] -> ValidSrc;
+        [] -> hd(SourceCandidates)
+    end,
+    LocalRes = bf_ast_verifier:verify_rules(SourceFile, #{required_remote_calls => [{erlang, connect, 2}, {erlang, connect, 3}]}),
+    RemoteRes = bf_ast_verifier:verify_rules(SourceFile, #{required_remote_calls => [{arity_calc, connect, 2}, {arity_calc, connect, 3}]}),
+    DelegationOk = case {LocalRes, RemoteRes} of
+        {{ok, _}, _} -> true;
+        {_, {ok, _}} -> true;
+        _ -> false
+    end,
+    {ok, SrcBin} = file:read_file(SourceFile),
+    HasDefaultPortMacro = binary:match(SrcBin, <<"?DEFAULT_PORT">>) =/= nomatch,
+    HasDefaultTimeoutMacro = binary:match(SrcBin, <<"?DEFAULT_TIMEOUT">>) =/= nomatch,
+    HasModuleMacro = binary:match(SrcBin, <<"?MODULE">>) =/= nomatch,
+    case {DelegationOk, HasDefaultPortMacro, HasDefaultTimeoutMacro, HasModuleMacro} of
+        {true, true, true, true} ->
+            #{id => <<"ast_arity_and_macros_audit">>, title => <<"AST Analysis: Arity Delegation & Macro Audit">>, status => <<"passed">>, time_ms => 10, details => <<"Verified connect/1 -> connect/2 -> connect/3 delegation and ?DEFAULT_PORT, ?DEFAULT_TIMEOUT, ?MODULE usage.">>};
+        {false, _, _, _} ->
+            #{id => <<"ast_arity_and_macros_audit">>, title => <<"AST Analysis: Arity Delegation & Macro Audit">>, status => <<"failed">>, time_ms => 10, details => <<"Missing cascading delegation calls to connect/2 and connect/3.">>};
+        _ ->
+            #{id => <<"ast_arity_and_macros_audit">>, title => <<"AST Analysis: Arity Delegation & Macro Audit">>, status => <<"failed">>, time_ms => 10, details => <<"Missing required macro usages (?DEFAULT_PORT, ?DEFAULT_TIMEOUT, or ?MODULE) inside function bodies.">>}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_arity_and_macros_audit">>, title => <<"AST Analysis: Arity Delegation & Macro Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_Arity = try
     R1 = arity_calc:connect(localhost),
     R2 = arity_calc:connect(localhost, 8080),
     R3 = arity_calc:connect(localhost, 8080, 2500),
@@ -4416,15 +4455,15 @@ S1_Arity = try
          {connection, arity_calc, localhost, 8080, 5000},
          {connection, arity_calc, localhost, 8080, 2500},
          {connection, arity_calc, auth_service, 5222, 30000}} ->
-            #{id => <<"arity_delegation">>, title => <<"Function Arity Cascading Defaults & Macros">>, status => <<"passed">>, time_ms => 8, details => <<"connect/1 -> connect/2 -> connect/3 delegation and macros verified">>};
+            #{id => <<"arity_delegation">>, title => <<"Function Arity Cascading Defaults & Macros">>, status => <<"passed">>, time_ms => 8, details => <<"connect/1 -> connect/2 -> connect/3 delegation and macros verified.">>};
         Got1 ->
             #{id => <<"arity_delegation">>, title => <<"Function Arity Cascading Defaults & Macros">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Arity mismatch: ~p", [Got1]))}
     end
 catch C1:Err1 ->
     #{id => <<"arity_delegation">>, title => <<"Function Arity Cascading Defaults & Macros">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
-Stages = [CompileStage, S1_Arity]
-`, true
+Stages = [CompileStage, S1_Ast, S2_Arity]
+`, wsDir, wsDir), true
 
 	case "ch01-l07":
 		return `

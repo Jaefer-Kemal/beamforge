@@ -1206,12 +1206,12 @@ Furthermore, production systems rely on **Compile-Time Macros (\`-define\`)** to
 ## Deep Concept Breakdown & Under the Hood
 
 ### Modules and Exports
-- \`-module(arity_calc).\`: Declares the module name. The file must be named \`arity_calc.erl\`.
-- \`-export([connect/1, connect/2, connect/3]).\`: Declares which functions are public. Any function not in the export list is private to the module and cannot be called from outside.
+- \`-module(cache_client).\`: Declares the module name. The file must be named \`cache_client.erl\`.
+- \`-export([query_cache/1, query_cache/2, query_cache/3]).\`: Declares which functions are public. Any function not in the export list is private to the module and cannot be called from outside.
 
 ### Arity: Functions with the Same Name are Completely Distinct
-In languages like Python or JavaScript, defining \`def connect(host)\` followed by \`def connect(host, port)\` overwrites the first definition.
-**In Erlang, \`connect/1\`, \`connect/2\`, and \`connect/3\` are three completely distinct functions!**
+In languages like Python or JavaScript, defining \`def query_cache(key)\` followed by \`def query_cache(key, ttl)\` overwrites the first definition.
+**In Erlang, \`query_cache/1\`, \`query_cache/2\`, and \`query_cache/3\` are three completely distinct functions!**
 They can have different logic, different return types, and different implementations.
 
 In idiomatic Erlang, functions with lower arity are used to provide **Default Arguments** by calling higher-arity versions:
@@ -1229,48 +1229,42 @@ query_cache(Key, TtlSeconds, Region) ->
 ### Compile-Time Macros (\`-define\`)
 Macros allow defining compile-time constants:
 \`\`\`erlang
--define(DEFAULT_PORT, 80).
--define(DEFAULT_TIMEOUT, 5000).
+-define(DEFAULT_TTL, 60).
+-define(DEFAULT_REGION, us_east).
 \`\`\`
 To invoke a macro in code, prepend a question mark (\`?\`):
 \`\`\`erlang
-?DEFAULT_PORT     %% Expands to 80 at compile time
-?MODULE           %% Built-in macro: expands to the current module atom (arity_calc)
+?DEFAULT_TTL     %% Expands to 60 at compile time
+?MODULE          %% Built-in macro: expands to the current module atom (cache_client)
 \`\`\`
 
-> [!warning] Common Beginner Syntax Trap: The ? Symbol on Macros
+> [!WARNING] Common Beginner Syntax Trap: The ? Symbol on Macros
 > Forgetting the \`?\` symbol when using a macro is a frequent beginner mistake.
-> Writing \`connect(Host, DEFAULT_PORT)\` treats \`DEFAULT_PORT\` as an unbound variable, throwing an \`unbound variable\` error!
-> Always prefix macro names with \`?\`: \`?DEFAULT_PORT\`.
+> Writing \`query_cache(Key, DEFAULT_TTL)\` treats \`DEFAULT_TTL\` as an unbound variable, throwing an \`unbound variable\` error!
+> Always prefix macro names with \`?\`: \`?DEFAULT_TTL\`.
 
 ## Parallel Worked Example
 
-Consider a distributed telemetry metrics emitter:
+Consider a distributed backoff scheduler that delegates from a 1-argument convenience entry point to a 2-argument implementation tagged with \`?MODULE\`:
 
 \`\`\`erlang
--module(metrics_emitter).
--export([emit/1, emit/2, emit/3]).
+-module(retry_policy).
+-export([schedule_retry/1, schedule_retry/2]).
 
--define(DEFAULT_SEVERITY, info).
--define(BUFFER_CAPACITY, 100).
+-define(DEFAULT_DELAY_MS, 250).
 
-%% Emit an event metric using the default severity level
-emit(MetricName) ->
-    emit(MetricName, ?DEFAULT_SEVERITY).
+%% Delegate single-argument retry scheduling using the compile-time delay constant
+schedule_retry(Attempt) ->
+    schedule_retry(Attempt, ?DEFAULT_DELAY_MS).
 
-%% Emit an event metric with custom severity, cascading to full payload configuration
-emit(MetricName, Severity) ->
-    emit(MetricName, Severity, ?BUFFER_CAPACITY).
-
-%% Construct a 5-element telemetry packet embedding the origin module via ?MODULE
-emit(MetricName, Severity, BufferLimit) ->
-    {metric_packet, ?MODULE, MetricName, Severity, BufferLimit}.
+%% Construct a tagged retry directive embedding the enclosing ?MODULE atom
+schedule_retry(Attempt, DelayMs) ->
+    {retry_plan, ?MODULE, Attempt, DelayMs * Attempt}.
 \`\`\`
 
-Notice:
-- \`emit/1\` delegates to \`emit/2\`, which in turn delegates to \`emit/3\`, demonstrating idiomatic arity cascading.
-- Compile-time constants (\`?DEFAULT_SEVERITY\` and \`?BUFFER_CAPACITY\`) supply default arguments cleanly.
-- The built-in macro \`?MODULE\` automatically embeds the current module's atom name into the returned record tuple.
+Notice how the BEAM compiles and executes each piece:
+- \`schedule_retry/1\` delegates to \`schedule_retry/2\` by substituting \`?DEFAULT_DELAY_MS\` (\`250\`) before AST compilation completes.
+- \`?MODULE\` expands automatically to the enclosing atom \`retry_policy\`, keeping module identity accurate if the file is ever renamed.
 
 ## Official Erlang Docs & Function Reference
 
@@ -1281,37 +1275,38 @@ Notice:
   Expands Const to Replacement before compiler syntax analysis.
   ?MODULE expands to the atom name of the enclosing module.
 \`\`\`
+> **How to Read This Spec**: Macros perform preprocessor text replacement before parsing, while exported arities like \`Fun/1\` and \`Fun/2\` are compiled as independent function table entries inspectable via \`Module:module_info/0\`. Open the attached **\`module_info\` Reference Card** below for official OTP module metadata documentation and ERTS source links.
 
 ## Assignment Specification
 
-In \`arity_calc.erl\`, implement compile-time constants and a cascading network connection interface:
+In \`src/arity_calc.erl\`, define compile-time constants and implement/export \`connect/1\`, \`connect/2\`, and \`connect/3\`:
 
 1. **Compile-Time Macros**:
-   - Define a macro \`DEFAULT_PORT\` with the integer value \`80\`.
-   - Define a macro \`DEFAULT_TIMEOUT\` with the integer value \`5000\` (milliseconds).
+   - Define \`DEFAULT_PORT\` with integer value \`80\`.
+   - Define \`DEFAULT_TIMEOUT\` with integer value \`5000\` (milliseconds).
 
 2. **Cascading Functions**:
    - \`connect(Host)\`:
      - **Input**: A host identifier \`Host\` (atom or string, e.g., \`localhost\`).
-     - **Behavior**: Delegate to the arity-2 version of \`connect\`, supplying the default port defined by your \`DEFAULT_PORT\` macro.
-     - **Example**: \`arity_calc:connect(localhost)\` delegates to \`connect(localhost, 80)\`.
-   - \`connect(Host, Port)\`:
-     - **Input**: A host identifier \`Host\` and integer \`Port\`.
-     - **Behavior**: Delegate to the arity-3 version of \`connect\`, supplying the default timeout defined by your \`DEFAULT_TIMEOUT\` macro.
-     - **Example**: \`arity_calc:connect(localhost, 8080)\` delegates to \`connect(localhost, 8080, 5000)\`.
-   - \`connect(Host, Port, Timeout)\`:
-     - **Input**: A host identifier \`Host\`, integer \`Port\`, and integer \`Timeout\`.
-     - **Behavior**: Construct and return a 5-element tagged tuple. The tuple must start with the tag atom \`connection\`, followed by the current module name (using the built-in \`?MODULE\` macro), \`Host\`, \`Port\`, and \`Timeout\`.
+     - **Behavior**: Supplies the default port macro and delegates in $O(1)$ time to \`connect/2\`.
      - **Examples**:
        - \`arity_calc:connect(localhost)\` returns \`{connection, arity_calc, localhost, 80, 5000}\`.
+   - \`connect(Host, Port)\`:
+     - **Input**: A host identifier \`Host\` and integer \`Port\`.
+     - **Behavior**: Supplies the default timeout macro and delegates in $O(1)$ time to \`connect/3\`.
+     - **Examples**:
        - \`arity_calc:connect(localhost, 8080)\` returns \`{connection, arity_calc, localhost, 8080, 5000}\`.
+   - \`connect(Host, Port, Timeout)\`:
+     - **Input**: A host identifier \`Host\`, integer \`Port\`, and integer \`Timeout\`.
+     - **Behavior**: Constructs and returns a 5-element tagged tuple in $O(1)$ time starting with the tag atom \`connection\`, followed by the current module atom (using \`?MODULE\`), \`Host\`, \`Port\`, and \`Timeout\`.
+     - **Examples**:
        - \`arity_calc:connect(localhost, 8080, 2500)\` returns \`{connection, arity_calc, localhost, 8080, 2500}\`.
 
 ## Rules & Verification Constraints
 
-- Use the \`?DEFAULT_PORT\` and \`?DEFAULT_TIMEOUT\` macros rather than hardcoding \`80\` and \`5000\` inside the function bodies.
-- Use the built-in \`?MODULE\` macro for the second element of the returned tuple.
-- Do not use Maps or Binaries—pass host names as atoms or strings (e.g., \`localhost\` or \`"api.erlang.org"\`).`,
+- **Exports**: \`arity_calc\` must export \`connect/1\`, \`connect/2\`, and \`connect/3\`.
+- **Cascading Delegation & Macros**: Reference \`?DEFAULT_PORT\`, \`?DEFAULT_TIMEOUT\`, and \`?MODULE\` inside the function bodies, and delegate from \`connect/1\` -> \`connect/2\` -> \`connect/3\` rather than hardcoding literals (verified by AST and source checks).
+- **Primitives Only**: Do not use Maps or Binaries—pass host names as atoms or strings (e.g., \`localhost\` or \`"api.erlang.org"\`) with zero compiler warnings.`,
     otpDocCards: [
       {
         functionName: 'module_info',
@@ -1353,27 +1348,27 @@ In \`arity_calc.erl\`, implement compile-time constants and a cascading network 
         title: 'Connect with Default Port and Timeout (Arity 1)',
         erlangCall: 'arity_calc:connect(localhost)',
         expectedOutput: '{connection, arity_calc, localhost, 80, 5000}',
-        explanation: 'Cascades connect(localhost) -> connect(localhost, 80) -> connect(localhost, 80, 5000).',
+        explanation: 'Applies both compile-time defaults (port 80 and timeout 5000ms) through arity delegation.',
       },
       {
         id: 'tc-ch01-06-b',
         title: 'Connect with Explicit Port (Arity 2)',
         erlangCall: 'arity_calc:connect(localhost, 8080)',
         expectedOutput: '{connection, arity_calc, localhost, 8080, 5000}',
-        explanation: 'Cascades connect(localhost, 8080) -> connect(localhost, 8080, 5000).',
+        explanation: 'Preserves explicit port 8080 and applies the default 5000ms timeout.',
       },
       {
         id: 'tc-ch01-06-c',
         title: 'Connect with Full Parameters (Arity 3)',
         erlangCall: 'arity_calc:connect(localhost, 8080, 2500)',
         expectedOutput: '{connection, arity_calc, localhost, 8080, 2500}',
-        explanation: 'Directly returns 5-tuple with explicit timeout.',
+        explanation: 'Directly returns the 5-element tagged tuple with explicit port and timeout.',
       },
     ],
     astRules: {
       requiredCalls: ['arity_calc:connect/2', 'arity_calc:connect/3'],
     },
-    solutionExplanation: 'Demonstrates cascading default argument delegation across arities using compile-time macros ?DEFAULT_PORT, ?DEFAULT_TIMEOUT, and ?MODULE.',
+    solutionExplanation: 'Demonstrates cascading default-argument delegation across arities using compile-time macros ?DEFAULT_PORT, ?DEFAULT_TIMEOUT, and ?MODULE.',
     files: [
       {
         name: 'arity_calc.erl',
@@ -1384,16 +1379,16 @@ In \`arity_calc.erl\`, implement compile-time constants and a cascading network 
 -define(DEFAULT_PORT, 80).
 -define(DEFAULT_TIMEOUT, 5000).
 
-%% @doc Connect using default port (80) and default timeout (5000ms).
-connect(Host) ->
+%% @doc Connect using default port and timeout macros by delegating to connect/2.
+connect(_Host) ->
     ok.
 
-%% @doc Connect with explicit port and default timeout (5000ms).
-connect(Host, Port) ->
+%% @doc Connect using explicit Port and default timeout macro by delegating to connect/3.
+connect(_Host, _Port) ->
     ok.
 
-%% @doc Connect with explicit port and timeout. Returns a 5-element tagged connection tuple.
-connect(Host, Port, Timeout) ->
+%% @doc Construct a 5-element tagged connection tuple embedding the current module identifier.
+connect(_Host, _Port, _Timeout) ->
     ok.`,
       },
     ],
@@ -1404,12 +1399,15 @@ connect(Host, Port, Timeout) ->
 -define(DEFAULT_PORT, 80).
 -define(DEFAULT_TIMEOUT, 5000).
 
+%% @doc Connect using default port and timeout macros by delegating to connect/2.
 connect(Host) ->
     connect(Host, ?DEFAULT_PORT).
 
+%% @doc Connect using explicit Port and default timeout macro by delegating to connect/3.
 connect(Host, Port) ->
     connect(Host, Port, ?DEFAULT_TIMEOUT).
 
+%% @doc Construct a 5-element tagged connection tuple embedding the current module identifier.
 connect(Host, Port, Timeout) ->
     {connection, ?MODULE, Host, Port, Timeout}.`,
     },
@@ -1419,16 +1417,16 @@ connect(Host, Port, Timeout) ->
 -define(DEFAULT_PORT, 80).
 -define(DEFAULT_TIMEOUT, 5000).
 
-%% @doc Connect using default port (80) and default timeout (5000ms).
-connect(Host) ->
+%% @doc Connect using default port and timeout macros by delegating to connect/2.
+connect(_Host) ->
     ok.
 
-%% @doc Connect with explicit port and default timeout (5000ms).
-connect(Host, Port) ->
+%% @doc Connect using explicit Port and default timeout macro by delegating to connect/3.
+connect(_Host, _Port) ->
     ok.
 
-%% @doc Connect with explicit port and timeout. Returns a 5-element tagged connection tuple.
-connect(Host, Port, Timeout) ->
+%% @doc Construct a 5-element tagged connection tuple embedding the current module identifier.
+connect(_Host, _Port, _Timeout) ->
     ok.`,
     solutionCode: `-module(arity_calc).
 -export([connect/1, connect/2, connect/3]).
@@ -1436,12 +1434,15 @@ connect(Host, Port, Timeout) ->
 -define(DEFAULT_PORT, 80).
 -define(DEFAULT_TIMEOUT, 5000).
 
+%% @doc Connect using default port and timeout macros by delegating to connect/2.
 connect(Host) ->
     connect(Host, ?DEFAULT_PORT).
 
+%% @doc Connect using explicit Port and default timeout macro by delegating to connect/3.
 connect(Host, Port) ->
     connect(Host, Port, ?DEFAULT_TIMEOUT).
 
+%% @doc Construct a 5-element tagged connection tuple embedding the current module identifier.
 connect(Host, Port, Timeout) ->
     {connection, ?MODULE, Host, Port, Timeout}.`,
   },

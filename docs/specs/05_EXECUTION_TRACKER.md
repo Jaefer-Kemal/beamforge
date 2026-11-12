@@ -3098,6 +3098,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter1Verification` passed all 10 subtests in `17.72s` (`17.750s` total); `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` passed all 8 CH01 lessons including `ch01-l05 | 3/3 tests passed` (`12.35s` / `12.484s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 191: Spec 04 / Spec 08 Anti-Spoiler Rework, Arity/Macro AST Audit & Live Tri-Verification of Chapter 1 Lecture 6 (`ch01-l06`)
+- [x] **191.1: De-Spoil Deep Concept Leaks, Parallel Clone (`metrics_emitter` -> `retry_policy`) & Sync Starter/Solution Contracts (`src/arity_calc.erl`, `ch01-l06`)**:
+  - Updated `ch01-l06` ONLY in `apps/web-ide/src/data/chapters/ch01.ts` (`lines 1208–1447`): replaced leaked `arity_calc` / `connect/1..3` / `-define(DEFAULT_PORT, 80).` / `-define(DEFAULT_TIMEOUT, 5000).` textbook snippets with `cache_client` / `query_cache` / `DEFAULT_TTL` (`lines 1208–1244`), standardized `> [!WARNING]` (`line 1241`), replaced the 3-arity 1:1 mirror `metrics_emitter` with the domain-disjoint 2-arity module `retry_policy.erl` (`schedule_retry/1`, `schedule_retry/2` at `lines 1246–1267`), added the Spec 04 §1.3 macro manual reading note & `module_info` reference-card pointer (`line 1278`), scrubbed cascade call spoilers from `Assignment Specification` & `visibleTestCases` explanations (`lines 1280–1366`), and synchronized `_`-prefixed `-Wall -Werror` starter stubs + plain-English `%% @doc` headers across all 4 code blocks (`lines 1372–1447`).
+  - Fixed `Run` catch `call_str` (`services/orchestrator/internal/bridge/erl_runner_chapters.go`, `lines 264–283`) and hardened `Submit` (`case "ch01-l06"`, `lines 4401–4466`) to verify all 3 exports (`connect/1`, `connect/2`, `connect/3`), enforce `bf_ast_verifier` cascading calls (`connect/2`, `connect/3` in local or remote form) AND source macro usages (`?DEFAULT_PORT`, `?DEFAULT_TIMEOUT`, `?MODULE`) in Stage 2 (`ast_arity_and_macros_audit`).
+  - Expanded `services/orchestrator/internal/bridge/ch01_verification_test.go` (`lines 95–455`) to verify `ch01-l06` (`RunVerification` 3 stages `score=100` + `RunCode` 3/3 visible tests) plus negative AST rejection when literals are hardcoded without delegation/macros.
+- [x] **191.2: Mandatory Live Tri-Verification & Compiler Suite (`ch01-l06`, Local Commit Only per Spec 08 §3.3)**:
+  - **Parallel Worked Example (`retry_policy.erl`)**: Extracted from `ch01.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified live on OTP 29 (`PWE_OK`).
+  - **Starter & Solution Pack (`arity_calc.erl`)**: Verified starter & solution parity (`files[0].content === starterCode`, `solutionFiles['src/arity_calc.erl'] === solutionCode`), compiled starter with `-Wall -Werror` (0 warnings) returning `{ok, ok, ok}`, compiled solution with `+debug_info -Wall -Werror`, passed `bf_ast_verifier`, and ran all 3 `visibleTestCases` live (`SOL_ALL_VISIBLE_AND_AST_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter1Verification` passed all 12 subtests in `33.98s` (`34.017s` total); `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` passed all 8 CH01 lessons including `ch01-l06 | 3/3 tests passed` (`16.38s` / `16.398s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
+
 
 
 

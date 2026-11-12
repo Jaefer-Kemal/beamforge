@@ -92,6 +92,25 @@ ascii_initial(NameString) ->
     {char_code, FirstCharCode}.
 `
 
+	arityCalcSolution := `-module(arity_calc).
+-export([connect/1, connect/2, connect/3]).
+
+-define(DEFAULT_PORT, 80).
+-define(DEFAULT_TIMEOUT, 5000).
+
+%% @doc Connect using default port and timeout macros by delegating to connect/2.
+connect(Host) ->
+    connect(Host, ?DEFAULT_PORT).
+
+%% @doc Connect using explicit Port and default timeout macro by delegating to connect/3.
+connect(Host, Port) ->
+    connect(Host, Port, ?DEFAULT_TIMEOUT).
+
+%% @doc Construct a 5-element tagged connection tuple embedding the current module identifier.
+connect(Host, Port, Timeout) ->
+    {connection, ?MODULE, Host, Port, Timeout}.
+`
+
 	tests := []struct {
 		name          string
 		exerciseID    string
@@ -135,6 +154,14 @@ ascii_initial(NameString) ->
 			exerciseID: "ch01-l05",
 			files: map[string]string{
 				"src/list_ops.erl": listOpsSolution,
+			},
+			visibleCount: 3,
+		},
+		{
+			name:       "ch01-l06 Modules, Arity & Macros",
+			exerciseID: "ch01-l06",
+			files: map[string]string{
+				"src/arity_calc.erl": arityCalcSolution,
 			},
 			visibleCount: 3,
 		},
@@ -379,6 +406,51 @@ ascii_initial([FirstCharCode | _Rest]) ->
 		}
 		if !astFailed {
 			t.Errorf("Expected ast_cons_pattern_audit stage to fail for lists:append/2, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch01-l06 rejects hardcoded literals without delegation or macros", func(t *testing.T) {
+		sessionID := "test-ch01-l06-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/arity_calc.erl": `-module(arity_calc).
+-export([connect/1, connect/2, connect/3]).
+
+connect(Host) ->
+    {connection, arity_calc, Host, 80, 5000}.
+
+connect(Host, Port) ->
+    {connection, arity_calc, Host, Port, 5000}.
+
+connect(Host, Port, Timeout) ->
+    {connection, arity_calc, Host, Port, Timeout}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch01-l06", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected non-cascading hardcoded arity_calc to fail AST verification, but got PASSED")
+		}
+
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_arity_and_macros_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_arity_and_macros_audit stage to fail for hardcoded connect/1..3, stages=%+v", report.Stages)
 		}
 	})
 }
