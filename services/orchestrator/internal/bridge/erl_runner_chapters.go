@@ -412,25 +412,29 @@ T1_Res = try deep_match:extract_route({packet, {header, 4, {route, "10.0.0.1", "
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"deep_match:extract_route(...)">>, expected => <<"{ok, ipv4, \"10.0.0.1\", \"10.0.0.2\"}">>,
+        #{call_str => <<"deep_match:extract_route({packet, {header, 4, {route, \"10.0.0.1\", \"10.0.0.2\"}}, [ping, 1]})">>,
+          expected => <<"{ok, ipv4, \"10.0.0.1\", \"10.0.0.2\"}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"deep_match:extract_route(...)">>, expected => <<"{ok, ipv4, ...}">>,
+    #{call_str => <<"deep_match:extract_route({packet, {header, 4, {route, \"10.0.0.1\", \"10.0.0.2\"}}, [ping, 1]})">>,
+      expected => <<"{ok, ipv4, \"10.0.0.1\", \"10.0.0.2\"}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try deep_match:extract_route({packet, {header, 5, {route, "10.0.0.1", "10.0.0.2"}}, []}) of
     {error, {unsupported_version, 5}} = R2 ->
-        #{call_str => <<"deep_match:extract_route({packet, {header, 5, ...}, []})">>,
+        #{call_str => <<"deep_match:extract_route({packet, {header, 5, {route, \"10.0.0.1\", \"10.0.0.2\"}}, []})">>,
           expected => <<"{error, {unsupported_version, 5}}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"deep_match:extract_route(...)">>, expected => <<"{error, {unsupported_version, 5}}">>,
+        #{call_str => <<"deep_match:extract_route({packet, {header, 5, {route, \"10.0.0.1\", \"10.0.0.2\"}}, []})">>,
+          expected => <<"{error, {unsupported_version, 5}}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
 catch C2:R2 ->
-    #{call_str => <<"deep_match:extract_route(...)">>, expected => <<"{error, {unsupported_version, 5}}">>,
+    #{call_str => <<"deep_match:extract_route({packet, {header, 5, {route, \"10.0.0.1\", \"10.0.0.2\"}}, []})">>,
+      expected => <<"{error, {unsupported_version, 5}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 
@@ -439,17 +443,37 @@ P3 = {packet, {header, 4, {route, "src_host", "dst_host"}}, [data, 42]},
 T3_Res = try deep_match:repackage_envelope(P3) of
     {forwarded, "dst_host", P3} = R3 ->
         #{call_str => <<"deep_match:repackage_envelope({packet, {header, 4, {route, \"src_host\", \"dst_host\"}}, [data, 42]})">>,
-          expected => <<"{forwarded, \"dst_host\", {packet, ...}}">>,
+          expected => <<"{forwarded, \"dst_host\", {packet, {header, 4, {route, \"src_host\", \"dst_host\"}}, [data, 42]}}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T3_Start};
     Other3 ->
-        #{call_str => <<"deep_match:repackage_envelope(...)">>, expected => <<"{forwarded, \"dst_host\", ...}">>,
+        #{call_str => <<"deep_match:repackage_envelope({packet, {header, 4, {route, \"src_host\", \"dst_host\"}}, [data, 42]})">>,
+          expected => <<"{forwarded, \"dst_host\", {packet, {header, 4, {route, \"src_host\", \"dst_host\"}}, [data, 42]}}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
 catch C3:R3 ->
-    #{call_str => <<"deep_match:repackage_envelope(...)">>, expected => <<"{forwarded, ...}">>,
+    #{call_str => <<"deep_match:repackage_envelope({packet, {header, 4, {route, \"src_host\", \"dst_host\"}}, [data, 42]})">>,
+      expected => <<"{forwarded, \"dst_host\", {packet, {header, 4, {route, \"src_host\", \"dst_host\"}}, [data, 42]}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res, T2_Res, T3_Res],
+
+T4_Start = erlang:system_time(millisecond),
+P4 = {packet, {header, 6, {route, "a", "b"}}, []},
+T4_Res = try deep_match:repackage_envelope(P4) of
+    {dropped, P4} = R4 ->
+        #{call_str => <<"deep_match:repackage_envelope({packet, {header, 6, {route, \"a\", \"b\"}}, []})">>,
+          expected => <<"{dropped, {packet, {header, 6, {route, \"a\", \"b\"}}, []}}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R4]))), passed => true,
+          time_ms => erlang:system_time(millisecond) - T4_Start};
+    Other4 ->
+        #{call_str => <<"deep_match:repackage_envelope({packet, {header, 6, {route, \"a\", \"b\"}}, []})">>,
+          expected => <<"{dropped, {packet, {header, 6, {route, \"a\", \"b\"}}, []}}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other4]))), passed => false, time_ms => 0}
+catch C4:R4 ->
+    #{call_str => <<"deep_match:repackage_envelope({packet, {header, 6, {route, \"a\", \"b\"}}, []})">>,
+      expected => <<"{dropped, {packet, {header, 6, {route, \"a\", \"b\"}}, []}}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -4616,37 +4640,88 @@ Stages = [CompileStage, S1_Ast, S2_Suite]
 
 	// ── CHAPTER 2 ─────────────────────────────────────────────────────────────
 	case "ch02-l01":
-		return `
+		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(deep_match) of
     {module, deep_match} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"deep_match.erl compiled cleanly">>};
+        Exports = deep_match:module_info(exports),
+        Required = [{extract_route, 1}, {repackage_envelope, 1}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"deep_match.erl compiled cleanly and exported extract_route/1 and repackage_envelope/1.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Match = try
+S1_Ast = try
+    SourceCandidates = [
+        filename:join(["%s", "src", "deep_match.erl"]),
+        filename:join(["%s", "deep_match.erl"])
+    ],
+    SourceFile = case [P || P <- SourceCandidates, filelib:is_regular(P)] of
+        [ValidSrc | _] -> ValidSrc;
+        [] -> hd(SourceCandidates)
+    end,
+    AstRes = bf_ast_verifier:verify_rules(SourceFile, #{forbidden_remote_calls => [{erlang, element, 2}], forbidden_constructs => [if_expr]}),
+    AstOk = case AstRes of
+        {ok, _} -> true;
+        _ -> false
+    end,
+    NoForbiddenTypes = case epp:parse_file(SourceFile, []) of
+        {ok, Forms} ->
+            HasForbidden = (fun Walk(T) when is_tuple(T) ->
+                case element(1, T) of
+                    map -> true;
+                    bin when tuple_size(T) >= 3, element(3, T) =/= [] -> true;
+                    _ -> Walk(tuple_to_list(T))
+                end;
+                Walk([H | Tail]) -> Walk(H) orelse Walk(Tail);
+                Walk(_) -> false
+            end)(Forms),
+            not HasForbidden;
+        _ -> false
+    end,
+    case {AstOk, NoForbiddenTypes} of
+        {true, true} ->
+            #{id => <<"ast_deep_match_audit">>, title => <<"AST Analysis: No element/2, if_expr, Maps, or Binaries">>, status => <<"passed">>, time_ms => 10, details => <<"Verified direct tuple head pattern matching without erlang:element/2, if expressions, maps, or binaries.">>};
+        {false, _} ->
+            #{id => <<"ast_deep_match_audit">>, title => <<"AST Analysis: No element/2, if_expr, Maps, or Binaries">>, status => <<"failed">>, time_ms => 10, details => <<"Forbidden erlang:element/2 call or if_expr branching detected; match nested tuples directly in clause heads.">>};
+        {true, false} ->
+            #{id => <<"ast_deep_match_audit">>, title => <<"AST Analysis: No element/2, if_expr, Maps, or Binaries">>, status => <<"failed">>, time_ms => 10, details => <<"Forbidden syntax detected (maps and non-empty binaries are forbidden; use tuples, atoms, and strings only).">>}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_deep_match_audit">>, title => <<"AST Analysis: No element/2, if_expr, Maps, or Binaries">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_Match = try
     R1 = deep_match:extract_route({packet, {header, 4, {route, "10.0.0.1", "10.0.0.2"}}, [ping, 1]}),
     R2 = deep_match:extract_route({packet, {header, 6, {route, "fe80::1", "fe80::2"}}, []}),
     R3 = deep_match:extract_route({packet, {header, 5, {route, "a", "b"}}, []}),
     R4 = deep_match:extract_route({corrupt, envelope}),
+    R5 = deep_match:extract_route({packet, {header, 4, bad_route}, [ping]}),
     P = {packet, {header, 4, {route, "src_host", "dst_host"}}, [data, 42]},
     F1 = deep_match:repackage_envelope(P),
     D1 = deep_match:repackage_envelope({packet, {header, 6, {route, "a", "b"}}, []}),
-    case {R1, R2, R3, R4, F1, D1} of
+    D2 = deep_match:repackage_envelope(corrupt),
+    case {R1, R2, R3, R4, R5, F1, D1, D2} of
         {{ok, ipv4, "10.0.0.1", "10.0.0.2"},
          {ok, ipv6, "fe80::1", "fe80::2"},
          {error, {unsupported_version, 5}},
          {error, malformed_envelope},
+         {error, malformed_envelope},
          {forwarded, "dst_host", P},
-         {dropped, {packet, {header, 6, {route, "a", "b"}}, []}}} ->
-            #{id => <<"deep_pattern_matching">>, title => <<"Deep Function Head Pattern Matching & Aliasing">>, status => <<"passed">>, time_ms => 8, details => <<"Nested tuple head pattern destructuring and aliasing verified">>};
+         {dropped, {packet, {header, 6, {route, "a", "b"}}, []}},
+         {dropped, corrupt}} ->
+            #{id => <<"deep_pattern_matching">>, title => <<"Deep Function Head Pattern Matching & Aliasing">>, status => <<"passed">>, time_ms => 8, details => <<"Nested tuple head pattern destructuring and aliasing verified across valid, unsupported, and malformed cases.">>};
         Got1 ->
             #{id => <<"deep_pattern_matching">>, title => <<"Deep Function Head Pattern Matching & Aliasing">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
     end
 catch C1:Err1 ->
     #{id => <<"deep_pattern_matching">>, title => <<"Deep Function Head Pattern Matching & Aliasing">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
-Stages = [CompileStage, S1_Match]
-`, true
+Stages = [CompileStage, S1_Ast, S2_Match]
+`, wsDir, wsDir), true
 
 	case "ch02-l02":
 		return `

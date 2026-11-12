@@ -472,10 +472,24 @@ scan_expr({match, _Line, Left, Right}, ForbiddenCalls, ForbiddenConstructs, VAcc
     {V1, R1, C1} = scan_expr(Left, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet),
     scan_expr(Right, ForbiddenCalls, ForbiddenConstructs, V1, R1, C1);
 
-scan_expr({call, _Line, {atom, _, LocalFun}, Args}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
+scan_expr({call, Line, {atom, _, LocalFun}, Args}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
     Arity = length(Args),
     NewRAcc = [{erlang, LocalFun, Arity}, {LocalFun, Arity} | RAcc],
-    scan_exprs(Args, ForbiddenCalls, ForbiddenConstructs, VAcc, NewRAcc, CSet);
+    NewVAcc = case is_forbidden_call(erlang, LocalFun, Arity, ForbiddenCalls) of
+        true ->
+            Msg = iolist_to_binary(io_lib:format(
+                "Line ~p: Forbidden BIF call to ~p/~p.",
+                [extract_line(Line), LocalFun, Arity]
+            )),
+            [#{
+                rule => <<"forbidden_remote_call">>,
+                line => extract_line(Line),
+                message => Msg
+            } | VAcc];
+        false ->
+            VAcc
+    end,
+    scan_exprs(Args, ForbiddenCalls, ForbiddenConstructs, NewVAcc, NewRAcc, CSet);
 
 scan_expr({'fun', _Line, {clauses, Clauses}}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
     scan_clauses(Clauses, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet);
