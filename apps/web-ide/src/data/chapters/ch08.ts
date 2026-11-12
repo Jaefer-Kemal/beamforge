@@ -2723,43 +2723,159 @@ test_chaos_cascade() ->
     visualScene: 'supervision_rest_for_one_ets_heir',
     difficulty: 'Advanced',
     xpReward: 250,
-    conceptMarkdown: `## Architectural Mission: E-Commerce Checkout Pipeline
+    conceptMarkdown: `## Why This Matters in Production
 
-Welcome to the Chapter 8 Problem Set! You will architect a production-grade, fault-isolated **E-Commerce Checkout Supervision Tree**.
+In production OTP systems, supervisors and workers are separated into dedicated modules so supervision restarts cleanly isolate failure boundaries without tangling business state inside supervisor callbacks. An e-commerce checkout backend depends on three sequential stages: a persistent database pool, an in-memory pricing cache fed by that pool, and an order gateway serving buyers from cached prices.
 
-In real-world e-commerce backends, checkout pipelines consist of strictly ordered micro-services:
-1. **\`db_pool\`**: Database connection pool maintaining long-lived TCP connections. Must remain stable at all costs.
-2. **\`pricing_cache\`**: Fast in-memory caching worker dependent on \`db_pool\`.
-3. **\`order_gateway\`**: Payment and order submission gateway dependent on \`pricing_cache\`.
+When the pricing cache crashes, keeping the downstream order gateway alive would serve stale or broken prices—whereas restarting the upstream database pool would sever unrelated active connections. Choosing ordered downstream supervision (\`rest_for_one\`) across cleanly separated worker modules keeps upstream foundations stable while rebuilding only broken downstream links. Use the interactive visualizer below to trace how OTP sequences those restarts.
 
-### Architectural Requirements
+## Deep Concept Breakdown & Under the Hood
 
-1. **Strategy Selection:**
-   - The supervision tree must use **\`rest_for_one\`** with **\`intensity => 5, period => 10\`**.
-   - If \`order_gateway\` crashes, only \`order_gateway\` restarts. \`db_pool\` and \`pricing_cache\` are unaffected.
-   - If \`pricing_cache\` crashes, \`pricing_cache\` and \`order_gateway\` restart in dependency order. \`db_pool\` is untouched.
-   - If \`db_pool\` crashes, the entire pipeline is cleanly restarted in order.
+When a supervisor launches worker processes implemented in a separate \`gen_server\` module, three BEAM runtime details govern reliability and hot-code maintenance:
 
-2. **Strict Clean Worker Separation:**
-   - Look at the second tab in your editor: \`src/checkout_worker.erl\` is already implemented as a clean, separate \`gen_server\` worker.
-   - In \`src/checkout_sup.erl\`, configure each child spec with:
-     - \`start => {checkout_worker, start_link, [RegisteredName, Role]}\`
-     - Child 1: \`id => db_pool\`, \`start => {checkout_worker, start_link, [db_pool_worker, db]}\`
-     - Child 2: \`id => pricing_cache\`, \`start => {checkout_worker, start_link, [pricing_cache_worker, cache]}\`
-     - Child 3: \`id => order_gateway\`, \`start => {checkout_worker, start_link, [order_gateway_worker, gateway]}\`
-     - All 3 children must have \`restart => permanent\`, \`shutdown => 5000\`, \`type => worker\`, and \`modules => [checkout_worker]\`.
+1. **Cross-Module MFArgs Delegation**: Each child specification's \`start\` entry tells the supervisor which \`{Module, Function, Arguments}\` call boots and links the worker process. Because \`supervisor:start_link/3\` is synchronous, it executes each child's start function sequentially in list order before returning \`{ok, SupPid}\`.
+2. **Release Handler Code Tracking (\`modules\`)**: Setting \`modules => [WorkerModule]\` in a worker's child specification tells OTP's release handler which code module owns that process's runtime loop—crucial for live hot-code upgrades (\`code_change/3\`), even though the child spec itself lives inside the supervisor file.
+3. **Resilient Lookup After Restarts**: Registered process names remain bound only while their process is alive. When \`rest_for_one\` restarts a worker, its old PID dies and a fresh PID takes over the registered name. Querying \`supervisor:which_children/1\` with a child ID returns the current live \`pid()\` managed under that tree (falling back to \`whereis/1\` only if checking a registered atom directly).
 
-3. **Pipeline PID Introspection (\`get_pipeline_pids/0\`):**
-   - Calls \`supervisor:which_children(?MODULE)\`.
-   - Locates each child by its ID tuple (or registered process fallback).
-   - Returns \`{ok, #{db_pid => DbPid, cache_pid => CachePid, gateway_pid => GatewayPid}}\`.
+## Official Erlang Docs & Function Reference
 
-### The 3-Stage Live Chaos Test
+\`\`\`erlang
+%% Official OTP Signatures (stdlib / supervisor)
+supervisor:start_link(SupName, Module, Args) -> startlink_ret()
+  Types:
+    SupName = {local, Name :: atom()} | {global, Name :: term()} | {via, Module :: module(), Name :: term()}
+    Module = module()
+    Args = term()
+    startlink_ret() = {ok, pid()} | ignore | {error, startlink_err()}
 
-Your supervision tree will be subjected to automated chaos injection in the test suite:
-- **Chaos 1:** \`order_gateway\` is killed with \`exit(kill)\`. Confirms ONLY Child 3 restarted; DB and Cache PIDs match their original values.
-- **Chaos 2:** \`pricing_cache\` is killed with \`exit(kill)\`. Confirms Child 2 and Child 3 received NEW PIDs, while DB Pool PID is preserved!
-- **Chaos 3:** \`db_pool\` is killed with \`exit(kill)\`. Confirms all 3 processes are restarted in sequence with new PIDs!
+supervisor:which_children(SupRef) -> [{Id, Child, Type, Modules}]
+  Types:
+    SupRef = Name :: atom() | {Name :: atom(), Node :: node()} | pid()
+    Id = child_id() | undefined
+    Child = pid() | undefined | restarting
+    Type = worker | supervisor
+    Modules = [module()] | dynamic
+\`\`\`
+
+Use the attached reference cards below when registering a supervisor locally under its own module atom (\`?MODULE\`) and inspecting child PIDs by child ID.
+
+## Parallel Worked Example: Multi-File Log Ingestion Tree
+
+Consider a separate two-module system: an IoT log ingestion tree with a companion \`gen_server\` worker module (\`ingest_stage_worker\`) supervised by \`ingest_pipeline_sup\` across three ordered stages: \`socket_reader\`, \`frame_decoder\`, and \`metrics_sink\`.
+
+### 1. Companion Worker Module (\`ingest_stage_worker.erl\`)
+
+\`\`\`erlang
+-module(ingest_stage_worker).
+-behaviour(gen_server).
+
+-export([start_link/1, init/1, handle_call/3, handle_cast/2, terminate/2]).
+
+%% @doc Start and register an ingestion stage server under its stage atom.
+start_link(StageTag) ->
+    gen_server:start_link({local, StageTag}, ?MODULE, StageTag, []).
+
+%% @doc Initialize worker state for the assigned ingestion stage.
+init(StageTag) ->
+    {ok, #{stage => StageTag}}.
+
+%% @doc Report the stage tag held by this worker.
+handle_call(stage, _From, State) ->
+    {reply, {ok, maps:get(stage, State)}, State}.
+
+%% @doc Ignore unused asynchronous casts.
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+%% @doc Clean up worker state on supervisor shutdown.
+terminate(_Reason, _State) ->
+    ok.
+\`\`\`
+
+### 2. Ordered Multi-Child Supervisor (\`ingest_pipeline_sup.erl\`)
+
+\`\`\`erlang
+-module(ingest_pipeline_sup).
+-behaviour(supervisor).
+
+-export([start_link/0, init/1, stage_pids/0]).
+
+%% @doc Start the locally registered ingestion pipeline supervisor.
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+%% @doc Configure rest_for_one supervision across three permanent stage workers.
+init([]) ->
+    SupFlags = #{
+        strategy => rest_for_one,
+        intensity => 4,
+        period => 8
+    },
+    Stages = [socket_reader, frame_decoder, metrics_sink],
+    ChildSpecs = [
+        #{
+            id => Stage,
+            start => {ingest_stage_worker, start_link, [Stage]},
+            restart => permanent,
+            shutdown => 3000,
+            type => worker,
+            modules => [ingest_stage_worker]
+        }
+        || Stage <- Stages
+    ],
+    {ok, {SupFlags, ChildSpecs}}.
+
+%% @doc Return the current PIDs of all three ingestion stages in pipeline order.
+stage_pids() ->
+    Children = supervisor:which_children(?MODULE),
+    FindPid = fun(Id) ->
+        case lists:keyfind(Id, 1, Children) of
+            {Id, Pid, _, _} -> Pid;
+            false -> whereis(Id)
+        end
+    end,
+    {FindPid(socket_reader), FindPid(frame_decoder), FindPid(metrics_sink)}.
+\`\`\`
+
+### What OTP Does at Runtime
+
+- **External Worker Delegation**: Every child spec points \`start\` at \`{ingest_stage_worker, start_link, [Stage]}\` and sets \`modules => [ingest_stage_worker]\`, cleanly isolating worker logic from supervision configuration.
+- **Dependency Ordering**: Declaring \`[socket_reader, frame_decoder, metrics_sink]\` under \`rest_for_one\` (budget: 4 restarts per 8 seconds) guarantees that crashing \`frame_decoder\` restarts \`frame_decoder\` and \`metrics_sink\` while preserving \`socket_reader\`.
+- **Resolving Active Child PIDs**: \`stage_pids/0\` queries \`supervisor:which_children(?MODULE)\` by child ID and falls back to \`whereis/1\`, immediately surfacing fresh PIDs after downstream recovery restarts.
+
+## Assignment Specification
+
+Implement \`src/checkout_sup.erl\` as an OTP supervisor managing the read-only companion worker module \`src/checkout_worker.erl\` (visible in your editor's second tab, exporting \`start_link/2\` taking a local registered name atom and role atom).
+
+### \`start_link/0\`
+- **Input**: None.
+- **Behavior**: Starts the \`checkout_sup\` supervisor registered locally on the node under its own module name, links it to the calling process, and boots all initial children before returning.
+- **Examples**:
+  - \`checkout_sup:start_link()\` returns \`{ok, SupPid}\`.
+
+### \`init/1\`
+- **Input**: Empty list \`[]\`.
+- **Behavior**: Configures ordered downstream recovery (\`rest_for_one\`) tolerating up to 5 restarts within a 10-second period, and defines 3 permanent worker specifications (each with a \`5000\` ms shutdown timeout, worker type, and \`checkout_worker\` module tracking) in strict dependency order:
+  1. First child: ID \`db_pool\`, delegating to \`checkout_worker:start_link/2\` with local name \`db_pool_worker\` and role \`db\`.
+  2. Second child: ID \`pricing_cache\`, delegating to \`checkout_worker:start_link/2\` with local name \`pricing_cache_worker\` and role \`cache\`.
+  3. Third child: ID \`order_gateway\`, delegating to \`checkout_worker:start_link/2\` with local name \`order_gateway_worker\` and role \`gateway\`.
+- **Examples**:
+  - \`checkout_sup:init([])\` returns \`{ok, {SupFlags, [DbSpec, CacheSpec, GatewaySpec]}}\`.
+
+### \`get_pipeline_pids/0\`
+- **Input**: None.
+- **Behavior**: Queries the locally registered \`checkout_sup\` child list via OTP supervisor introspection, looks up each of the three stage PIDs (falling back to registered process lookup by worker name if needed), and returns an ok-tagged map containing keys \`db_pid\`, \`cache_pid\`, and \`gateway_pid\`.
+- **Examples**:
+  - \`checkout_sup:get_pipeline_pids()\` returns \`{ok, #{db_pid => DbPid, cache_pid => CachePid, gateway_pid => GatewayPid}}\`.
+
+## Rules & Verification Constraints
+
+- **Required Remote Calls**: \`bf_ast_verifier\` enforces \`supervisor:start_link/3\` and \`supervisor:which_children/1\`.
+- **Exact Flags & Child Order**: \`init/1\` must return \`rest_for_one\`, intensity \`5\`, period \`10\`, and child IDs \`[db_pool, pricing_cache, order_gateway]\`.
+- **3-Stage Chaos Injection**:
+  - Killing \`order_gateway\` restarts only \`order_gateway\`, leaving \`db_pool\` and \`pricing_cache\` PIDs unchanged.
+  - Killing \`pricing_cache\` restarts \`pricing_cache\` and \`order_gateway\` with new PIDs while preserving \`db_pool\`.
+  - Killing \`db_pool\` restarts all three pipeline workers with fresh PIDs in order.
 `,
     mentalModelCheck: {
       question: 'In checkout_sup with children [db_pool, pricing_cache, order_gateway] under rest_for_one, why does order_gateway crashing NOT restart pricing_cache?',
@@ -2804,6 +2920,18 @@ Your supervision tree will be subjected to automated chaos injection in the test
         complexityNote: 'Synchronous boot. Returns only when init/1 and all permanent children have started.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/supervisor.html#start_link/3',
       },
+      {
+        functionName: 'which_children',
+        module: 'supervisor',
+        signature: 'supervisor:which_children(SupRef) -> [{Id, Child, Type, Modules}]',
+        typesSpec: [
+          'SupRef = atom() | pid()',
+          'Child = pid() | undefined | restarting'
+        ],
+        description: 'Returns tuples describing every child currently managed by the supervisor, including live child PIDs.',
+        complexityNote: 'Synchronous gen_server call to the supervisor loop.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/supervisor.html#which_children/1',
+      },
     ],
     starterCode: `-module(checkout_sup).
 -behaviour(supervisor).
@@ -2814,12 +2942,15 @@ Your supervision tree will be subjected to automated chaos injection in the test
     init/1
 ]).
 
+%% @doc Start and locally register the checkout supervisor linked to the caller.
 start_link() ->
     ok.
 
+%% @doc Return rest_for_one supervisor flags and permanent checkout worker specs.
 init([]) ->
     ok.
 
+%% @doc Query the live PIDs of the db_pool, pricing_cache, and order_gateway workers.
 get_pipeline_pids() ->
     ok.
 `,
@@ -2832,9 +2963,11 @@ get_pipeline_pids() ->
     init/1
 ]).
 
+%% @doc Start and locally register the checkout supervisor linked to the caller.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% @doc Return rest_for_one supervisor flags and permanent checkout worker specs.
 init([]) ->
     SupFlags = #{
         strategy => rest_for_one,
@@ -2869,6 +3002,7 @@ init([]) ->
     ],
     {ok, {SupFlags, ChildSpecs}}.
 
+%% @doc Query the live PIDs of the db_pool, pricing_cache, and order_gateway workers.
 get_pipeline_pids() ->
     Children = supervisor:which_children(?MODULE),
     DbPid = case lists:keyfind(db_pool, 1, Children) of
@@ -2900,12 +3034,15 @@ get_pipeline_pids() ->
     init/1
 ]).
 
+%% @doc Start and locally register the checkout supervisor linked to the caller.
 start_link() ->
     ok.
 
+%% @doc Return rest_for_one supervisor flags and permanent checkout worker specs.
 init([]) ->
     ok.
 
+%% @doc Query the live PIDs of the db_pool, pricing_cache, and order_gateway workers.
 get_pipeline_pids() ->
     ok.
 `,
@@ -2932,29 +3069,37 @@ get_pipeline_pids() ->
     code_change/3
 ]).
 
+%% @doc Start and register a checkout worker process under the given local name and role.
 start_link(RegName, Role) ->
     gen_server:start_link({local, RegName}, ?MODULE, Role, []).
 
+%% @doc Initialize worker state with the assigned pipeline role.
 init(Role) ->
     {ok, #{role => Role, restarts => 0}}.
 
+%% @doc Synchronously retrieve the pipeline role atom from a worker process.
 get_role(Pid) ->
     gen_server:call(Pid, get_role).
 
+%% @doc Handle synchronous role queries for this checkout stage worker.
 handle_call(get_role, _From, #{role := Role} = State) ->
     {reply, {ok, Role}, State};
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Ignore asynchronous cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Ignore out-of-band info messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up worker resources during supervisor termination.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Preserve worker state across live code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -2970,9 +3115,11 @@ code_change(_OldVsn, State, _Extra) ->
     init/1
 ]).
 
+%% @doc Start and locally register the checkout supervisor linked to the caller.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% @doc Return rest_for_one supervisor flags and permanent checkout worker specs.
 init([]) ->
     SupFlags = #{
         strategy => rest_for_one,
@@ -3007,6 +3154,7 @@ init([]) ->
     ],
     {ok, {SupFlags, ChildSpecs}}.
 
+%% @doc Query the live PIDs of the db_pool, pricing_cache, and order_gateway workers.
 get_pipeline_pids() ->
     Children = supervisor:which_children(?MODULE),
     DbPid = case lists:keyfind(db_pool, 1, Children) of
@@ -3040,29 +3188,37 @@ get_pipeline_pids() ->
     code_change/3
 ]).
 
+%% @doc Start and register a checkout worker process under the given local name and role.
 start_link(RegName, Role) ->
     gen_server:start_link({local, RegName}, ?MODULE, Role, []).
 
+%% @doc Initialize worker state with the assigned pipeline role.
 init(Role) ->
     {ok, #{role => Role, restarts => 0}}.
 
+%% @doc Synchronously retrieve the pipeline role atom from a worker process.
 get_role(Pid) ->
     gen_server:call(Pid, get_role).
 
+%% @doc Handle synchronous role queries for this checkout stage worker.
 handle_call(get_role, _From, #{role := Role} = State) ->
     {reply, {ok, Role}, State};
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Ignore asynchronous cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Ignore out-of-band info messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up worker resources during supervisor termination.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Preserve worker state across live code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -3075,21 +3231,21 @@ code_change(_OldVsn, State, _Extra) ->
         id: 'tc1',
         title: 'Start Checkout Supervisor Pipeline',
         explanation: 'Starts checkout_sup and confirms all three pipeline workers are alive.',
-        erlangCall: 'begin case whereis(checkout_sup) of undefined -> ok; OldSup1 -> unlink(OldSup1), exit(OldSup1, shutdown), timer:sleep(20) end, {ok, Sup} = checkout_sup:start_link(), {ok, #{db_pid := Db, cache_pid := Cache, gateway_pid := Gw}} = checkout_sup:get_pipeline_pids(), unlink(Sup), catch supervisor:stop(Sup), is_pid(Db) andalso is_pid(Cache) andalso is_pid(Gw) end',
+        erlangCall: 'begin case whereis(checkout_sup) of undefined -> ok; OldSup1 -> RefOld1 = monitor(process, OldSup1), unlink(OldSup1), exit(OldSup1, shutdown), receive {\'DOWN\', RefOld1, process, OldSup1, _} -> ok after 1000 -> ok end end, {ok, Sup} = checkout_sup:start_link(), {ok, #{db_pid := Db, cache_pid := Cache, gateway_pid := Gw}} = checkout_sup:get_pipeline_pids(), unlink(Sup), catch supervisor:stop(Sup), is_pid(Db) andalso is_pid(Cache) andalso is_pid(Gw) end',
         expectedOutput: 'true',
       },
       {
         id: 'tc2',
         title: 'Chaos Test: Gateway Crash (Isolated)',
         explanation: 'Kills order_gateway; confirms DB and Cache PIDs are preserved while Gateway restarts with new PID.',
-        erlangCall: 'begin case whereis(checkout_sup) of undefined -> ok; OldSup2 -> unlink(OldSup2), exit(OldSup2, shutdown), timer:sleep(20) end, {ok, Sup} = checkout_sup:start_link(), {ok, #{db_pid := Db1, cache_pid := Cache1, gateway_pid := Gw1}} = checkout_sup:get_pipeline_pids(), exit(Gw1, kill), timer:sleep(50), {ok, #{db_pid := Db2, cache_pid := Cache2, gateway_pid := Gw2}} = checkout_sup:get_pipeline_pids(), unlink(Sup), catch supervisor:stop(Sup), {Db1 =:= Db2, Cache1 =:= Cache2, Gw1 =/= Gw2} end',
+        erlangCall: 'begin case whereis(checkout_sup) of undefined -> ok; OldSup2 -> RefOld2 = monitor(process, OldSup2), unlink(OldSup2), exit(OldSup2, shutdown), receive {\'DOWN\', RefOld2, process, OldSup2, _} -> ok after 1000 -> ok end end, {ok, Sup} = checkout_sup:start_link(), {ok, #{db_pid := Db1, cache_pid := Cache1, gateway_pid := Gw1}} = checkout_sup:get_pipeline_pids(), exit(Gw1, kill), timer:sleep(50), {ok, #{db_pid := Db2, cache_pid := Cache2, gateway_pid := Gw2}} = checkout_sup:get_pipeline_pids(), unlink(Sup), catch supervisor:stop(Sup), {Db1 =:= Db2, Cache1 =:= Cache2, Gw1 =/= Gw2} end',
         expectedOutput: '{true, true, true}',
       },
       {
         id: 'tc3',
         title: 'Chaos Test: Cache Crash (Cascades to Gateway)',
         explanation: 'Kills pricing_cache; confirms Cache and Gateway restart with new PIDs while DB Pool PID is untouched.',
-        erlangCall: 'begin case whereis(checkout_sup) of undefined -> ok; OldSup3 -> unlink(OldSup3), exit(OldSup3, shutdown), timer:sleep(20) end, {ok, Sup} = checkout_sup:start_link(), {ok, #{db_pid := Db1, cache_pid := Cache1, gateway_pid := Gw1}} = checkout_sup:get_pipeline_pids(), exit(Cache1, kill), timer:sleep(50), {ok, #{db_pid := Db2, cache_pid := Cache2, gateway_pid := Gw2}} = checkout_sup:get_pipeline_pids(), unlink(Sup), catch supervisor:stop(Sup), {Db1 =:= Db2, Cache1 =/= Cache2, Gw1 =/= Gw2} end',
+        erlangCall: 'begin case whereis(checkout_sup) of undefined -> ok; OldSup3 -> RefOld3 = monitor(process, OldSup3), unlink(OldSup3), exit(OldSup3, shutdown), receive {\'DOWN\', RefOld3, process, OldSup3, _} -> ok after 1000 -> ok end end, {ok, Sup} = checkout_sup:start_link(), {ok, #{db_pid := Db1, cache_pid := Cache1, gateway_pid := Gw1}} = checkout_sup:get_pipeline_pids(), exit(Cache1, kill), timer:sleep(50), {ok, #{db_pid := Db2, cache_pid := Cache2, gateway_pid := Gw2}} = checkout_sup:get_pipeline_pids(), unlink(Sup), catch supervisor:stop(Sup), {Db1 =:= Db2, Cache1 =/= Cache2, Gw1 =/= Gw2} end',
         expectedOutput: '{true, true, true}',
       },
     ],

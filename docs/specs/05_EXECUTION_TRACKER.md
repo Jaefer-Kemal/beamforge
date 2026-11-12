@@ -2661,6 +2661,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter8Verification/ch08-l06` (`VERIFIED 100% PASSED`, score=100, 3 stages in `1.32s`, `1.652s` package total); `TEST_CHAPTER=8 TestDynamicVisibleTestsCurriculum` (`ch08-l06 | 2/2 tests passed`, all 7 Ch. 8 lessons passed in `8.70s` / `8.727s` total).
   - **Workspace Compilers**: `Select-String` confirmed `SPEC_COUNT=0` across `ch01`–`ch08`; `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 154: Pedagogical Despoiling & Live Tri-Verification of Chapter 8 Lecture 7 (`ch08-l07`)
+- [x] **154.1: Problem Set De-Spoiling, Multi-Module PWE & 10/10 `@doc` Contracts (`ch08-l07`: `checkout_sup.erl` + `checkout_worker.erl`)**:
+  - Removed verbatim child-spec and return-map syntax spoilers from `ch08.ts` `conceptMarkdown` and upgraded the lesson to full Spec 04 & Spec 08 structure (`## Why This Matters in Production`, `## Deep Concept Breakdown & Under the Hood`, `## Official Erlang Docs & Function Reference` paired with `supervisor:start_link/3` and `supervisor:which_children/1` cards, runnable domain-disjoint 2-module PWE `ingest_stage_worker.erl` + `ingest_pipeline_sup.erl`, clean `Input`/`Behavior`/`Examples` contracts, and `## Rules & Verification Constraints`).
+  - Added 10/10 `@doc` contracts across `checkout_sup.erl` (`starterCode`, `files[0].content`, `solutionCode`, `solutionFiles['src/checkout_sup.erl']`, plus `ch08_verification_test.go`) and companion read-only `checkout_worker.erl` (`files[1].content` and `solutionFiles['src/checkout_worker.erl']`), keeping neutral `ok.` starter stubs and zero `-spec`.
+  - Hardened `visibleTestCases` (`tc1`–`tc3`) pre-test teardown with deterministic `monitor(process, OldSup)` + `'DOWN'` await cleanup to avoid `{local, checkout_sup}` restart races.
+- [x] **154.2: Mandatory Live Tri-Verification & Full Chapter 8 Certification (`ch08-l07`)**:
+  - **Parallel Worked Example (`ingest_stage_worker.erl` + `ingest_pipeline_sup.erl`)**: Extracted both modules from `ch08.ts`, compiled both cleanly with `erlc.exe -Wall` (exit code 0, 0 warnings), and verified live `rest_for_one` recovery via escript (`PWE_L07_OK`).
+  - **Starter Pack (`starterCode === files[0].content` & `files[1] === solutionFiles[wkr]`)**: Compiled both modules cleanly (`erlc.exe` exit code 0) and executed stubs safely (`STARTER_L07 exports=true stubs={ok,ok,ok}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled cleanly (`erlc.exe -Wall +debug_info` exit code 0, 0 warnings), passed `bf_ast_verifier` (`supervisor:start_link/3`, `supervisor:which_children/1`), and passed all 3 chaos scenarios (`SOLUTION_L07_OK ast=passed chaos=3/3`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; full `TestChapter8Verification` passed all 7/7 Chapter 8 lessons (`ch08-l01` through `ch08-l07`, score=100, `10.41s` / `10.438s` package total); `TEST_CHAPTER=8 TestDynamicVisibleTestsCurriculum` passed all 7/7 Chapter 8 lessons (`ch08-l07 | 3/3 tests passed`, `14.36s` / `14.418s` total).
+  - **Workspace Compilers**: `Select-String` confirmed `SPEC_COUNT=0` across `ch01`–`ch08`; `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 

@@ -413,9 +413,11 @@ test_chaos_cascade() ->
     init/1
 ]).
 
+%% @doc Start and locally register the checkout supervisor linked to the caller.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% @doc Return rest_for_one supervisor flags and permanent checkout worker specs.
 init([]) ->
     SupFlags = #{
         strategy => rest_for_one,
@@ -450,6 +452,7 @@ init([]) ->
     ],
     {ok, {SupFlags, ChildSpecs}}.
 
+%% @doc Query the live PIDs of the db_pool, pricing_cache, and order_gateway workers.
 get_pipeline_pids() ->
     Children = supervisor:which_children(?MODULE),
     DbPid = case lists:keyfind(db_pool, 1, Children) of
