@@ -1631,98 +1631,165 @@ code_change(_OldVsn, State, _Extra) ->
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-In Erlang/OTP, an **Application** is a self-contained component that can be started and stopped as a single unit, packaged into production releases, and configured at runtime.
+In Erlang/OTP, an **Application** is a self-contained component that can be booted, monitored, upgraded, and shut down as a single unit inside a production release.
 
-Every production system you build—from an HTTP REST API to an XMPP cluster—is structured as one or more OTP applications.
+Every real-world BEAM system—whether an HTTP gateway, message broker, or database engine—is composed of cooperating OTP applications, each configured cleanly at runtime without recompiling source files.
+
+## Deep Concept Breakdown & Under the Hood
 
 ### The Two Components of an OTP Application
 
-1. **The Application Resource File (\`.app\` or \`.app.src\`):**
-   - A declarative metadata file containing the application's name, version, registered names, dependencies, and configuration parameters.
-   - Declares the callback module implementing \`-behaviour(application).\`.
+1. **The Application Resource File (\`.app\` or \`.app.src\`)**:
+   - A declarative Erlang term file declaring the application's name, semantic version, registered processes, required dependencies, default environment variables, and entry callback module (\`mod\`).
+2. **The Application Callback Module (\`-behaviour(application).\`)**:
+   - Implements \`start(StartType, StartArgs) -> {ok, SupPid} | {error, Reason}\` and \`stop(State) -> ok\`.
+   - When booted, the BEAM spawns an isolated **Application Master** process which invokes \`start/2\` to start the application's root supervisor and monitors the root PID until shutdown.
 
-2. **The Application Callback Module:**
-   - Implements \`start(StartType, StartArgs) -> {ok, SupPid} | {error, Reason}\`.
-   - Implements \`stop(State) -> ok\`.
-   - The \`start/2\` callback is invoked by the BEAM **Application Master** process. It spawns the root supervisor of the application's supervision tree and returns the root supervisor's PID.
-
-### The \`.app.src\` Resource Specification
+### Example \`.app.src\` Manifest Format
 
 \`\`\`erlang
-{application, commerce_app, [
-    {description, "E-Commerce Core Checkout & Order Engine"},
+{application, telemetry_agent, [
+    {description, "Telemetry Collector & Batch Dispatcher"},
     {vsn, "1.0.0"},
-    {registered, [commerce_app, checkout_sup]},
-    {mod, {commerce_app, []}},
+    {registered, [telemetry_agent_app]},
+    {mod, {telemetry_agent_app, []}},
     {applications, [kernel, stdlib]},
     {env, [
-        {currency, "USD"},
-        {max_retries, 3},
-        {checkout_timeout_ms, 5000}
+        {batch_limit, 500},
+        {flush_interval_ms, 2000}
     ]}
 ]}.
 \`\`\`
 
-### Runtime Configuration with \`application:get_env/3\`
+### What the BEAM Does Under the Hood: Concurrent ETS Environment Config
 
-Production code must NEVER hardcode configuration parameters (like API tokens, database hosts, or timeout thresholds).
-
-OTP provides built-in application configuration management:
-- **\`application:get_env(App, Key, Default)\`**: Reads the runtime configuration parameter for \`App\`. If unset, safely returns \`Default\`.
-- **\`application:set_env(App, Key, Value)\`**: Updates the runtime configuration dynamically in the application controller.
+Production services must **never** hardcode timeouts, feature flags, or endpoints. Instead, OTP's application controller stores each application's \`env\` parameters in an internal ETS table:
+- \`application:get_env(App, Key, Default)\` performs a lock-free concurrent ETS lookup returning \`Default\` if the key is unset.
+- \`application:set_env(App, Key, Value)\` atomically updates that runtime parameter live across the node without restarting processes or recompiling BEAM files.
 
 > [!warning] Production Supervision Trap: Hardcoded Configuration Constants
-> Never write \`Timeout = 5000\` inside worker processes. If production network conditions require increasing timeouts during high traffic, hardcoded values require recompilation and redeployment. Using \`application:get_env(my_app, timeout_ms, 5000)\` allows dynamic tuning via \`sys.config\` or live console RPC without downtime.
+> Never bake operational constants like \`Timeout = 5000\` directly inside worker logic. Reading parameters via \`application:get_env/3\` lets operators override limits through \`sys.config\` files or live remote shells during traffic spikes without downtime.
 
-### Parallel Worked Example
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
--module(auth_app).
+%% Official OTP Callbacks & Functions (kernel / application)
+Module:start(StartType, StartArgs) -> {ok, Pid} | {error, Reason}
+Module:stop(State) -> ok | term()
+application:get_env(Application, Par, Def) -> Val
+application:set_env(Application, Par, Val) -> ok
+  Types:
+    Application = Par = atom()
+    StartType = normal | {takeover, node()} | {failover, node()}
+    StartArgs = Def = Val = State = term()
+\`\`\`
+
+In production, \`application:start/1\` handles booting dependent apps listed in \`applications\` first, then directs the Application Master to run \`Module:start(normal, [])\`. Consult the attached OTP Doc Cards below for \`application:start/1\` and \`application:get_env/3\`.
+
+## Parallel Worked Example: Telemetry Agent Application
+
+Consider \`telemetry_agent_app\`, an OTP application module combining startup configuration lookup with root supervision and guarded dynamic updates:
+
+\`\`\`erlang
+-module(telemetry_agent_app).
 -behaviour(application).
 -behaviour(supervisor).
 
--export([start/2, stop/1, get_config/2, set_config/2, init/1]).
+-export([
+    start/2,
+    stop/1,
+    read_batch_limit/0,
+    set_batch_limit/1,
+    init/1
+]).
 
+%% @doc Start the application root supervisor using runtime batch configuration.
 start(_StartType, _StartArgs) ->
-    case supervisor:start_link({local, ?MODULE}, ?MODULE, []) of
-        {ok, SupPid} -> {ok, SupPid};
-        {error, {already_started, SupPid}} -> {ok, SupPid};
-        {error, Reason} -> {error, Reason}
-    end.
+    DefaultLimit = read_batch_limit(),
+    supervisor:start_link(?MODULE, [DefaultLimit]).
 
+%% @doc Release application resources during OTP application shutdown.
 stop(_State) ->
     ok.
 
-get_config(Key, Default) ->
-    application:get_env(auth_app, Key, Default).
+%% @doc Fetch the configured batch limit with a default of 500 events.
+read_batch_limit() ->
+    application:get_env(telemetry_agent, batch_limit, 500).
 
-set_config(Key, Value) ->
-    application:set_env(auth_app, Key, Value).
+%% @doc Dynamically update the batch limit when given a positive integer.
+set_batch_limit(Limit) when is_integer(Limit), Limit > 0 ->
+    application:set_env(telemetry_agent, batch_limit, Limit).
 
-init([]) ->
+%% @doc Configure the supervisor flags with a rest_for_one strategy.
+init([_BatchLimit]) ->
     SupFlags = #{
-        strategy => one_for_one,
-        intensity => 3,
-        period => 5
+        strategy => rest_for_one,
+        intensity => 5,
+        period => 10
     },
-    ChildSpecs = [],
-    {ok, {SupFlags, ChildSpecs}}.
+    {ok, {SupFlags, []}}.
 \`\`\`
 
-### Your Mission
+Key Erlang mechanics illustrated above:
+- **Boot-Time Env Lookup**: \`start/2\` reads live configuration via \`application:get_env/3\` before launching the supervision tree so startup flags reflect \`sys.config\` overrides immediately.
+- **Guarded Runtime Updates**: Wrapping \`application:set_env/3\` inside a guarded helper ensures operators cannot accidentally inject negative or non-integer limits at runtime.
+- **Startup Return Contract**: \`start/2\` must return \`{ok, SupPid}\` (or an error tuple), matching the exact shape returned by \`supervisor:start_link\`.
 
-Implement module \`commerce_app\` implementing both \`-behaviour(application).\` and \`-behaviour(supervisor).\`:
-1. \`start(StartType, StartArgs) -> {ok, pid()} | {error, term()}\`:
-   - Spawns the supervisor using \`supervisor:start_link({local, ?MODULE}, ?MODULE, [])\`.
-   - Returns \`{ok, SupPid}\` (handles \`{error, {already_started, SupPid}}\` gracefully).
-2. \`stop(State) -> ok\`:
-   - Performs clean teardown; returns \`ok\`.
-3. \`get_app_config(Key, Default) -> term()\`:
-   - Invokes \`application:get_env(commerce_app, Key, Default)\`.
-4. \`set_app_config(Key, Value) -> ok\`:
-   - Invokes \`application:set_env(commerce_app, Key, Value)\`.
-5. \`init([]) -> {ok, {SupFlags, ChildSpecs}}\`:
-   - Returns \`strategy => one_for_one\`, \`intensity => 3\`, \`period => 5\`, and \`ChildSpecs = []\`.
+## Assignment Specification
+
+Implement \`src/commerce_app.erl\` implementing both \`-behaviour(application).\` and \`-behaviour(supervisor).\`:
+
+\`\`\`erlang
+-module(commerce_app).
+-behaviour(application).
+-behaviour(supervisor).
+
+-export([
+    start/2,
+    stop/1,
+    get_app_config/2,
+    set_app_config/2,
+    init/1
+]).
+\`\`\`
+
+### Functional Requirements
+
+#### \`start/2\`
+- **Input**: \`StartType\` (application start mode), \`StartArgs\` (startup arguments).
+- **Behavior**: Spawns and links the root supervisor registered locally under its own module name using \`supervisor:start_link/3\`. Returns the standard \`{ok, SupPid}\` tuple both when newly spawned and gracefully when an already-started supervisor tuple is returned; passes through any other error reason unchanged.
+- **Examples**:
+  - \`commerce_app:start(normal, [])\` returns \`{ok, SupPid}\`.
+
+#### \`stop/1\`
+- **Input**: \`State\` (shutdown state term).
+- **Behavior**: Completes application teardown cleanly and returns \`ok\`.
+- **Examples**:
+  - \`commerce_app:stop([])\` returns \`ok\`.
+
+#### \`get_app_config/2\`
+- **Input**: \`Key\` (atom parameter name), \`Default\` (fallback value term).
+- **Behavior**: Reads \`Key\` from the \`commerce_app\` application runtime environment via \`application:get_env/3\`, returning \`Default\` if undefined.
+- **Examples**:
+  - \`commerce_app:get_app_config(max_connections, 100)\` returns \`100\` (when unset).
+
+#### \`set_app_config/2\`
+- **Input**: \`Key\` (atom parameter name), \`Value\` (configuration value term).
+- **Behavior**: Writes \`Key\` to \`Value\` inside the \`commerce_app\` runtime environment via \`application:set_env/3\`, returning \`ok\`.
+- **Examples**:
+  - \`commerce_app:set_app_config(currency, "USD")\` returns \`ok\`.
+
+#### \`init/1\`
+- **Input**: Empty initialization list \`[]\`.
+- **Behavior**: Returns OTP supervisor flags specifying the \`one_for_one\` strategy with restart intensity \`3\` and period \`5\`, paired with an empty child specification list.
+- **Examples**:
+  - \`commerce_app:init([])\` returns \`{ok, {#{intensity => 3, period => 5, strategy => one_for_one}, []}}\`.
+
+## Rules & Verification Constraints
+
+- Must declare both \`-behaviour(application).\` and \`-behaviour(supervisor).\`.
+- Must export \`start/2\`, \`stop/1\`, \`get_app_config/2\`, \`set_app_config/2\`, and \`init/1\`.
+- Must invoke \`application:get_env/3\`, \`application:set_env/3\`, and \`supervisor:start_link/3\`.
 `,
     mentalModelCheck: {
       question: 'Who invokes the start/2 callback of an OTP application module?',
@@ -1793,18 +1860,23 @@ Implement module \`commerce_app\` implementing both \`-behaviour(application).\`
     init/1
 ]).
 
+%% @doc Boot the commerce OTP application by starting and linking its locally registered root supervisor; handles already-started supervision cleanly.
 start(_StartType, _StartArgs) ->
     ok.
 
+%% @doc Perform clean teardown when the commerce OTP application stops.
 stop(_State) ->
     ok.
 
+%% @doc Retrieve a runtime environment setting for this application, returning Default when unset.
 get_app_config(Key, Default) ->
     ok.
 
+%% @doc Dynamically update a runtime environment key-value parameter for this application.
 set_app_config(Key, Value) ->
     ok.
 
+%% @doc Initialize the root supervisor restart strategy, crash intensity limits, and empty child spec list.
 init([]) ->
     ok.
 `,
@@ -1820,6 +1892,7 @@ init([]) ->
     init/1
 ]).
 
+%% @doc Boot the commerce OTP application by starting and linking its locally registered root supervisor; handles already-started supervision cleanly.
 start(_StartType, _StartArgs) ->
     case supervisor:start_link({local, ?MODULE}, ?MODULE, []) of
         {ok, SupPid} -> {ok, SupPid};
@@ -1827,15 +1900,19 @@ start(_StartType, _StartArgs) ->
         {error, Reason} -> {error, Reason}
     end.
 
+%% @doc Perform clean teardown when the commerce OTP application stops.
 stop(_State) ->
     ok.
 
+%% @doc Retrieve a runtime environment setting for this application, returning Default when unset.
 get_app_config(Key, Default) ->
     application:get_env(commerce_app, Key, Default).
 
+%% @doc Dynamically update a runtime environment key-value parameter for this application.
 set_app_config(Key, Value) ->
     application:set_env(commerce_app, Key, Value).
 
+%% @doc Initialize the root supervisor restart strategy, crash intensity limits, and empty child spec list.
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,
@@ -1861,18 +1938,23 @@ init([]) ->
     init/1
 ]).
 
+%% @doc Boot the commerce OTP application by starting and linking its locally registered root supervisor; handles already-started supervision cleanly.
 start(_StartType, _StartArgs) ->
     ok.
 
+%% @doc Perform clean teardown when the commerce OTP application stops.
 stop(_State) ->
     ok.
 
+%% @doc Retrieve a runtime environment setting for this application, returning Default when unset.
 get_app_config(Key, Default) ->
     ok.
 
+%% @doc Dynamically update a runtime environment key-value parameter for this application.
 set_app_config(Key, Value) ->
     ok.
 
+%% @doc Initialize the root supervisor restart strategy, crash intensity limits, and empty child spec list.
 init([]) ->
     ok.
 `,
@@ -1891,6 +1973,7 @@ init([]) ->
     init/1
 ]).
 
+%% @doc Boot the commerce OTP application by starting and linking its locally registered root supervisor; handles already-started supervision cleanly.
 start(_StartType, _StartArgs) ->
     case supervisor:start_link({local, ?MODULE}, ?MODULE, []) of
         {ok, SupPid} -> {ok, SupPid};
@@ -1898,15 +1981,19 @@ start(_StartType, _StartArgs) ->
         {error, Reason} -> {error, Reason}
     end.
 
+%% @doc Perform clean teardown when the commerce OTP application stops.
 stop(_State) ->
     ok.
 
+%% @doc Retrieve a runtime environment setting for this application, returning Default when unset.
 get_app_config(Key, Default) ->
     application:get_env(commerce_app, Key, Default).
 
+%% @doc Dynamically update a runtime environment key-value parameter for this application.
 set_app_config(Key, Value) ->
     application:set_env(commerce_app, Key, Value).
 
+%% @doc Initialize the root supervisor restart strategy, crash intensity limits, and empty child spec list.
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,

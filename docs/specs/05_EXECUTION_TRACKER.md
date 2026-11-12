@@ -2635,6 +2635,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter8Verification/ch08-l04` (`VERIFIED 100% PASSED`, score=100, 4 stages in `1.37s`) and `TEST_CHAPTER=8 TestDynamicVisibleTestsCurriculum` (`ch08-l04 | 3/3 tests passed`, all 7 Ch. 8 lessons passed in `8.71s`).
   - **Workspace Compilers**: `Select-String` confirmed `0` `-spec` declarations across `ch01`–`ch08`; `go build ./...`, `npx tsc --noEmit`, and `npm run build` (8/8 routes) all passed cleanly.
 
+## Phase 152: Pedagogical Despoiling & Live Tri-Verification of Chapter 8 Lecture 5 (`ch08-l05`)
+- [x] **152.1: Replace Clone PWE & Eliminate Spoilers in Lecture 8.5 (`ch08-l05`: `commerce_app.erl`)**:
+  - Replaced the 1:1 clone Parallel Worked Example (`auth_app`) in `ch08-l05` with a domain-disjoint, runnable example: `telemetry_agent_app.erl` (`start/2`, `stop/1`, `read_batch_limit/0`, `set_batch_limit/1`, `init/1`).
+  - Upgraded `conceptMarkdown` (`ch08.ts`) to full Spec 04 & Spec 08 compliance: added `## Deep Concept Breakdown & Under the Hood` and `## Official Erlang Docs & Function Reference` (zero emojis), and converted the assignment into clean `Input`, `Behavior`, and `Examples` blocks with zero syntax spoilers.
+  - Added 10/10 `@doc` contracts across `starterCode`, `files[0].content`, `solutionCode`, and `solutionFiles['src/commerce_app.erl']`, preserving neutral `ok.` starter stubs and zero `-spec`.
+- [x] **152.2: Mandatory Live Tri-Verification & Compiler Suite (`ch08-l05`)**:
+  - **Parallel Worked Example (`telemetry_agent_app.erl`)**: Extracted from `ch08.ts`, compiled with `erlc.exe -Wall` (exit code 0, 0 warnings), and verified live execution via escript (`PWE_L05_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly with `erlc.exe` (exit code 0, 4 expected unused-variable warnings) and executed stubs cleanly (`STARTER_L05 exports=true stubs={ok,ok,ok,ok,ok}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `erlc.exe -Wall +debug_info` (exit code 0, 0 warnings), passed `bf_ast_verifier` (`application:get_env/3`, `application:set_env/3`, `supervisor:start_link/3`), and passed `SOLUTION_L05_OK`.
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter8Verification/ch08-l05` (`VERIFIED 100% PASSED`, score=100, 4 stages in `1.12s`, `1.485s` package total) and `TEST_CHAPTER=8 TestDynamicVisibleTestsCurriculum` (`ch08-l05 | 3/3 tests passed`, all 7 Ch. 8 lessons passed in `8.66s`).
+  - **Workspace Compilers**: `Select-String` confirmed `0` `-spec` declarations across `ch01`–`ch08`; `go build ./...`, `npx tsc --noEmit`, and `npm run build` (8/8 routes) all passed with exit code 0.
+
 
 
 
