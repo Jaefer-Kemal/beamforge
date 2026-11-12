@@ -129,6 +129,21 @@ count_packets([_ | T], Acc) ->
     count_packets(T, Acc + 1).
 `
 
+	accFilterSolution := `-module(acc_filter).
+-export([keep_valid_orders/1]).
+
+%% @doc Traverse Orders with a tail-recursive accumulator and lists:reverse/1 to extract in original relative order the integer IDs of confirmed orders whose quantity exceeds zero, returning an empty list when none qualify or empty.
+keep_valid_orders(Orders) ->
+    keep_valid_orders(Orders, []).
+
+keep_valid_orders([], Acc) ->
+    lists:reverse(Acc);
+keep_valid_orders([{order, Id, Qty, confirmed} | Rest], Acc) when Qty > 0 ->
+    keep_valid_orders(Rest, [Id | Acc]);
+keep_valid_orders([_InvalidOrder | Rest], Acc) ->
+    keep_valid_orders(Rest, Acc).
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -158,6 +173,11 @@ count_packets([_ | T], Acc) ->
 			exerciseID:   "ch02-l05",
 			visibleCount: 2,
 			files:        map[string]string{"src/tco_counter.erl": tcoCounterSolution},
+		},
+		{
+			exerciseID:   "ch02-l06",
+			visibleCount: 2,
+			files:        map[string]string{"src/acc_filter.erl": accFilterSolution},
 		},
 	}
 
@@ -733,6 +753,89 @@ count_packets(List) -> length(List).
 		}
 		if !astFailed {
 			t.Errorf("Expected tail_recursion_ast_audit stage to fail for lists:sum/length, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l06 rejects quadratic ++ list append and missing lists:reverse/1", func(t *testing.T) {
+		sessionID := "test-ch02-l06-neg-append"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/acc_filter.erl": `-module(acc_filter).
+-export([keep_valid_orders/1]).
+
+keep_valid_orders(Orders) ->
+    keep_valid_orders(Orders, []).
+
+keep_valid_orders([], Acc) ->
+    Acc;
+keep_valid_orders([{order, Id, Qty, confirmed} | Rest], Acc) when Qty > 0 ->
+    keep_valid_orders(Rest, Acc ++ [Id]);
+keep_valid_orders([_Other | Rest], Acc) ->
+    keep_valid_orders(Rest, Acc).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch02-l06", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected acc_filter using ++ without lists:reverse/1 to fail AST verification, but got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_list_accumulator_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_list_accumulator_audit stage to fail for ++/missing reverse, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l06 rejects list comprehension bypass via AST audit", func(t *testing.T) {
+		sessionID := "test-ch02-l06-neg-lc"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/acc_filter.erl": `-module(acc_filter).
+-export([keep_valid_orders/1]).
+
+keep_valid_orders(Orders) ->
+    [Id || {order, Id, Qty, confirmed} <- Orders, Qty > 0].
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch02-l06", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected acc_filter using list comprehension to fail AST audit, but got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_list_accumulator_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_list_accumulator_audit stage to fail for list comprehension, stages=%+v", report.Stages)
 		}
 	})
 }

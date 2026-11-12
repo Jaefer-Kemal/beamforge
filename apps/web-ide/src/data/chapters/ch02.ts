@@ -1451,23 +1451,31 @@ This guarantees strict $O(N)$ total execution time and minimal memory churn.
 
 ## Parallel Worked Example
 
-Filtering and formatting critical incidents from gateway event logs:
+Consider a gateway audit inspector extracting and formatting critical events from mixed stream logs:
 
 \`\`\`erlang
 -module(gateway_inspector).
 -export([format_critical_alerts/1]).
 
+%% 1. Initialize an empty list accumulator and delegate to the tail-recursive loop
 format_critical_alerts(Events) ->
     alert_loop(Events, []).
 
+%% 2. Base case: reverse the LIFO accumulator once in C-BIF O(N) time
 alert_loop([], Acc) ->
     lists:reverse(Acc);
+%% 3. Match target entries, build output record, and prepend in O(1) constant time
 alert_loop([{event, Service, critical, Details} | Rest], Acc) ->
     AlertNotice = {critical_alert, Service, Details},
     alert_loop(Rest, [AlertNotice | Acc]);
-alert_loop([{event, _Service, _Priority, _Details} | Rest], Acc) ->
+%% 4. Skip non-critical events or unrecognized log shapes while advancing to Rest
+alert_loop([_Other | Rest], Acc) ->
     alert_loop(Rest, Acc).
 \`\`\`
+
+Notice how the BEAM executes this module:
+- Matching \`critical\` events prepends \`AlertNotice\` onto \`Acc\` with \`[AlertNotice | Acc]\` in constant $O(1)$ cons-cell allocation—avoiding quadratic \`++\` copying.
+- Calling \`lists:reverse(Acc)\` in the \`[]\` base case restores chronological stream order in a single linear pass while keeping stack usage $O(1)$.
 
 ## Official Erlang Docs & Function Reference
 
@@ -1477,18 +1485,18 @@ lists:reverse(List1) -> List2
   Types:
     List1 = List2 = [T]
 \`\`\`
-> \`lists:reverse/1\` is implemented as a direct C primitive inside the ERTS emulator. It is extraordinarily fast.
+> \`lists:reverse/1\` is implemented as a direct C primitive inside the ERTS emulator. See the Erlang Reference Card for complete type-spec and $O(N)$ complexity details.
 
 ## Assignment Specification
 
 Implement order filtering in \`acc_filter.erl\` to process incoming customer order batches:
 
-### \`keep_valid_orders/1\`
-- **Input**: \`Orders\` — A list of zero or more 4-element tuples of the format \`{order, Id, Qty, Status}\`, where \`Id\` is an integer, \`Qty\` is an integer count, and \`Status\` is an atom (such as \`confirmed\` or \`pending\`).
-- **Behavior**: Filters the list and extracts the \`Id\` values of all orders that meet two criteria:
-  1. The quantity \`Qty\` is strictly greater than \`0\`.
-  2. The status \`Status\` is equal to the atom \`confirmed\`.
-  The returned list must preserve the exact relative order of the original input. The solution must execute in linear $O(N)$ time using the tail-recursive accumulator pattern with \`lists:reverse/1\` invoked at the base case. Returns \`[]\` if no matching orders exist or the input list is empty.
+### 1. \`keep_valid_orders(Orders)\`
+- **Input**: A list \`Orders\` of zero or more 4-element \`order\` tuples, where each tuple contains an integer \`Id\`, an integer \`Qty\`, and a \`Status\` atom (such as \`confirmed\`, \`pending\`, or \`canceled\`).
+- **Behavior**: Filter the list in $O(N)$ time and $O(1)$ stack space using tail-recursive accumulation with \`lists:reverse/1\`, extracting the \`Id\` integers of orders satisfying two conditions:
+  1. \`Qty\` is strictly greater than \`0\`.
+  2. \`Status\` is equal to the atom \`confirmed\`.
+  Preserve the exact relative ordering of matching entries, and return an empty list when no orders qualify or \`Orders\` is empty.
 - **Examples**:
   - \`acc_filter:keep_valid_orders([{order, 1, 5, confirmed}, {order, 2, 0, confirmed}, {order, 3, 10, pending}, {order, 4, 8, confirmed}])\` returns \`[1, 4]\`.
   - \`acc_filter:keep_valid_orders([{order, 5, 0, confirmed}, {order, 6, 12, canceled}])\` returns \`[]\`.
@@ -1496,9 +1504,9 @@ Implement order filtering in \`acc_filter.erl\` to process incoming customer ord
 
 ## Rules & Verification Constraints
 
-- Must be tail-recursive (enforced by \`bf_ast_verifier\`).
-- Must call \`lists:reverse/1\` in the base case.
-- Do not use \`lists:filter/2\` or \`lists:map/2\`.`,
+- Must be tail-recursive with an accumulator (enforced by \`bf_ast_verifier\`).
+- Must call \`lists:reverse/1\` in the base case to restore original order (do not use \`++\` inside the loop).
+- Do not use \`lists:filter/2\`, \`lists:map/2\`, \`lists:filtermap/2\`, \`lists:foldl/3\`, \`lists:foldr/3\`, or list comprehensions.`,
     otpDocCards: [
       {
         functionName: 'reverse',
@@ -1541,11 +1549,19 @@ Implement order filtering in \`acc_filter.erl\` to process incoming customer ord
         expectedOutput: '[1, 4]',
         explanation: 'Extracts IDs 1 and 4 in original order, ignoring zero-qty and pending orders.',
       },
+      {
+        id: 'tc-ch02-06-b',
+        title: 'Return Empty List When No Orders Qualify',
+        erlangCall: 'acc_filter:keep_valid_orders([{order, 5, 0, confirmed}, {order, 6, 12, canceled}])',
+        expectedOutput: '[]',
+        explanation: 'Zero-quantity and canceled orders are excluded cleanly.',
+      },
     ],
     astRules: {
       requireTailRecursion: ['keep_valid_orders/1'],
       requiredCalls: ['lists:reverse/1'],
-      forbiddenCalls: ['lists:filter/2', 'lists:map/2'],
+      forbiddenCalls: ['lists:filter/2', 'lists:map/2', 'lists:filtermap/2', 'lists:foldl', 'lists:foldr'],
+      forbiddenConstructs: ['list_comprehension'],
     },
     solutionExplanation: 'Demonstrates tail-recursive list accumulation using [Item | Acc] and base-case lists:reverse/1 order preservation.',
     files: [
@@ -1555,8 +1571,8 @@ Implement order filtering in \`acc_filter.erl\` to process incoming customer ord
         content: `-module(acc_filter).
 -export([keep_valid_orders/1]).
 
-%% @doc Filter confirmed orders with quantity greater than zero and extract their IDs.
-keep_valid_orders(Orders) ->
+%% @doc Traverse Orders with a tail-recursive accumulator and lists:reverse/1 to extract in original relative order the integer IDs of confirmed orders whose quantity exceeds zero, returning an empty list when none qualify or empty.
+keep_valid_orders(_Orders) ->
     ok.`,
       },
     ],
@@ -1564,6 +1580,7 @@ keep_valid_orders(Orders) ->
       'src/acc_filter.erl': `-module(acc_filter).
 -export([keep_valid_orders/1]).
 
+%% @doc Traverse Orders with a tail-recursive accumulator and lists:reverse/1 to extract in original relative order the integer IDs of confirmed orders whose quantity exceeds zero, returning an empty list when none qualify or empty.
 keep_valid_orders(Orders) ->
     keep_valid_orders(Orders, []).
 
@@ -1577,12 +1594,13 @@ keep_valid_orders([_InvalidOrder | Rest], Acc) ->
     starterCode: `-module(acc_filter).
 -export([keep_valid_orders/1]).
 
-%% @doc Filter confirmed orders with quantity greater than zero and extract their IDs.
-keep_valid_orders(Orders) ->
+%% @doc Traverse Orders with a tail-recursive accumulator and lists:reverse/1 to extract in original relative order the integer IDs of confirmed orders whose quantity exceeds zero, returning an empty list when none qualify or empty.
+keep_valid_orders(_Orders) ->
     ok.`,
     solutionCode: `-module(acc_filter).
 -export([keep_valid_orders/1]).
 
+%% @doc Traverse Orders with a tail-recursive accumulator and lists:reverse/1 to extract in original relative order the integer IDs of confirmed orders whose quantity exceeds zero, returning an empty list when none qualify or empty.
 keep_valid_orders(Orders) ->
     keep_valid_orders(Orders, []).
 

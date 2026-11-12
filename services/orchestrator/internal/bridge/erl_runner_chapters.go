@@ -719,20 +719,40 @@ init:stop().
 		}
 		return `
 T1_Start = erlang:system_time(millisecond),
-Orders = [{order, 1, 5, confirmed}, {order, 2, 0, confirmed}, {order, 3, 10, pending}, {order, 4, 8, confirmed}],
-T1_Res = try acc_filter:keep_valid_orders(Orders) of
+Orders1 = [{order, 1, 5, confirmed}, {order, 2, 0, confirmed}, {order, 3, 10, pending}, {order, 4, 8, confirmed}],
+T1_Res = try acc_filter:keep_valid_orders(Orders1) of
     [1, 4] = R1 ->
-        #{call_str => <<"acc_filter:keep_valid_orders(...)">>, expected => <<"[1, 4]">>,
+        #{call_str => <<"acc_filter:keep_valid_orders([{order, 1, 5, confirmed}, {order, 2, 0, confirmed}, {order, 3, 10, pending}, {order, 4, 8, confirmed}])">>,
+          expected => <<"[1, 4]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"acc_filter:keep_valid_orders(...)">>, expected => <<"[1, 4]">>,
+        #{call_str => <<"acc_filter:keep_valid_orders([{order, 1, 5, confirmed}, {order, 2, 0, confirmed}, {order, 3, 10, pending}, {order, 4, 8, confirmed}])">>,
+          expected => <<"[1, 4]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"acc_filter:keep_valid_orders(...)">>, expected => <<"[1, 4]">>,
+    #{call_str => <<"acc_filter:keep_valid_orders([{order, 1, 5, confirmed}, {order, 2, 0, confirmed}, {order, 3, 10, pending}, {order, 4, 8, confirmed}])">>,
+      expected => <<"[1, 4]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+Orders2 = [{order, 5, 0, confirmed}, {order, 6, 12, canceled}],
+T2_Res = try acc_filter:keep_valid_orders(Orders2) of
+    [] ->
+        #{call_str => <<"acc_filter:keep_valid_orders([{order, 5, 0, confirmed}, {order, 6, 12, canceled}])">>,
+          expected => <<"[]">>,
+          actual => <<"[]">>, passed => true,
+          time_ms => erlang:system_time(millisecond) - T2_Start};
+    Other2 ->
+        #{call_str => <<"acc_filter:keep_valid_orders([{order, 5, 0, confirmed}, {order, 6, 12, canceled}])">>,
+          expected => <<"[]">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
+catch C2:R2 ->
+    #{call_str => <<"acc_filter:keep_valid_orders([{order, 5, 0, confirmed}, {order, 6, 12, canceled}])">>,
+      expected => <<"[]">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -5044,26 +5064,83 @@ Stages = [CompileStage, S1_Ast, S2_Tco]
 		if _, err := os.Stat(invRoot); err == nil {
 			return r.buildInventoryVerificationScript(wsDir), true
 		}
-		return `
+		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(acc_filter) of
     {module, acc_filter} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"acc_filter.erl compiled cleanly">>};
+        Exports = acc_filter:module_info(exports),
+        Required = [{keep_valid_orders, 1}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"acc_filter.erl compiled cleanly and exported keep_valid_orders/1.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Reverse = try
-    Orders = [{order, 1, 5, confirmed}, {order, 2, 0, confirmed}, {order, 3, 10, pending}, {order, 4, 8, confirmed}],
-    case acc_filter:keep_valid_orders(Orders) of
-        [1, 4] ->
-            #{id => <<"accumulator_and_reverse">>, title => <<"Accumulator Pattern & lists:reverse/1 Preservation">>, status => <<"passed">>, time_ms => 8, details => <<"Order preserved correctly using lists:reverse at base case">>};
+S1_Ast = try
+    SourceCandidates = [
+        filename:join(["%s", "src", "acc_filter.erl"]),
+        filename:join(["%s", "acc_filter.erl"])
+    ],
+    SourceFile = case [P || P <- SourceCandidates, filelib:is_regular(P)] of
+        [ValidSrc | _] -> ValidSrc;
+        [] -> hd(SourceCandidates)
+    end,
+    Rules = #{
+        require_tail_recursion => [{keep_valid_orders, 1}],
+        required_remote_calls => [{lists, reverse, 1}],
+        forbidden_remote_calls => [{lists, filter, any}, {lists, map, any}, {lists, filtermap, any}, {lists, foldl, any}, {lists, foldr, any}],
+        forbidden_constructs => [list_comprehension]
+    },
+    AstRes = bf_ast_verifier:verify_rules(SourceFile, Rules),
+    NoAppend = case epp:parse_file(SourceFile, []) of
+        {ok, Forms} ->
+            HasAppend = (fun Walk(T) when is_tuple(T) ->
+                case element(1, T) of
+                    op when tuple_size(T) >= 3, element(3, T) =:= '++' -> true;
+                    _ -> Walk(tuple_to_list(T))
+                end;
+                Walk([H | Tail]) -> Walk(H) orelse Walk(Tail);
+                Walk(_) -> false
+            end)(Forms),
+            not HasAppend;
+        _ -> false
+    end,
+    case {AstRes, NoAppend} of
+        {{ok, _}, true} ->
+            #{id => <<"ast_list_accumulator_audit">>, title => <<"AST Analysis: Tail-Recursive Accumulator + lists:reverse/1">>, status => <<"passed">>, time_ms => 12, details => <<"Verified tail-recursive accumulator, lists:reverse/1 usage, zero lists:filter/map/comprehensions, and zero O(N^2) ++ appending.">>};
+        {{error, [#{message := Msg} | _]}, _} ->
+            #{id => <<"ast_list_accumulator_audit">>, title => <<"AST Analysis: Tail-Recursive Accumulator + lists:reverse/1">>, status => <<"failed">>, time_ms => 12, details => Msg};
+        {_, false} ->
+            #{id => <<"ast_list_accumulator_audit">>, title => <<"AST Analysis: Tail-Recursive Accumulator + lists:reverse/1">>, status => <<"failed">>, time_ms => 12, details => <<"Forbidden O(N^2) list append operator (++) detected; prepend with [Id | Acc] and call lists:reverse/1 once at the base case.">>};
+        {{error, OtherErr}, _} ->
+            #{id => <<"ast_list_accumulator_audit">>, title => <<"AST Analysis: Tail-Recursive Accumulator + lists:reverse/1">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST Rule violation: ~p", [OtherErr]))}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_list_accumulator_audit">>, title => <<"AST Analysis: Tail-Recursive Accumulator + lists:reverse/1">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_Reverse = try
+    Orders1 = [{order, 1, 5, confirmed}, {order, 2, 0, confirmed}, {order, 3, 10, pending}, {order, 4, 8, confirmed}],
+    Orders2 = [{order, 5, 0, confirmed}, {order, 6, 12, canceled}, {bad_shape, 7, 5, confirmed}],
+    BigOrders = [{order, N, N rem 3, confirmed} || N <- lists:seq(1, 3000)],
+    ExpectedBig = [N || N <- lists:seq(1, 3000), (N rem 3) > 0],
+    R1 = acc_filter:keep_valid_orders(Orders1),
+    R2 = acc_filter:keep_valid_orders(Orders2),
+    R3 = acc_filter:keep_valid_orders([]),
+    R4 = acc_filter:keep_valid_orders(BigOrders),
+    case {R1, R2, R3, R4 =:= ExpectedBig} of
+        {[1, 4], [], [], true} ->
+            #{id => <<"accumulator_and_reverse">>, title => <<"Accumulator Pattern & lists:reverse/1 Preservation">>, status => <<"passed">>, time_ms => 8, details => <<"Order preserved correctly using O(1) prepend and lists:reverse/1 across standard, empty, and 3,000-order batches.">>};
         Got1 ->
             #{id => <<"accumulator_and_reverse">>, title => <<"Accumulator Pattern & lists:reverse/1 Preservation">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Reverse mismatch: ~p", [Got1]))}
     end
 catch C1:Err1 ->
     #{id => <<"accumulator_and_reverse">>, title => <<"Accumulator Pattern & lists:reverse/1 Preservation">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
-Stages = [CompileStage, S1_Reverse]
-`, true
+Stages = [CompileStage, S1_Ast, S2_Reverse]
+`, wsDir, wsDir), true
 
 	case "ch02-l07":
 		return `
