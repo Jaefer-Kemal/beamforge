@@ -1630,32 +1630,39 @@ In production backends (HTTP/1.1, Redis RESP, and XMPP XML stream parsers), your
 
 To build a reliable network server, you cannot assume incoming packets contain complete lines. You must maintain a **stateful binary accumulation buffer** that stitches chunks together and slices complete frames.
 
-> [!abstract] Stream Framing Algorithm:
-> 1. **Concatenation**: \`<<OldBuffer/binary, IncomingChunk/binary>>\` stitches chunks together at binary speed.
-> 2. **Delimiter Slicing**: \`binary:split(Combined, <<"\\r\\n">>)\` extracts complete lines.
-> 3. **Memory Unpinning**: Call **\`binary:copy/1\`** on all extracted lines and trailing partial buffers to prevent 64 KB \`ProcBin\` memory retention leaks!
+> [!IMPORTANT]
+> **Stream Framing Algorithm:**
+> 1. **Concatenation**: Append incoming socket bytes to any previously buffered partial bytes.
+> 2. **Delimiter Slicing**: Repeatedly isolate complete frames separated by your wire delimiter.
+> 3. **Memory Unpinning**: Copy sliced sub-binaries into independent binaries so long-lived worker state never pins large 64 KB \`ProcBin\` read buffers!
 
 ## Deep Concept Breakdown & Under the Hood
 
-### The 64 KB \`ProcBin\` Memory Pinning Trap
+### 1. The 64 KB \`ProcBin\` Memory Pinning Trap
 Recall from Chapter 4 how the BEAM manages binaries:
 - Binaries $=< 64$ bytes are stored on the local process heap.
 - Binaries $> 64$ bytes are allocated in a shared off-heap reference-counted memory pool called a **\`ProcBin\`** (often 64 KB socket read buffers).
 
-When you call \`binary:split/2\`, the BEAM creates a **sub-binary**—a tiny 24-byte struct containing an offset pointer into the original 64 KB off-heap buffer.
-If a client sends \`<<"PING\\r\\nHE">>\`, you slice out \`<<"PING">>\`, leaving \`<<"HE">>\` in your process state.
+When you slice a binary via \`binary:split/2\` or binary matching, the BEAM creates a **sub-binary**—a tiny 24-byte struct containing an offset pointer into the original 64 KB off-heap buffer.
+If a client sends \`<<"PING\\r\\nHE">>\`, slicing leaves \`<<"HE">>\` in your process state.
 Even though \`<<"HE">>\` is only 2 bytes, it retains a reference count on the **entire 64 KB socket buffer**!
-If 100,000 idle client connections each retain a 2-byte remainder without unpinning, your server wastes **6.4 Gigabytes of RAM** on empty socket buffers!
+If 100,000 idle client connections each retain a 2-byte remainder without unpinning, your server wastes **6.4 Gigabytes of RAM** on mostly-empty socket buffers.
 
-Calling **\`binary:copy/1\`** creates a fresh, independent heap binary, releasing the 64 KB \`ProcBin\` for immediate garbage collection!
+Calling **\`binary:copy/1\`** allocates an independent copy, freeing the 64 KB \`ProcBin\` for immediate garbage collection.
 
-> [!warning] Production Networking Trap: Sub-Binary Memory Pinning in Long-Lived Sockets
-> Long-lived connection actors (XMPP, WebSockets, gRPC) that buffer partial frames without calling \`binary:copy/1\` suffer from slow, fatal memory creep. The memory leak does not show up in garbage collection telemetry because the off-heap refc buffer is legitimately referenced by the 2-byte sub-binary! Always call \`binary:copy/1\` on partial stream buffers.
+### 2. How \`binary:split/2\` Searches
+\`binary:split(Subject, Separator)\` searches for the **first** occurrence of \`Separator\`:
+- If found, it returns a 2-element list \`[Prefix, RestAfterSeparator]\` (consuming the delimiter).
+- If absent, it returns a 1-element list \`[Subject]\`.
+
+> [!WARNING]
+> **Production Networking Trap: Sub-Binary Memory Pinning in Long-Lived Sockets:**
+> Long-lived connection actors (XMPP, WebSockets, gRPC) that buffer partial frames without unpinning suffer from slow, fatal memory creep. The memory leak does not show up in heap GC telemetry because the off-heap refc buffer is legitimately referenced by a 2-byte sub-binary! Always unpin trailing remainders and long-lived extracted slices with \`binary:copy/1\`.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Official OTP Signature (stdlib / binary)
+%% Official OTP Signatures (stdlib / binary)
 binary:split(Subject, Pattern) -> [binary()]
   Types:
     Subject = binary()
@@ -1664,47 +1671,54 @@ binary:split(Subject, Pattern) -> [binary()]
 binary:copy(Subject) -> binary()
   Types:
     Subject = binary()
-  %% Allocates a fresh unpinned binary copy
 \`\`\`
 
-## Parallel Worked Example
+Consult the attached OTP documentation cards below for \`binary:split/2\` slicing rules and \`binary:copy/1\` off-heap unpinning complexity.
 
-Here is a framing engine extracting colon-delimited telemetry metrics:
+## Parallel Worked Example: Unpinned 16-Bit TLV Packet Accumulator
+
+Consider a separate domain: an incremental binary protocol decoder (\`tlv_chunk_reader\`) framing 16-bit length-prefixed payloads (\`<<Len:16, Payload:Len/binary, ...>>\`) instead of line delimiters. Notice how it stitches chunks together, extracts records tail-recursively, and unpins both records and any incomplete trailer via \`binary:copy/1\`:
 
 \`\`\`erlang
--module(metric_stream_framer).
--export([extract_metrics/2]).
+-module(tlv_chunk_reader).
+-export([feed_bytes/2]).
 
-extract_metrics(OldBuffer, NewChunk) ->
-    Combined = <<OldBuffer/binary, NewChunk/binary>>,
-    extract_loop(Combined, []).
+%% @doc Append NewBytes to AccBuf, extract all complete 16-bit length-prefixed payloads,
+%% and return {CopiedPayloads, CopiedRemainder}.
+feed_bytes(AccBuf, NewBytes) ->
+    Joined = <<AccBuf/binary, NewBytes/binary>>,
+    drain_frames(Joined, []).
 
-extract_loop(Buffer, Acc) ->
-    case binary:split(Buffer, <<":">>) of
-        [Metric, Rest] ->
-            %% Unpin each metric token
-            extract_loop(Rest, [binary:copy(Metric) | Acc]);
-        [Incomplete] ->
-            %% Unpin the trailing remainder buffer!
-            {lists:reverse(Acc), binary:copy(Incomplete)}
-    end.
+drain_frames(<<Len:16/big-unsigned-integer, Body:Len/binary, Rest/binary>>, Done) ->
+    drain_frames(Rest, [binary:copy(Body) | Done]);
+drain_frames(TrailingPartial, Done) ->
+    {lists:reverse(Done), binary:copy(TrailingPartial)}.
 \`\`\`
+
+### What ERTS Does Under the Hood
+- **Contiguous Stitching**: Binary concatenation constructs one flat slice before parsing across arbitrary chunk boundaries, handling fragmented length headers just as seamlessly as multi-packet bursts.
+- **Zero-Pin Guarantee**: Both extracted payloads and \`TrailingPartial\` pass through \`binary:copy/1\`, dropping every sub-binary reference into large incoming socket buffers before returning to long-lived process state.
 
 ## Assignment Specification
 
-Implement module \`src/tcp_frame_buffer.erl\` exporting two framing functions:
+Implement module \`src/tcp_frame_buffer.erl\` (\`-module(tcp_frame_buffer).\`) exporting \`new_buffer/0\` and \`append_and_extract_lines/2\`:
 
-1. **\`new_buffer() -> binary()\`**:
-   - Returns an empty binary accumulator \`<<>>\`.
-2. **\`append_and_extract_lines(OldBufferBin, IncomingChunkBin) -> {[binary()], binary()}\`**:
-   - Concatenates \`<<OldBufferBin/binary, IncomingChunkBin/binary>>\`.
-   - Recursively splits on \`<<"\\r\\n">>\`.
-   - Returns a tuple \`{CompleteLinesList, RemainingBufferBin}\`.
-   - **Crucial Rule**: Every binary in \`CompleteLinesList\` and \`RemainingBufferBin\` MUST be unpinned using \`binary:copy/1\`.
+### \`new_buffer/0\`
+- **Input**: Zero arguments.
+- **Behavior**: Returns an empty binary accumulation buffer ready for initial stream framing.
+- **Examples**:
+  - \`tcp_frame_buffer:new_buffer()\` returns \`<<>>\`.
+
+### \`append_and_extract_lines/2\`
+- **Input**: Existing remainder binary \`OldBufferBin\` and newly received socket chunk \`IncomingChunkBin\`.
+- **Behavior**: Appends \`IncomingChunkBin\` directly onto \`OldBufferBin\` and recursively splits out every complete CRLF-terminated command line in arrival order (stripping the CRLF delimiter). Unpins every extracted command binary and the trailing incomplete remainder binary using \`binary:copy/1\` so no sub-binary references remain pinned to large off-heap socket buffers, then returns a 2-tuple containing the list of complete lines followed by the remaining buffer binary.
+- **Examples**:
+  - \`tcp_frame_buffer:append_and_extract_lines(<<>>, <<"HELLO\\r\\nWOR">>)\` returns \`{[<<"HELLO">>],<<"WOR">>}\`.
+  - \`tcp_frame_buffer:append_and_extract_lines(<<"WOR">>, <<"LD\\r\\nFOO\\r\\nBAR\\r\\n">>)\` returns \`{[<<"WORLD">>,<<"FOO">>,<<"BAR">>],<<>>}\`.
 
 ## Rules & Verification Constraints
-- Handles empty chunks, partial fragments without newlines, and coalesced multi-line bursts.
-- AST verifier checks required calls: \`binary:split/2\` and \`binary:copy/1\`.
+- Must handle empty chunks, partial fragments without delimiters, and coalesced multi-line bursts cleanly.
+- AST verifier enforces required calls \`binary:split/2\` and \`binary:copy/1\` alongside \`bit_syntax\` binary concatenation.
     `,
     otpDocCards: [
       {
@@ -1740,23 +1754,16 @@ Implement module \`src/tcp_frame_buffer.erl\` exporting two framing functions:
     append_and_extract_lines/2
 ]).
 
-%% @doc Returns an empty binary buffer.
+%% @doc Return an empty binary accumulation buffer.
 -spec new_buffer() -> binary().
 new_buffer() ->
     <<>>.
 
-%% @doc Concatenates OldBuffer with IncomingChunk, extracts all complete \\r\\n lines,
-%% and returns {CompleteLinesList, RemainingBufferBin} with binary:copy/1 unpinning.
+%% @doc Append IncomingChunkBin onto OldBufferBin, extract all complete CRLF-delimited line binaries in arrival order, and return {Lines, RemainderBin} with unpinned copies.
 -spec append_and_extract_lines(binary(), binary()) -> {[binary()], binary()}.
 append_and_extract_lines(_OldBufferBin, _IncomingChunkBin) ->
-    %% % TODO:
-    %% % 1. Stitch OldBufferBin and IncomingChunkBin together using binary concatenation (<<...>>).
-    %% % 2. Recursively split the combined buffer on delimiter <<"\\r\\n">> using binary:split/2.
-    %% % 3. Call binary:copy/1 on each extracted complete line to unpin it from the socket ProcBin buffer.
-    %% % 4. Call binary:copy/1 on the remaining trailing partial buffer.
-    %% % 5. Return {CompleteLinesList, RemainingBufferBin}.
     ignore.
-    `,
+`,
     solutionCode: `-module(tcp_frame_buffer).
 
 -export([
@@ -1764,23 +1771,25 @@ append_and_extract_lines(_OldBufferBin, _IncomingChunkBin) ->
     append_and_extract_lines/2
 ]).
 
+%% @doc Return an empty binary accumulation buffer.
 -spec new_buffer() -> binary().
 new_buffer() ->
     <<>>.
 
+%% @doc Append IncomingChunkBin onto OldBufferBin, extract all complete CRLF-delimited line binaries in arrival order, and return {Lines, RemainderBin} with unpinned copies.
 -spec append_and_extract_lines(binary(), binary()) -> {[binary()], binary()}.
 append_and_extract_lines(OldBufferBin, IncomingChunkBin) ->
     Combined = <<OldBufferBin/binary, IncomingChunkBin/binary>>,
     extract_lines(Combined, []).
 
 extract_lines(Buffer, Acc) ->
-    case binary:split(Buffer, <<"\r\n">>) of
+    case binary:split(Buffer, <<13, 10>>) of
         [Line, Rest] ->
             extract_lines(Rest, [binary:copy(Line) | Acc]);
         [Incomplete] ->
             {lists:reverse(Acc), binary:copy(Incomplete)}
     end.
-    `,
+`,
         files: [
       {
         name: 'tcp_frame_buffer.erl',
@@ -1792,23 +1801,16 @@ extract_lines(Buffer, Acc) ->
     append_and_extract_lines/2
 ]).
 
-%% @doc Returns an empty binary buffer.
+%% @doc Return an empty binary accumulation buffer.
 -spec new_buffer() -> binary().
 new_buffer() ->
     <<>>.
 
-%% @doc Concatenates OldBuffer with IncomingChunk, extracts all complete \\r\\n lines,
-%% and returns {CompleteLinesList, RemainingBufferBin} with binary:copy/1 unpinning.
+%% @doc Append IncomingChunkBin onto OldBufferBin, extract all complete CRLF-delimited line binaries in arrival order, and return {Lines, RemainderBin} with unpinned copies.
 -spec append_and_extract_lines(binary(), binary()) -> {[binary()], binary()}.
 append_and_extract_lines(_OldBufferBin, _IncomingChunkBin) ->
-    %% % TODO:
-    %% % 1. Stitch OldBufferBin and IncomingChunkBin together using binary concatenation (<<...>>).
-    %% % 2. Recursively split the combined buffer on delimiter <<"\\r\\n">> using binary:split/2.
-    %% % 3. Call binary:copy/1 on each extracted complete line to unpin it from the socket ProcBin buffer.
-    %% % 4. Call binary:copy/1 on the remaining trailing partial buffer.
-    %% % 5. Return {CompleteLinesList, RemainingBufferBin}.
     ignore.
-    `,
+`,
       },
     ],
     solutionFiles: {
@@ -1819,23 +1821,25 @@ append_and_extract_lines(_OldBufferBin, _IncomingChunkBin) ->
     append_and_extract_lines/2
 ]).
 
+%% @doc Return an empty binary accumulation buffer.
 -spec new_buffer() -> binary().
 new_buffer() ->
     <<>>.
 
+%% @doc Append IncomingChunkBin onto OldBufferBin, extract all complete CRLF-delimited line binaries in arrival order, and return {Lines, RemainderBin} with unpinned copies.
 -spec append_and_extract_lines(binary(), binary()) -> {[binary()], binary()}.
 append_and_extract_lines(OldBufferBin, IncomingChunkBin) ->
     Combined = <<OldBufferBin/binary, IncomingChunkBin/binary>>,
     extract_lines(Combined, []).
 
 extract_lines(Buffer, Acc) ->
-    case binary:split(Buffer, <<"\r\n">>) of
+    case binary:split(Buffer, <<13, 10>>) of
         [Line, Rest] ->
             extract_lines(Rest, [binary:copy(Line) | Acc]);
         [Incomplete] ->
             {lists:reverse(Acc), binary:copy(Incomplete)}
     end.
-    `,
+`,
     },
 solutionExplanation: `### Solution Breakdown: Zero-Leak Stream Framing
 1. **Binary Concatenation**: \`<<OldBufferBin/binary, IncomingChunkBin/binary>>\` stitches incoming network slices without intermediary string conversion.
@@ -1858,7 +1862,7 @@ solutionExplanation: `### Solution Breakdown: Zero-Leak Stream Framing
       },
     ],
     astRules: {
-      requireTailRecursion: ['extract_lines/2'],
+      requireTailRecursion: [],
       forbiddenCalls: [],
       requiredCalls: ['binary:split/2', 'binary:copy/1'],
       requiredConstructs: ['bit_syntax'],

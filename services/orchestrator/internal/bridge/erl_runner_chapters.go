@@ -8016,15 +8016,17 @@ CompileStage = case compile:file("%s/src/tcp_frame_buffer.erl", [return_errors, 
         #{id => <<"compile">>, title => <<"Compile tcp_frame_buffer.erl">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("~p", [Err]))}
 end,
 S1_Ast = case bf_ast_verifier:verify_rules("%s/src/tcp_frame_buffer.erl", #{
-    required_calls => [{binary, copy, 1}]
+    required_calls => [{binary, split, 2}, {binary, copy, 1}],
+    required_constructs => [bit_syntax]
 }) of
     {ok, _} ->
-        #{id => <<"ast_verification">>, title => <<"AST Analysis: Memory Safety binary:copy/1">>, status => <<"passed">>, time_ms => 15, details => <<"Verified binary:copy/1 is used to prevent sub-binary leaks.">>};
+        #{id => <<"ast_verification">>, title => <<"AST Analysis: binary:split/2, binary:copy/1 & Bit Syntax">>, status => <<"passed">>, time_ms => 15, details => <<"Verified binary:split/2, binary:copy/1, and bit syntax concatenation.">>};
     {error, AstFailReason} ->
-        #{id => <<"ast_verification">>, title => <<"AST Analysis: Memory Safety binary:copy/1">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST verification failed: ~p", [AstFailReason]))}
+        #{id => <<"ast_verification">>, title => <<"AST Analysis: binary:split/2, binary:copy/1 & Bit Syntax">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST verification failed: ~p", [AstFailReason]))}
 end,
 S2_FramingEdgeCases = try
-    {L0, B0} = tcp_frame_buffer:append_and_extract_lines(<<>>, <<>>),
+    InitBuf = tcp_frame_buffer:new_buffer(),
+    {L0, B0} = tcp_frame_buffer:append_and_extract_lines(InitBuf, <<>>),
     {L1, B1} = tcp_frame_buffer:append_and_extract_lines(<<>>, <<"FRAGMENT_WITHOUT_DELIM">>),
     {L2, B2} = tcp_frame_buffer:append_and_extract_lines(B1, <<"_END\r\nLINE_TWO\r\nLINE_THREE\r\nPARTIAL">>),
     {L3, B3} = tcp_frame_buffer:append_and_extract_lines(B2, <<"_COMPLETED\r\n">>),

@@ -248,17 +248,19 @@ code_change(_OldVsn, State, _Extra) ->
     append_and_extract_lines/2
 ]).
 
+%% @doc Return an empty binary accumulation buffer.
 -spec new_buffer() -> binary().
 new_buffer() ->
     <<>>.
 
+%% @doc Append IncomingChunkBin onto OldBufferBin, extract all complete CRLF-delimited line binaries in arrival order, and return {Lines, RemainderBin} with unpinned copies.
 -spec append_and_extract_lines(binary(), binary()) -> {[binary()], binary()}.
 append_and_extract_lines(OldBufferBin, IncomingChunkBin) ->
     Combined = <<OldBufferBin/binary, IncomingChunkBin/binary>>,
     extract_lines(Combined, []).
 
 extract_lines(Buffer, Acc) ->
-    case binary:split(Buffer, <<"\r\n">>) of
+    case binary:split(Buffer, <<13, 10>>) of
         [Line, Rest] ->
             extract_lines(Rest, [binary:copy(Line) | Acc]);
         [Incomplete] ->

@@ -2811,6 +2811,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter10Verification/ch10-l03` (`VERIFIED 100% PASSED`, score=100, 4 stages in `2.88s`, `3.379s` package total); `TEST_CHAPTER=10 TestDynamicVisibleTestsCurriculum` (all 7 Ch. 10 lessons passed in `10.33s` / `10.353s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 166: Pedagogical Despoiling, `<<13, 10>>` Framing Parity & Live Tri-Verification of Chapter 10 Lecture 4 (`ch10-l04`)
+- [x] **166.1: Replace `metric_stream_framer` Clone with Domain-Disjoint PWE (`tlv_chunk_reader.erl`), Clean Starter Stubs, Fix Escape Parity (`<<13, 10>>`) & Align AST Grader (`ch10-l04`: `tcp_frame_buffer.erl`)**:
+  - Replaced `metric_stream_framer` (1:1 `binary:split` clone) in `apps/web-ide/src/data/chapters/ch10.ts` with a domain-disjoint runnable 16-bit TLV binary reader (`tlv_chunk_reader.erl` demonstrating concatenated chunk slicing and `binary:copy/1` unpinning), converted Obsidian callouts to GFM alerts, added card pointer to `## Official Erlang Docs & Function Reference`, and rewrote `## Assignment Specification` to strict Spec 08 `Input`/`Behavior`/`Examples` layout with zero code spoilers.
+  - Replaced code-dictating `%% % TODO ...` hints in `starterCode` and `files[0].content` (`src/tcp_frame_buffer.erl`) with clean Spec 08 `@doc` contracts across both exports (`new_buffer/0`, `append_and_extract_lines/2`) and neutral `ignore.` stub, synchronized `%% @doc` across `solutionCode`, `solutionFiles`, and `services/orchestrator/internal/bridge/ch10_verification_test.go`, and normalized the CRLF delimiter in `extract_lines/2` to `<<13, 10>>` so JS runtime, Monaco `👁 Solution`, and Go's raw `.ts` parser evaluate identical bytes.
+  - Updated `ch10.ts` `astRules.requireTailRecursion` to `[]` (removing unexported private helper name coupling) and upgraded `services/orchestrator/internal/bridge/erl_runner_chapters.go` (`case "ch10-l04"` Submit) to enforce `binary:split/2`, `binary:copy/1`, `bit_syntax`, and exercise `tcp_frame_buffer:new_buffer/0`.
+- [x] **166.2: Mandatory Live Tri-Verification & Compiler Suite (`ch10-l04`)**:
+  - **Parallel Worked Example (`tlv_chunk_reader.erl`)**: Extracted from `ch10.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified split-header TLV framing (`PWE_CH10_L04_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe -Wall`) and executed stubs safely (`STARTER_CH10_L04 exports=true stubs={<<>>,ignore}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` (`binary:split/2`, `binary:copy/1`, `bit_syntax`, plus `extract_lines/2` TCO), and passed 2/2 visible tests (`SOLUTION_CH10_L04_OK ast=passed visible=2/2`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter10Verification/ch10-l04` (`VERIFIED 100% PASSED`, score=100, 3 stages in `3.42s`, `3.786s` package total); `TEST_CHAPTER=10 TestDynamicVisibleTestsCurriculum` (`ch10-l04 | 2/2 tests passed`, all 7 Ch. 10 lessons passed in `14.72s` / `14.751s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 
