@@ -143,6 +143,25 @@ end,
 
 PidStr = fun(P) when is_pid(P) -> list_to_binary(pid_to_list(P)); (O) -> list_to_binary(io_lib:format("~p", [O])) end,
 
+WaitNewPid = fun Wait(Name, OldPid, 0) -> whereis(Name);
+                 Wait(Name, OldPid, Tries) ->
+                     case whereis(Name) of
+                         P when is_pid(P), P =/= OldPid -> P;
+                         _ -> timer:sleep(15), Wait(Name, OldPid, Tries - 1)
+                     end
+             end,
+
+WaitInbox = fun WInbox(BPid, 0) ->
+                    {ok, session_established, BI} = xmpp_c2s_statem:get_session_info(BPid),
+                    maps:get(delivered_inbox, BI, []);
+                WInbox(BPid, Tries) ->
+                    {ok, session_established, BI} = xmpp_c2s_statem:get_session_info(BPid),
+                    case maps:get(delivered_inbox, BI, []) of
+                        [_ | _] = Inbox -> Inbox;
+                        [] -> timer:sleep(15), WInbox(BPid, Tries - 1)
+                    end
+            end,
+
 ResultMap = try
     {ok, _SupPid} = xmpp_sup:start_link(),
     {AlicePid, AliceHandshakeXmls} = Handshake(<<"alice">>, <<"web">>),
@@ -177,9 +196,7 @@ ResultMap = try
                 true ->
                     {BobPid, _} = Handshake(<<"bob">>, <<"mobile">>),
                     {ok, session_established, _} = xmpp_c2s_statem:feed_xml(AlicePid, ChatFrame),
-                    timer:sleep(25),
-                    {ok, session_established, BobInfo} = xmpp_c2s_statem:get_session_info(BobPid),
-                    BobInbox = maps:get(delivered_inbox, BobInfo, []),
+                    BobInbox = WaitInbox(BobPid, 20),
                     xmpp_c2s_statem:stop(BobPid),
                     case BobInbox of
                         [_ | _] ->
@@ -299,9 +316,8 @@ ResultMap = try
             RegBefore = whereis(xmpp_session_registry),
             RouterBefore = whereis(xmpp_router),
             exit(RouterBefore, kill),
-            timer:sleep(45),
+            RouterAfter = WaitNewPid(xmpp_router, RouterBefore, 35),
             RegAfter = whereis(xmpp_session_registry),
-            RouterAfter = whereis(xmpp_router),
             RegTxtBefore = PidStr(RegBefore),
             RegTxtAfter = PidStr(RegAfter),
             RouterTxtBefore = PidStr(RouterBefore),
@@ -309,9 +325,7 @@ ResultMap = try
             ChaosBody = <<"Post-Chaos Zero-Loss Recovery Check">>,
             ChaosFrame = <<"<message id='chaos_1' to='bob@beamforge.local'><body>", ChaosBody/binary, "</body></message>">>,
             {ok, session_established, _} = xmpp_c2s_statem:feed_xml(AlicePid, ChaosFrame),
-            timer:sleep(25),
-            {ok, session_established, BobInfo} = xmpp_c2s_statem:get_session_info(BobPid),
-            BobInbox = maps:get(delivered_inbox, BobInfo, []),
+            BobInbox = WaitInbox(BobPid, 20),
             xmpp_c2s_statem:stop(BobPid),
             ChaosPass = (RegBefore =:= RegAfter) andalso is_pid(RouterAfter) andalso (RouterBefore =/= RouterAfter) andalso (length(BobInbox) > 0),
             case ChaosPass of

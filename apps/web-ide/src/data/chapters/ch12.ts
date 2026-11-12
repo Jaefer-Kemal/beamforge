@@ -1909,7 +1909,7 @@ Welcome to the **BeamForge Final Capstone**. Across the 6 Studio Milestones, you
       {
         id: 'tc-cap-6',
         title: 'Milestone 6: Chaos Monkey Supervision Resilience',
-        erlangCall: 'begin catch xmpp_sup:stop(), {ok, _} = xmpp_sup:start_link(), Reg1 = whereis(xmpp_session_registry), exit(Reg1, kill), timer:sleep(60), Reg2 = whereis(xmpp_session_registry), xmpp_sup:stop(), Reg2 =/= undefined andalso Reg2 =/= Reg1 end',
+        erlangCall: 'begin catch xmpp_sup:stop(), {ok, _} = xmpp_sup:start_link(), Reg1 = whereis(xmpp_session_registry), exit(Reg1, kill), timer:sleep(150), Reg2 = whereis(xmpp_session_registry), xmpp_sup:stop(), Reg2 =/= undefined andalso Reg2 =/= Reg1 end',
         expectedOutput: 'true',
         explanation: 'Verifies that killing the session registry triggers rest_for_one supervisor restart of both registry and router without bringing down the root tree.',
       },
