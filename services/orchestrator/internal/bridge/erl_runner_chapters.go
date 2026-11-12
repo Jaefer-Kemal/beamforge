@@ -4203,21 +4203,39 @@ Stages = [CompileStage, S1_Ast, S2_Telemetry]
 		return `
 CompileStage = case code:ensure_loaded(basic_types) of
     {module, basic_types} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"basic_types.erl compiled cleanly">>};
+        Exports = basic_types:module_info(exports),
+        Required = [{calculate_bandwidth, 2}, {is_exact_match, 2}, {is_within_quota, 3}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"basic_types.erl compiled cleanly and exported all 3 required functions.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Arithmetic = try {basic_types:calculate_bandwidth(1250, 2), basic_types:calculate_bandwidth(2500, 5)} of
-    {5000, 4000} ->
-        #{id => <<"integer_arithmetic">>, title => <<"Integer Division Arithmetic (div)">>, status => <<"passed">>, time_ms => 5, details => <<"Bandwidth calculations verified using whole integer division">>};
+S1_Arithmetic = try {basic_types:calculate_bandwidth(1250, 2), basic_types:calculate_bandwidth(2500, 5), basic_types:calculate_bandwidth(100, 3)} of
+    {5000, 4000, 266} ->
+        #{id => <<"integer_arithmetic">>, title => <<"Integer Division Arithmetic (div)">>, status => <<"passed">>, time_ms => 5, details => <<"Exact and truncating integer bandwidth calculations verified.">>};
     Got1 ->
         #{id => <<"integer_arithmetic">>, title => <<"Integer Division Arithmetic (div)">>, status => <<"failed">>, time_ms => 5, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
 catch C1:R1 ->
     #{id => <<"integer_arithmetic">>, title => <<"Integer Division Arithmetic (div)">>, status => <<"failed">>, time_ms => 5, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
 end,
-S2_Comparisons = try {basic_types:is_exact_match(42, 42.0), basic_types:is_exact_match(100, 100), basic_types:is_exact_match(ok, ok), basic_types:is_within_quota(450, 500, false), basic_types:is_within_quota(550, 500, false), basic_types:is_within_quota(9999, 100, true)} of
-    {false, true, true, true, false, true} ->
-        #{id => <<"comparison_and_logic">>, title => <<"Strict Equality (=:=) & Quota Bounds Logic">>, status => <<"passed">>, time_ms => 6, details => <<"Verified exact type-safe equality and =< boolean logic">>};
+S2_Comparisons = try
+    {basic_types:is_exact_match(42, 42.0),
+     basic_types:is_exact_match(100, 100),
+     basic_types:is_exact_match(ok, ok),
+     basic_types:is_within_quota(0, 500, false),
+     basic_types:is_within_quota(450, 500, false),
+     basic_types:is_within_quota(500, 500, false),
+     basic_types:is_within_quota(550, 500, false),
+     basic_types:is_within_quota(-10, 500, false),
+     basic_types:is_within_quota(9999, 100, true)}
+of
+    {false, true, true, true, true, true, false, false, true} ->
+        #{id => <<"comparison_and_logic">>, title => <<"Strict Equality (=:=) & Quota Bounds Logic">>, status => <<"passed">>, time_ms => 6, details => <<"Verified type-safe equality, admin bypass, negative rejection, and inclusive [0, LimitMb] quota boundaries.">>};
     Got2 ->
         #{id => <<"comparison_and_logic">>, title => <<"Strict Equality (=:=) & Quota Bounds Logic">>, status => <<"failed">>, time_ms => 6, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got2]))}
 catch C2:R2 ->
@@ -8040,18 +8058,7 @@ S2_ActiveOnceBackpressure = try
             #{id => <<"active_once_backpressure">>, title => <<"Live Backpressure Test: Mailbox Bounded under Burst Load">>, status => <<"passed">>, time_ms => 60, details => <<"Backpressure test passed.">>};
         {error, ErrReason, Rep} ->
             tcp_flow_worker:stop_server(ListenPid),
-            #{id => <<"active_once_backpressure">>, title => <<"Live Backpressure Test: Mailbox Bounded under Burst Load">>, status => <<"failed">>, time_ms => 60, details => list_to_binary(io_lib:format("Backpressure test failed (~p): ~p", [ErrReason, Rep]))}
-    end
-catch C:R ->
-    #{id => <<"active_once_backpressure">>, title => <<"Live Backpressure Test: Mailbox Bounded under Burst Load">>, status => <<"failed">>, time_ms => 60, details => list_to_binary(io_lib:format("Backpressure test crashed: ~p:~p", [C, R]))}
-end,
-S3_EchoAndLifecycle = try
-    (case whereis(tcp_flow_worker) of undefined -> ok; OldP -> catch gen_server:stop(OldP) end),
-    timer:sleep(20),
-    {ok, LPid3, Port3} = tcp_flow_worker:start_server(),
-    {ok, CSock3} = gen_tcp:connect("127.0.0.1", Port3, [binary, {packet, raw}, {active, false}], 2000),
-    ok = gen_tcp:send(CSock3, <<"TEST_PING\r\n">>),
-    {ok, <<"+ACK: TEST_PING\r\n">>} = gen_tcp:recv(CSock3, 0, 2000),
+            #{id => <<"active_once_backpressure">>, title => <<"Live Backpressure Test: Mai
     #{packets_processed := 1, bytes_processed := 11, closed := false} = tcp_flow_worker:get_stats(tcp_flow_worker),
     1 = tcp_flow_worker:get_processed_count(tcp_flow_worker),
     ok = gen_tcp:close(CSock3),

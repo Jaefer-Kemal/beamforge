@@ -24,10 +24,27 @@ inspect_vm() ->
     {vm_info, OtpRel, Schedulers, ProcLimit, AtomLimit}.
 `
 
+	basicTypesSolution := `-module(basic_types).
+-export([calculate_bandwidth/2, is_exact_match/2, is_within_quota/3]).
+
+%% @doc Convert byte count and elapsed seconds into whole integer bits per second.
+calculate_bandwidth(Bytes, Seconds) ->
+    (Bytes * 8) div Seconds.
+
+%% @doc Return true only if ValA and ValB match identically in both value and runtime type.
+is_exact_match(ValA, ValB) ->
+    ValA =:= ValB.
+
+%% @doc Return true if IsAdmin is active, or if non-negative UsedMb does not exceed LimitMb.
+is_within_quota(UsedMb, LimitMb, IsAdmin) ->
+    IsAdmin =:= true orelse (UsedMb >= 0 andalso UsedMb =< LimitMb).
+`
+
 	tests := []struct {
-		name       string
-		exerciseID string
-		files      map[string]string
+		name          string
+		exerciseID    string
+		files         map[string]string
+		visibleCount  int
 	}{
 		{
 			name:       "ch01-l01 BEAM VM Introspection Guided Demo",
@@ -35,6 +52,15 @@ inspect_vm() ->
 			files: map[string]string{
 				"src/beam_intro.erl": beamIntroSolution,
 			},
+			visibleCount: 1,
+		},
+		{
+			name:       "ch01-l02 Numbers, Booleans & Comparison Operators",
+			exerciseID: "ch01-l02",
+			files: map[string]string{
+				"src/basic_types.erl": basicTypesSolution,
+			},
+			visibleCount: 3,
 		},
 	}
 
@@ -71,8 +97,13 @@ inspect_vm() ->
 			if err != nil {
 				t.Fatalf("RunCode failed with error: %v", err)
 			}
-			if !runRes.CompileOk || len(runRes.VisibleTests) == 0 || !runRes.VisibleTests[0].Passed {
-				t.Errorf("[%s] Expected RunCode visible tests to pass, got CompileOk=%v VisibleTests=%+v", tc.exerciseID, runRes.CompileOk, runRes.VisibleTests)
+			if !runRes.CompileOk || len(runRes.VisibleTests) != tc.visibleCount {
+				t.Fatalf("[%s] Expected CompileOk=true and %d visible tests, got CompileOk=%v count=%d", tc.exerciseID, tc.visibleCount, runRes.CompileOk, len(runRes.VisibleTests))
+			}
+			for _, vt := range runRes.VisibleTests {
+				if !vt.Passed {
+					t.Errorf("[%s] Visible test failed: %+v", tc.exerciseID, vt)
+				}
 			}
 		})
 	}
@@ -113,6 +144,51 @@ inspect_vm() ->
 		}
 		if !astFailed {
 			t.Errorf("Expected ast_rule_audit stage to fail for missing erlang:system_info/1, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch01-l02 rejects negative quota acceptance bug", func(t *testing.T) {
+		sessionID := "test-ch01-l02-neg-quota"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		buggy := map[string]string{
+			"src/basic_types.erl": `-module(basic_types).
+-export([calculate_bandwidth/2, is_exact_match/2, is_within_quota/3]).
+
+calculate_bandwidth(Bytes, Seconds) ->
+    (Bytes * 8) div Seconds.
+
+is_exact_match(ValA, ValB) ->
+    ValA =:= ValB.
+
+is_within_quota(UsedMb, LimitMb, IsAdmin) ->
+    IsAdmin =:= true orelse UsedMb =< LimitMb.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch01-l02", buggy)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected buggy is_within_quota accepting negative UsedMb to fail verification, but got PASSED")
+		}
+
+		compFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "comparison_and_logic" && st.Status == "failed" {
+				compFailed = true
+			}
+		}
+		if !compFailed {
+			t.Errorf("Expected comparison_and_logic stage to fail for negative quota bug, stages=%+v", report.Stages)
 		}
 	})
 }

@@ -239,19 +239,19 @@ In Erlang, comparison operators are written using standard ASCII characters:
 | **\`=:=\`** | Exact Equality | \`42 =:= 42\` | \`true\` | Checks value **and** type (\`42 =:= 42.0\` is \`false\`) |
 | **\`=/=\`** | Exact Inequality | \`42 =/= 42.0\` | \`true\` | Negation of \`=:=\` |
 | **\`==\`** | Loose Equality | \`42 == 42.0\` | \`true\` | Coerces integer to float |
-| **\`\/=\`** | Loose Inequality | \`10 /= 20\` | \`true\` | Negation of \`==\` |
+| **\`/=\`** | Loose Inequality | \`10 /= 20\` | \`true\` | Negation of \`==\` |
 | **\`<\`** | Strictly Less Than | \`5 < 10\` | \`true\` | Standard less-than |
 | **\`=<\`** | Less Than or Equal | \`5 =< 5\` | \`true\` | **Erlang Syntax:** \`=<\` (Never \`<=\`) |
 | **\`>\`** | Strictly Greater Than | \`10 > 5\` | \`true\` | Standard greater-than |
 | **\`>=\`** | Greater Than or Equal | \`10 >= 10\` | \`true\` | Standard greater-than-or-equal |
 
-> [!warning] Common Beginner Syntax Trap: The =< Comparison Operator
+> [!WARNING] Common Beginner Syntax Trap: The =< Comparison Operator
 > In nearly every programming language, "less-than-or-equal" is written as \`<=\`.
 > **In Erlang, less-than-or-equal is written as \`=<\`!**
 > Why? Because \`<=\` is reserved in Erlang for binary comprehension generators. If you type \`X <= 10\`, the compiler will throw a confusing syntax error.
 > Remember: \`=<\` (arrow pointing into the equal sign) means less-than-or-equal.
 
-> [!warning] Exact Equality (=:=) vs. Loose Numeric Equality (==)
+> [!WARNING] Exact Equality (=:=) vs. Loose Numeric Equality (==)
 > Erlang has two equality operators:
 > - \`=:=\` (**Exact Equality**): Compares both value **and type**. \`42 =:= 42.0\` is \`false\` because an integer is not a float.
 > - \`==\` (**Loose Equality**): Coerces numbers. \`42 == 42.0\` is \`true\`.
@@ -259,32 +259,27 @@ In Erlang, comparison operators are written using standard ASCII characters:
 
 ## Parallel Worked Example
 
-Consider a player account and resource metering module:
+Consider an industrial sensor-telemetry module that slices sampling durations and flags thermal threshold violations:
 
 \`\`\`erlang
--module(player_meter).
--export([split_elapsed_time/1, is_same_tier/2, is_reward_eligible/3]).
+-module(thermal_probe).
+-export([split_cycles/2, is_sensor_tripped/3]).
 
-%% Calculate whole minutes and remaining seconds from a total duration
-split_elapsed_time(TotalSeconds) ->
-    Minutes   = TotalSeconds div 60,
-    Remaining = TotalSeconds rem 60,
-    {Minutes, Remaining}.
+%% Partition elapsed milliseconds into complete cycles and leftover milliseconds
+split_cycles(TotalMs, IntervalMs) ->
+    FullCycles = TotalMs div IntervalMs,
+    LeftoverMs = TotalMs rem IntervalMs,
+    {FullCycles, LeftoverMs}.
 
-%% Verify whether two tier identifiers match strictly in type and value
-is_same_tier(TierA, TierB) ->
-    TierA =:= TierB.
-
-%% Determine if an account qualifies for a bonus reward:
-%% Must have VIP status, OR have non-negative score that meets minimum threshold
-is_reward_eligible(Score, MinScore, IsVip) ->
-    IsVip =:= true orelse (Score >= 0 andalso Score >= MinScore).
+%% Trigger alert when mode is strictly active, ceiling is non-zero, and reading breaches bounds
+is_sensor_tripped(Reading, Ceiling, Mode) ->
+    (Mode =:= active) andalso (Ceiling =/= 0) andalso (Ceiling =< Reading orelse Reading < 0).
 \`\`\`
 
-Notice:
-- \`div\` and \`rem\` compute integer division and modulo respectively.
-- \`=:=\` enforces strict equality without numeric type coercion.
-- \`orelse\` and \`andalso\` evaluate boolean conditions with short-circuit behavior.
+Notice how the BEAM evaluates each primitive:
+- \`div\` and \`rem\` compute whole integer quotient and remainder cleanly with zero float rounding drift.
+- \`=:=\` and \`=/=\` enforce strict value-and-type comparison against atoms and numbers (\`Mode =:= active\`, \`Ceiling =/= 0\`).
+- \`=<\` and \`<\` compose inside parenthesized short-circuit \`andalso\` / \`orelse\` guards without intermediate branching.
 
 ## Official Erlang Docs & Function Reference
 
@@ -296,21 +291,22 @@ Notice:
 %% Low:      =:=, =/=, ==, /=, <, =<, >, >=
 %% Lowest:   andalso, orelse
 \`\`\`
+> **How to Read This Spec**: Operators in higher rows bind more tightly than rows below them (for example, \`*\` and \`div\` evaluate before \`=<\`, which evaluates before \`andalso\` / \`orelse\`). Open the attached **\`div_and_rem\` Reference Card** below for official OTP arithmetic documentation and ERTS C emulator source links.
 
 ## Assignment Specification
 
-In \`basic_types.erl\`, implement three fundamental calculation and logic functions:
+In \`src/basic_types.erl\`, implement and export three calculation and logic functions (\`calculate_bandwidth/2\`, \`is_exact_match/2\`, \`is_within_quota/3\`):
 
 1. \`calculate_bandwidth(Bytes, Seconds)\`:
-   - **Input**: Integer \`Bytes\` transferred over integer \`Seconds\`.
-   - **Behavior**: Convert the total bytes to bits (1 byte = 8 bits), and return the whole integer transmission rate in bits per second. Must use integer division so the result is always an integer.
+   - **Input**: Non-negative integer \`Bytes\` transferred over positive integer \`Seconds\`.
+   - **Behavior**: Converts bytes to bits (8 bits per byte) and returns the whole integer transmission rate in bits per second in $O(1)$ time, truncating any fractional remainder.
    - **Examples**:
-     - \`basic_types:calculate_bandwidth(1250, 2)\` returns \`5000\` (since \`(1250 * 8) div 2 = 5000\`).
+     - \`basic_types:calculate_bandwidth(1250, 2)\` returns \`5000\` (1,250 bytes equals 10,000 bits across 2 seconds, yielding 5,000 bps).
      - \`basic_types:calculate_bandwidth(100, 3)\` returns \`266\`.
 
 2. \`is_exact_match(ValA, ValB)\`:
    - **Input**: Two arbitrary Erlang terms, \`ValA\` and \`ValB\`.
-   - **Behavior**: Return \`true\` if both values are identical in both value **and** type. Return \`false\` if types differ, even if their numeric values appear loose-equal (e.g., integer vs float).
+   - **Behavior**: Returns \`true\` if both terms match identically in both value **and** runtime type in $O(1)$ time; returns \`false\` when types differ even if numeric values coerce loosely (such as integer vs float).
    - **Examples**:
      - \`basic_types:is_exact_match(42, 42)\` returns \`true\`.
      - \`basic_types:is_exact_match(42, 42.0)\` returns \`false\` (integer vs float).
@@ -318,9 +314,9 @@ In \`basic_types.erl\`, implement three fundamental calculation and logic functi
 
 3. \`is_within_quota(UsedMb, LimitMb, IsAdmin)\`:
    - **Input**: Integer \`UsedMb\`, integer \`LimitMb\`, and boolean \`IsAdmin\`.
-   - **Behavior**: Determine whether resource usage is permitted:
-     - Always returns \`true\` if the caller has administrator privileges (\`IsAdmin\`).
-     - For non-administrators, returns \`true\` only if \`UsedMb\` is non-negative ($0$ or greater) and does not exceed \`LimitMb\`.
+   - **Behavior**: Determines in $O(1)$ time whether resource usage is permitted:
+     - Always returns \`true\` when the caller has active administrator privileges (\`IsAdmin\` strictly true).
+     - For non-administrators, returns \`true\` only when \`UsedMb\` is non-negative (0 or greater) and does not exceed \`LimitMb\`.
      - Returns \`false\` otherwise.
    - **Examples**:
      - \`basic_types:is_within_quota(450, 500, false)\` returns \`true\`.
@@ -330,8 +326,10 @@ In \`basic_types.erl\`, implement three fundamental calculation and logic functi
 
 ## Rules & Verification Constraints
 
-- Do not use \`when\` guard clauses or \`if\`/\`case\` statements yet—rely entirely on boolean expressions.
-- Remember to use \`=<\` for less-than-or-equal to avoid syntax errors.`,
+- **Exports**: \`basic_types\` must export \`calculate_bandwidth/2\`, \`is_exact_match/2\`, and \`is_within_quota/3\`.
+- **Expression-Only Style**: Do not use \`when\` guard clauses or \`if\`/\`case\` statements yet—rely on arithmetic and short-circuit boolean expressions.
+- **Syntax Trap Check**: Remember Erlang uses \`=<\` (not \`<=\`) for less-than-or-equal comparisons.
+- **Runtime Verification**: Verified across truncating integer division, strict type-safe equality, negative usage rejection, and inclusive \`[0, LimitMb]\` boundaries.`,
     otpDocCards: [
       {
         functionName: 'div_and_rem',
@@ -373,27 +371,27 @@ In \`basic_types.erl\`, implement three fundamental calculation and logic functi
         title: 'Calculate Integer Bandwidth',
         erlangCall: 'basic_types:calculate_bandwidth(1250, 2)',
         expectedOutput: '5000',
-        explanation: '(1250 * 8) div 2 = 5000 bps.',
+        explanation: '1250 bytes (10,000 bits) over 2 seconds equals 5000 whole integer bits per second.',
       },
       {
         id: 'tc-ch01-02-b',
         title: 'Exact Equality Match Check',
         erlangCall: 'basic_types:is_exact_match(42, 42.0)',
         expectedOutput: 'false',
-        explanation: 'Integer 42 is not identical in type to Float 42.0 under =:=.',
+        explanation: 'Integer 42 differs in runtime type from float 42.0 under strict equality.',
       },
       {
         id: 'tc-ch01-02-c',
         title: 'Bandwidth Quota Within Limit Check',
         erlangCall: 'basic_types:is_within_quota(450, 500, false)',
         expectedOutput: 'true',
-        explanation: 'UsedMb (450) is >= 0 and =< LimitMb (500).',
+        explanation: 'UsedMb (450) falls inclusively between 0 and LimitMb (500).',
       },
     ],
     astRules: {
       requiredCalls: [],
     },
-    solutionExplanation: 'Uses div for integer arithmetic, =:= for exact type-safe equality, and =< with andalso/orelse for quota bounds checking.',
+    solutionExplanation: 'Uses integer division after converting bytes to bits, strict equality (=:=) to preserve numeric types, and short-circuit boolean logic with =< for inclusive quota bounds checking.',
     files: [
       {
         name: 'basic_types.erl',
@@ -401,16 +399,16 @@ In \`basic_types.erl\`, implement three fundamental calculation and logic functi
         content: `-module(basic_types).
 -export([calculate_bandwidth/2, is_exact_match/2, is_within_quota/3]).
 
-%% @doc Return whole integer bits per second given byte count and elapsed seconds.
-calculate_bandwidth(Bytes, Seconds) ->
+%% @doc Convert byte count and elapsed seconds into whole integer bits per second.
+calculate_bandwidth(_Bytes, _Seconds) ->
     ok.
 
-%% @doc Return true only if ValA and ValB match strictly in both value and type.
-is_exact_match(ValA, ValB) ->
+%% @doc Return true only if ValA and ValB match identically in both value and runtime type.
+is_exact_match(_ValA, _ValB) ->
     ok.
 
-%% @doc Return true if usage is within [0, LimitMb], or if IsAdmin is active.
-is_within_quota(UsedMb, LimitMb, IsAdmin) ->
+%% @doc Return true if IsAdmin is active, or if non-negative UsedMb does not exceed LimitMb.
+is_within_quota(_UsedMb, _LimitMb, _IsAdmin) ->
     ok.`,
       },
     ],
@@ -418,38 +416,44 @@ is_within_quota(UsedMb, LimitMb, IsAdmin) ->
       'src/basic_types.erl': `-module(basic_types).
 -export([calculate_bandwidth/2, is_exact_match/2, is_within_quota/3]).
 
+%% @doc Convert byte count and elapsed seconds into whole integer bits per second.
 calculate_bandwidth(Bytes, Seconds) ->
     (Bytes * 8) div Seconds.
 
+%% @doc Return true only if ValA and ValB match identically in both value and runtime type.
 is_exact_match(ValA, ValB) ->
     ValA =:= ValB.
 
+%% @doc Return true if IsAdmin is active, or if non-negative UsedMb does not exceed LimitMb.
 is_within_quota(UsedMb, LimitMb, IsAdmin) ->
     IsAdmin =:= true orelse (UsedMb >= 0 andalso UsedMb =< LimitMb).`,
     },
     starterCode: `-module(basic_types).
 -export([calculate_bandwidth/2, is_exact_match/2, is_within_quota/3]).
 
-%% @doc Return whole integer bits per second given byte count and elapsed seconds.
-calculate_bandwidth(Bytes, Seconds) ->
+%% @doc Convert byte count and elapsed seconds into whole integer bits per second.
+calculate_bandwidth(_Bytes, _Seconds) ->
     ok.
 
-%% @doc Return true only if ValA and ValB match strictly in both value and type.
-is_exact_match(ValA, ValB) ->
+%% @doc Return true only if ValA and ValB match identically in both value and runtime type.
+is_exact_match(_ValA, _ValB) ->
     ok.
 
-%% @doc Return true if usage is within [0, LimitMb], or if IsAdmin is active.
-is_within_quota(UsedMb, LimitMb, IsAdmin) ->
+%% @doc Return true if IsAdmin is active, or if non-negative UsedMb does not exceed LimitMb.
+is_within_quota(_UsedMb, _LimitMb, _IsAdmin) ->
     ok.`,
     solutionCode: `-module(basic_types).
 -export([calculate_bandwidth/2, is_exact_match/2, is_within_quota/3]).
 
+%% @doc Convert byte count and elapsed seconds into whole integer bits per second.
 calculate_bandwidth(Bytes, Seconds) ->
     (Bytes * 8) div Seconds.
 
+%% @doc Return true only if ValA and ValB match identically in both value and runtime type.
 is_exact_match(ValA, ValB) ->
     ValA =:= ValB.
 
+%% @doc Return true if IsAdmin is active, or if non-negative UsedMb does not exceed LimitMb.
 is_within_quota(UsedMb, LimitMb, IsAdmin) ->
     IsAdmin =:= true orelse (UsedMb >= 0 andalso UsedMb =< LimitMb).`,
   },

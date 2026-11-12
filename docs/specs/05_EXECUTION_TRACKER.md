@@ -3054,6 +3054,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter1Verification` passed 2/2 subtests in `3.93s` (`3.979s` total); `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` passed all 8 CH01 lessons including `ch01-l01 | 1/1 tests passed` (`14.26s` / `14.278s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 187: Spec 04 / Spec 08 Anti-Spoiler Rework, Boundary Grader Hardening & Live Tri-Verification of Chapter 1 Lecture 2 (`ch01-l02`)
+- [x] **187.1: De-Spoil Parallel Worked Example, Prompt Formula, & Sync Starter/Solution Contracts (`src/basic_types.erl`, `ch01-l02`)**:
+  - Updated `ch01-l02` ONLY in `apps/web-ide/src/data/chapters/ch01.ts` (`lines 242–459`): fixed escaped table operator ``\`/=\` `` (`line 242`), standardized `> [!WARNING]` GFM alerts (`lines 248, 254`), replaced the 1:1 parallel clone `player_meter` (`TierA =:= TierB`, `IsVip =:= true orelse ...`) with the distinct 2-function industrial module `thermal_probe.erl` (`split_cycles/2`, `is_sensor_tripped/3` at `lines 260–282`), added the Spec 04 §1.3 precedence reading note & `div_and_rem` reference-card pointer (`line 294`), removed the forbidden `(1250 * 8) div 2 = 5000` expression spoiler (`lines 304, 374`), updated export/runtime rules (`lines 327–332`), and synchronized clean `_`-prefixed `-Wall -Werror` starter stubs + plain-English `%% @doc` headers across all 4 code blocks (`lines 395–459`).
+  - Hardened `services/orchestrator/internal/bridge/erl_runner_chapters.go` (`case "ch01-l02"`, `lines 4202–4245`) to verify all 3 exports (`calculate_bandwidth/2`, `is_exact_match/2`, `is_within_quota/3`), truncating integer division `(100, 3) -> 266`, and full `is_within_quota/3` boundaries (`(0, 500, false) -> true`, `(500, 500, false) -> true`, `(-10, 500, false) -> false`, `(9999, 100, true) -> true`).
+  - Expanded `services/orchestrator/internal/bridge/ch01_verification_test.go` (`lines 27–190`) to test `ch01-l02` (`RunVerification` 3 stages + `RunCode` 3/3 visible tests) plus negative rejection when `UsedMb >= 0` is omitted.
+- [x] **187.2: Mandatory Live Tri-Verification & Compiler Suite (`ch01-l02`, Local Commit Only per Spec 08 §3.3)**:
+  - **Parallel Worked Example (`thermal_probe.erl`)**: Extracted from `ch01.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified live on OTP 29 (`PWE_OK`).
+  - **Starter & Solution Pack (`basic_types.erl`)**: Verified starter & solution parity (`files[0].content === starterCode`, `solutionFiles['src/basic_types.erl'] === solutionCode`), compiled starter with `-Wall -Werror` (0 warnings) returning safe `{ok, ok, ok}` stubs, compiled solution with `+debug_info -Wall -Werror`, and executed all 3 `visibleTestCases` plus boundary cases live (`SOL_ALL_VISIBLE_AND_BOUNDS_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter1Verification` passed all 4 subtests in `7.61s` (`7.668s` total); `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` passed all 8 CH01 lessons including `ch01-l02 | 3/3 tests passed` (`14.75s` / `14.774s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
+
 
 
 
