@@ -3428,13 +3428,13 @@ init:stop().
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
     {ok, N} = xmpp_wire_demo:run_demo(),
-    Pass = (N >= 5),
+    Pass = (N =:= 8),
     #{call_str => <<"xmpp_wire_demo:run_demo()">>,
-      expected => <<"{ok, N} (N >= 5 transcript steps)">>,
+      expected => <<"{ok, 8}">>,
       actual => list_to_binary(lists:flatten(io_lib:format("{ok, ~p}", [N]))),
       passed => Pass, time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"xmpp_wire_demo:run_demo()">>, expected => <<"{ok, N}">>,
+    #{call_str => <<"xmpp_wire_demo:run_demo()">>, expected => <<"{ok, 8}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res],
@@ -8288,35 +8288,43 @@ Stages = [CompileStage, S1_Ast, S2_UnitParserAndExec, S3_WireSocketIntegration, 
 		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(xmpp_wire_demo) of
     {module, xmpp_wire_demo} ->
-        case lists:member({run_demo, 0}, xmpp_wire_demo:module_info(exports)) of
-            true -> #{id => <<"compile">>, title => <<"Compile xmpp_wire_demo.erl">>, status => <<"passed">>, time_ms => 12, details => <<"Compilation succeeded; run_demo/0 exported.">>};
-            false -> #{id => <<"compile">>, title => <<"Compile xmpp_wire_demo.erl">>, status => <<"failed">>, time_ms => 12, details => <<"Missing export run_demo/0">>}
+        Req = [{run_demo, 0}, {print_transcript, 2}],
+        Exports = xmpp_wire_demo:module_info(exports),
+        case [E || E <- Req, not lists:member(E, Exports)] of
+            [] -> #{id => <<"compile">>, title => <<"Compile xmpp_wire_demo.erl">>, status => <<"passed">>, time_ms => 12, details => <<"Compilation succeeded; run_demo/0 and print_transcript/2 exported.">>};
+            Missing -> #{id => <<"compile">>, title => <<"Compile xmpp_wire_demo.erl">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
         end;
     {error, E} ->
         #{id => <<"compile">>, title => <<"Compile xmpp_wire_demo.erl">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E]))}
 end,
 S1_Ast = try
     SrcPath = filename:join(["%s", "src", "xmpp_wire_demo.erl"]),
-    Rules = #{required_remote_calls => [{sample_xmpp_c2s, start_link, 1}, {bf_xmpp_c2s_harness, verify_c2s_handshake_and_routing, 3}]},
-    case bf_ast_verifier:verify_rules(SrcPath, Rules) of
-        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Protocol & Harness Invocation">>, status => <<"passed">>, time_ms => 15, details => <<"Verified sample_xmpp_c2s:start_link/1 and harness verification calls exist.">>};
-        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Protocol & Harness Invocation">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
+    BeamPath = filename:join(["%s", "ebin", "xmpp_wire_demo.beam"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    Rules = #{
+        require_tail_recursion => [{print_transcript, 2}],
+        required_calls => [{sample_xmpp_c2s, start_link, 1}, {bf_xmpp_c2s_harness, verify_c2s_handshake_and_routing, 3}],
+        required_constructs => [map_exact_match]
+    },
+    case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
+        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Protocol, Map Matching & Transcript TCO">>, status => <<"passed">>, time_ms => 15, details => <<"Verified sample_xmpp_c2s:start_link/1, bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing/3, map_exact_match, and print_transcript/2 TCO.">>};
+        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Protocol, Map Matching & Transcript TCO">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
     end
 catch C1:R1 ->
-    #{id => <<"ast_verification">>, title => <<"AST Analysis: Protocol & Harness Invocation">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [C1, R1]))}
+    #{id => <<"ast_verification">>, title => <<"AST Analysis: Protocol, Map Matching & Transcript TCO">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [C1, R1]))}
 end,
 S2_DemoWireExecution = try
     case xmpp_wire_demo:run_demo() of
-        {ok, Count} when Count >= 5 ->
-            #{id => <<"demo_wire_execution">>, title => <<"Execute Live XMPP C2S Wire Protocol Session">>, status => <<"passed">>, time_ms => 60, details => list_to_binary(io_lib:format("Completed all ~p wire transcript phases with valid RFC 6120 XML payloads.", [Count]))};
+        {ok, 8} ->
+            #{id => <<"demo_wire_execution">>, title => <<"Execute Live XMPP C2S Wire Protocol Session">>, status => <<"passed">>, time_ms => 60, details => <<"Completed all 8 wire transcript entries across 5 RFC 6120 XMPP phases.">>};
         OtherDemo ->
-            #{id => <<"demo_wire_execution">>, title => <<"Execute Live XMPP C2S Wire Protocol Session">>, status => <<"failed">>, time_ms => 60, details => list_to_binary(io_lib:format("Demo execution failed: ~p", [OtherDemo]))}
+            #{id => <<"demo_wire_execution">>, title => <<"Execute Live XMPP C2S Wire Protocol Session">>, status => <<"failed">>, time_ms => 60, details => list_to_binary(io_lib:format("Expected {ok, 8}, got: ~p", [OtherDemo]))}
     end
 catch C2:R2 ->
     #{id => <<"demo_wire_execution">>, title => <<"Execute Live XMPP C2S Wire Protocol Session">>, status => <<"failed">>, time_ms => 60, details => list_to_binary(io_lib:format("Demo crashed: ~p:~p", [C2, R2]))}
 end,
 Stages = [CompileStage, S1_Ast, S2_DemoWireExecution]
-`, wsDir), true
+`, wsDir, wsDir), true
 
 	case "ch11-l02":
 		return fmt.Sprintf(`

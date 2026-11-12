@@ -9,7 +9,7 @@ export const CHAPTER_11_LESSONS: LessonContent[] = [
     title: 'Guided Demo: Observing a Live XMPP Wire Protocol Session Transcript',
     difficulty: 'Intermediate',
     xpReward: 50,
-        visualScene: 'tcp_xmpp_stream_framing',
+    visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Why does the XMPP C2S protocol keep a single TCP connection open persistently rather than using short-lived HTTP requests for each chat message?',
       options: [
@@ -45,6 +45,7 @@ The **Extensible Messaging and Presence Protocol (XMPP — RFC 6120 & RFC 6121)*
 
 Unlike HTTP (where the client opens a connection, requests a resource, receives JSON, and closes), XMPP establishes a **persistent, bidirectional XML stream** over a single long-lived TCP socket:
 
+> [!IMPORTANT]
 > **The 5-Phase XMPP C2S Protocol Lifecycle:**
 > 1. **Phase 1: Stream Open** — \`<stream:stream to='localhost' xmlns='jabber:client' ...>\`
 > 2. **Phase 2: Stream Features** — Server advertises supported auth mechanisms (\`<mechanisms>\`)
@@ -63,40 +64,126 @@ Once the stream is open and authenticated, all communication consists of three s
 - **\`<message>\`**: Asynchronous message payload (\`type='chat'\` or \`type='groupchat'\`) directed from one JID to another.
 
 ### 2. Why Erlang/OTP is the Undisputed King of XMPP
-In object-oriented or thread-per-request architectures, keeping millions of continuous XML streams open exhausts thread limits or requires complex async state machines. 
+In object-oriented or thread-per-request architectures, keeping millions of continuous XML streams open exhausts thread limits or requires complex async state machines.
 
 In Erlang:
-1. **One Process Per Connected Session**: Every connected client socket is owned by a single \`gen_statem\` Erlang process (e.g. \`mongoose_c2s.erl\`).
+1. **One Process Per Connected Session**: Every connected client socket is owned by a single \`gen_statem\` Erlang process (e.g., \`mongoose_c2s.erl\`).
 2. **Sub-Microsecond Stanza Routing**: Routing a message between Alice and Bob does not require an external database or message broker. The server queries an in-memory ETS table to find Bob's process ID (\`BobC2SPid\`) and executes an instantaneous BEAM message send:
    \`\`\`erlang
    BobC2SPid ! {route_stanza, StanzaXmlBin}
    \`\`\`
 3. **Hardware Backpressure**: By using \`inet:setopts(Socket, [{active, once}])\`, a slow client or flooded socket never causes memory leaks or process crashes.
 
-## Official Erlang Docs & Function Reference
+### 3. Opening Stream Envelope (RFC 6120 Section 4.2)
+Every XMPP session opens with an unclosed root \`stream\` element declaring both the \`jabber:client\` and \`http://etherx.jabber.org/streams\` namespaces:
 
-\`\`\`erlang
-%% IETF RFC 6120 - Section 4.2: Stream Initiation
-%% Opening XML stream header:
+\`\`\`xml
 <stream:stream from='client@domain' to='server.domain'
                version='1.0' xmlns='jabber:client'
                xmlns:stream='http://etherx.jabber.org/streams'>
 \`\`\`
 
-In this guided demonstration, we will boot an in-memory mock XMPP C2S acceptor and run our automated test harness \`bf_xmpp_c2s_harness\` against it. You will see the exact wire transcripts and microsecond latencies for each protocol phase.
+## Official Erlang Docs & Function Reference
+
+\`\`\`erlang
+%% BeamForge C2S Simulation & Harness Signatures (gen_statem / gen_tcp)
+sample_xmpp_c2s:start_link(Options) -> {ok, Pid} | {error, Reason}
+  Types:
+    Options = #{reg_name => atom(), active_mode => once | true}
+    Pid = pid()
+
+sample_xmpp_c2s:get_port(Pid) -> Port
+  Types:
+    Pid = pid()
+    Port = inet:port_number()
+
+sample_xmpp_c2s:stop(Pid) -> ok
+  Types:
+    Pid = pid()
+
+bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing(Port, ClientJid, AuthToken) ->
+    {ok, [TranscriptEntry]} | {error, Stage, Reason, [TranscriptEntry]}
+  Types:
+    Port = inet:port_number()
+    ClientJid = AuthToken = binary()
+    TranscriptEntry = #{direction := binary(), xml := binary(), stage := binary(), latency_us := non_neg_integer()}
+\`\`\`
+
+Consult the attached reference cards below for \`sample_xmpp_c2s:start_link/1\` and \`bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing/3\` lifecycle details.
+
+## Parallel Worked Example: Ephemeral Banner Protocol Transcript
+
+Consider a separate domain: a **Line-Oriented Service Banner Transcript** (\`banner_session_demo\`) that boots a transient passive TCP responder on ephemeral port \`0\`, runs a 2-step greeting and status exchange while timing microsecond deltas, logs each recorded frame with exact map matching (\`:=\`), and cleans up cleanly:
+
+\`\`\`erlang
+-module(banner_session_demo).
+-export([run_session/0, dump_events/2]).
+
+%% @doc Run a transient line-protocol banner exchange and print timestamped transcript events.
+run_session() ->
+    {ok, LSock} = gen_tcp:listen(0, [binary, {packet, line}, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(LSock),
+    spawn(fun() ->
+        case gen_tcp:accept(LSock, 2000) of
+            {ok, Peer} ->
+                ok = gen_tcp:send(Peer, <<"+READY v1\\n">>),
+                {ok, <<"STATUS\\n">>} = gen_tcp:recv(Peer, 0, 2000),
+                ok = gen_tcp:send(Peer, <<"UPTIME_OK\\n">>),
+                gen_tcp:close(Peer);
+            {error, _} ->
+                ok
+        end
+    end),
+    {ok, Sock} = gen_tcp:connect("127.0.0.1", Port, [binary, {packet, line}, {active, false}], 2000),
+    T0 = erlang:monotonic_time(microsecond),
+    {ok, Greeting} = gen_tcp:recv(Sock, 0, 2000),
+    T1 = erlang:monotonic_time(microsecond),
+    ok = gen_tcp:send(Sock, <<"STATUS\\n">>),
+    {ok, Reply} = gen_tcp:recv(Sock, 0, 2000),
+    T2 = erlang:monotonic_time(microsecond),
+    gen_tcp:close(Sock),
+    gen_tcp:close(LSock),
+    Events = [
+        #{dir => <<"rx">>, tag => <<"banner">>, frame => Greeting, lat_us => T1 - T0},
+        #{dir => <<"tx">>, tag => <<"cmd_status">>, frame => <<"STATUS\\n">>, lat_us => 0},
+        #{dir => <<"rx">>, tag => <<"status_ok">>, frame => Reply, lat_us => T2 - T1}
+    ],
+    ok = dump_events(Events, 1),
+    {ok, length(Events)}.
+
+%% @doc Recursively format recorded wire events by 1-based step index.
+dump_events([], _Step) ->
+    ok;
+dump_events([#{dir := Dir, tag := Tag, frame := Frame, lat_us := Us} | Tail], Step) ->
+    io:format("[~p | ~s | ~p us] ~s -> ~s", [Step, Dir, Us, Tag, Frame]),
+    dump_events(Tail, Step + 1).
+\`\`\`
+
+### What ERTS Does at Runtime
+- **Microsecond Monotonic Telemetry**: Calling \`erlang:monotonic_time(microsecond)\` before and after each blocking \`gen_tcp:recv/3\` measures real scheduler-accurate socket round-trip latency without wall-clock skew.
+- **Exact Map Extraction & Tail Recursion**: Matching \`#{dir := Dir, ...}\` in \`dump_events/2\` asserts every required telemetry key exists before printing and recurses in tail position.
 
 ## Assignment Specification
 
-This is a **guided terminal demo**—no code changes are required!
-1. Review the runnable Erlang module \`xmpp_wire_demo.erl\`.
-2. Click **\`Run\`** to boot the live mock C2S listener and execute the full 5-stage handshake.
-3. Observe the structured wire timeline in the console output.
-4. Click **\`Submit\`** to verify the socket and protocol execution stages.
+This is a **Guided Demonstration** implemented in \`src/xmpp_wire_demo.erl\` (\`-module(xmpp_wire_demo).\`). Inspect the pre-wired demo in the editor and run it to observe an end-to-end XMPP C2S session transcript:
+
+### \`run_demo/0\`
+- **Input**: Zero arguments.
+- **Behavior**: Constructs a unique registered server atom, boots an ephemeral \`sample_xmpp_c2s\` listener configured for single-packet active flow control, queries the assigned port, runs \`bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing/3\` for Alice's JID and credential token, formats each returned transcript entry via \`print_transcript/2\`, stops the C2S process cleanly, and returns the step count tuple (or formats any partial transcript and returns a tagged stage failure on error).
+- **Examples**:
+  - \`xmpp_wire_demo:run_demo()\` returns \`{ok, 8}\`.
+
+### \`print_transcript/2\`
+- **Input**: List of transcript entry maps (\`direction\`, \`xml\`, \`stage\`, \`latency_us\`) and integer step counter \`Idx\`.
+- **Behavior**: Pattern-matches required transcript map keys using exact map matching, maps client-to-server vs server-to-client directions into readable directional banners, logs each step's latency and XML frame via \`io:format/2\`, and tail-recurses until the list is exhausted, returning \`ok\`.
+- **Examples**:
+  - \`xmpp_wire_demo:print_transcript([], 1)\` returns \`ok\`.
+
+Click **\`▷ Run\`** to stream the live transcript or **\`▶ Submit\`** to verify AST, bytecode TCO, and full protocol execution.
 
 ## Rules & Verification Constraints
-
-- The module must export \`run_demo/0\` returning \`{ok, TranscriptCount}\`.
-- Must execute all 5 protocol stages: Stream Open, Stream Features, SASL Auth, Resource Binding, and Message Routing.`,
+- **Exported Contract**: \`src/xmpp_wire_demo.erl\` must export \`run_demo/0\` (returning \`{ok, 8}\` covering all 5 C2S handshake/routing phases) and \`print_transcript/2\`.
+- **AST & Bytecode Enforcements**: \`bf_ast_verifier\` verifies remote calls \`sample_xmpp_c2s:start_link/1\` and \`bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing/3\`, exact map matching (\`map_exact_match\`), and tail recursion on \`print_transcript/2\`.`,
     otpDocCards: [
       {
         functionName: 'start_link',
@@ -126,16 +213,15 @@ This is a **guided terminal demo**—no code changes are required!
         githubSourceUrl: 'https://github.com/processone/ejabberd',
       },
     ],
-        files: [
+    files: [
       {
         path: 'src/xmpp_wire_demo.erl',
         name: 'xmpp_wire_demo.erl',
         content: `-module(xmpp_wire_demo).
 -export([run_demo/0, print_transcript/2]).
 
-%% @doc Boots an ephemeral mock XMPP C2S server, runs the live protocol harness,
-%% formats each transcript step with latencies, and returns {ok, EntryCount}.
--spec run_demo() -> {ok, pos_integer()}.
+%% @doc Boot an ephemeral mock XMPP C2S server, execute the live C2S protocol harness, print each wire step, and return {ok, EntryCount} or {error, Stage}.
+-spec run_demo() -> {ok, pos_integer()} | {error, atom()}.
 run_demo() ->
     RegName = list_to_atom("sample_xmpp_c2s_" ++ integer_to_list(erlang:unique_integer([positive]))),
     {ok, ServerPid} = sample_xmpp_c2s:start_link(#{reg_name => RegName, active_mode => once}),
@@ -143,7 +229,6 @@ run_demo() ->
     io:format("~n================================================================~n"),
     io:format(">>> BEAMFORGE XMPP WIRE PROTOCOL DEMO (PORT: ~p) <<<~n", [Port]),
     io:format("================================================================~n~n"),
-    
     ClientJid = <<"alice@localhost">>,
     AuthToken = <<"password">>,
     case bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing(Port, ClientJid, AuthToken) of
@@ -161,14 +246,16 @@ run_demo() ->
             {error, Stage}
     end.
 
-%% @private Pretty-print transcript entries with direction indicators
-print_transcript([], _Idx) -> ok;
+%% @doc Tail-recursively print ordered XMPP transcript entry maps with direction indicators and microsecond latencies.
+-spec print_transcript([map()], pos_integer()) -> ok.
+print_transcript([], _Idx) ->
+    ok;
 print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := Lat} | Rest], Idx) ->
     Arrow = case Dir of
         <<"c2s">> -> "C ===> S (Client to Server)";
         <<"s2c">> -> "S ===> C (Server to Client)"
     end,
-    io:format("[Step ~p | ~s | Latency: ~p µs]~n  Stage: ~s~n  XML:   ~s~n~n",
+    io:format("[Step ~p | ~s | Latency: ~p us]~n  Stage: ~s~n  XML:   ~s~n~n",
               [Idx, Arrow, Lat, Stage, Xml]),
     print_transcript(Rest, Idx + 1).
 `,
@@ -178,7 +265,8 @@ print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := 
       'src/xmpp_wire_demo.erl': `-module(xmpp_wire_demo).
 -export([run_demo/0, print_transcript/2]).
 
--spec run_demo() -> {ok, pos_integer()}.
+%% @doc Boot an ephemeral mock XMPP C2S server, execute the live C2S protocol harness, print each wire step, and return {ok, EntryCount} or {error, Stage}.
+-spec run_demo() -> {ok, pos_integer()} | {error, atom()}.
 run_demo() ->
     RegName = list_to_atom("sample_xmpp_c2s_" ++ integer_to_list(erlang:unique_integer([positive]))),
     {ok, ServerPid} = sample_xmpp_c2s:start_link(#{reg_name => RegName, active_mode => once}),
@@ -186,7 +274,6 @@ run_demo() ->
     io:format("~n================================================================~n"),
     io:format(">>> BEAMFORGE XMPP WIRE PROTOCOL DEMO (PORT: ~p) <<<~n", [Port]),
     io:format("================================================================~n~n"),
-    
     ClientJid = <<"alice@localhost">>,
     AuthToken = <<"password">>,
     case bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing(Port, ClientJid, AuthToken) of
@@ -204,13 +291,16 @@ run_demo() ->
             {error, Stage}
     end.
 
-print_transcript([], _Idx) -> ok;
+%% @doc Tail-recursively print ordered XMPP transcript entry maps with direction indicators and microsecond latencies.
+-spec print_transcript([map()], pos_integer()) -> ok.
+print_transcript([], _Idx) ->
+    ok;
 print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := Lat} | Rest], Idx) ->
     Arrow = case Dir of
         <<"c2s">> -> "C ===> S (Client to Server)";
         <<"s2c">> -> "S ===> C (Server to Client)"
     end,
-    io:format("[Step ~p | ~s | Latency: ~p µs]~n  Stage: ~s~n  XML:   ~s~n~n",
+    io:format("[Step ~p | ~s | Latency: ~p us]~n  Stage: ~s~n  XML:   ~s~n~n",
               [Idx, Arrow, Lat, Stage, Xml]),
     print_transcript(Rest, Idx + 1).
 `,
@@ -218,9 +308,8 @@ print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := 
     starterCode: `-module(xmpp_wire_demo).
 -export([run_demo/0, print_transcript/2]).
 
-%% @doc Boots an ephemeral mock XMPP C2S server, runs the live protocol harness,
-%% formats each transcript step with latencies, and returns {ok, EntryCount}.
--spec run_demo() -> {ok, pos_integer()}.
+%% @doc Boot an ephemeral mock XMPP C2S server, execute the live C2S protocol harness, print each wire step, and return {ok, EntryCount} or {error, Stage}.
+-spec run_demo() -> {ok, pos_integer()} | {error, atom()}.
 run_demo() ->
     RegName = list_to_atom("sample_xmpp_c2s_" ++ integer_to_list(erlang:unique_integer([positive]))),
     {ok, ServerPid} = sample_xmpp_c2s:start_link(#{reg_name => RegName, active_mode => once}),
@@ -228,7 +317,6 @@ run_demo() ->
     io:format("~n================================================================~n"),
     io:format(">>> BEAMFORGE XMPP WIRE PROTOCOL DEMO (PORT: ~p) <<<~n", [Port]),
     io:format("================================================================~n~n"),
-    
     ClientJid = <<"alice@localhost">>,
     AuthToken = <<"password">>,
     case bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing(Port, ClientJid, AuthToken) of
@@ -246,14 +334,16 @@ run_demo() ->
             {error, Stage}
     end.
 
-%% @private Pretty-print transcript entries with direction indicators
-print_transcript([], _Idx) -> ok;
+%% @doc Tail-recursively print ordered XMPP transcript entry maps with direction indicators and microsecond latencies.
+-spec print_transcript([map()], pos_integer()) -> ok.
+print_transcript([], _Idx) ->
+    ok;
 print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := Lat} | Rest], Idx) ->
     Arrow = case Dir of
         <<"c2s">> -> "C ===> S (Client to Server)";
         <<"s2c">> -> "S ===> C (Server to Client)"
     end,
-    io:format("[Step ~p | ~s | Latency: ~p µs]~n  Stage: ~s~n  XML:   ~s~n~n",
+    io:format("[Step ~p | ~s | Latency: ~p us]~n  Stage: ~s~n  XML:   ~s~n~n",
               [Idx, Arrow, Lat, Stage, Xml]),
     print_transcript(Rest, Idx + 1).
 `,
@@ -267,15 +357,16 @@ print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := 
       },
     ],
     astRules: {
-      requireTailRecursion: [],
+      requireTailRecursion: ['print_transcript/2'],
       forbiddenCalls: [],
-      requiredCalls: ['sample_xmpp_c2s:start_link'],
-      requiredConstructs: ['case'],
+      requiredCalls: ['sample_xmpp_c2s:start_link/1', 'bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing/3'],
+      requiredConstructs: ['map_exact_match'],
     },
     solutionCode: `-module(xmpp_wire_demo).
 -export([run_demo/0, print_transcript/2]).
 
--spec run_demo() -> {ok, pos_integer()}.
+%% @doc Boot an ephemeral mock XMPP C2S server, execute the live C2S protocol harness, print each wire step, and return {ok, EntryCount} or {error, Stage}.
+-spec run_demo() -> {ok, pos_integer()} | {error, atom()}.
 run_demo() ->
     RegName = list_to_atom("sample_xmpp_c2s_" ++ integer_to_list(erlang:unique_integer([positive]))),
     {ok, ServerPid} = sample_xmpp_c2s:start_link(#{reg_name => RegName, active_mode => once}),
@@ -283,7 +374,6 @@ run_demo() ->
     io:format("~n================================================================~n"),
     io:format(">>> BEAMFORGE XMPP WIRE PROTOCOL DEMO (PORT: ~p) <<<~n", [Port]),
     io:format("================================================================~n~n"),
-    
     ClientJid = <<"alice@localhost">>,
     AuthToken = <<"password">>,
     case bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing(Port, ClientJid, AuthToken) of
@@ -301,13 +391,16 @@ run_demo() ->
             {error, Stage}
     end.
 
-print_transcript([], _Idx) -> ok;
+%% @doc Tail-recursively print ordered XMPP transcript entry maps with direction indicators and microsecond latencies.
+-spec print_transcript([map()], pos_integer()) -> ok.
+print_transcript([], _Idx) ->
+    ok;
 print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := Lat} | Rest], Idx) ->
     Arrow = case Dir of
         <<"c2s">> -> "C ===> S (Client to Server)";
         <<"s2c">> -> "S ===> C (Server to Client)"
     end,
-    io:format("[Step ~p | ~s | Latency: ~p µs]~n  Stage: ~s~n  XML:   ~s~n~n",
+    io:format("[Step ~p | ~s | Latency: ~p us]~n  Stage: ~s~n  XML:   ~s~n~n",
               [Idx, Arrow, Lat, Stage, Xml]),
     print_transcript(Rest, Idx + 1).
 `,

@@ -21,21 +21,44 @@ func TestChapter11Verification(t *testing.T) {
 				"src/xmpp_wire_demo.erl": `-module(xmpp_wire_demo).
 -export([run_demo/0, print_transcript/2]).
 
--spec run_demo() -> {ok, pos_integer()}.
+%% @doc Boot an ephemeral mock XMPP C2S server, execute the live C2S protocol harness, print each wire step, and return {ok, EntryCount} or {error, Stage}.
+-spec run_demo() -> {ok, pos_integer()} | {error, atom()}.
 run_demo() ->
-    print_transcript(1, <<"C -> S: <stream:stream to='localhost' xmlns='jabber:client' ...>">>),
-    print_transcript(2, <<"S -> C: <stream:stream from='localhost' ...><stream:features><mechanisms><mechanism>PLAIN</mechanism></mechanisms></stream:features>">>),
-    print_transcript(3, <<"C -> S: <auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>alice</auth>">>),
-    print_transcript(4, <<"S -> C: <success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>">>),
-    print_transcript(5, <<"C -> S: <iq type='set' id='bind_1'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><resource>obsidian</resource></bind></iq>">>),
-    print_transcript(6, <<"S -> C: <iq type='result' id='bind_1'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>alice@localhost/obsidian</jid></bind></iq>">>),
-    print_transcript(7, <<"C -> S: <message to='bob@localhost' type='chat'><body>Hello XMPP</body></message>">>),
-    try sample_xmpp_c2s:start_link(#{}) catch _:_ -> ok end,
-    try bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing(5222, <<"alice@localhost">>, <<"secret">>) catch _:_ -> ok end,
-    {ok, 7}.
+    RegName = list_to_atom("sample_xmpp_c2s_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    {ok, ServerPid} = sample_xmpp_c2s:start_link(#{reg_name => RegName, active_mode => once}),
+    Port = sample_xmpp_c2s:get_port(ServerPid),
+    io:format("~n================================================================~n"),
+    io:format(">>> BEAMFORGE XMPP WIRE PROTOCOL DEMO (PORT: ~p) <<<~n", [Port]),
+    io:format("================================================================~n~n"),
+    ClientJid = <<"alice@localhost">>,
+    AuthToken = <<"password">>,
+    case bf_xmpp_c2s_harness:verify_c2s_handshake_and_routing(Port, ClientJid, AuthToken) of
+        {ok, Transcript} ->
+            print_transcript(Transcript, 1),
+            sample_xmpp_c2s:stop(ServerPid),
+            io:format("~n================================================================~n"),
+            io:format(">>> ALL 5 XMPP PHASES COMPLETED WITH ZERO WIRE VIOLATIONS <<<~n"),
+            io:format("================================================================~n"),
+            {ok, length(Transcript)};
+        {error, Stage, Reason, PartialTranscript} ->
+            io:format("[ERROR] Failed at stage: ~p (~p)~n", [Stage, Reason]),
+            print_transcript(PartialTranscript, 1),
+            sample_xmpp_c2s:stop(ServerPid),
+            {error, Stage}
+    end.
 
-print_transcript(Step, Line) ->
-    io:format("[Step ~p] ~s~n", [Step, Line]).
+%% @doc Tail-recursively print ordered XMPP transcript entry maps with direction indicators and microsecond latencies.
+-spec print_transcript([map()], pos_integer()) -> ok.
+print_transcript([], _Idx) ->
+    ok;
+print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := Lat} | Rest], Idx) ->
+    Arrow = case Dir of
+        <<"c2s">> -> "C ===> S (Client to Server)";
+        <<"s2c">> -> "S ===> C (Server to Client)"
+    end,
+    io:format("[Step ~p | ~s | Latency: ~p us]~n  Stage: ~s~n  XML:   ~s~n~n",
+              [Idx, Arrow, Lat, Stage, Xml]),
+    print_transcript(Rest, Idx + 1).
 `,
 			},
 		},
