@@ -3395,6 +3395,10 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Starter & Solution Pack (`packet_parser.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/packet_parser.erl'] === solutionCode`), compiled starter with `-Wall -Werror` (0 warnings) and safe stub return (`STARTER_OK`), compiled solution with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `.beam` TCO verification, and passed 100% of visible and hidden edge tests (`SOLUTION_OK`).
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter4Verification` passed all 24 subtests (`ch04-l01`–`ch04-l08` positive + negative suites) in `38.28s` (`38.360s` total); `TEST_CHAPTER=4 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH04 lessons (`ch04-l08 | 4/4 tests passed`) in `9.53s` (`9.550s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+- [x] **216.3: Batched Chapter 4 Production Vercel Deployment**:
+  - Verified linked project `jaefer-kemals-projects/beamforge` (`prj_O6n3qdyBs2yiAOgkZ07TOqssidO7`, `Root Directory: apps/web-ide`, team `team_No3zUm08VFU0t2ycglbWltXK`) via `npx vercel project inspect --non-interactive` and `npx vercel whoami --format json`.
+  - Deployed Chapter 4 production release (`dpl_FX5ycrDvDQ3ahaxqjR2J8Aok6Hrm`, `readyState: READY`) via `npx vercel --prod --yes` to `https://beamforge-p5l8zykqc-jaefer-kemals-projects.vercel.app` aliased to `https://beamforge-eight.vercel.app`.
+  - Verified live `HTTP 200` responses via `npx vercel curl` across `/`, `/syllabus`, `/learn/ch04-l01`, `/learn/ch04-l02`, `/learn/ch04-l03`, `/learn/ch04-l04`, `/learn/ch04-l05`, `/learn/ch04-l06`, `/learn/ch04-l07`, and `/learn/ch04-l08`.
 
 
 
