@@ -180,18 +180,29 @@ init:stop().
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
     AuditRes = incident_tcp_active_true:audit_socket_opts(),
-    FramingRes = incident_tcp_active_true:test_framing(),
-    Passed = (AuditRes =:= {ok, active_once_enforced}) andalso (FramingRes =:= {ok, [<<"PING">>, <<"PONG">>], <<"PARTIAL">>}),
-    #{call_str => <<"incident_tcp_active_true:test_framing()">>,
-      expected => <<"{ok, [<<\"PING\">>, <<\"PONG\">>], <<\"PARTIAL\">>}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("Opts: ~p, Framing: ~p", [AuditRes, FramingRes]))),
-      passed => Passed,
+    #{call_str => <<"incident_tcp_active_true:audit_socket_opts()">>,
+      expected => <<"{ok, active_once_enforced}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [AuditRes]))),
+      passed => (AuditRes =:= {ok, active_once_enforced}),
       time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"incident_tcp_active_true test">>, expected => <<"{ok, ...}">>,
+    #{call_str => <<"incident_tcp_active_true:audit_socket_opts()">>, expected => <<"{ok, active_once_enforced}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    FramingRes = incident_tcp_active_true:test_framing(),
+    ExpFraming = {ok, [<<"PING">>, <<"PONG">>], <<"PARTIAL">>},
+    #{call_str => <<"incident_tcp_active_true:test_framing()">>,
+      expected => <<"{ok, [<<\"PING\">>, <<\"PONG\">>], <<\"PARTIAL\">>}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [FramingRes]))),
+      passed => (FramingRes =:= ExpFraming),
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"incident_tcp_active_true:test_framing()">>, expected => <<"{ok, [<<\"PING\">>, <<\"PONG\">>], <<\"PARTIAL\">>}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -474,7 +485,24 @@ CompileStage = case code:ensure_loaded(incident_tcp_active_true) of
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_SocketOpts = try
+S1_Ast = try
+    BeamPath = code:which(incident_tcp_active_true),
+    WsRoot = filename:dirname(filename:dirname(BeamPath)),
+    SrcPath = filename:join([WsRoot, "src", "incident_tcp_active_true.erl"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    Rules = #{
+        require_tail_recursion => [{extract_lines, 2}],
+        required_remote_calls => [{binary, split, 2}, {binary, copy, 1}],
+        required_constructs => [bit_syntax]
+    },
+    case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
+        {ok, _} -> #{id => <<"ast_unpinning_tco">>, title => <<"AST & TCO Audit: binary:split/2, binary:copy/1 & extract_lines/2">>, status => <<"passed">>, time_ms => 10, details => <<"Verified binary:split/2, binary:copy/1, bit_syntax, and tail-recursive extract_lines/2.">>};
+        {error, AstViol} -> #{id => <<"ast_unpinning_tco">>, title => <<"AST & TCO Audit: binary:split/2, binary:copy/1 & extract_lines/2">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Violations: ~p", [AstViol]))}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_unpinning_tco">>, title => <<"AST & TCO Audit: binary:split/2, binary:copy/1 & extract_lines/2">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_SocketOpts = try
     Opts = incident_tcp_active_true:recommended_socket_opts(),
     case lists:member({active, once}, Opts) andalso not lists:member({active, true}, Opts) of
         true -> #{id => <<"socket_backpressure_audit">>, title => <<"Socket Option Backpressure Audit ({active, once})">>, status => <<"passed">>, time_ms => 6, details => <<"Enforces {active, once} backpressure; rejected hazardous {active, true}.">>};
@@ -483,7 +511,7 @@ S1_SocketOpts = try
 catch C_Opt:Err_Opt ->
     #{id => <<"socket_backpressure_audit">>, title => <<"Socket Option Backpressure Audit ({active, once})">>, status => <<"failed">>, time_ms => 6, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C_Opt, Err_Opt]))}
 end,
-S2_FramingAndUnpinning = try
+S3_FramingAndUnpinning = try
     {ok, L1, Rem1} = incident_tcp_active_true:buffer_and_extract_lines(<<>>, <<"SET foo ">>),
     {ok, L2, Rem2} = incident_tcp_active_true:buffer_and_extract_lines(Rem1, <<"bar\r\nGET foo\r\nDE">>),
     {ok, L3, Rem3} = incident_tcp_active_true:buffer_and_extract_lines(Rem2, <<"L foo\r\n">>),
@@ -496,7 +524,7 @@ S2_FramingAndUnpinning = try
 catch C_Frame:Err_Frame ->
     #{id => <<"tcp_stream_framing_and_unpinning">>, title => <<"Fragmented TCP Stream Framing & Memory Unpinning">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C_Frame, Err_Frame]))}
 end,
-Stages = [CompileStage, S1_SocketOpts, S2_FramingAndUnpinning]
+Stages = [CompileStage, S1_Ast, S2_SocketOpts, S3_FramingAndUnpinning]
 `, true
 
 	// ── Incident #107 (Ch. 11): XMPP Pre-Auth Injection & XML Escape ─────────

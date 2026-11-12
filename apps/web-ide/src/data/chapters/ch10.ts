@@ -2529,8 +2529,8 @@ solutionExplanation: `### Solution Breakdown: High-Concurrency Socket Handoff
       severity: 'CRITICAL',
       serviceName: 'edge-tcp-ingestion-gateway',
       symptom: 'Under a 5,000 packet/sec client burst, connection worker mailboxes spike to 80,000 queued messages, memory balloons to 8 GB, and partial commands split across two TCP packets are silently corrupted!',
-      rootCauseHint: 'recommended_socket_opts/0 configures {active, true} (disabling TCP backpressure), and buffer_and_extract_lines(OldBuffer, Chunk) ignores OldBuffer when splitting on \r\n and omits binary:copy/1!',
-      fixObjective: 'Change {active, true} to {active, once} in recommended_socket_opts/0, and fix buffer_and_extract_lines/2 to concatenate <<OldBuffer/binary, Chunk/binary>>, extract complete \r\n lines, and unpin both lines and the trailing remainder with binary:copy/1.',
+      rootCauseHint: 'src/incident_tcp_active_true.erl configures unbounded active socket delivery (bypassing TCP backpressure), while its line framer drops prior partial chunks and retains pinned sub-binary slices.',
+      fixObjective: 'Enforce single-packet active backpressure in recommended_socket_opts/0, and repair buffer_and_extract_lines/2 + extract_lines/2 to preserve prior buffer prefixes, slice complete CRLF frames, and unpin both lines and remainders.',
     },
     mentalModelCheck: {
       question: 'What is the immediate consequence at the OS TCP stack when an Erlang process receives a packet on an {active, once} socket and takes 50ms to call inet:setopts(Socket, [{active, once}])?',
@@ -2560,7 +2560,7 @@ handle_info({tcp, Socket, Data}, State) ->
         },
       ],
     },
-    conceptMarkdown: `## Production Incident Post-Mortem: Incident #106
+    conceptMarkdown: `## Why This Matters in Production
 
 At 14:22 UTC, our primary edge TCP ingestion cluster began crashing across multiple availability zones. Within 12 minutes, the Linux kernel OOM (Out-Of-Memory) killer terminated 14 BEAM nodes, abruptly severing over 120,000 active device sessions.
 
@@ -2568,12 +2568,9 @@ Telemetry inspection revealed two catastrophic defects:
 1. **Unbounded Mailbox Growth**: Connection worker processes had average mailbox queue lengths exceeding **80,000 unhandled messages**, consuming over 600 MB of heap memory per connection process!
 2. **Corrupted Stream State & Buffer Dropping**: Incoming commands split across MTU packet boundaries (for example, \`<<"SET session_token ">>\` arriving in Packet 1, followed 15ms later by \`<<"secret123\\r\\n">>\` in Packet 2) suffered silent data corruption because the buffer dropped the prefix!
 
-> [!warning] Production Networking Trap: The Silent Poison of \`{active, true}\`
-> In small local tests or during interactive development, \`{active, true}\` feels effortless: you never have to call \`inet:setopts(Socket, [{active, once}])\` or remember to re-arm socket reception. Every packet lands in your mailbox instantly.
-> 
-> But in production under adversarial conditions (Slowloris attacks, network bursts, or slow downstream databases), \`{active, true}\` completely disables the operating system's TCP receive window. Even if your worker process is stuck doing an expensive database insert or garbage-collecting its heap, the Linux kernel blindly pumps thousands of incoming TCP segments into the BEAM mailbox. 
-> 
-> Because Erlang mailboxes are unbounded FIFO queues residing on the process heap, the mailbox balloons exponentially until the operating system invokes the OOM killer!
+> [!WARNING]
+> **Production Networking Trap: The Silent Poison of Unbounded \`{active, true}\`:**
+> Under Slowloris attacks, network bursts, or slow downstream databases, \`{active, true}\` completely disables OS TCP receive-window backpressure. Even if a worker is paused in a database write or garbage collection, the Linux kernel pumps every incoming TCP segment straight into the unbounded BEAM mailbox until OOM kills the node.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -2583,61 +2580,81 @@ When you configure a socket with \`{active, once}\`:
 2. The driver **immediately flips the socket to passive mode** (\`{active, false}\`).
 3. While your process executes \`handle_info\` and formats a reply, subsequent packets from the client remain queued inside the OS kernel's TCP receive buffer (\`SO_RCVBUF\`).
 4. Once the kernel's receive buffer fills up, the OS TCP stack advertises a **Window Size of 0** (\`TCP Zero Window\`) back across the wire.
-5. The client's operating system halts packet transmission at the network card layer! This is true, zero-CPU backpressure.
-6. When your Erlang worker finishes processing and calls \`inet:setopts(Socket, [{active, once}])\`, the BEAM drains the next chunk and the OS opens its TCP window again.
+5. The client's operating system halts packet transmission at the network card layer with zero CPU polling.
+6. When your Erlang worker calls \`inet:setopts(Socket, [{active, once}])\`, the BEAM drains the next chunk and re-opens the window.
 
-### 2. The Custom Stream Framing & Memory Pinning Defect
-In addition to the mailbox flood, the incident post-mortem uncovered a memory leak in the framing parser:
+### 2. Custom Stream Stitching & Sub-Binary Unpinning
+When a TCP stream fragments across packets, discarding prior leftover bytes destroys split tokens across chunk boundaries. Furthermore, slices returned by \`binary:split/2\` are 24-byte sub-binaries referencing the original 64 KB off-heap \`ProcBin\` socket read buffer—retaining even a tiny uncopied remainder pins all 64 KB in RAM indefinitely until copied into an independent binary via \`binary:copy/1\`.
+
+## Official Erlang Docs & Function Reference
+
 \`\`\`erlang
-%% Defective implementation:
-buffer_and_extract_lines(_OldBuffer, Chunk) ->
-    Combined = Chunk, %% BUG: Discarded OldBuffer! Incomplete prefixes are lost!
-    extract_lines(Combined, []).
+%% Official OTP Signatures (kernel / inet & stdlib / binary)
+inet:setopts(Socket, Options) -> ok | {error, posix()}
+  Types:
+    Socket = gen_tcp:socket()
+    Options = [{active, once | true | false}]
+
+binary:split(Subject, Pattern) -> [binary()]
+binary:copy(Subject) -> binary()
+  Types:
+    Subject = Pattern = binary()
 \`\`\`
-When a TCP stream fragments across packets, discarding \`OldBuffer\` destroys any partial command tokens that arrived in previous chunks.
 
-Furthermore, failing to call \`binary:copy/1\` on the extracted line tokens and trailing partial remainder leaves them pointing into temporary 64 KB off-heap socket buffers (\`ProcBin\` reference-counted binaries). A 10-byte slice can keep a 64 KB buffer pinned indefinitely in memory!
+Consult the attached OTP documentation cards below for \`inet:setopts/2\` flow-control semantics and \`binary:copy/1\` off-heap memory reclamation.
 
-## Parallel Worked Example: The Correct Triage Pattern
+## Parallel Worked Example: Bounded Heartbeat Beacon Ingestor
+
+Consider a separate domain: a telemetry gateway framing null-byte (\`<<0>>\`) delimited device heartbeat beacons using bounded packet options and unpinned binary copies (\`heartbeat_lease_guard\`):
 
 \`\`\`erlang
--module(safe_ingestion_worker).
--export([recommended_opts/0, feed_stream/2]).
+-module(heartbeat_lease_guard).
+-export([bounded_pipe_opts/0, ingest_beacons/2]).
 
-%% Enforce backpressure: {active, once} guarantees one packet per cycle
-recommended_opts() ->
-    [binary, {packet, raw}, {active, once}, {reuseaddr, true}].
+%% @doc Return bounded socket options for line-delimited device beacons.
+bounded_pipe_opts() ->
+    [binary, {packet, line}, {active, once}, {nodelay, true}].
 
-%% Stitches prior leftover with newly received chunk, splits on CRLF,
-%% and unpins all extracted binaries
-feed_stream(PriorBuffer, IncomingChunk) ->
-    Combined = <<PriorBuffer/binary, IncomingChunk/binary>>,
-    slice_lines(Combined, []).
+%% @doc Prepend PriorTail to ChunkBin, slice null-delimited beacons,
+%% and return {ExtractedBeacons, RemainingTail} using unpinned binary copies.
+ingest_beacons(PriorTail, ChunkBin) ->
+    Stream = <<PriorTail/binary, ChunkBin/binary>>,
+    split_beacons(Stream, []).
 
-slice_lines(Buffer, Acc) ->
-    case binary:split(Buffer, <<"\\r\\n">>) of
-        [Line, Rest] ->
-            %% Unpin each complete line from socket ProcBin
-            slice_lines(Rest, [binary:copy(Line) | Acc]);
+split_beacons(<<>>, Acc) ->
+    {lists:reverse(Acc), <<>>};
+split_beacons(Stream, Acc) ->
+    case binary:split(Stream, <<0>>) of
+        [Beacon, Rest] ->
+            split_beacons(Rest, [binary:copy(Beacon) | Acc]);
         [Incomplete] ->
-            %% Unpin trailing partial remainder for next cycle
-            {ok, lists:reverse(Acc), binary:copy(Incomplete)}
+            {lists:reverse(Acc), binary:copy(Incomplete)}
     end.
 \`\`\`
 
+### What ERTS Does During Remediation
+- **Single-Packet Admission**: Switching to \`{active, once}\` lets ERTS push one chunk per re-arm cycle, bounding mailbox memory to $O(1)$ items while the kernel throttles burst senders.
+- **Unpinned Accumulation**: Copying each extracted slice and the trailing incomplete remainder drops every reference to the 64 KB socket \`ProcBin\`.
+
 ## Assignment Specification
 
-Fix module \`src/incident_tcp_active_true.erl\`:
-1. **\`recommended_socket_opts/0\`**: Change \`{active, true}\` to \`{active, once}\` to restore kernel backpressure.
-2. **\`buffer_and_extract_lines(OldBuffer, Chunk)\`**:
-   - Concatenate \`OldBuffer\` and \`Chunk\`: \`Combined = <<OldBuffer/binary, Chunk/binary>>\`.
-   - Recursively split on \`<<"\\r\\n">>\`.
-   - Call \`binary:copy/1\` on each complete line and on the trailing incomplete remainder.
-   - Return \`{ok, ExtractedLinesList, UnpinnedRemainderBin}\`.
+Repair both defects inside \`src/incident_tcp_active_true.erl\` (\`-module(incident_tcp_active_true).\`), leaving \`audit_socket_opts/0\` and \`test_framing/0\` intact:
+
+### \`recommended_socket_opts/0\`
+- **Input**: Zero arguments.
+- **Behavior**: Returns the ingestion socket option list configured for binary chunks, raw packet framing, single-packet active backpressure, and address reuse—eliminating unbounded active mailbox floods.
+- **Examples**:
+  - \`incident_tcp_active_true:audit_socket_opts()\` validates that bounded single-packet active mode is enforced without unbounded active flooding and returns \`{ok, active_once_enforced}\`.
+
+### \`buffer_and_extract_lines/2\`
+- **Input**: Accumulated remainder binary \`OldBuffer\`, newly arrived socket chunk \`Chunk\`.
+- **Behavior**: Prepends \`OldBuffer\` ahead of \`Chunk\` so partial commands spanning packet boundaries are preserved, extracts every complete CRLF-terminated line cleanly, copies both extracted line binaries and any trailing incomplete remainder into unpinned independent binaries, and returns a 3-tuple \`{ok, ExtractedLinesList, UnpinnedRemainderBin}\`.
+- **Examples**:
+  - \`incident_tcp_active_true:test_framing()\` splits fragments \`<<"PIN">>\`, \`<<"G", 13, 10, "PONG", 13, 10, "PAR">>\`, and \`<<"TIAL">>\` and returns \`{ok, [<<"PING">>, <<"PONG">>], <<"PARTIAL">>}\`.
 
 ## Rules & Verification Constraints
-- Verified by the Go Orchestrator against simulated high-rate packet floods and fragmented chunk pipelines.
-- AST verifier mandates \`binary:split/2\` and \`binary:copy/1\`.
+- **Backpressure & Stream Survival**: Verified against burst-safe socket option audits and multi-chunk split-frame tests.
+- **AST & TCO Checks**: \`bf_ast_verifier\` enforces tail recursion on \`extract_lines/2\`, required calls \`binary:split/2\` and \`binary:copy/1\`, and \`bit_syntax\` concatenation.
     `,
     otpDocCards: [
       {
@@ -2663,21 +2680,12 @@ Fix module \`src/incident_tcp_active_true.erl\`:
 -export([recommended_socket_opts/0, buffer_and_extract_lines/2]).
 -export([audit_socket_opts/0, test_framing/0]).
 
-%% Returns socket options for high-throughput TCP ingestion
+%% @doc Return the ingestion TCP socket option list enforcing bounded single-packet active delivery.
 recommended_socket_opts() ->
-    %% % TODO [INC-106 Triage]:
-    %% % Sockets configured with unbounded active mode flood worker mailboxes under burst traffic.
-    %% % Switch to bounded active mode so the OS kernel regulates incoming packet flow.
     [binary, {packet, raw}, {active, true}, {reuseaddr, true}].
 
-%% Buffers incoming chunks, extracts complete CRLF-delimited lines,
-%% and returns {ok, [Lines], UnpinnedRemainder}.
+%% @doc Stitch OldBuffer ahead of Chunk, extract complete CRLF lines, and return {ok, Lines, UnpinnedRemainder}.
 buffer_and_extract_lines(OldBuffer, Chunk) ->
-    %% % TODO [INC-106 Triage]:
-    %% % Defect 1: Incoming fragments lose their prefix because OldBuffer is ignored!
-    %% % Stitch the previous accumulator with the new chunk before extracting lines.
-    %% % Defect 2: Sub-binary slices pin 64 KB socket buffers in memory.
-    %% % Ensure every extracted line and trailing remainder is unpinned via binary:copy/1.
     Combined = Chunk,
     _ = OldBuffer,
     extract_lines(Combined, []).
@@ -2685,15 +2693,14 @@ buffer_and_extract_lines(OldBuffer, Chunk) ->
 extract_lines(<<>>, Acc) ->
     {ok, lists:reverse(Acc), <<>>};
 extract_lines(Bin, Acc) ->
-    case binary:split(Bin, <<"\\r\\n">>) of
+    case binary:split(Bin, <<13, 10>>) of
         [Line, Rest] ->
             extract_lines(Rest, [Line | Acc]);
         [Incomplete] ->
-            %% % TODO: Call binary:copy/1 on Incomplete!
             {ok, lists:reverse(Acc), Incomplete}
     end.
 
-%% Diagnostic helpers
+%% @doc Audit recommended_socket_opts/0 to verify single-packet active mode is enabled without active flooding.
 audit_socket_opts() ->
     Opts = recommended_socket_opts(),
     case lists:member({active, once}, Opts) andalso not lists:member({active, true}, Opts) of
@@ -2701,23 +2708,26 @@ audit_socket_opts() ->
         false -> {error, {bad_options, Opts}}
     end.
 
+%% @doc Verify multi-chunk fragmented CRLF stream framing across three sequential chunks.
 test_framing() ->
     Chunk1 = <<"PIN">>,
     {ok, Lines1, Rem1} = buffer_and_extract_lines(<<>>, Chunk1),
-    Chunk2 = <<"G\\r\\nPONG\\r\\nPAR">>,
+    Chunk2 = <<"G", 13, 10, "PONG", 13, 10, "PAR">>,
     {ok, Lines2, Rem2} = buffer_and_extract_lines(Rem1, Chunk2),
     Chunk3 = <<"TIAL">>,
     {ok, Lines3, Rem3} = buffer_and_extract_lines(Rem2, Chunk3),
     AllLines = Lines1 ++ Lines2 ++ Lines3,
     {ok, AllLines, Rem3}.
-    `,
+`,
     solutionCode: `-module(incident_tcp_active_true).
 -export([recommended_socket_opts/0, buffer_and_extract_lines/2]).
 -export([audit_socket_opts/0, test_framing/0]).
 
+%% @doc Return the ingestion TCP socket option list enforcing bounded single-packet active delivery.
 recommended_socket_opts() ->
     [binary, {packet, raw}, {active, once}, {reuseaddr, true}].
 
+%% @doc Stitch OldBuffer ahead of Chunk, extract complete CRLF lines, and return {ok, Lines, UnpinnedRemainder}.
 buffer_and_extract_lines(OldBuffer, Chunk) ->
     Combined = <<OldBuffer/binary, Chunk/binary>>,
     extract_lines(Combined, []).
@@ -2725,13 +2735,14 @@ buffer_and_extract_lines(OldBuffer, Chunk) ->
 extract_lines(<<>>, Acc) ->
     {ok, lists:reverse(Acc), <<>>};
 extract_lines(Bin, Acc) ->
-    case binary:split(Bin, <<"\\r\\n">>) of
+    case binary:split(Bin, <<13, 10>>) of
         [Line, Rest] ->
             extract_lines(Rest, [binary:copy(Line) | Acc]);
         [Incomplete] ->
             {ok, lists:reverse(Acc), binary:copy(Incomplete)}
     end.
 
+%% @doc Audit recommended_socket_opts/0 to verify single-packet active mode is enabled without active flooding.
 audit_socket_opts() ->
     Opts = recommended_socket_opts(),
     case lists:member({active, once}, Opts) andalso not lists:member({active, true}, Opts) of
@@ -2739,16 +2750,17 @@ audit_socket_opts() ->
         false -> {error, {bad_options, Opts}}
     end.
 
+%% @doc Verify multi-chunk fragmented CRLF stream framing across three sequential chunks.
 test_framing() ->
     Chunk1 = <<"PIN">>,
     {ok, Lines1, Rem1} = buffer_and_extract_lines(<<>>, Chunk1),
-    Chunk2 = <<"G\\r\\nPONG\\r\\nPAR">>,
+    Chunk2 = <<"G", 13, 10, "PONG", 13, 10, "PAR">>,
     {ok, Lines2, Rem2} = buffer_and_extract_lines(Rem1, Chunk2),
     Chunk3 = <<"TIAL">>,
     {ok, Lines3, Rem3} = buffer_and_extract_lines(Rem2, Chunk3),
     AllLines = Lines1 ++ Lines2 ++ Lines3,
     {ok, AllLines, Rem3}.
-    `,
+`,
         files: [
       {
         name: 'incident_tcp_active_true.erl',
@@ -2757,21 +2769,12 @@ test_framing() ->
 -export([recommended_socket_opts/0, buffer_and_extract_lines/2]).
 -export([audit_socket_opts/0, test_framing/0]).
 
-%% Returns socket options for high-throughput TCP ingestion
+%% @doc Return the ingestion TCP socket option list enforcing bounded single-packet active delivery.
 recommended_socket_opts() ->
-    %% % TODO [INC-106 Triage]:
-    %% % Sockets configured with unbounded active mode flood worker mailboxes under burst traffic.
-    %% % Switch to bounded active mode so the OS kernel regulates incoming packet flow.
     [binary, {packet, raw}, {active, true}, {reuseaddr, true}].
 
-%% Buffers incoming chunks, extracts complete CRLF-delimited lines,
-%% and returns {ok, [Lines], UnpinnedRemainder}.
+%% @doc Stitch OldBuffer ahead of Chunk, extract complete CRLF lines, and return {ok, Lines, UnpinnedRemainder}.
 buffer_and_extract_lines(OldBuffer, Chunk) ->
-    %% % TODO [INC-106 Triage]:
-    %% % Defect 1: Incoming fragments lose their prefix because OldBuffer is ignored!
-    %% % Stitch the previous accumulator with the new chunk before extracting lines.
-    %% % Defect 2: Sub-binary slices pin 64 KB socket buffers in memory.
-    %% % Ensure every extracted line and trailing remainder is unpinned via binary:copy/1.
     Combined = Chunk,
     _ = OldBuffer,
     extract_lines(Combined, []).
@@ -2779,15 +2782,14 @@ buffer_and_extract_lines(OldBuffer, Chunk) ->
 extract_lines(<<>>, Acc) ->
     {ok, lists:reverse(Acc), <<>>};
 extract_lines(Bin, Acc) ->
-    case binary:split(Bin, <<"\\r\\n">>) of
+    case binary:split(Bin, <<13, 10>>) of
         [Line, Rest] ->
             extract_lines(Rest, [Line | Acc]);
         [Incomplete] ->
-            %% % TODO: Call binary:copy/1 on Incomplete!
             {ok, lists:reverse(Acc), Incomplete}
     end.
 
-%% Diagnostic helpers
+%% @doc Audit recommended_socket_opts/0 to verify single-packet active mode is enabled without active flooding.
 audit_socket_opts() ->
     Opts = recommended_socket_opts(),
     case lists:member({active, once}, Opts) andalso not lists:member({active, true}, Opts) of
@@ -2795,16 +2797,17 @@ audit_socket_opts() ->
         false -> {error, {bad_options, Opts}}
     end.
 
+%% @doc Verify multi-chunk fragmented CRLF stream framing across three sequential chunks.
 test_framing() ->
     Chunk1 = <<"PIN">>,
     {ok, Lines1, Rem1} = buffer_and_extract_lines(<<>>, Chunk1),
-    Chunk2 = <<"G\\r\\nPONG\\r\\nPAR">>,
+    Chunk2 = <<"G", 13, 10, "PONG", 13, 10, "PAR">>,
     {ok, Lines2, Rem2} = buffer_and_extract_lines(Rem1, Chunk2),
     Chunk3 = <<"TIAL">>,
     {ok, Lines3, Rem3} = buffer_and_extract_lines(Rem2, Chunk3),
     AllLines = Lines1 ++ Lines2 ++ Lines3,
     {ok, AllLines, Rem3}.
-    `,
+`,
       },
     ],
     solutionFiles: {
@@ -2812,9 +2815,11 @@ test_framing() ->
 -export([recommended_socket_opts/0, buffer_and_extract_lines/2]).
 -export([audit_socket_opts/0, test_framing/0]).
 
+%% @doc Return the ingestion TCP socket option list enforcing bounded single-packet active delivery.
 recommended_socket_opts() ->
     [binary, {packet, raw}, {active, once}, {reuseaddr, true}].
 
+%% @doc Stitch OldBuffer ahead of Chunk, extract complete CRLF lines, and return {ok, Lines, UnpinnedRemainder}.
 buffer_and_extract_lines(OldBuffer, Chunk) ->
     Combined = <<OldBuffer/binary, Chunk/binary>>,
     extract_lines(Combined, []).
@@ -2822,13 +2827,14 @@ buffer_and_extract_lines(OldBuffer, Chunk) ->
 extract_lines(<<>>, Acc) ->
     {ok, lists:reverse(Acc), <<>>};
 extract_lines(Bin, Acc) ->
-    case binary:split(Bin, <<"\\r\\n">>) of
+    case binary:split(Bin, <<13, 10>>) of
         [Line, Rest] ->
             extract_lines(Rest, [binary:copy(Line) | Acc]);
         [Incomplete] ->
             {ok, lists:reverse(Acc), binary:copy(Incomplete)}
     end.
 
+%% @doc Audit recommended_socket_opts/0 to verify single-packet active mode is enabled without active flooding.
 audit_socket_opts() ->
     Opts = recommended_socket_opts(),
     case lists:member({active, once}, Opts) andalso not lists:member({active, true}, Opts) of
@@ -2836,16 +2842,17 @@ audit_socket_opts() ->
         false -> {error, {bad_options, Opts}}
     end.
 
+%% @doc Verify multi-chunk fragmented CRLF stream framing across three sequential chunks.
 test_framing() ->
     Chunk1 = <<"PIN">>,
     {ok, Lines1, Rem1} = buffer_and_extract_lines(<<>>, Chunk1),
-    Chunk2 = <<"G\\r\\nPONG\\r\\nPAR">>,
+    Chunk2 = <<"G", 13, 10, "PONG", 13, 10, "PAR">>,
     {ok, Lines2, Rem2} = buffer_and_extract_lines(Rem1, Chunk2),
     Chunk3 = <<"TIAL">>,
     {ok, Lines3, Rem3} = buffer_and_extract_lines(Rem2, Chunk3),
     AllLines = Lines1 ++ Lines2 ++ Lines3,
     {ok, AllLines, Rem3}.
-    `,
+`,
     },
 solutionExplanation: `### Incident #106 Triage Verification
 1. **Flow Control Enforced**: Switching from \`{active, true}\` to \`{active, once}\` ensures the OS kernel buffers packets when the worker process is busy, triggering TCP window backpressure to throttle senders.

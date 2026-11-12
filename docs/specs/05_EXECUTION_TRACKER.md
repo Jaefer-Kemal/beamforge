@@ -2835,6 +2835,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter10Verification/ch10-l05` (`VERIFIED 100% PASSED`, score=100, 3 stages in `2.55s`, `3.004s` package total); `TEST_CHAPTER=10 TestDynamicVisibleTestsCurriculum` (`ch10-l05 | 2/2 tests passed`, all 7 Ch. 10 lessons passed in `10.30s` / `10.321s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 168: Pedagogical Despoiling, Incident `Run`/AST Expansion & Live Tri-Verification of Chapter 10 Lecture 6 (`ch10-l06`)
+- [x] **168.1: Replace `safe_ingestion_worker` Clone with Domain-Disjoint PWE (`heartbeat_lease_guard.erl`), Strip Starter/Banner Spoilers, Add `@doc`s & Expand `Run`/`Submit` (`ch10-l06`: `incident_tcp_active_true.erl`)**:
+  - Removed verbatim solution spoilers (`{active, once}`, `<<OldBuffer/binary, Chunk/binary>>`, `binary:copy/1`) from `incidentAlert` (`apps/web-ide/src/data/chapters/ch10.ts`) and replaced `safe_ingestion_worker` (1:1 clone) with a domain-disjoint runnable module (`heartbeat_lease_guard.erl`: `<<0>>`-delimited beacons, `{packet, line}` / `{nodelay, true}` options).
+  - Normalized `conceptMarkdown` headings (`## Why This Matters in Production`, GFM `> [!WARNING]`, `## Official Erlang Docs & Function Reference` with card pointer, and Spec 08 `Input`/`Behavior`/`Examples` `## Assignment Specification`).
+  - Stripped inline `%% % TODO ...` hints from `starterCode` and `files[0].content` (`src/incident_tcp_active_true.erl`) while retaining the intentional production bugs (`{active, true}`, discarded `OldBuffer`, uncopied sub-binaries), normalized CRLF literals to `<<13, 10>>` / `13, 10` bytes across `solutionCode`, `solutionFiles`, and `ch10_verification_test.go`, and added `%% @doc` contracts across all 4 exports.
+  - Updated `services/orchestrator/internal/bridge/erl_runner_incidents.go` (`case "ch10-l06"`) so `Run` executes both `audit_socket_opts()` and `test_framing()` (`[T1_Res, T2_Res]`), and `Submit` adds `S1_Ast` enforcing `binary:split/2`, `binary:copy/1`, `bit_syntax`, and `extract_lines/2` TCO via `bf_ast_verifier:verify_rules/3`.
+- [x] **168.2: Mandatory Live Tri-Verification & Compiler Suite (`ch10-l06`)**:
+  - **Parallel Worked Example (`heartbeat_lease_guard.erl`)**: Extracted from `ch10.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified split-beacon ingestion (`PWE_CH10_L06_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe -Wall`) and reproduced the incident failures safely (`audit_socket_opts()` -> `{error, {bad_options, ...}}`, `test_framing()` -> `{ok, [<<"G">>, <<"PONG">>], <<"TIAL">>}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier:verify_rules/3`, and passed 2/2 visible tests (`SOLUTION_CH10_L06_OK ast=passed visible=2/2`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter10Verification/ch10-l06` (`VERIFIED 100% PASSED`, score=100, 4 stages in `1.91s`, `2.246s` package total); `TEST_CHAPTER=10 TestDynamicVisibleTestsCurriculum` (`ch10-l06 | 2/2 tests passed`, all 7 Ch. 10 lessons passed in `9.94s` / `9.957s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 
