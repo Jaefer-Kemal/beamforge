@@ -894,41 +894,44 @@ T1_Res = try hof_transform:discount_prices([{product, 1, "Keyboard", 100}, {prod
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"hof_transform:discount_prices(...)">>,
+        #{call_str => <<"hof_transform:discount_prices([{product, 1, \"Keyboard\", 100}, {product, 2, \"Mouse\", 50}], 10)">>,
           expected => <<"[{product, 1, \"Keyboard\", 90}, {product, 2, \"Mouse\", 45}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"hof_transform:discount_prices(...)">>, expected => <<"[{product, ...}]">>,
+    #{call_str => <<"hof_transform:discount_prices([{product, 1, \"Keyboard\", 100}, {product, 2, \"Mouse\", 50}], 10)">>,
+      expected => <<"[{product, 1, \"Keyboard\", 90}, {product, 2, \"Mouse\", 45}]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try hof_transform:active_sessions([{session, 101, active}, {session, 102, expired}, {session, 103, active}]) of
     [{session, 101, active}, {session, 103, active}] = R2 ->
-        #{call_str => <<"hof_transform:active_sessions(...)">>,
+        #{call_str => <<"hof_transform:active_sessions([{session, 101, active}, {session, 102, expired}, {session, 103, active}])">>,
           expected => <<"[{session, 101, active}, {session, 103, active}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"hof_transform:active_sessions(...)">>,
+        #{call_str => <<"hof_transform:active_sessions([{session, 101, active}, {session, 102, expired}, {session, 103, active}])">>,
           expected => <<"[{session, 101, active}, {session, 103, active}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
 catch C2:R2 ->
-    #{call_str => <<"hof_transform:active_sessions(...)">>, expected => <<"[{session, ...}]">>,
+    #{call_str => <<"hof_transform:active_sessions([{session, 101, active}, {session, 102, expired}, {session, 103, active}])">>,
+      expected => <<"[{session, 101, active}, {session, 103, active}]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
 T3_Res = try hof_transform:sanitize_metrics([{cpu_load, 14.8}, {fan_speed, -10}, {memory_usage, 65.2}]) of
     [{cpu_load, 15}, {memory_usage, 65}] = R3 ->
-        #{call_str => <<"hof_transform:sanitize_metrics(...)">>,
+        #{call_str => <<"hof_transform:sanitize_metrics([{cpu_load, 14.8}, {fan_speed, -10}, {memory_usage, 65.2}])">>,
           expected => <<"[{cpu_load, 15}, {memory_usage, 65}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T3_Start};
     Other3 ->
-        #{call_str => <<"hof_transform:sanitize_metrics(...)">>,
+        #{call_str => <<"hof_transform:sanitize_metrics([{cpu_load, 14.8}, {fan_speed, -10}, {memory_usage, 65.2}])">>,
           expected => <<"[{cpu_load, 15}, {memory_usage, 65}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
 catch C3:R3 ->
-    #{call_str => <<"hof_transform:sanitize_metrics(...)">>, expected => <<"[{...}]">>,
+    #{call_str => <<"hof_transform:sanitize_metrics([{cpu_load, 14.8}, {fan_speed, -10}, {memory_usage, 65.2}])">>,
+      expected => <<"[{cpu_load, 15}, {memory_usage, 65}]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res],
@@ -5341,30 +5344,76 @@ Stages = [CompileStage_H01, S_Ast_H01, S1_Closures, S2_GuardCheck]
 `, wsDir, wsDir), true
 
 	case "ch03-l02":
-		return `
+		return fmt.Sprintf(`
 CompileStage_H02 = case code:ensure_loaded(hof_transform) of
     {module, hof_transform} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"hof_transform.erl compiled cleanly">>};
+        Exports_H02 = hof_transform:module_info(exports),
+        Req_H02 = [{discount_prices, 2}, {active_sessions, 1}, {sanitize_metrics, 1}],
+        Missing_H02 = [FA || FA <- Req_H02, not lists:member(FA, Exports_H02)],
+        case Missing_H02 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"hof_transform.erl compiled cleanly and exported discount_prices/2, active_sessions/1, sanitize_metrics/1.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_H02]))}
+        end;
     {error, E_H02} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_H02]))}
 end,
+S_Ast_H02 = try
+    SourceCandidates_H02 = [
+        filename:join(["%s", "src", "hof_transform.erl"]),
+        filename:join(["%s", "hof_transform.erl"])
+    ],
+    SourceFile_H02 = case [P || P <- SourceCandidates_H02, filelib:is_regular(P)] of
+        [ValidSrc_H02 | _] -> ValidSrc_H02;
+        [] -> hd(SourceCandidates_H02)
+    end,
+    Rules_H02 = #{
+        required_remote_calls => [{lists, map, 2}, {lists, filter, 2}, {lists, filtermap, 2}],
+        forbidden_constructs => [list_comprehension, map_syntax, bit_syntax]
+    },
+    case bf_ast_verifier:verify_rules(SourceFile_H02, <<>>, Rules_H02) of
+        {ok, _} ->
+            #{id => <<"ast_hof_transform_audit">>, title => <<"AST HOF & Construct Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified lists:map/2, lists:filter/2, lists:filtermap/2 usage and zero list comprehensions, maps, or binaries.">>};
+        {error, AstViolations_H02} ->
+            FirstMsg_H02 = case AstViolations_H02 of
+                [#{message := M_H02} | _] -> M_H02;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_H02]))
+            end,
+            #{id => <<"ast_hof_transform_audit">>, title => <<"AST HOF & Construct Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_H02, error => AstViolations_H02}
+    end
+catch Class_Ast_H02:Err_Ast_H02 ->
+    #{id => <<"ast_hof_transform_audit">>, title => <<"AST HOF & Construct Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [Class_Ast_H02, Err_Ast_H02]))}
+end,
 S1_Transform = try
     Discounts = hof_transform:discount_prices([{product, 1, "Desk", 100}, {product, 2, "Chair", 50}], 20),
+    DiscountTrunc = hof_transform:discount_prices([{product, 3, "Cable", 25}], 10),
+    DiscountEmpty = hof_transform:discount_prices([], 20),
     Active = hof_transform:active_sessions([{session, "s1", active}, {session, "s2", expired}, {session, "s3", active}]),
+    ActiveEmpty = hof_transform:active_sessions([]),
+    ActiveNone = hof_transform:active_sessions([{session, 1, expired}]),
     Metrics = hof_transform:sanitize_metrics([{cpu, 10.4}, {temp, -5.0}, {disk, 99.8}]),
-    case {Discounts, Active, Metrics} of
+    MetricsEdge = hof_transform:sanitize_metrics([{idle, 0.0}, {voltage, -0.5}, {ok_int, 7}]),
+    MetricsEmpty = hof_transform:sanitize_metrics([]),
+    case {Discounts, DiscountTrunc, DiscountEmpty, Active, ActiveEmpty, ActiveNone, Metrics, MetricsEdge, MetricsEmpty} of
         {[{product, 1, "Desk", 80}, {product, 2, "Chair", 40}],
+         [{product, 3, "Cable", 23}],
+         [],
          [{session, "s1", active}, {session, "s3", active}],
-         [{cpu, 10}, {disk, 100}]} ->
-            #{id => <<"map_filter_filtermap">>, title => <<"lists:map, filter & filtermap Operations">>, status => <<"passed">>, time_ms => 10, details => <<"Single-pass filtermap and transformations verified">>};
+         [],
+         [],
+         [{cpu, 10}, {disk, 100}],
+         [{idle, 0}, {ok_int, 7}],
+         []} ->
+            #{id => <<"map_filter_filtermap">>, title => <<"lists:map, filter & filtermap Operations">>, status => <<"passed">>, time_ms => 10, details => <<"Single-pass filtermap, integer truncation, zero-boundary, and empty-list edge cases verified.">>};
         Got_H02 ->
             #{id => <<"map_filter_filtermap">>, title => <<"lists:map, filter & filtermap Operations">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Transform mismatch: ~p", [Got_H02]))}
     end
 catch Class_H02:Err_H02 ->
     #{id => <<"map_filter_filtermap">>, title => <<"lists:map, filter & filtermap Operations">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_H02, Err_H02]))}
 end,
-Stages = [CompileStage_H02, S1_Transform]
-`, true
+Stages = [CompileStage_H02, S_Ast_H02, S1_Transform]
+`, wsDir, wsDir), true
 
 	case "ch03-l03":
 		return `

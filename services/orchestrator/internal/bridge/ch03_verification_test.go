@@ -34,6 +34,32 @@ choose_pricing_strategy(_) ->
     fun(Price) -> Price end.
 `
 
+	hofTransformSolution := `-module(hof_transform).
+-export([discount_prices/2, active_sessions/1, sanitize_metrics/1]).
+
+%% @doc Return a list of product tuples with each price reduced by the caller-supplied DiscountPercent using truncating integer division while preserving order.
+discount_prices(Products, DiscountPercent) ->
+    lists:map(fun({product, Id, Name, Price}) ->
+        NewPrice = Price - ((Price * DiscountPercent) div 100),
+        {product, Id, Name, NewPrice}
+    end, Products).
+
+%% @doc Retain only session tuples in the active state from Sessions while preserving original order.
+active_sessions(Sessions) ->
+    lists:filter(fun({session, _Id, Status}) ->
+        Status =:= active
+    end, Sessions).
+
+%% @doc Discard negative readings and round zero-or-positive telemetry values in RawMetrics to whole integers in a single pass.
+sanitize_metrics(RawMetrics) ->
+    lists:filtermap(fun
+        ({Metric, Value}) when Value >= 0 ->
+            {true, {Metric, round(Value)}};
+        ({_Metric, _Negative}) ->
+            false
+    end, RawMetrics).
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -43,6 +69,11 @@ choose_pricing_strategy(_) ->
 			exerciseID:   "ch03-l01",
 			visibleCount: 4,
 			files:        map[string]string{"src/hof_basics.erl": hofBasicsSolution},
+		},
+		{
+			exerciseID:   "ch03-l02",
+			visibleCount: 3,
+			files:        map[string]string{"src/hof_transform.erl": hofTransformSolution},
 		},
 	}
 
@@ -198,6 +229,102 @@ choose_pricing_strategy(_) ->
 		}
 		if !astFailed || !guardFailed {
 			t.Errorf("Expected both ast_hof_basics_audit and is_function_guard to fail, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch03-l02 rejects list comprehension bypass and missing lists HOF calls via AST audit", func(t *testing.T) {
+		sessionID := "test-ch03-l02-neg-lc"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/hof_transform.erl": `-module(hof_transform).
+-export([discount_prices/2, active_sessions/1, sanitize_metrics/1]).
+
+discount_prices(Products, DiscountPercent) ->
+    [{product, Id, Name, Price - ((Price * DiscountPercent) div 100)} || {product, Id, Name, Price} <- Products].
+
+active_sessions(Sessions) ->
+    [{session, Id, Status} || {session, Id, Status} <- Sessions, Status =:= active].
+
+sanitize_metrics(RawMetrics) ->
+    [{Metric, round(Value)} || {Metric, Value} <- RawMetrics, Value >= 0].
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch03-l02", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected list-comprehension bypass in ch03-l02 to fail AST audit, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_hof_transform_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_hof_transform_audit stage to fail for list comprehension bypass, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch03-l02 rejects off-by-zero Value > 0 boundary error in sanitize_metrics", func(t *testing.T) {
+		sessionID := "test-ch03-l02-neg-zero"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		buggy := map[string]string{
+			"src/hof_transform.erl": `-module(hof_transform).
+-export([discount_prices/2, active_sessions/1, sanitize_metrics/1]).
+
+discount_prices(Products, DiscountPercent) ->
+    lists:map(fun({product, Id, Name, Price}) ->
+        {product, Id, Name, Price - ((Price * DiscountPercent) div 100)}
+    end, Products).
+
+active_sessions(Sessions) ->
+    lists:filter(fun({session, _Id, Status}) -> Status =:= active end, Sessions).
+
+%% Bug: strict > 0 drops valid 0.0 / 0 readings.
+sanitize_metrics(RawMetrics) ->
+    lists:filtermap(fun
+        ({Metric, Value}) when Value > 0 ->
+            {true, {Metric, round(Value)}};
+        (_) ->
+            false
+    end, RawMetrics).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch03-l02", buggy)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected strict Value > 0 bug in sanitize_metrics to fail ch03-l02, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "map_filter_filtermap" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected map_filter_filtermap stage to fail for strict Value > 0 zero-dropping bug, stages=%+v", report.Stages)
 		}
 	})
 }

@@ -390,7 +390,7 @@ PositiveTemps = lists:filter(fun(T) -> T > 0 end, Temps).
 
 > [!warning] Common Beginner Syntax Trap: Boolean Predicate Requirement
 > The callback fun passed to \`lists:filter/2\` MUST return the literal boolean atom \`true\` or \`false\`.
-> If your function returns an integer, an atom like \`ok\`, or \`undefined\`, the BEAM VM immediately crashes with a \`{badarg, lists:filter}\` runtime exception!
+> If your function returns an integer or an arbitrary atom like \`ok\` or \`undefined\`, the BEAM VM immediately crashes with a \`{bad_filter, ReturnedValue}\` runtime exception!
 
 ### 3. The Single-Pass Optimization: \`lists:filtermap/2\`
 Frequently in production, you need to filter a list AND transform the retained elements.
@@ -398,8 +398,8 @@ A novice writes two sequential pipeline stages:
 
 \`\`\`erlang
 %% Inefficient: Traverses the list twice and allocates an intermediate list in memory!
-Filtered = lists:filter(fun(X) -> isValid(X) end, RawList),
-Transformed = lists:map(fun(X) -> transform(X) end, Filtered).
+Filtered = lists:filter(fun(Elem) -> is_valid(Elem) end, RawList),
+Transformed = lists:map(fun(Elem) -> transform(Elem) end, Filtered).
 \`\`\`
 
 Erlang provides **\`lists:filtermap/2\`**, which performs both operations in a **single pass**:
@@ -426,33 +426,36 @@ end, Configs).
 
 ## Parallel Worked Example
 
-Consider an aerospace telemetry engine configuring drone flight avionics:
+Consider a rail infrastructure telemetry controller classifying track relays and normalizing live Celsius sensor probes into Kelvin in a single pass:
 
 \`\`\`erlang
--module(drone_avionics).
--export([calibrate_altitudes/2, operational_rotors/1, normalize_flight_vectors/1]).
+-module(rail_telemetry).
+-export([tag_clear_signals/1, scale_celsius_probes/2]).
 
-%% 1. lists:map to adjust altitudes by offset
-calibrate_altitudes(Waypoints, OffsetMeters) ->
-    lists:map(fun({waypoint, WId, Alt}) ->
-        {waypoint, WId, Alt + OffsetMeters}
-    end, Waypoints).
+%% ── Phase 1: Boolean Filtering & Projection Pipeline (lists:filter/2 + lists:map/2) ──
+%% Retains only clear relays and projects bare signal IDs tagged with track mode.
+tag_clear_signals(Relays) ->
+    ClearRelays = lists:filter(fun({relay, _SignalId, State}) ->
+        State =:= clear
+    end, Relays),
+    lists:map(fun({relay, SignalId, _State}) ->
+        {cleared_signal, SignalId}
+    end, ClearRelays).
 
-%% 2. lists:filter to retain only nominal rotors
-operational_rotors(RotorList) ->
-    lists:filter(fun({rotor, _Id, _Rpm, State}) ->
-        State =:= nominal
-    end, RotorList).
-
-%% 3. lists:filtermap to filter micro-jitter and scale significant deviations
-normalize_flight_vectors(Vectors) ->
+%% ── Phase 2: Single-Pass Filter-and-Transform (lists:filtermap/2) ──────────────────
+%% Discards offline probes and offsets active Celsius readings into scaled Kelvin in one traversal.
+scale_celsius_probes(Probes, OffsetK) ->
     lists:filtermap(fun
-        ({axis, AxisTag, Deviation}) when abs(Deviation) > 0.05 ->
-            {true, {corrected_axis, AxisTag, round(Deviation * 1000)}};
-        ({axis, _AxisTag, _MinorDeviation}) ->
+        ({probe, ProbeId, Celsius}) when is_integer(Celsius) ->
+            {true, {kelvin, ProbeId, Celsius + OffsetK}};
+        ({probe, _ProbeId, offline}) ->
             false
-    end, Vectors).
+    end, Probes).
 \`\`\`
+
+How the BEAM executes these collection helpers:
+- **Phase 1 (\`tag_clear_signals/1\`)**: Uses \`lists:filter/2\` (boolean check \`State =:= clear\`) followed by \`lists:map/2\` to illustrate when separating two independent operations costs an extra list traversal and temporary cons cells on the process heap.
+- **Phase 2 (\`scale_celsius_probes/2\`)**: Replaces the two-pass filter-plus-map with a single \`lists:filtermap/2\` call; returning \`{true, Transformed}\` swaps elements in one pass while returning \`false\` drops offline entries cleanly with zero throwaway intermediate list allocation.
 
 ## Official Erlang Docs & Function Reference
 
@@ -462,39 +465,41 @@ lists:filter(Pred, List) -> [term()]
 lists:filtermap(Fun, List) -> [term()]
 \`\`\`
 
+> How to read these signatures: \`Fun\` and \`Pred\` are first-class 1-argument functions (\`fun((A) -> B)\` or \`fun((A) -> boolean())\`), and all three stdlib traversal helpers guarantee exact left-to-right output ordering matching \`List\`. Open the attached **Reference Cards** for \`lists:map/2\` and \`lists:filtermap/2\` documentation.
+
 ## Assignment Specification
 
 Implement three collection transformation functions in \`src/hof_transform.erl\` utilizing the Erlang \`lists\` standard library:
 
-### \`discount_prices/2\`
+### 1. \`discount_prices(Products, DiscountPercent)\`
 - **Input**:
-  - \`Products\` — A list of zero or more 4-element tuples of the form \`{product, Id, Name, Price}\`, where \`Id\` is an integer, \`Name\` is a string, and \`Price\` is an integer (in cents).
+  - \`Products\` — A list of zero or more 4-element \`product\` tuples (carrying an integer \`Id\`, a string \`Name\`, and an integer \`Price\`).
   - \`DiscountPercent\` — An integer percentage discount (e.g., \`10\` for 10%).
-- **Behavior**: Uses \`lists:map/2\` to return a new list of product tuples with their price reduced by \`DiscountPercent\` using integer arithmetic (\`Price - (Price * DiscountPercent div 100)\`). Preserves product \`Id\`, \`Name\`, and relative ordering.
+- **Behavior**: Transforms every product tuple across \`Products\` into a discounted product tuple preserving \`Id\`, \`Name\`, and exact input list ordering. Compute each reduced price by deducting \`DiscountPercent\` percent of \`Price\` using truncating whole-number integer division (rounding down the deducted discount amount toward zero before subtracting from \`Price\`).
 - **Examples**:
   - \`hof_transform:discount_prices([{product, 1, "Keyboard", 100}, {product, 2, "Mouse", 50}], 10)\` returns \`[{product, 1, "Keyboard", 90}, {product, 2, "Mouse", 45}]\`.
   - \`hof_transform:discount_prices([], 20)\` returns \`[]\`.
 
-### \`active_sessions/1\`
-- **Input**: \`Sessions\` — A list of zero or more 3-element tuples of the form \`{session, SessionId, Status}\`, where \`SessionId\` is an integer or string, and \`Status\` is an atom.
-- **Behavior**: Uses \`lists:filter/2\` with a boolean predicate to retain only session tuples whose status is equal to the atom \`active\`, preserving their original order.
+### 2. \`active_sessions(Sessions)\`
+- **Input**: \`Sessions\` — A list of zero or more 3-element \`session\` tuples (carrying an integer or string \`SessionId\` and a \`Status\` atom).
+- **Behavior**: Filters \`Sessions\` with a strict boolean predicate keeping only session tuples whose status atom equals \`active\`, preserving original list ordering.
 - **Examples**:
   - \`hof_transform:active_sessions([{session, 101, active}, {session, 102, expired}, {session, 103, active}])\` returns \`[{session, 101, active}, {session, 103, active}]\`.
   - \`hof_transform:active_sessions([{session, 1, expired}])\` returns \`[]\`.
 
-### \`sanitize_metrics/1\`
-- **Input**: \`RawMetrics\` — A list of zero or more 2-element tuples of the form \`{MetricName, Value}\`, where \`MetricName\` is an atom and \`Value\` is a number (integer or float).
-- **Behavior**: Uses \`lists:filtermap/2\` in a single pass to sanitize telemetry measurements:
-  - If \`Value\` is negative (less than zero), discard the measurement.
-  - If \`Value\` is zero or positive, retain the tuple with \`Value\` converted to the nearest integer using \`round/1\`.
+### 3. \`sanitize_metrics(RawMetrics)\`
+- **Input**: \`RawMetrics\` — A list of zero or more 2-element telemetry pairs (pairing a metric atom \`MetricName\` with an integer or float \`Value\`).
+- **Behavior**: Filters and transforms \`RawMetrics\` in a single traversal:
+  - Discard measurements where \`Value\` is strictly less than zero.
+  - Retain measurements where \`Value\` is zero or positive with \`Value\` converted to the nearest integer via the standard rounding function.
 - **Examples**:
   - \`hof_transform:sanitize_metrics([{cpu_load, 14.8}, {fan_speed, -10}, {memory_usage, 65.2}])\` returns \`[{cpu_load, 15}, {memory_usage, 65}]\`.
   - \`hof_transform:sanitize_metrics([{voltage, -5.0}])\` returns \`[]\`.
 
 ## Rules & Verification Constraints
 
-- Must use \`lists:map/2\`, \`lists:filter/2\`, and \`lists:filtermap/2\`.
-- Strictly no Maps (\`#{}\`) or Bit-Syntax Binaries (\`<<...>>\`). Use tuples, atoms, and integers only.`,
+- \`bf_ast_verifier\` enforces required remote calls to \`lists:map/2\`, \`lists:filter/2\`, and \`lists:filtermap/2\`, and forbids list comprehensions (\`[Expr || ...]\`), maps (\`#{}\`), and bit-syntax binaries (\`<<...>>\`).
+- Use tuples, atoms, numbers (integers/floats), and lists only.`,
     otpDocCards: [
       {
         functionName: 'lists:map/2',
@@ -563,8 +568,9 @@ Implement three collection transformation functions in \`src/hof_transform.erl\`
     ],
     astRules: {
       requiredCalls: ['lists:map/2', 'lists:filter/2', 'lists:filtermap/2'],
+      forbiddenConstructs: ['list_comprehension', 'map_syntax', 'bit_syntax'],
     },
-    solutionExplanation: 'Utilizes lists:map/2 for 1-to-1 price transformations, lists:filter/2 for status filtering, and lists:filtermap/2 for single-pass metric sanitization.',
+    solutionExplanation: 'Utilizes lists:map/2 for 1-to-1 integer-discounted price transformations, lists:filter/2 for active session filtering, and lists:filtermap/2 for single-pass non-negative metric sanitization.',
     files: [
       {
         name: 'hof_transform.erl',
@@ -572,16 +578,16 @@ Implement three collection transformation functions in \`src/hof_transform.erl\`
         content: `-module(hof_transform).
 -export([discount_prices/2, active_sessions/1, sanitize_metrics/1]).
 
-%% @doc Apply DiscountPercent to each product price using lists:map/2.
-discount_prices(Products, DiscountPercent) ->
+%% @doc Return a list of product tuples with each price reduced by the caller-supplied DiscountPercent using truncating integer division while preserving order.
+discount_prices(_Products, _DiscountPercent) ->
     ok.
 
-%% @doc Retain only active sessions using lists:filter/2.
-active_sessions(Sessions) ->
+%% @doc Retain only session tuples in the active state from Sessions while preserving original order.
+active_sessions(_Sessions) ->
     ok.
 
-%% @doc Discard negative metrics and round non-negative readings in a single pass using lists:filtermap/2.
-sanitize_metrics(RawMetrics) ->
+%% @doc Discard negative readings and round zero-or-positive telemetry values in RawMetrics to whole integers in a single pass.
+sanitize_metrics(_RawMetrics) ->
     ok.`,
       },
     ],
@@ -589,17 +595,20 @@ sanitize_metrics(RawMetrics) ->
       'src/hof_transform.erl': `-module(hof_transform).
 -export([discount_prices/2, active_sessions/1, sanitize_metrics/1]).
 
+%% @doc Return a list of product tuples with each price reduced by the caller-supplied DiscountPercent using truncating integer division while preserving order.
 discount_prices(Products, DiscountPercent) ->
     lists:map(fun({product, Id, Name, Price}) ->
         NewPrice = Price - ((Price * DiscountPercent) div 100),
         {product, Id, Name, NewPrice}
     end, Products).
 
+%% @doc Retain only session tuples in the active state from Sessions while preserving original order.
 active_sessions(Sessions) ->
     lists:filter(fun({session, _Id, Status}) ->
         Status =:= active
     end, Sessions).
 
+%% @doc Discard negative readings and round zero-or-positive telemetry values in RawMetrics to whole integers in a single pass.
 sanitize_metrics(RawMetrics) ->
     lists:filtermap(fun
         ({Metric, Value}) when Value >= 0 ->
@@ -611,31 +620,34 @@ sanitize_metrics(RawMetrics) ->
     starterCode: `-module(hof_transform).
 -export([discount_prices/2, active_sessions/1, sanitize_metrics/1]).
 
-%% @doc Apply DiscountPercent to each product price using lists:map/2.
-discount_prices(Products, DiscountPercent) ->
+%% @doc Return a list of product tuples with each price reduced by the caller-supplied DiscountPercent using truncating integer division while preserving order.
+discount_prices(_Products, _DiscountPercent) ->
     ok.
 
-%% @doc Retain only active sessions using lists:filter/2.
-active_sessions(Sessions) ->
+%% @doc Retain only session tuples in the active state from Sessions while preserving original order.
+active_sessions(_Sessions) ->
     ok.
 
-%% @doc Discard negative metrics and round non-negative readings in a single pass using lists:filtermap/2.
-sanitize_metrics(RawMetrics) ->
+%% @doc Discard negative readings and round zero-or-positive telemetry values in RawMetrics to whole integers in a single pass.
+sanitize_metrics(_RawMetrics) ->
     ok.`,
     solutionCode: `-module(hof_transform).
 -export([discount_prices/2, active_sessions/1, sanitize_metrics/1]).
 
+%% @doc Return a list of product tuples with each price reduced by the caller-supplied DiscountPercent using truncating integer division while preserving order.
 discount_prices(Products, DiscountPercent) ->
     lists:map(fun({product, Id, Name, Price}) ->
         NewPrice = Price - ((Price * DiscountPercent) div 100),
         {product, Id, Name, NewPrice}
     end, Products).
 
+%% @doc Retain only session tuples in the active state from Sessions while preserving original order.
 active_sessions(Sessions) ->
     lists:filter(fun({session, _Id, Status}) ->
         Status =:= active
     end, Sessions).
 
+%% @doc Discard negative readings and round zero-or-positive telemetry values in RawMetrics to whole integers in a single pass.
 sanitize_metrics(RawMetrics) ->
     lists:filtermap(fun
         ({Metric, Value}) when Value >= 0 ->
