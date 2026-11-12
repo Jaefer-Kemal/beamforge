@@ -60,6 +60,33 @@ safe_ratio(_, _) ->
     {error, invalid_ratio}.
 `
 
+	flowControlSolution := `-module(flow_control).
+-export([handle_http_response/1, grade_latency/1]).
+
+%% @doc Dispatch on a 3-element HTTP response tuple via a case expression, returning an ok payload pair for status 200 or classifying 401/403, 500-599, unexpected integer statuses, and malformed terms into error pairs.
+handle_http_response(Response) ->
+    case Response of
+        {http_response, 200, Body} ->
+            {ok, Body};
+        {http_response, Code, _Body} when Code =:= 401; Code =:= 403 ->
+            {error, unauthorized};
+        {http_response, Code, _Body} when is_integer(Code), Code >= 500, Code =< 599 ->
+            {error, server_error};
+        {http_response, Code, _Body} when is_integer(Code) ->
+            {error, {unexpected_status, Code}};
+        _ ->
+            {error, invalid_response}
+    end.
+
+%% @doc Classify an integer round-trip latency in milliseconds via an if expression into optimal (under 50 ms), acceptable (50 through 200 ms inclusive), or SLA-breach status atoms.
+grade_latency(LatencyMs) ->
+    if
+        LatencyMs < 50 -> optimal;
+        LatencyMs >= 50, LatencyMs =< 200 -> acceptable;
+        true -> sla_breach
+    end.
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -74,6 +101,11 @@ safe_ratio(_, _) ->
 			exerciseID:   "ch02-l02",
 			visibleCount: 4,
 			files:        map[string]string{"src/guard_validator.erl": guardValidatorSolution},
+		},
+		{
+			exerciseID:   "ch02-l03",
+			visibleCount: 4,
+			files:        map[string]string{"src/flow_control.erl": flowControlSolution},
 		},
 	}
 
@@ -375,6 +407,112 @@ safe_ratio(_, _) ->
 		}
 		if !guardFailed {
 			t.Errorf("Expected guard_clause_validation stage to fail for float port 80.0, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l03 rejects head-only multi-clause bypass missing case...of and if...end", func(t *testing.T) {
+		sessionID := "test-ch02-l03-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/flow_control.erl": `-module(flow_control).
+-export([handle_http_response/1, grade_latency/1]).
+
+handle_http_response({http_response, 200, Body}) ->
+    {ok, Body};
+handle_http_response({http_response, Code, _}) when Code =:= 401; Code =:= 403 ->
+    {error, unauthorized};
+handle_http_response({http_response, Code, _}) when is_integer(Code), Code >= 500, Code =< 599 ->
+    {error, server_error};
+handle_http_response({http_response, Code, _}) when is_integer(Code) ->
+    {error, {unexpected_status, Code}};
+handle_http_response(_) ->
+    {error, invalid_response}.
+
+grade_latency(LatencyMs) when LatencyMs < 50 -> optimal;
+grade_latency(LatencyMs) when LatencyMs =< 200 -> acceptable;
+grade_latency(_) -> sla_breach.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch02-l03", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected flow_control without case...of and if...end to fail AST verification, but got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_control_flow_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_control_flow_audit stage to fail when case...of / if...end are missing, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l03 rejects missing is_integer(Code) guard on status code", func(t *testing.T) {
+		sessionID := "test-ch02-l03-neg-term-order"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		buggy := map[string]string{
+			"src/flow_control.erl": `-module(flow_control).
+-export([handle_http_response/1, grade_latency/1]).
+
+handle_http_response(Response) ->
+    case Response of
+        {http_response, 200, Body} ->
+            {ok, Body};
+        {http_response, Code, _Body} when Code =:= 401; Code =:= 403 ->
+            {error, unauthorized};
+        {http_response, Code, _Body} when Code >= 500, Code =< 599 ->
+            {error, server_error};
+        {http_response, Code, _Body} ->
+            {error, {unexpected_status, Code}};
+        _ ->
+            {error, invalid_response}
+    end.
+
+grade_latency(LatencyMs) ->
+    if
+        LatencyMs < 50 -> optimal;
+        LatencyMs >= 50, LatencyMs =< 200 -> acceptable;
+        true -> sla_breach
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch02-l03", buggy)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected flow_control missing is_integer(Code) to fail on non-integer status, but got PASSED")
+		}
+		flowFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "case_and_if_expressions" && st.Status == "failed" {
+				flowFailed = true
+			}
+		}
+		if !flowFailed {
+			t.Errorf("Expected case_and_if_expressions stage to fail for non-integer status code, stages=%+v", report.Stages)
 		}
 	})
 }

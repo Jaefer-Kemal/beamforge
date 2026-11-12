@@ -448,7 +448,8 @@ scan_expr({map_field_assoc, _Line, Key, Val}, ForbiddenCalls, ForbiddenConstruct
     scan_expr(Val, ForbiddenCalls, ForbiddenConstructs, V1, R1, C1);
 
 scan_expr({'case', _Line, Expr, Clauses}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
-    {V1, R1, C1} = scan_expr(Expr, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet),
+    CSet1 = sets:add_element(case_expr, CSet),
+    {V1, R1, C1} = scan_expr(Expr, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet1),
     scan_clauses(Clauses, ForbiddenCalls, ForbiddenConstructs, V1, R1, C1);
 
 scan_expr({block, _Line, Exprs}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
@@ -577,6 +578,10 @@ construct_missing_message(receive_after) ->
     <<"Required construct missing: code must use receive...after with a timeout.">>;
 construct_missing_message(record_def) ->
     <<"Required construct missing: code must define and use records (-record).">>;
+construct_missing_message(case_expr) ->
+    <<"Required construct missing: code must use case...of branching expressions.">>;
+construct_missing_message(if_expr) ->
+    <<"Required construct missing: code must use if...end guard expressions.">>;
 construct_missing_message(Other) ->
     iolist_to_binary(io_lib:format("Required construct missing: ~p", [Other])).
 

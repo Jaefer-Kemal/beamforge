@@ -545,14 +545,17 @@ init:stop().
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try flow_control:handle_http_response({http_response, 200, "{\"status\":\"healthy\"}"}) of
     {ok, "{\"status\":\"healthy\"}"} = R1 ->
-        #{call_str => <<"flow_control:handle_http_response({http_response, 200, ...})">>, expected => <<"{ok, \"{\\\"status\\\":\\\"healthy\\\"}\"}">>,
+        #{call_str => <<"flow_control:handle_http_response({http_response, 200, \"{\\\"status\\\":\\\"healthy\\\"}\"})">>,
+          expected => <<"{ok, \"{\\\"status\\\":\\\"healthy\\\"}\"}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"flow_control:handle_http_response(...)">>, expected => <<"{ok, \"{\\\"status\\\":\\\"healthy\\\"}\"}">>,
+        #{call_str => <<"flow_control:handle_http_response({http_response, 200, \"{\\\"status\\\":\\\"healthy\\\"}\"})">>,
+          expected => <<"{ok, \"{\\\"status\\\":\\\"healthy\\\"}\"}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"flow_control:handle_http_response(...)">>, expected => <<"{ok, ...}">>,
+    #{call_str => <<"flow_control:handle_http_response({http_response, 200, \"{\\\"status\\\":\\\"healthy\\\"}\"})">>,
+      expected => <<"{ok, \"{\\\"status\\\":\\\"healthy\\\"}\"}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 
@@ -563,10 +566,10 @@ T2_Res = try flow_control:handle_http_response({http_response, 401, []}) of
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"flow_control:handle_http_response(...)">>, expected => <<"{error, unauthorized}">>,
+        #{call_str => <<"flow_control:handle_http_response({http_response, 401, []})">>, expected => <<"{error, unauthorized}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
 catch C2:R2 ->
-    #{call_str => <<"flow_control:handle_http_response(...)">>, expected => <<"{error, unauthorized}">>,
+    #{call_str => <<"flow_control:handle_http_response({http_response, 401, []})">>, expected => <<"{error, unauthorized}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 
@@ -4805,35 +4808,88 @@ Stages = [CompileStage, S1_Ast, S2_Guards]
 `, wsDir, wsDir), true
 
 	case "ch02-l03":
-		return `
+		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(flow_control) of
     {module, flow_control} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"flow_control.erl compiled cleanly">>};
+        Exports = flow_control:module_info(exports),
+        Required = [{handle_http_response, 1}, {grade_latency, 1}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"flow_control.erl compiled cleanly and exported handle_http_response/1 and grade_latency/1.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Flow = try
+S1_Ast = try
+    SourceCandidates = [
+        filename:join(["%s", "src", "flow_control.erl"]),
+        filename:join(["%s", "flow_control.erl"])
+    ],
+    SourceFile = case [P || P <- SourceCandidates, filelib:is_regular(P)] of
+        [ValidSrc | _] -> ValidSrc;
+        [] -> hd(SourceCandidates)
+    end,
+    AstOk = case bf_ast_verifier:verify_rules(SourceFile, #{required_constructs => [case_expr, if_expr]}) of
+        {ok, _} -> true;
+        _ -> false
+    end,
+    ScopedOk = case epp:parse_file(SourceFile, []) of
+        {ok, Forms} ->
+            FindFunExpr = fun(FunName, Arity, NodeTag) ->
+                Matching = [Clauses || {function, _, F, A, Clauses} <- Forms, F =:= FunName, A =:= Arity],
+                HasTag = fun Walk(T) when is_tuple(T) ->
+                    (tuple_size(T) >= 1 andalso element(1, T) =:= NodeTag) orelse Walk(tuple_to_list(T));
+                    Walk([H | Tail]) -> Walk(H) orelse Walk(Tail);
+                    Walk(_) -> false
+                end,
+                Matching =/= [] andalso HasTag(Matching)
+            end,
+            FindFunExpr(handle_http_response, 1, 'case') andalso FindFunExpr(grade_latency, 1, 'if');
+        _ -> false
+    end,
+    case {AstOk, ScopedOk} of
+        {true, true} ->
+            #{id => <<"ast_control_flow_audit">>, title => <<"AST Analysis: Required case...of & if...end">>, status => <<"passed">>, time_ms => 10, details => <<"Verified case...of in handle_http_response/1 and if...end in grade_latency/1.">>};
+        _ ->
+            #{id => <<"ast_control_flow_audit">>, title => <<"AST Analysis: Required case...of & if...end">>, status => <<"failed">>, time_ms => 10, details => <<"Required AST constructs missing: handle_http_response/1 must use case...of and grade_latency/1 must use if...end.">>}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_control_flow_audit">>, title => <<"AST Analysis: Required case...of & if...end">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_Flow = try
     R1 = flow_control:handle_http_response({http_response, 200, "OK"}),
     R2 = flow_control:handle_http_response({http_response, 401, []}),
     R3 = flow_control:handle_http_response({http_response, 403, []}),
-    R4 = flow_control:handle_http_response({http_response, 502, []}),
-    R5 = flow_control:handle_http_response({http_response, 301, []}),
-    R6 = flow_control:handle_http_response(corrupt),
+    R4 = flow_control:handle_http_response({http_response, 500, []}),
+    R5 = flow_control:handle_http_response({http_response, 502, []}),
+    R6 = flow_control:handle_http_response({http_response, 599, []}),
+    R7 = flow_control:handle_http_response({http_response, 301, []}),
+    R8 = flow_control:handle_http_response({http_response, "500", "bad"}),
+    R9 = flow_control:handle_http_response(corrupt),
     L1 = flow_control:grade_latency(30),
-    L2 = flow_control:grade_latency(150),
-    L3 = flow_control:grade_latency(800),
-    case {R1, R2, R3, R4, R5, R6, L1, L2, L3} of
-        {{ok, "OK"}, {error, unauthorized}, {error, unauthorized}, {error, server_error}, {error, {unexpected_status, 301}}, {error, invalid_response},
-         optimal, acceptable, sla_breach} ->
-            #{id => <<"case_and_if_expressions">>, title => <<"Control Expressions (case...of & if...end)">>, status => <<"passed">>, time_ms => 10, details => <<"Branch pattern matching and boolean guard chains verified">>};
+    L2 = flow_control:grade_latency(49),
+    L3 = flow_control:grade_latency(50),
+    L4 = flow_control:grade_latency(150),
+    L5 = flow_control:grade_latency(200),
+    L6 = flow_control:grade_latency(201),
+    L7 = flow_control:grade_latency(800),
+    case {R1, R2, R3, R4, R5, R6, R7, R8, R9, L1, L2, L3, L4, L5, L6, L7} of
+        {{ok, "OK"}, {error, unauthorized}, {error, unauthorized},
+         {error, server_error}, {error, server_error}, {error, server_error},
+         {error, {unexpected_status, 301}}, {error, invalid_response}, {error, invalid_response},
+         optimal, optimal, acceptable, acceptable, acceptable, sla_breach, sla_breach} ->
+            #{id => <<"case_and_if_expressions">>, title => <<"Control Expressions (case...of & if...end)">>, status => <<"passed">>, time_ms => 10, details => <<"Branch pattern matching, integer status boundaries, and SLA latency intervals verified.">>};
         Got1 ->
             #{id => <<"case_and_if_expressions">>, title => <<"Control Expressions (case...of & if...end)">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Flow mismatch: ~p", [Got1]))}
     end
 catch C1:Err1 ->
     #{id => <<"case_and_if_expressions">>, title => <<"Control Expressions (case...of & if...end)">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
-Stages = [CompileStage, S1_Flow]
-`, true
+Stages = [CompileStage, S1_Ast, S2_Flow]
+`, wsDir, wsDir), true
 
 	case "ch02-l04":
 		return `

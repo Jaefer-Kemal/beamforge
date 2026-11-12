@@ -618,7 +618,7 @@ assess_battery_level(Percent) ->
 \`\`\`
 
 ### 3. The Dreaded \`if_clause\` Runtime Crash
-In Erlang, if none of the guard conditions in an \`if...end\` block evaluate to \`true\`, the BEAM VM crashes immediately with an \`{if_clause}\` runtime error!
+In Erlang, if none of the guard conditions in an \`if...end\` block evaluate to \`true\`, the BEAM VM crashes immediately with an \`if_clause\` runtime error!
 
 To prevent this, Erlang programs using \`if\` must always include a final **\`true ->\` branch** as the fallback catch-all.
 
@@ -627,37 +627,38 @@ To prevent this, Erlang programs using \`if\` must always include a final **\`tr
 
 ## Parallel Worked Example
 
-Consider an industrial robotics arm controller inspecting optical sensor payloads and joint calibration angles:
+Consider a pharmaceutical cold-chain vault monitor inspecting probe readings and chamber climate alarms:
 
 \`\`\`erlang
--module(robot_controller).
--export([eval_sensor_reading/1, calibrate_joint_angle/1]).
+-module(cold_chain).
+-export([inspect_shipment/2, climate_action/2]).
 
-eval_sensor_reading(SensorPacket) ->
-    case SensorPacket of
-        {optical_probe, ready, Intensity} when Intensity >= 95 ->
-            {engaged, focused, Intensity};
-        {optical_probe, calibrating, _} ->
-            {hold, sensor_warmup};
-        {optical_probe, fault, ErrorCode} ->
-            {quarantine, {hardware_fault, ErrorCode}};
-        {optical_probe, UnknownStatus, _} ->
-            {error, {unsupported_probe_state, UnknownStatus}};
+%% 1. Branch inside the body using case...of across mixed tuple/atom shapes and guards
+inspect_shipment(ContainerId, ProbeResult) ->
+    case ProbeResult of
+        {seal_intact, Celsius} when is_number(Celsius), Celsius =< -18 ->
+            {cleared, ContainerId};
+        {seal_intact, Celsius} when is_number(Celsius) ->
+            {spoilage_alert, ContainerId, Celsius};
+        tampered ->
+            {quarantined, security_breach};
         _ ->
-            {error, unrecognized_sensor_packet}
+            unreadable_probe
     end.
 
-calibrate_joint_angle(Degrees) ->
+%% 2. Branch strictly on guard conditions using if...end (4 branches + mandatory true)
+climate_action(Celsius, DoorOpenCount) ->
     if
-        Degrees >= -15, Degrees =< 15 -> aligned;
-        Degrees < -15; Degrees > 180 -> out_of_bounds;
-        true -> manual_trim_required
+        DoorOpenCount > 5 -> emergency_lockdown;
+        Celsius > -10 -> compressor_boost;
+        Celsius < -30 -> heater_trim;
+        true -> nominal_cruise
     end.
 \`\`\`
 
-Notice:
-- \`eval_sensor_reading/1\` demonstrates \`case...of\` branching on a tuple, combining pattern matching with integer guards (\`when Intensity >= 95\`), specific error tuples, and a wildcard fallback.
-- \`calibrate_joint_angle/1\` demonstrates \`if...end\` guard chains using compound comma AND, semicolon OR, and the mandatory \`true ->\` catch-all branch.
+Notice how the BEAM evaluates this module:
+- \`inspect_shipment/2\` branches inside the body with \`case...of\`, mixing tuple destructuring, integer guards (\`when is_number(Celsius), Celsius =< -18\`), an atom match (\`tampered\`), and a wildcard fallback (\`_\`).
+- \`climate_action/2\` evaluates two telemetry metrics through an \`if...end\` guard chain from top to bottom and prevents \`if_clause\` crashes using the mandatory \`true -> nominal_cruise\` catch-all branch.
 
 ## Official Erlang Docs & Function Reference
 
@@ -676,19 +677,20 @@ if
     true -> FallbackBody
 end.
 \`\`\`
+> Note: See the Erlang Reference Card for complete control-flow semantics and BEAM pattern-decoder guarantees.
 
 ## Assignment Specification
 
 Implement two flow control functions in \`flow_control.erl\`:
 
 ### 1. \`handle_http_response(Response)\`
-- **Input**: Any term \`Response\`. Well-formed responses are 3-element tuples containing the atom tag \`http_response\`, an integer \`StatusCode\`, and a payload \`Body\`.
+- **Input**: Any Erlang term \`Response\`. Well-formed responses are 3-element tuples tagged with the atom \`http_response\`, followed by an integer status code \`StatusCode\` and a payload \`Body\`.
 - **Behavior**: Inspect the response inside the function body using a \`case...of\` expression:
-  - Status code \`200\`: Returns \`{ok, Body}\`.
-  - Status code \`401\` or \`403\`: Returns \`{error, unauthorized}\`.
-  - Status codes in the \`500\` through \`599\` range (inclusive): Returns \`{error, server_error}\`.
-  - Any other integer status code: Returns \`{error, {unexpected_status, StatusCode}}\`.
-  - Any term that does not match the 3-element \`http_response\` tuple structure: Returns \`{error, invalid_response}\`.
+  - Status code \`200\`: return a 2-element \`ok\` tuple containing \`Body\`.
+  - Status code \`401\` or \`403\`: return an \`error\` pair tagged with \`unauthorized\`.
+  - Status codes in the \`500\` through \`599\` range (inclusive): return an \`error\` pair tagged with \`server_error\`.
+  - Any other integer status code: return an \`error\` pair wrapping an \`unexpected_status\` pair carrying that status code.
+  - Any term that does not match the 3-element \`http_response\` tuple with an integer status code: return an \`error\` pair tagged with \`invalid_response\`.
 - **Examples**:
   - \`flow_control:handle_http_response({http_response, 200, "{\\"status\\":\\"healthy\\"}"})\` returns \`{ok, "{\\"status\\":\\"healthy\\"}"}\`.
   - \`flow_control:handle_http_response({http_response, 401, []})\` returns \`{error, unauthorized}\`.
@@ -700,9 +702,9 @@ Implement two flow control functions in \`flow_control.erl\`:
 ### 2. \`grade_latency(LatencyMs)\`
 - **Input**: An integer \`LatencyMs\` representing network round-trip time in milliseconds.
 - **Behavior**: Classify latency using an \`if...end\` expression with guard conditions:
-  - Latency strictly less than \`50\` ms: Returns the atom \`optimal\`.
-  - Latency between \`50\` ms and \`200\` ms (inclusive): Returns the atom \`acceptable\`.
-  - Any latency greater than \`200\` ms (handled via the mandatory \`true\` fallback branch): Returns the atom \`sla_breach\`.
+  - Latency strictly below \`50\` ms: return the atom \`optimal\`.
+  - Latency from \`50\` ms through \`200\` ms (inclusive): return the atom \`acceptable\`.
+  - Any latency exceeding \`200\` ms (handled via the mandatory catch-all branch): return the atom \`sla_breach\`.
 - **Examples**:
   - \`flow_control:grade_latency(30)\` returns \`optimal\`.
   - \`flow_control:grade_latency(50)\` returns \`acceptable\`.
@@ -713,7 +715,7 @@ Implement two flow control functions in \`flow_control.erl\`:
 ## Rules & Verification Constraints
 
 - \`handle_http_response/1\` must use a \`case...of\` expression.
-- \`grade_latency/1\` must use an \`if...end\` expression with a \`true ->\` catch-all.`,
+- \`grade_latency/1\` must use an \`if...end\` expression with a mandatory catch-all branch.`,
     otpDocCards: [
       {
         functionName: 'case_expression',
@@ -761,25 +763,25 @@ Implement two flow control functions in \`flow_control.erl\`:
         title: 'Handle Unauthorized HTTP Response',
         erlangCall: 'flow_control:handle_http_response({http_response, 401, []})',
         expectedOutput: '{error, unauthorized}',
-        explanation: 'Matches 401/403 guard branch.',
+        explanation: 'Matches 401 or 403 unauthorized status branch.',
       },
       {
         id: 'tc-ch02-03-c',
         title: 'Grade Optimal Latency',
         erlangCall: 'flow_control:grade_latency(30)',
         expectedOutput: 'optimal',
-        explanation: '30 is < 50 ms in if...end.',
+        explanation: '30 ms falls below 50 ms threshold.',
       },
       {
         id: 'tc-ch02-03-d',
         title: 'Grade SLA Breach Latency',
         erlangCall: 'flow_control:grade_latency(500)',
         expectedOutput: 'sla_breach',
-        explanation: '500 triggers the true -> fallback.',
+        explanation: '500 ms exceeds 200 ms and triggers the catch-all fallback branch.',
       },
     ],
     astRules: {
-      requiredConstructs: ['case_expr'],
+      requiredConstructs: ['case_expr', 'if_expr'],
     },
     solutionExplanation: 'Demonstrates case...of pattern matching on HTTP response tuples and if...end guard chains for latency grading.',
     files: [
@@ -789,12 +791,12 @@ Implement two flow control functions in \`flow_control.erl\`:
         content: `-module(flow_control).
 -export([handle_http_response/1, grade_latency/1]).
 
-%% @doc Parse and normalize HTTP response tuples into success and error tagged envelopes.
-handle_http_response(Response) ->
+%% @doc Dispatch on a 3-element HTTP response tuple via a case expression, returning an ok payload pair for status 200 or classifying 401/403, 500-599, unexpected integer statuses, and malformed terms into error pairs.
+handle_http_response(_Response) ->
     ok.
 
-%% @doc Classify round-trip latency into optimal, acceptable, or sla_breach status atoms.
-grade_latency(LatencyMs) ->
+%% @doc Classify an integer round-trip latency in milliseconds via an if expression into optimal (under 50 ms), acceptable (50 through 200 ms inclusive), or SLA-breach status atoms.
+grade_latency(_LatencyMs) ->
     ok.`,
       },
     ],
@@ -802,20 +804,22 @@ grade_latency(LatencyMs) ->
       'src/flow_control.erl': `-module(flow_control).
 -export([handle_http_response/1, grade_latency/1]).
 
+%% @doc Dispatch on a 3-element HTTP response tuple via a case expression, returning an ok payload pair for status 200 or classifying 401/403, 500-599, unexpected integer statuses, and malformed terms into error pairs.
 handle_http_response(Response) ->
     case Response of
         {http_response, 200, Body} ->
             {ok, Body};
         {http_response, Code, _Body} when Code =:= 401; Code =:= 403 ->
             {error, unauthorized};
-        {http_response, Code, _Body} when Code >= 500, Code =< 599 ->
+        {http_response, Code, _Body} when is_integer(Code), Code >= 500, Code =< 599 ->
             {error, server_error};
-        {http_response, Code, _Body} ->
+        {http_response, Code, _Body} when is_integer(Code) ->
             {error, {unexpected_status, Code}};
         _ ->
             {error, invalid_response}
     end.
 
+%% @doc Classify an integer round-trip latency in milliseconds via an if expression into optimal (under 50 ms), acceptable (50 through 200 ms inclusive), or SLA-breach status atoms.
 grade_latency(LatencyMs) ->
     if
         LatencyMs < 50 -> optimal;
@@ -826,30 +830,32 @@ grade_latency(LatencyMs) ->
     starterCode: `-module(flow_control).
 -export([handle_http_response/1, grade_latency/1]).
 
-%% @doc Parse and normalize HTTP response tuples into success and error tagged envelopes.
-handle_http_response(Response) ->
+%% @doc Dispatch on a 3-element HTTP response tuple via a case expression, returning an ok payload pair for status 200 or classifying 401/403, 500-599, unexpected integer statuses, and malformed terms into error pairs.
+handle_http_response(_Response) ->
     ok.
 
-%% @doc Classify round-trip latency into optimal, acceptable, or sla_breach status atoms.
-grade_latency(LatencyMs) ->
+%% @doc Classify an integer round-trip latency in milliseconds via an if expression into optimal (under 50 ms), acceptable (50 through 200 ms inclusive), or SLA-breach status atoms.
+grade_latency(_LatencyMs) ->
     ok.`,
     solutionCode: `-module(flow_control).
 -export([handle_http_response/1, grade_latency/1]).
 
+%% @doc Dispatch on a 3-element HTTP response tuple via a case expression, returning an ok payload pair for status 200 or classifying 401/403, 500-599, unexpected integer statuses, and malformed terms into error pairs.
 handle_http_response(Response) ->
     case Response of
         {http_response, 200, Body} ->
             {ok, Body};
         {http_response, Code, _Body} when Code =:= 401; Code =:= 403 ->
             {error, unauthorized};
-        {http_response, Code, _Body} when Code >= 500, Code =< 599 ->
+        {http_response, Code, _Body} when is_integer(Code), Code >= 500, Code =< 599 ->
             {error, server_error};
-        {http_response, Code, _Body} ->
+        {http_response, Code, _Body} when is_integer(Code) ->
             {error, {unexpected_status, Code}};
         _ ->
             {error, invalid_response}
     end.
 
+%% @doc Classify an integer round-trip latency in milliseconds via an if expression into optimal (under 50 ms), acceptable (50 through 200 ms inclusive), or SLA-breach status atoms.
 grade_latency(LatencyMs) ->
     if
         LatencyMs < 50 -> optimal;
