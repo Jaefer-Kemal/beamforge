@@ -1178,51 +1178,60 @@ T1_Res = try inventory_hof:total_inventory_valuation([{product, 1, "Keyboard", 5
         #{call_str => <<"inventory_hof:total_inventory_valuation([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 4}])">>,
           expected => <<"600">>, actual => <<"600">>, passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"inventory_hof:total_inventory_valuation(...)">>, expected => <<"600">>,
+        #{call_str => <<"inventory_hof:total_inventory_valuation([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 4}])">>,
+          expected => <<"600">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"inventory_hof:total_inventory_valuation(...)">>, expected => <<"600">>,
+    #{call_str => <<"inventory_hof:total_inventory_valuation([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 4}])">>,
+      expected => <<"600">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try inventory_hof:critical_stock_alerts([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 2}], 5) of
     [{alert, 2, "Mouse", 2}] = R2 ->
-        #{call_str => <<"inventory_hof:critical_stock_alerts(..., 5)">>, expected => <<"[{alert, 2, \"Mouse\", 2}]">>,
+        #{call_str => <<"inventory_hof:critical_stock_alerts([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 2}], 5)">>,
+          expected => <<"[{alert, 2, \"Mouse\", 2}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"inventory_hof:critical_stock_alerts(...)">>, expected => <<"[{alert, 2, \"Mouse\", 2}]">>,
+        #{call_str => <<"inventory_hof:critical_stock_alerts([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 2}], 5)">>,
+          expected => <<"[{alert, 2, \"Mouse\", 2}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
 catch C2:R2 ->
-    #{call_str => <<"inventory_hof:critical_stock_alerts(...)">>, expected => <<"[{alert, ...}]">>,
+    #{call_str => <<"inventory_hof:critical_stock_alerts([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 2}], 5)">>,
+      expected => <<"[{alert, 2, \"Mouse\", 2}]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
 T3_Res = try inventory_hof:apply_orders_with_keylists([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}], [{order, 1, 3}, {order, 2, 10}]) of
     [{product, 1, "Keyboard", 50, 7}, {product, 2, "Mouse", 25, 5}] = R3 ->
-        #{call_str => <<"inventory_hof:apply_orders_with_keylists(...)">>,
+        #{call_str => <<"inventory_hof:apply_orders_with_keylists([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}], [{order, 1, 3}, {order, 2, 10}])">>,
           expected => <<"[{product, 1, \"Keyboard\", 50, 7}, {product, 2, \"Mouse\", 25, 5}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T3_Start};
     Other3 ->
-        #{call_str => <<"inventory_hof:apply_orders_with_keylists(...)">>,
+        #{call_str => <<"inventory_hof:apply_orders_with_keylists([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}], [{order, 1, 3}, {order, 2, 10}])">>,
           expected => <<"[{product, 1, \"Keyboard\", 50, 7}, {product, 2, \"Mouse\", 25, 5}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
 catch C3:R3 ->
-    #{call_str => <<"inventory_hof:apply_orders_with_keylists(...)">>, expected => <<"[{product, ...}]">>,
+    #{call_str => <<"inventory_hof:apply_orders_with_keylists([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}], [{order, 1, 3}, {order, 2, 10}])">>,
+      expected => <<"[{product, 1, \"Keyboard\", 50, 7}, {product, 2, \"Mouse\", 25, 5}]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 T4_Start = erlang:system_time(millisecond),
 T4_Res = try inventory_hof:aggregate_sla_logs([{log, api_auth, 40, ok}, {log, api_pay, 120, error}, {log, api_auth, 60, ok}]) of
     {sla_summary, 3, 1, 220} = R4 ->
-        #{call_str => <<"inventory_hof:aggregate_sla_logs(...)">>, expected => <<"{sla_summary, 3, 1, 220}">>,
+        #{call_str => <<"inventory_hof:aggregate_sla_logs([{log, api_auth, 40, ok}, {log, api_pay, 120, error}, {log, api_auth, 60, ok}])">>,
+          expected => <<"{sla_summary, 3, 1, 220}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R4]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T4_Start};
     Other4 ->
-        #{call_str => <<"inventory_hof:aggregate_sla_logs(...)">>, expected => <<"{sla_summary, 3, 1, 220}">>,
+        #{call_str => <<"inventory_hof:aggregate_sla_logs([{log, api_auth, 40, ok}, {log, api_pay, 120, error}, {log, api_auth, 60, ok}])">>,
+          expected => <<"{sla_summary, 3, 1, 220}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other4]))), passed => false, time_ms => 0}
 catch C4:R4 ->
-    #{call_str => <<"inventory_hof:aggregate_sla_logs(...)">>, expected => <<"{sla_summary, ...}">>,
+    #{call_str => <<"inventory_hof:aggregate_sla_logs([{log, api_auth, 40, ok}, {log, api_pay, 120, error}, {log, api_auth, 60, ok}])">>,
+      expected => <<"{sla_summary, 3, 1, 220}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
@@ -5734,34 +5743,79 @@ Stages = [CompileStage_H06, S_Ast_H06, S1_Comprehensions]
 `, wsDir, wsDir), true
 
 	case "ch03-l07":
-		return `
+		return fmt.Sprintf(`
 CompileStage_H07 = case code:ensure_loaded(inventory_hof) of
     {module, inventory_hof} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"inventory_hof.erl compiled cleanly">>};
+        Exports_H07 = inventory_hof:module_info(exports),
+        Req_H07 = [{total_inventory_valuation, 1}, {critical_stock_alerts, 2}, {apply_orders_with_keylists, 2}, {aggregate_sla_logs, 1}],
+        Missing_H07 = [FA || FA <- Req_H07, not lists:member(FA, Exports_H07)],
+        case Missing_H07 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"inventory_hof.erl compiled cleanly and exported total_inventory_valuation/1, critical_stock_alerts/2, apply_orders_with_keylists/2, aggregate_sla_logs/1.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_H07]))}
+        end;
     {error, E_H07} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_H07]))}
+end,
+S_Ast_H07 = try
+    SourceCandidates_H07 = [
+        filename:join(["%s", "src", "inventory_hof.erl"]),
+        filename:join(["%s", "inventory_hof.erl"])
+    ],
+    SourceFile_H07 = case [P || P <- SourceCandidates_H07, filelib:is_regular(P)] of
+        [ValidSrc_H07 | _] -> ValidSrc_H07;
+        [] -> hd(SourceCandidates_H07)
+    end,
+    Rules_H07 = #{
+        required_remote_calls => [{lists, foldl, 3}, {lists, filtermap, 2}, {lists, keyfind, 3}, {lists, keystore, 4}],
+        forbidden_constructs => [map_syntax, bit_syntax]
+    },
+    case bf_ast_verifier:verify_rules(SourceFile_H07, <<>>, Rules_H07) of
+        {ok, _} ->
+            #{id => <<"ast_inventory_hof_audit">>, title => <<"AST HOF & Keylist BIF Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified lists:foldl/3, lists:filtermap/2, lists:keyfind/3, lists:keystore/4 and zero maps or binaries.">>};
+        {error, AstViolations_H07} ->
+            FirstMsg_H07 = case AstViolations_H07 of
+                [#{message := M_H07} | _] -> M_H07;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_H07]))
+            end,
+            #{id => <<"ast_inventory_hof_audit">>, title => <<"AST HOF & Keylist BIF Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_H07, error => AstViolations_H07}
+    end
+catch Class_Ast_H07:Err_Ast_H07 ->
+    #{id => <<"ast_inventory_hof_audit">>, title => <<"AST HOF & Keylist BIF Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [Class_Ast_H07, Err_Ast_H07]))}
 end,
 S1_HofSuite = try
     Inv = [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 2}],
     Val = inventory_hof:total_inventory_valuation(Inv),
+    ValEmpty = inventory_hof:total_inventory_valuation([]),
     Alerts = inventory_hof:critical_stock_alerts(Inv, 5),
+    AlertsExact = inventory_hof:critical_stock_alerts(Inv, 2),
+    AlertsEmpty = inventory_hof:critical_stock_alerts([], 5),
     UpdatedInv = inventory_hof:apply_orders_with_keylists(Inv, [{order, 1, 3}, {order, 2, 10}, {order, 99, 1}]),
+    SeqInv = inventory_hof:apply_orders_with_keylists(Inv, [{order, 1, 6}, {order, 1, 5}, {order, 1, 4}, {order, 2, 0}, {order, 2, -1}]),
+    EmptyOrdersInv = inventory_hof:apply_orders_with_keylists(Inv, []),
     Logs = [{log, auth, 40, ok}, {log, pay, 120, error}, {log, auth, 60, ok}],
     Agg = inventory_hof:aggregate_sla_logs(Logs),
-    case {Val, Alerts, UpdatedInv, Agg} of
-        {550,
+    AggEmpty = inventory_hof:aggregate_sla_logs([]),
+    case {Val, ValEmpty, Alerts, AlertsExact, AlertsEmpty, UpdatedInv, SeqInv, EmptyOrdersInv, Agg, AggEmpty} of
+        {550, 0,
          [{alert, 2, "Mouse", 2}],
+         [{alert, 2, "Mouse", 2}],
+         [],
          [{product, 1, "Keyboard", 50, 7}, {product, 2, "Mouse", 25, 2}],
-         {sla_summary, 3, 1, 220}} ->
-            #{id => <<"hof_inventory_suite">>, title => <<"Refactored Inventory & SLA Aggregator Pipeline">>, status => <<"passed">>, time_ms => 12, details => <<"Passed valuation, critical stock alerts, keylist order application, and SLA log aggregation">>};
+         [{product, 1, "Keyboard", 50, 0}, {product, 2, "Mouse", 25, 2}],
+         [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 2}],
+         {sla_summary, 3, 1, 220},
+         {sla_summary, 0, 0, 0}} ->
+            #{id => <<"hof_inventory_suite">>, title => <<"Refactored Inventory & SLA Aggregator Pipeline">>, status => <<"passed">>, time_ms => 12, details => <<"Passed empty inputs, valuation, inclusive stock bounds, sequential stateful order depletion, and SLA log aggregation">>};
         Got_H07 ->
             #{id => <<"hof_inventory_suite">>, title => <<"Refactored Inventory & SLA Aggregator Pipeline">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("HOF Suite mismatch: ~p", [Got_H07]))}
     end
 catch Class_H07:Err_H07 ->
     #{id => <<"hof_inventory_suite">>, title => <<"Refactored Inventory & SLA Aggregator Pipeline">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_H07, Err_H07]))}
 end,
-Stages = [CompileStage_H07, S1_HofSuite]
-`, true
+Stages = [CompileStage_H07, S_Ast_H07, S1_HofSuite]
+`, wsDir, wsDir), true
 
 	// ── CHAPTER 4 ─────────────────────────────────────────────────────────────
 	case "ch04-l01":

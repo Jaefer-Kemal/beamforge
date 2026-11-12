@@ -155,6 +155,46 @@ fulfilled_order_receipts(Inventory, Orders) ->
     ].
 `
 
+	inventoryHofSolution := `-module(inventory_hof).
+-export([total_inventory_valuation/1, critical_stock_alerts/2, apply_orders_with_keylists/2, aggregate_sla_logs/1]).
+
+%% @doc Compute the combined monetary value of all stock in Inventory in a single pass, returning zero for an empty catalog.
+total_inventory_valuation(Inventory) ->
+    lists:foldl(fun({product, _Id, _Name, Price, Stock}, TotalAcc) ->
+        TotalAcc + (Price * Stock)
+    end, 0, Inventory).
+
+%% @doc Filter and project Inventory items whose stock is at or below the caller-supplied Threshold into alert notifications while preserving order.
+critical_stock_alerts(Inventory, Threshold) ->
+    lists:filtermap(fun
+        ({product, Id, Name, _Price, Stock}) when Stock =< Threshold ->
+            {true, {alert, Id, Name, Stock}};
+        (_) ->
+            false
+    end, Inventory).
+
+%% @doc Apply sequential customer Orders left-to-right against Inventory, deducting valid positive quantities with sufficient stock in place without altering catalog ordering.
+apply_orders_with_keylists(Inventory, Orders) ->
+    lists:foldl(fun({order, ProdId, Qty}, AccInv) ->
+        case lists:keyfind(ProdId, 2, AccInv) of
+            {product, ProdId, Name, Price, Stock} when Stock >= Qty, Qty > 0 ->
+                UpdatedProd = {product, ProdId, Name, Price, Stock - Qty},
+                lists:keystore(ProdId, 2, AccInv, UpdatedProd);
+            _ ->
+                AccInv
+        end
+    end, Inventory, Orders).
+
+%% @doc Reduce service Logs into an SLA summary tuple tracking total request count, error-status count, and cumulative latency in milliseconds.
+aggregate_sla_logs(Logs) ->
+    lists:foldl(fun
+        ({log, _Endpoint, Latency, error}, {sla_summary, TotalReqs, Errors, TotalLatency}) ->
+            {sla_summary, TotalReqs + 1, Errors + 1, TotalLatency + Latency};
+        ({log, _Endpoint, Latency, _OkStatus}, {sla_summary, TotalReqs, Errors, TotalLatency}) ->
+            {sla_summary, TotalReqs + 1, Errors, TotalLatency + Latency}
+    end, {sla_summary, 0, 0, 0}, Logs).
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -189,6 +229,11 @@ fulfilled_order_receipts(Inventory, Orders) ->
 			exerciseID:   "ch03-l06",
 			visibleCount: 3,
 			files:        map[string]string{"src/comprehension_queries.erl": comprehensionQueriesSolution},
+		},
+		{
+			exerciseID:   "ch03-l07",
+			visibleCount: 4,
+			files:        map[string]string{"src/inventory_hof.erl": inventoryHofSolution},
 		},
 	}
 
@@ -829,6 +874,126 @@ fulfilled_order_receipts(Inventory, Orders) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected list_comprehensions stage to fail for generator order and stock/qty boundary bugs, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch03-l07 rejects manual recursion and list comprehension bypasses missing required BIFs via AST audit", func(t *testing.T) {
+		sessionID := "test-ch03-l07-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		manualBypass := map[string]string{
+			"src/inventory_hof.erl": `-module(inventory_hof).
+-export([total_inventory_valuation/1, critical_stock_alerts/2, apply_orders_with_keylists/2, aggregate_sla_logs/1]).
+
+total_inventory_valuation(Inventory) ->
+    lists:sum([Price * Stock || {product, _Id, _Name, Price, Stock} <- Inventory]).
+
+critical_stock_alerts(Inventory, Threshold) ->
+    [{alert, Id, Name, Stock} || {product, Id, Name, _Price, Stock} <- Inventory, Stock =< Threshold].
+
+apply_orders_with_keylists(Inventory, []) ->
+    Inventory;
+apply_orders_with_keylists(Inventory, [{order, ProdId, Qty} | Rest]) ->
+    Updated = [case Id =:= ProdId andalso Stock >= Qty andalso Qty > 0 of
+        true -> {product, Id, Name, Price, Stock - Qty};
+        false -> {product, Id, Name, Price, Stock}
+    end || {product, Id, Name, Price, Stock} <- Inventory],
+    apply_orders_with_keylists(Updated, Rest).
+
+aggregate_sla_logs(Logs) ->
+    agg(Logs, {sla_summary, 0, 0, 0}).
+
+agg([], Acc) ->
+    Acc;
+agg([{log, _, Lat, error} | T], {sla_summary, C, E, S}) ->
+    agg(T, {sla_summary, C + 1, E + 1, S + Lat});
+agg([{log, _, Lat, _} | T], {sla_summary, C, E, S}) ->
+    agg(T, {sla_summary, C + 1, E, S + Lat}).
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch03-l07", manualBypass)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when lists:foldl/filtermap/keyfind/keystore are bypassed, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_inventory_hof_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_inventory_hof_audit stage to fail when required BIF calls are missing, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch03-l07 rejects inclusive boundary and non-threaded sequential depletion bugs", func(t *testing.T) {
+		sessionID := "test-ch03-l07-neg-edge"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		edgeBugs := map[string]string{
+			"src/inventory_hof.erl": `-module(inventory_hof).
+-export([total_inventory_valuation/1, critical_stock_alerts/2, apply_orders_with_keylists/2, aggregate_sla_logs/1]).
+
+total_inventory_valuation(Inventory) ->
+    lists:foldl(fun({product, _Id, _Name, Price, Stock}, Acc) -> Acc + (Price * Stock) end, 0, Inventory).
+
+%% Bug: strict < Threshold instead of =< misses exact boundary Stock =:= Threshold.
+critical_stock_alerts(Inventory, Threshold) ->
+    lists:filtermap(fun
+        ({product, Id, Name, _Price, Stock}) when Stock < Threshold -> {true, {alert, Id, Name, Stock}};
+        (_) -> false
+    end, Inventory).
+
+%% Bug: allows strict Stock > Qty instead of >= Qty and ignores AccInv lookup by re-querying original Inventory.
+apply_orders_with_keylists(Inventory, Orders) ->
+    lists:foldl(fun({order, ProdId, Qty}, AccInv) ->
+        case lists:keyfind(ProdId, 2, Inventory) of
+            {product, ProdId, Name, Price, Stock} when Stock > Qty, Qty > 0 ->
+                lists:keystore(ProdId, 2, AccInv, {product, ProdId, Name, Price, Stock - Qty});
+            _ ->
+                AccInv
+        end
+    end, Inventory, Orders).
+
+aggregate_sla_logs(Logs) ->
+    lists:foldl(fun
+        ({log, _, Latency, error}, {sla_summary, C, E, L}) -> {sla_summary, C + 1, E + 1, L + Latency};
+        ({log, _, Latency, _}, {sla_summary, C, E, L}) -> {sla_summary, C + 1, E, L + Latency}
+    end, {sla_summary, 0, 0, 0}, Logs).
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch03-l07", edgeBugs)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict for Stock < Threshold and non-threaded order depletion bugs, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "hof_inventory_suite" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected hof_inventory_suite stage to fail for threshold boundary and sequential state bugs, stages=%+v", report.Stages)
 		}
 	})
 }

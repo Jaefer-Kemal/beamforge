@@ -1862,176 +1862,128 @@ fulfilled_order_receipts(Inventory, Orders) ->
     visualScene: 'tco_vs_body_stack',
     conceptMarkdown: `## Why This Matters in Production
 
-In Chapter 2, you built the foundation of an inventory processing engine using manual tail-recursion. While functional, that architecture required dozens of lines of private helper loops, accumulator management, and manual list traversals.
+In Chapter 2, you built an inventory processing engine using manual tail recursion. While effective, that design required writing separate private helper loops, managing reverse accumulators, and hand-coding tuple scans across multiple functions.
 
 Now that you have mastered:
-1. **\`lists:foldl/3\`** for tail-recursive state accumulation in constant $O(1)$ stack space,
-2. **\`lists:filtermap/2\`** for single-pass filtering and projection without intermediate heap allocation,
-3. **\`lists:keyfind/3\` & \`lists:keystore/4\`** for native C-speed tuple lookups and in-place replacements,
+1. **\`lists:foldl/3\`** for tail-recursive state aggregation in constant $O(1)$ stack space,
+2. **\`lists:filtermap/2\`** for single-pass selection and record transformation without intermediate lists,
+3. **\`lists:keyfind/3\` & \`lists:keystore/4\`** for native C-speed tuple lookups and in-place key replacement,
 
-you are ready to synthesize these primitives into an idiomatic, high-throughput analytics and order fulfillment pipeline.
+you can synthesize these OTP primitives into an idiomatic, high-throughput analytics and order fulfillment pipeline.
 
 ## Deep Concept Breakdown & Under the Hood
 
-### 1. Refactoring Manual Recursion into Standard Folds
+### 1. Threading Evolving State in a Single Left Fold
 
-In manual recursion, calculating aggregated metrics across collections required defining private loop functions with base cases. With \`lists:foldl/3\`, these loops collapse into declarative reductions.
+When a sequence of transactions can mutate the availability checked by later transactions, each step must inspect the state produced by the previous step rather than the initial snapshot. Passing the collection itself as the accumulator in \`lists:foldl/3\` threads updated state strictly left-to-right across the batch in constant $O(1)$ call-stack space.
 
-Consider calculating the gross cargo weight across shipping containers:
+Similarly, rather than scanning an event stream three times for counts, anomalies, and sums, folding into a compound accumulator tuple computes multiple metrics in one linear pass:
 \`\`\`erlang
-total_payload_weight(Containers) ->
-    lists:foldl(fun({container, _Id, UnitKg, Units}, TotalAcc) ->
-        TotalAcc + (UnitKg * Units)
-    end, 0, Containers).
+%% Accumulate sample count and running maximum in a single left-fold pass
+measure_peak(Samples) ->
+    lists:foldl(fun(Reading, {Seen, High}) ->
+        {Seen + 1, erlang:max(Reading, High)}
+    end, {0, 0}, Samples).
 \`\`\`
 
-The BEAM compiler transforms this fold into a tight tail-recursive bytecode loop with zero call-frame stack growth.
+### 2. Fused Filtering & Native C Keyed Lookups
 
-### 2. Batch State Transitions with Keyed BIFs
+Chaining \`lists:filter/2\` followed by \`lists:map/2\` allocates an intermediate list on the process heap solely to discard it a microsecond later. \`lists:filtermap/2\` combines both predicates and tuple reshaping into one traversal. Meanwhile, pairing \`lists:keyfind/3\` with \`lists:keystore/4\` delegates tuple field comparisons (by 1-based tuple index) to fast ERTS C loops while preserving the relative positions of updated tuples in place.
 
-When processing batches of transactions against an existing master collection, you fold over the incoming transaction list while threading the master collection through as the accumulator.
+## Parallel Worked Example
 
-Inside the fold step, ERTS C BIFs handle lookup and update in $O(N)$ native C execution:
-\`\`\`erlang
-allocate_resources(Pools, Requests) ->
-    lists:foldl(fun({req, PoolId, UnitsNeeded}, AccPools) ->
-        case lists:keyfind(PoolId, 2, AccPools) of
-            {pool, PoolId, Name, FreeUnits} when FreeUnits >= UnitsNeeded, UnitsNeeded > 0 ->
-                Updated = {pool, PoolId, Name, FreeUnits - UnitsNeeded},
-                lists:keystore(PoolId, 2, AccPools, Updated);
-            _ ->
-                AccPools
-        end
-    end, Pools, Requests).
-\`\`\`
-
-If a pool has sufficient capacity, \`lists:keystore/4\` replaces it in-place in \`AccPools\`. If capacity is insufficient or the pool identifier is missing, \`AccPools\` passes to the next iteration unaltered.
-
-### 3. Multi-Metric Stream Telemetry Aggregation
-
-High-throughput BEAM backends stream millions of log tuples across process boundaries.
-Using a multi-field tagged tuple accumulator (such as \`{telemetry_summary, TotalCount, ErrorCount, TotalMetric}\`), a single left-fold pass computes counts, error tallies, and latency sums simultaneously.
-
-## Parallel Worked Example: Satellite Billing & Link Telemetry
-
-The following module implements a complete telemetry analysis and quota billing pipeline for satellite uplink channels. Notice how it combines \`foldl\`, \`filtermap\`, \`keyfind\`, and \`keystore\` across four distinct responsibilities:
+The module below implements a healthcare clinic triage filter and shift-roster nurse dispatcher using the same standard-library primitives on distinct data shapes and a different key position:
 
 \`\`\`erlang
--module(satellite_billing).
--export([total_bandwidth_capacity/1, degraded_link_alarms/2, apply_quota_usage/2, aggregate_uplink_telemetry/1]).
+-module(clinic_triage).
+-export([priority_triage_cards/2, dispatch_nurse_batches/2]).
 
-%% 1. Foldl reduction computing total gigabits capacity across carrier channels:
-total_bandwidth_capacity(Channels) ->
-    lists:foldl(fun({channel, _Id, _Freq, Gbps, Carriers}, Total) ->
-        Total + (Gbps * Carriers)
-    end, 0, Channels).
-
-%% 2. Filtermap single-pass alarm extraction for degraded SNR links:
-degraded_link_alarms(Channels, MinSnrDb) ->
+%% ── Phase 1: Single-Pass Predicate Filtering & Shape Projection ───────────
+%% Emits triage cards with boosted priority only for patients strictly above CutoffScore.
+priority_triage_cards(Patients, CutoffScore) ->
     lists:filtermap(fun
-        ({channel, Id, _Freq, _Gbps, _Carriers, SnrDb}) when SnrDb =< MinSnrDb ->
-            {true, {carrier_alarm, Id, SnrDb}};
+        ({patient, Ward, Score}) when Score > CutoffScore ->
+            {true, {triage_card, Ward, Score + 10}};
         (_) ->
             false
-    end, Channels).
+    end, Patients).
 
-%% 3. Foldl + keyfind + keystore quota deduction for batch usage sessions:
-apply_quota_usage(Accounts, Sessions) ->
-    lists:foldl(fun({session, AccountId, BytesUsed}, AccAccounts) ->
-        case lists:keyfind(AccountId, 2, AccAccounts) of
-            {account, AccountId, Plan, RemainingBytes} when RemainingBytes >= BytesUsed, BytesUsed > 0 ->
-                Updated = {account, AccountId, Plan, RemainingBytes - BytesUsed},
-                lists:keystore(AccountId, 2, AccAccounts, Updated);
+%% ── Phase 2: Folding Compound State with 1-Based Position-3 Lookups ───────
+%% Threads {RosterAcc, SkippedAcc} across dispatches, matching BadgeId at index 3.
+dispatch_nurse_batches(Nurses, Shifts) ->
+    lists:foldl(fun({dispatch, TargetDept, BadgeId}, {RosterAcc, SkippedAcc}) ->
+        case lists:keyfind(BadgeId, 3, RosterAcc) of
+            {nurse, TargetDept, BadgeId, SlotsLeft} when SlotsLeft > 0 ->
+                UpdatedNurse = {nurse, TargetDept, BadgeId, SlotsLeft - 1},
+                {lists:keystore(BadgeId, 3, RosterAcc, UpdatedNurse), SkippedAcc};
             _ ->
-                AccAccounts
+                {RosterAcc, SkippedAcc + 1}
         end
-    end, Accounts, Sessions).
-
-%% 4. Foldl telemetry log aggregation into a tagged summary tuple:
-aggregate_uplink_telemetry(Pings) ->
-    lists:foldl(fun
-        ({ping, _SatId, Latency, error}, {uplink_stats, PingsAcc, ErrsAcc, LatAcc}) ->
-            {uplink_stats, PingsAcc + 1, ErrsAcc + 1, LatAcc + Latency};
-        ({ping, _SatId, Latency, _OkStatus}, {uplink_stats, PingsAcc, ErrsAcc, LatAcc}) ->
-            {uplink_stats, PingsAcc + 1, ErrsAcc, LatAcc + Latency}
-    end, {uplink_stats, 0, 0, 0}, Pings).
+    end, {Nurses, 0}, Shifts).
 \`\`\`
 
-## Standard Library Function Reference
+How the BEAM executes these pipelines:
+- **Phase 1 (\`priority_triage_cards/2\`)**: Pattern matches each tuple inside \`lists:filtermap/2\` and drops non-matching patients without building an intermediate filtered list.
+- **Phase 2 (\`dispatch_nurse_batches/2\`)**: Threads a compound \`{RosterAcc, SkippedAcc}\` accumulator through \`lists:foldl/3\`, indexing into 4-element \`nurse\` tuples at 1-based position \`3\` so subsequent dispatches observe decremented slot counts immediately.
+
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-lists:foldl(Fun, Acc0, List) -> Acc1
-lists:filtermap(Fun, List) -> [term()]
-lists:keyfind(Key, Pos, List) -> Tuple | false
-lists:keystore(Key, Pos, List, NewTuple) -> [Tuple]
+%% Official OTP Signatures (stdlib / lists)
+lists:foldl(Fun, Acc0, List1) -> Acc1
+lists:filtermap(Fun, List1) -> List2
+lists:keyfind(Key, N, TupleList) -> Tuple | false
+lists:keystore(Key, N, TupleList1, NewTuple) -> TupleList2
+  Types:
+    Fun = fun((Elem, AccIn) -> AccOut) | fun((Elem) -> boolean() | {true, Value})
+    Acc0 = Acc1 = term()
+    Key = term()
+    N = pos_integer()
+    TupleList = TupleList1 = TupleList2 = [tuple()]
+    NewTuple = Tuple = tuple()
 \`\`\`
+
+> How to read these specs: Tuple positions \`N\` in \`keyfind/3\` and \`keystore/4\` are strictly **1-based** (\`pos_integer()\`), and \`Acc0\` establishes the accumulator structure threaded through every step of \`foldl/3\`. Open the attached **Reference Cards** for \`lists:foldl/3\`, \`lists:filtermap/2\`, \`lists:keyfind/3\`, and \`lists:keystore/4\` documentation.
 
 ## Assignment Specification
 
 Implement four pipeline functions in \`src/inventory_hof.erl\`:
 
-### 1. \`total_inventory_valuation/1\`
-- **Input**: A list of catalog records formatted as \`[{product, Id, Name, Price, Stock}, ...]\`, where \`Price\` and \`Stock\` are non-negative integers.
-- **Behavior**: Calculate the total monetary valuation of all catalog stock in a single pass using \`lists:foldl/3\`. Multiply \`Price\` by \`Stock\` for each item and sum across all records, starting from an initial accumulator of \`0\`. An empty catalog list evaluates to \`0\`.
+### 1. \`total_inventory_valuation(Inventory)\`
+- **Input**: \`Inventory\` — A list of zero or more 5-element \`product\` tuples carrying \`Id\`, string \`Name\`, non-negative integer unit \`Price\`, and non-negative integer \`Stock\`.
+- **Behavior**: Compute the combined monetary valuation (\`Price\` multiplied by \`Stock\`) across all items in a single left-fold pass using \`lists:foldl/3\`, returning \`0\` for an empty catalog.
 - **Examples**:
-  \`\`\`erlang
-  inventory_hof:total_inventory_valuation([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 4}])
-  %% => 600
-  \`\`\`
+  - \`inventory_hof:total_inventory_valuation([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 4}])\` returns \`600\`.
+  - \`inventory_hof:total_inventory_valuation([])\` returns \`0\`.
 
-### 2. \`critical_stock_alerts/2\`
+### 2. \`critical_stock_alerts(Inventory, Threshold)\`
 - **Input**:
-  - \`Inventory\`: A list of catalog records \`[{product, Id, Name, Price, Stock}, ...]\`.
-  - \`Threshold\`: An integer representing the low-stock alarm ceiling.
-- **Behavior**: Scan the catalog in a single pass using \`lists:filtermap/2\` to detect and transform understocked items:
-  - If a product's available \`Stock\` is less than or equal to \`Threshold\` (inclusive), retain and transform it into an alert notification tuple: \`{alert, Id, Name, Stock}\`.
-  - All items with stock strictly greater than \`Threshold\` must be omitted from the output.
-  - Returns the list of alert notification tuples.
+  - \`Inventory\` — A list of 5-element \`product\` tuples.
+  - \`Threshold\` — An integer low-stock alarm ceiling.
+- **Behavior**: Scan \`Inventory\` in a single pass with \`lists:filtermap/2\` to emit a 4-element \`alert\` tuple (carrying \`Id\`, \`Name\`, and \`Stock\`) for each entry whose available \`Stock\` is less than or equal to \`Threshold\` (inclusive), omitting entries strictly above \`Threshold\` while preserving original order.
 - **Examples**:
-  \`\`\`erlang
-  inventory_hof:critical_stock_alerts([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 2}], 5)
-  %% => [{alert, 2, "Mouse", 2}]
-  \`\`\`
+  - \`inventory_hof:critical_stock_alerts([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 2}], 5)\` returns \`[{alert, 2, "Mouse", 2}]\`.
+  - \`inventory_hof:critical_stock_alerts([{product, 2, "Mouse", 25, 5}], 5)\` returns \`[{alert, 2, "Mouse", 5}]\`.
 
-### 3. \`apply_orders_with_keylists/2\`
+### 3. \`apply_orders_with_keylists(Inventory, Orders)\`
 - **Input**:
-  - \`Inventory\`: A list of catalog records \`[{product, Id, Name, Price, Stock}, ...]\`.
-  - \`Orders\`: A list of customer order requests \`[{order, ProdId, Qty}, ...]\`.
-- **Behavior**: Process incoming orders sequentially against inventory using \`lists:foldl/3\`, initializing the accumulator with the input \`Inventory\`. For each order:
-  - Locate the product in the current inventory accumulator matching \`ProdId\` at index 2 using \`lists:keyfind/3\`.
-  - If the product exists, \`Qty\` is strictly positive, and available \`Stock\` is greater than or equal to \`Qty\`, deduct \`Qty\` from \`Stock\` and update the inventory in-place using \`lists:keystore/4\`.
-  - If the product is not found, or if requested \`Qty\` exceeds available stock, or if \`Qty\` is non-positive, leave the inventory accumulator unmodified.
-  - Returns the finalized inventory list preserving original item ordering.
+  - \`Inventory\` — A list of 5-element \`product\` tuples.
+  - \`Orders\` — A list of zero or more 3-element \`order\` tuples carrying a target product identifier and requested integer \`Qty\`.
+- **Behavior**: Process \`Orders\` sequentially from left to right against \`Inventory\` using \`lists:foldl/3\`, looking up and updating matched product tuples in place via \`lists:keyfind/3\` and \`lists:keystore/4\` without altering original catalog sequence. Deduct \`Qty\` from \`Stock\` only when the product identifier exists in the current state, \`Qty\` is strictly positive, and available \`Stock\` is at least \`Qty\` (inclusive); otherwise keep the inventory unchanged for that order.
 - **Examples**:
-  \`\`\`erlang
-  inventory_hof:apply_orders_with_keylists(
-      [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}],
-      [{order, 1, 3}, {order, 2, 10}]
-  )
-  %% => [{product, 1, "Keyboard", 50, 7}, {product, 2, "Mouse", 25, 5}]
-  \`\`\`
+  - \`inventory_hof:apply_orders_with_keylists([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}], [{order, 1, 3}, {order, 2, 10}])\` returns \`[{product, 1, "Keyboard", 50, 7}, {product, 2, "Mouse", 25, 5}]\`.
 
-### 4. \`aggregate_sla_logs/1\`
-- **Input**: A list of service level agreement log events: \`[{log, EndpointAtom, LatencyMs, StatusAtom}, ...]\`, where \`LatencyMs\` is an integer and \`StatusAtom\` is an atom (such as \`ok\` or \`error\`).
-- **Behavior**: Aggregate the log events in a single pass using \`lists:foldl/3\` with an initial summary accumulator of \`{sla_summary, 0, 0, 0}\`:
-  - Increment the total requests count for every log event encountered.
-  - Increment the error count only if \`StatusAtom\` equals \`error\`.
-  - Accumulate the \`LatencyMs\` value into the total latency counter.
-  - Returns \`{sla_summary, TotalRequests, ErrorCount, TotalLatency}\`.
+### 4. \`aggregate_sla_logs(Logs)\`
+- **Input**: \`Logs\` — A list of zero or more 4-element \`log\` tuples carrying an endpoint atom, integer \`LatencyMs\`, and status atom (\`ok\`, \`error\`, or another atom).
+- **Behavior**: Reduce \`Logs\` in a single \`lists:foldl/3\` pass into a 4-element \`sla_summary\` tuple recording total log count, count of events whose status equals \`error\`, and summed \`LatencyMs\` across all events (returning all-zero counters when \`Logs\` is empty).
 - **Examples**:
-  \`\`\`erlang
-  inventory_hof:aggregate_sla_logs([
-      {log, api_auth, 40, ok},
-      {log, api_pay, 120, error},
-      {log, api_auth, 60, ok}
-  ])
-  %% => {sla_summary, 3, 1, 220}
-  \`\`\`
+  - \`inventory_hof:aggregate_sla_logs([{log, api_auth, 40, ok}, {log, api_pay, 120, error}, {log, api_auth, 60, ok}])\` returns \`{sla_summary, 3, 1, 220}\`.
+  - \`inventory_hof:aggregate_sla_logs([])\` returns \`{sla_summary, 0, 0, 0}\`.
 
-## Verification Constraints
+## Rules & Verification Constraints
 
-- You must employ \`lists:foldl/3\`, \`lists:filtermap/2\`, \`lists:keyfind/3\`, and \`lists:keystore/4\`.
-- Strictly no Maps (\`#{}\`) or Bit-Syntax Binaries (\`<<...>>\`). Use tagged tuples, atoms, and integers only.`,
+- \`bf_ast_verifier\` enforces calls to \`lists:foldl/3\`, \`lists:filtermap/2\`, \`lists:keyfind/3\`, and \`lists:keystore/4\`, and forbids maps (\`#{}\`) and bit-syntax binaries (\`<<...>>\`).
+- Use tagged tuples, lists, strings, atoms, and integers only.`,
     otpDocCards: [
       {
         functionName: 'lists:foldl/3',
@@ -2043,13 +1995,31 @@ Implement four pipeline functions in \`src/inventory_hof.erl\`:
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/lists.html#foldl/3',
       },
       {
+        functionName: 'lists:filtermap/2',
+        module: 'lists',
+        signature: 'filtermap(Fun, List1) -> List2',
+        typesSpec: ['Fun = fun((Elem) -> boolean() | {true, Value})', 'List1 = [Elem]'],
+        description: 'Single-pass filter and transform without intermediate list allocation.',
+        complexityNote: 'O(N) time, O(1) stack overhead.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/lists.html#filtermap/2',
+      },
+      {
         functionName: 'lists:keyfind/3',
         module: 'lists',
         signature: 'keyfind(Key, N, TupleList) -> Tuple | false',
         typesSpec: ['Key = term()', 'N = pos_integer()', 'TupleList = [tuple()]'],
-        description: 'C BIF searching for tuple by key at position N.',
+        description: 'C BIF searching for tuple by key at 1-based position N.',
         complexityNote: 'O(N) fast C traversal.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/lists.html#keyfind/3',
+      },
+      {
+        functionName: 'lists:keystore/4',
+        module: 'lists',
+        signature: 'keystore(Key, N, TupleList1, NewTuple) -> TupleList2',
+        typesSpec: ['Key = term()', 'N = pos_integer()', 'NewTuple = tuple()'],
+        description: 'Replace first tuple matching Key at 1-based position N in place, or append NewTuple.',
+        complexityNote: 'O(N) C-assisted list copy preserving existing element order.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/lists.html#keystore/4',
       },
     ],
     mentalModelCheck: {
@@ -2107,8 +2077,9 @@ Implement four pipeline functions in \`src/inventory_hof.erl\`:
     ],
     astRules: {
       requiredCalls: ['lists:foldl/3', 'lists:filtermap/2', 'lists:keyfind/3', 'lists:keystore/4'],
+      forbiddenConstructs: ['map_syntax', 'bit_syntax'],
     },
-    solutionExplanation: 'Synthesizes foldl reductions, single-pass filtermap alerts, keyfind/keystore order updates, and SLA log aggregation without forward references.',
+    solutionExplanation: 'Synthesizes foldl reductions, single-pass filtermap alerts, keyfind/keystore order updates, and SLA log aggregation cleanly.',
     files: [
       {
         name: 'inventory_hof.erl',
@@ -2116,19 +2087,19 @@ Implement four pipeline functions in \`src/inventory_hof.erl\`:
         content: `-module(inventory_hof).
 -export([total_inventory_valuation/1, critical_stock_alerts/2, apply_orders_with_keylists/2, aggregate_sla_logs/1]).
 
-%% @doc Computes total monetary valuation of available catalog inventory.
+%% @doc Compute the combined monetary value of all stock in Inventory in a single pass, returning zero for an empty catalog.
 total_inventory_valuation(_Inventory) ->
     ok.
 
-%% @doc Emits alert notifications for inventory items falling below stock threshold.
+%% @doc Filter and project Inventory items whose stock is at or below the caller-supplied Threshold into alert notifications while preserving order.
 critical_stock_alerts(_Inventory, _Threshold) ->
     ok.
 
-%% @doc Sequentially fulfills order batch against inventory using keylist BIFs.
-apply_orders_with_keylists(Inventory, _Orders) ->
-    Inventory.
+%% @doc Apply sequential customer Orders left-to-right against Inventory, deducting valid positive quantities with sufficient stock in place without altering catalog ordering.
+apply_orders_with_keylists(_Inventory, _Orders) ->
+    ok.
 
-%% @doc Aggregates operational service metrics into an SLA summary tuple.
+%% @doc Reduce service Logs into an SLA summary tuple tracking total request count, error-status count, and cumulative latency in milliseconds.
 aggregate_sla_logs(_Logs) ->
     ok.`,
       },
@@ -2137,11 +2108,13 @@ aggregate_sla_logs(_Logs) ->
       'src/inventory_hof.erl': `-module(inventory_hof).
 -export([total_inventory_valuation/1, critical_stock_alerts/2, apply_orders_with_keylists/2, aggregate_sla_logs/1]).
 
+%% @doc Compute the combined monetary value of all stock in Inventory in a single pass, returning zero for an empty catalog.
 total_inventory_valuation(Inventory) ->
     lists:foldl(fun({product, _Id, _Name, Price, Stock}, TotalAcc) ->
         TotalAcc + (Price * Stock)
     end, 0, Inventory).
 
+%% @doc Filter and project Inventory items whose stock is at or below the caller-supplied Threshold into alert notifications while preserving order.
 critical_stock_alerts(Inventory, Threshold) ->
     lists:filtermap(fun
         ({product, Id, Name, _Price, Stock}) when Stock =< Threshold ->
@@ -2150,6 +2123,7 @@ critical_stock_alerts(Inventory, Threshold) ->
             false
     end, Inventory).
 
+%% @doc Apply sequential customer Orders left-to-right against Inventory, deducting valid positive quantities with sufficient stock in place without altering catalog ordering.
 apply_orders_with_keylists(Inventory, Orders) ->
     lists:foldl(fun({order, ProdId, Qty}, AccInv) ->
         case lists:keyfind(ProdId, 2, AccInv) of
@@ -2161,6 +2135,7 @@ apply_orders_with_keylists(Inventory, Orders) ->
         end
     end, Inventory, Orders).
 
+%% @doc Reduce service Logs into an SLA summary tuple tracking total request count, error-status count, and cumulative latency in milliseconds.
 aggregate_sla_logs(Logs) ->
     lists:foldl(fun
         ({log, _Endpoint, Latency, error}, {sla_summary, TotalReqs, Errors, TotalLatency}) ->
@@ -2172,29 +2147,31 @@ aggregate_sla_logs(Logs) ->
     starterCode: `-module(inventory_hof).
 -export([total_inventory_valuation/1, critical_stock_alerts/2, apply_orders_with_keylists/2, aggregate_sla_logs/1]).
 
-%% @doc Computes total monetary valuation of available catalog inventory.
+%% @doc Compute the combined monetary value of all stock in Inventory in a single pass, returning zero for an empty catalog.
 total_inventory_valuation(_Inventory) ->
     ok.
 
-%% @doc Emits alert notifications for inventory items falling below stock threshold.
+%% @doc Filter and project Inventory items whose stock is at or below the caller-supplied Threshold into alert notifications while preserving order.
 critical_stock_alerts(_Inventory, _Threshold) ->
     ok.
 
-%% @doc Sequentially fulfills order batch against inventory using keylist BIFs.
-apply_orders_with_keylists(Inventory, _Orders) ->
-    Inventory.
+%% @doc Apply sequential customer Orders left-to-right against Inventory, deducting valid positive quantities with sufficient stock in place without altering catalog ordering.
+apply_orders_with_keylists(_Inventory, _Orders) ->
+    ok.
 
-%% @doc Aggregates operational service metrics into an SLA summary tuple.
+%% @doc Reduce service Logs into an SLA summary tuple tracking total request count, error-status count, and cumulative latency in milliseconds.
 aggregate_sla_logs(_Logs) ->
     ok.`,
     solutionCode: `-module(inventory_hof).
 -export([total_inventory_valuation/1, critical_stock_alerts/2, apply_orders_with_keylists/2, aggregate_sla_logs/1]).
 
+%% @doc Compute the combined monetary value of all stock in Inventory in a single pass, returning zero for an empty catalog.
 total_inventory_valuation(Inventory) ->
     lists:foldl(fun({product, _Id, _Name, Price, Stock}, TotalAcc) ->
         TotalAcc + (Price * Stock)
     end, 0, Inventory).
 
+%% @doc Filter and project Inventory items whose stock is at or below the caller-supplied Threshold into alert notifications while preserving order.
 critical_stock_alerts(Inventory, Threshold) ->
     lists:filtermap(fun
         ({product, Id, Name, _Price, Stock}) when Stock =< Threshold ->
@@ -2203,6 +2180,7 @@ critical_stock_alerts(Inventory, Threshold) ->
             false
     end, Inventory).
 
+%% @doc Apply sequential customer Orders left-to-right against Inventory, deducting valid positive quantities with sufficient stock in place without altering catalog ordering.
 apply_orders_with_keylists(Inventory, Orders) ->
     lists:foldl(fun({order, ProdId, Qty}, AccInv) ->
         case lists:keyfind(ProdId, 2, AccInv) of
@@ -2214,6 +2192,7 @@ apply_orders_with_keylists(Inventory, Orders) ->
         end
     end, Inventory, Orders).
 
+%% @doc Reduce service Logs into an SLA summary tuple tracking total request count, error-status count, and cumulative latency in milliseconds.
 aggregate_sla_logs(Logs) ->
     lists:foldl(fun
         ({log, _Endpoint, Latency, error}, {sla_summary, TotalReqs, Errors, TotalLatency}) ->
