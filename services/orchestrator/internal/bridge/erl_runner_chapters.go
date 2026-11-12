@@ -3614,52 +3614,45 @@ init:stop().
 		return `
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
-    case code:ensure_loaded(xmpp_c2s_fsm) of
-        {module, xmpp_c2s_fsm} ->
-            S0 = xmpp_c2s_fsm:init_state(<<"localhost">>, <<"alice">>),
-            {next_state, wait_for_sasl, S1, [Feat]} = xmpp_c2s_fsm:transition(wait_for_stream, {stream_open, <<"localhost">>}, S0),
-            Pass1 = (binary:match(Feat, <<"PLAIN">>) =/= nomatch),
-            #{call_str => <<"transition(wait_for_stream, stream_open) -> wait_for_sasl">>,
-              expected => <<"{next_state, wait_for_sasl, ..., [FeatXml]}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [{next_state, wait_for_sasl, S1, [Feat]}]))),
-              passed => Pass1, time_ms => erlang:system_time(millisecond) - T1_Start};
-        _ ->
-            P1 = spawn(fun() -> ok end),
-            S_Legacy = xmpp_presence_router:upsert_session([], <<"bob@host/web">>, 1, P1, #{}),
-            Pass_Legacy = (S_Legacy =/= []),
-            #{call_str => <<"presence_router fallback">>, expected => <<"ok">>, actual => <<"ok">>, passed => Pass_Legacy, time_ms => 1}
-    end
+    S0 = xmpp_c2s_fsm:init(<<"localhost">>),
+    {reply, _Feat1, S1} = xmpp_c2s_fsm:handle_event({stream_open, <<"localhost">>}, S0),
+    Act1 = xmpp_c2s_fsm:get_state(S1),
+    #{call_str => <<"init(<<\"localhost\">>) + handle_event({stream_open, <<\"localhost\">>}) -> get_state">>,
+      expected => <<"wait_for_sasl">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Act1]))),
+      passed => (Act1 =:= wait_for_sasl), time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"transition(...)">>, expected => <<"state transition">>,
+    #{call_str => <<"handle_event({stream_open, ...})">>, expected => <<"wait_for_sasl">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try
-    S0 = xmpp_c2s_fsm:init_state(<<"localhost">>, <<"alice">>),
-    {next_state, wait_for_sasl, S1, _} = xmpp_c2s_fsm:transition(wait_for_stream, {stream_open, <<"localhost">>}, S0),
-    {stay, wait_for_sasl, S1, [Err]} = xmpp_c2s_fsm:transition(wait_for_sasl, {chat_message, <<"m1">>, <<"bob@localhost">>, <<"hi">>}, S1),
-    Pass2 = (binary:match(Err, <<"not-authorized">>) =/= nomatch),
-    #{call_str => <<"transition(wait_for_sasl, chat_message) -> reject not-authorized">>,
-      expected => <<"{stay, wait_for_sasl, S1, [<stream:error><not-authorized...>] }">>,
-      actual => Err,
-      passed => Pass2, time_ms => erlang:system_time(millisecond) - T2_Start}
+    S0 = xmpp_c2s_fsm:init(<<"localhost">>),
+    {reply, _, S1} = xmpp_c2s_fsm:handle_event({stream_open, <<"localhost">>}, S0),
+    {error, Reason, _} = xmpp_c2s_fsm:handle_event({chat_message, <<"bob">>, <<"1">>, <<"hi">>}, S1),
+    #{call_str => <<"handle_event({chat_message, ...}) in wait_for_sasl">>,
+      expected => <<"not_authorized">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Reason]))),
+      passed => (Reason =:= not_authorized), time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
-    #{call_str => <<"transition(...)">>, expected => <<"not-authorized">>,
+    #{call_str => <<"handle_event({chat_message, ...})">>, expected => <<"not_authorized">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
 T3_Res = try
-    S0 = xmpp_c2s_fsm:init_state(<<"localhost">>, <<"alice">>),
-    {next_state, wait_for_sasl, S1, _} = xmpp_c2s_fsm:transition(wait_for_stream, {stream_open, <<"localhost">>}, S0),
-    {next_state, authenticated, S2, _} = xmpp_c2s_fsm:transition(wait_for_sasl, {sasl_auth, <<"PLAIN">>, <<"payload">>}, S1),
-    {next_state, session_established, S3, [BindRes]} = xmpp_c2s_fsm:transition(authenticated, {iq_bind, <<"b1">>, <<"obsidian">>}, S2),
-    Pass3 = (maps:get(jid, S3) =:= <<"alice@localhost/obsidian">>) andalso (binary:match(BindRes, <<"alice@localhost/obsidian">>) =/= nomatch),
-    #{call_str => <<"Full handshake: stream_open -> sasl_auth -> iq_bind -> session_established">>,
-      expected => <<"{session_established, <<\"alice@localhost/obsidian\">>}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("~p", [{session_established, maps:get(jid, S3)}]))),
-      passed => Pass3, time_ms => erlang:system_time(millisecond) - T3_Start}
+    S0 = xmpp_c2s_fsm:init(<<"localhost">>),
+    {reply, _, S1} = xmpp_c2s_fsm:handle_event({stream_open, <<"localhost">>}, S0),
+    Token = base64:encode(<<0, "alice", 0, "secret">>),
+    {reply, _, S2} = xmpp_c2s_fsm:handle_event({auth_plain, Token}, S1),
+    {reply, _, S3} = xmpp_c2s_fsm:handle_event({bind_resource, <<"b1">>, <<"mobile">>}, S2),
+    Act3 = {xmpp_c2s_fsm:get_state(S3), maps:get(full_jid, S3)},
+    Exp3 = {session_established, <<"alice@localhost/mobile">>},
+    #{call_str => <<"Complete SASL Auth + bind_resource -> {session_established, full_jid}">>,
+      expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp3]))),
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Act3]))),
+      passed => (Act3 =:= Exp3), time_ms => erlang:system_time(millisecond) - T3_Start}
 catch C3:R3 ->
-    #{call_str => <<"Full handshake">>, expected => <<"session_established">>,
+    #{call_str => <<"Complete SASL Auth + bind_resource">>, expected => <<"{session_established, <<\"alice@localhost/mobile\">>}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res],
@@ -8585,10 +8578,10 @@ Stages = [CompileStage, S1_Ast, S2_UnitFragmentedStreamFraming]
 		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(xmpp_c2s_fsm) of
     {module, xmpp_c2s_fsm} ->
-        Req = [{init_state, 2}, {transition, 3}],
+        Req = [{init, 1}, {handle_event, 2}, {get_state, 1}],
         Exports = xmpp_c2s_fsm:module_info(exports),
         case [E || E <- Req, not lists:member(E, Exports)] of
-            [] -> #{id => <<"compile">>, title => <<"Compile xmpp_c2s_fsm.erl">>, status => <<"passed">>, time_ms => 12, details => <<"Compilation succeeded; all FSM functions exported.">>};
+            [] -> #{id => <<"compile">>, title => <<"Compile xmpp_c2s_fsm.erl">>, status => <<"passed">>, time_ms => 12, details => <<"Compilation succeeded; init/1, handle_event/2, and get_state/1 exported.">>};
             Missing -> #{id => <<"compile">>, title => <<"Compile xmpp_c2s_fsm.erl">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
         end;
     {error, E} ->
@@ -8596,45 +8589,44 @@ CompileStage = case code:ensure_loaded(xmpp_c2s_fsm) of
 end,
 S1_Ast = try
     SrcPath = filename:join(["%s", "src", "xmpp_c2s_fsm.erl"]),
-    Rules = #{},
+    Rules = #{
+        required_calls => [{base64, decode, 1}, {binary, copy, 1}],
+        required_constructs => [bit_syntax, map_exact_match]
+    },
     case bf_ast_verifier:verify_rules(SrcPath, Rules) of
-        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: C2S State Transitions">>, status => <<"passed">>, time_ms => 15, details => <<"AST analysis passed.">>};
-        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: C2S State Transitions">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
+        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Base64, binary:copy/1, Bit Syntax & Maps">>, status => <<"passed">>, time_ms => 15, details => <<"Verified base64:decode/1, binary:copy/1, bit_syntax, and map_exact_match.">>};
+        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Base64, binary:copy/1, Bit Syntax & Maps">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
     end
 catch CatchClass_L06_1:CatchReason_L06_1 ->
-    #{id => <<"ast_verification">>, title => <<"AST Analysis: C2S State Transitions">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [CatchClass_L06_1, CatchReason_L06_1]))}
+    #{id => <<"ast_verification">>, title => <<"AST Analysis: Base64, binary:copy/1, Bit Syntax & Maps">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [CatchClass_L06_1, CatchReason_L06_1]))}
 end,
 S2_UnitFsmHandshake = try
-    S0 = xmpp_c2s_fsm:init_state(<<"localhost">>, <<"alice">>),
+    S0 = xmpp_c2s_fsm:init(<<"localhost">>),
+    wait_for_stream = xmpp_c2s_fsm:get_state(S0),
     %% 1. Reject message in wait_for_stream
-    {stay, wait_for_stream, S0, [ErrBeforeStream]} = xmpp_c2s_fsm:transition(wait_for_stream, {chat_message, <<"m0">>, <<"bob@localhost">>, <<"hi">>}, S0),
-    CheckErrBefore = (binary:match(ErrBeforeStream, <<"not-authorized">>) =/= nomatch),
+    {error, unexpected_stanza_before_stream, S0} = xmpp_c2s_fsm:handle_event({chat_message, <<"bob@localhost">>, <<"m0">>, <<"hi">>}, S0),
     %% 2. Stream open -> wait_for_sasl with pre-auth features
-    {next_state, wait_for_sasl, S1, [FeatReply]} = xmpp_c2s_fsm:transition(wait_for_stream, {stream_open, <<"localhost">>}, S0),
-    CheckState1 = (binary:match(FeatReply, <<"PLAIN">>) =/= nomatch),
-    %% 3. Reject chat in wait_for_sasl
-    {stay, wait_for_sasl, S1, [ErrAuth]} = xmpp_c2s_fsm:transition(wait_for_sasl, {chat_message, <<"m1">>, <<"bob@localhost">>, <<"hi">>}, S1),
-    CheckErrAuth = (binary:match(ErrAuth, <<"not-authorized">>) =/= nomatch),
+    {reply, FeatReply, S1} = xmpp_c2s_fsm:handle_event({stream_open, <<"localhost">>}, S0),
+    CheckState1 = (xmpp_c2s_fsm:get_state(S1) =:= wait_for_sasl) andalso (binary:match(FeatReply, <<"PLAIN">>) =/= nomatch),
+    %% 3. Reject chat & bad base64 in wait_for_sasl
+    {error, not_authorized, S1} = xmpp_c2s_fsm:handle_event({chat_message, <<"bob@localhost">>, <<"m1">>, <<"hi">>}, S1),
+    {error, invalid_credentials, S1} = xmpp_c2s_fsm:handle_event({auth_plain, <<"!!!not_base64!!!">>}, S1),
     %% 4. SASL PLAIN auth -> authenticated
-    {next_state, authenticated, S2, [SuccessReply]} = xmpp_c2s_fsm:transition(wait_for_sasl, {sasl_auth, <<"PLAIN">>, <<"dummy">>}, S1),
-    CheckState2 = (binary:match(SuccessReply, <<"success">>) =/= nomatch),
-    %% 5. Post-auth stream open -> post_auth features with bind
-    {stay, authenticated, S2, [BindFeatReply]} = xmpp_c2s_fsm:transition(authenticated, {stream_open, <<"localhost">>}, S2),
-    CheckBindFeat = (binary:match(BindFeatReply, <<"bind">>) =/= nomatch),
+    Token = base64:encode(<<0, "alice", 0, "secret">>),
+    {reply, SuccessReply, S2} = xmpp_c2s_fsm:handle_event({auth_plain, Token}, S1),
+    CheckState2 = (xmpp_c2s_fsm:get_state(S2) =:= authenticated) andalso (binary:match(SuccessReply, <<"success">>) =/= nomatch),
+    %% 5. Reject non-bind event in authenticated
+    {error, expected_bind, S2} = xmpp_c2s_fsm:handle_event({chat_message, <<"bob@localhost">>, <<"m2">>, <<"hi">>}, S2),
     %% 6. Resource bind -> session_established
-    {next_state, session_established, S3, [BindReply]} = xmpp_c2s_fsm:transition(authenticated, {iq_bind, <<"bind_1">>, <<"desktop">>}, S2),
-    CheckState3 = (maps:get(jid, S3) =:= <<"alice@localhost/desktop">>) andalso (binary:match(BindReply, <<"alice@localhost/desktop">>) =/= nomatch),
-    %% 7. Chat message in session_established
-    {stay, session_established, S3, [RoutedMsg]} = xmpp_c2s_fsm:transition(session_established, {chat_message, <<"m_2">>, <<"bob@localhost">>, <<"Hey!">>}, S3),
-    CheckRoute = (binary:match(RoutedMsg, <<"Hey!">>) =/= nomatch),
-    %% 8. Ping in session_established
-    {stay, session_established, S3, [PongReply]} = xmpp_c2s_fsm:transition(session_established, {ping, <<"p_99">>}, S3),
-    CheckPing = (binary:match(PongReply, <<"p_99">>) =/= nomatch),
-    %% 9. Stream close
-    {stop, normal, S3, [CloseXml]} = xmpp_c2s_fsm:transition(session_established, stream_close, S3),
-    CheckClose = (CloseXml =:= <<"</stream:stream>">>),
-    case CheckErrBefore andalso CheckState1 andalso CheckErrAuth andalso CheckState2 andalso CheckBindFeat andalso CheckState3 andalso CheckRoute andalso CheckPing andalso CheckClose of
-        true -> #{id => <<"unit_fsm_handshake">>, title => <<"Unit Tests: Complete C2S Handshake Transitions & Security Gates">>, status => <<"passed">>, time_ms => 20, details => <<"Strict state sequence enforced; pre-auth stanzas rejected with not-authorized; Full JID bound; ping & close supported.">>};
+    {reply, BindReply, S3} = xmpp_c2s_fsm:handle_event({bind_resource, <<"bind_1">>, <<"desktop">>}, S2),
+    CheckState3 = (xmpp_c2s_fsm:get_state(S3) =:= session_established) andalso
+                  (maps:get(full_jid, S3) =:= <<"alice@localhost/desktop">>) andalso
+                  (binary:match(BindReply, <<"alice@localhost/desktop">>) =/= nomatch),
+    %% 7. Chat message & presence in session_established
+    {ok, {routed, <<"bob@localhost">>}, S3} = xmpp_c2s_fsm:handle_event({chat_message, <<"bob@localhost">>, <<"m_2">>, <<"Hey!">>}, S3),
+    {ok, {presence_updated, <<"available">>}, S3} = xmpp_c2s_fsm:handle_event({presence, <<"available">>}, S3),
+    case CheckState1 andalso CheckState2 andalso CheckState3 of
+        true -> #{id => <<"unit_fsm_handshake">>, title => <<"Unit Tests: Complete C2S Handshake Transitions & Security Gates">>, status => <<"passed">>, time_ms => 20, details => <<"Strict state sequence enforced; pre-auth stanzas rejected; SASL PLAIN decoded; Full JID bound and stanzas routed.">>};
         false -> #{id => <<"unit_fsm_handshake">>, title => <<"Unit Tests: Complete C2S Handshake Transitions & Security Gates">>, status => <<"failed">>, time_ms => 20, details => <<"FSM handshake assertion failed.">>}
     end
 catch CatchClass_L06_2:CatchReason_L06_2 ->

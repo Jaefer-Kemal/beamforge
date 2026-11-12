@@ -433,98 +433,98 @@ try_extract_element(Bin, TagName) ->
 			exerciseID: "ch11-l06",
 			files: map[string]string{
 				"src/xmpp_c2s_fsm.erl": `-module(xmpp_c2s_fsm).
--export([init_state/2, transition/3, init/1, handle_event/2, get_state/1]).
+-export([
+    init/1,
+    handle_event/2,
+    get_state/1
+]).
 
-init_state(Domain, ExpectedUser) ->
-    #{domain => Domain, user => ExpectedUser, jid => undefined, resource => undefined, show => <<"available">>, priority => 0, state_name => wait_for_stream}.
+-type fsm_state() :: #{
+    state := atom(),
+    domain := binary(),
+    user := binary(),
+    full_jid := binary()
+}.
 
+%% @doc Initialize a fresh RFC 6120 C2S handshake state map for Domain awaiting the initial stream opening header.
+-spec init(binary()) -> fsm_state().
 init(Domain) ->
-    init_state(Domain, <<"alice">>).
+    #{state => wait_for_stream, domain => Domain, user => <<>>, full_jid => <<>>}.
 
-get_state(State) when is_map(State) ->
-    maps:get(state_name, State, wait_for_stream).
+%% @doc Process an XMPP stream, SASL PLAIN, resource-bind, or session stanza event against State, returning a reply, routing ok result, or phase-specific error tuple.
+-spec handle_event(term(), fsm_state()) ->
+    {reply, binary() | [binary()], fsm_state()} |
+    {ok, term(), fsm_state()} |
+    {error, atom(), fsm_state()}.
+handle_event(Event, #{state := wait_for_stream, domain := Domain} = State) ->
+    case Event of
+        {stream_open, Domain} ->
+            Reply = <<"<stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>">>,
+            {reply, Reply, State#{state => wait_for_sasl}};
+        _ ->
+            {error, unexpected_stanza_before_stream, State}
+    end;
 
-transition(wait_for_stream, {stream_open, Domain}, State) ->
-    Feat = <<"<?xml version='1.0'?><stream:stream from='", Domain/binary, "' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'><stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>">>,
-    {next_state, wait_for_sasl, State#{domain => Domain, state_name => wait_for_sasl}, [Feat]};
-transition(wait_for_stream, _Other, State) ->
-    Err = <<"<?xml version='1.0'?><stream:stream xmlns:stream='http://etherx.jabber.org/streams'><stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error></stream:stream>">>,
-    {stay, wait_for_stream, State, [Err]};
-
-transition(wait_for_sasl, {sasl_auth, <<"PLAIN">>, _Payload}, State) ->
-    User = maps:get(user, State, <<"alice">>),
-    Success = <<"<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>">>,
-    {next_state, authenticated, State#{auth_user => User, state_name => authenticated}, [Success]};
-transition(wait_for_sasl, {auth_plain, _Token}, State) ->
-    User = maps:get(user, State, <<"alice">>),
-    Success = <<"<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>">>,
-    {next_state, authenticated, State#{auth_user => User, state_name => authenticated}, [Success]};
-transition(wait_for_sasl, {chat_message, _, _, _}, State) ->
-    Err = <<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>,
-    {stay, wait_for_sasl, State, [Err]};
-transition(wait_for_sasl, {iq_bind, _, _}, State) ->
-    Err = <<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>,
-    {stay, wait_for_sasl, State, [Err]};
-transition(wait_for_sasl, _Other, State) ->
-    Err = <<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>,
-    {stay, wait_for_sasl, State, [Err]};
-
-transition(authenticated, {stream_open, Domain}, State) ->
-    Feat = <<"<?xml version='1.0'?><stream:stream from='", Domain/binary, "' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'><stream:features><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/></stream:features>">>,
-    {stay, authenticated, State, [Feat]};
-transition(authenticated, {iq_bind, Id, Res}, State) ->
-    User = maps:get(auth_user, State, maps:get(user, State, <<"alice">>)),
-    Domain = maps:get(domain, State, <<"localhost">>),
-    Resource = case Res of <<>> -> <<"resource">>; _ -> Res end,
-    FullJid = <<User/binary, "@", Domain/binary, "/", Resource/binary>>,
-    BindRes = <<"<iq type='result' id='", Id/binary, "'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>", FullJid/binary, "</jid></bind></iq>">>,
-    {next_state, session_established, State#{jid => FullJid, full_jid => FullJid, resource => Resource, state_name => session_established}, [BindRes]};
-transition(authenticated, {bind_resource, Id, Res}, State) ->
-    transition(authenticated, {iq_bind, Id, Res}, State);
-transition(authenticated, _Other, State) ->
-    {stay, authenticated, State, []};
-
-transition(session_established, {chat_message, Id, To, Body}, State) ->
-    From = maps:get(jid, State, <<"unknown@localhost">>),
-    MsgXml = <<"<message from='", From/binary, "' to='", To/binary, "' id='", Id/binary, "' type='chat'><body>", Body/binary, "</body></message>">>,
-    {stay, session_established, State, [MsgXml]};
-transition(session_established, {presence, Show, Priority}, State) ->
-    {stay, session_established, State#{show => Show, priority => Priority}, []};
-transition(session_established, stream_close, State) ->
-    {stop, normal, State, [<<"</stream:stream>">>]};
-transition(session_established, {ping, Id}, State) ->
-    Pong = <<"<iq type='result' id='", Id/binary, "'/>">>,
-    {stay, session_established, State, [Pong]};
-transition(CurrentState, {ping, Id}, State) ->
-    Pong = <<"<iq type='result' id='", Id/binary, "'/>">>,
-    {stay, CurrentState, State, [Pong]}.
-
-handle_event(Event, State) when is_map(State) ->
-    Current = maps:get(state_name, State, wait_for_stream),
-    case transition(Current, Event, State) of
-        {next_state, Next, NewS, Out} ->
-            Reply = case Out of [] -> ok; [H|_] -> H end,
-            {reply, Reply, NewS#{state_name => Next}};
-        {stay, Current, NewS, [_Err]} when Current =:= wait_for_sasl; Current =:= wait_for_stream ->
-            case Event of
-                {chat_message, _, _, _} ->
-                    case Current of
-                        wait_for_stream -> {error, unexpected_stanza_before_stream, NewS};
-                        wait_for_sasl -> {error, not_authorized, NewS}
-                    end;
-                _ ->
-                    {error, not_authorized, NewS}
+handle_event(Event, #{state := wait_for_sasl} = State) ->
+    case Event of
+        {auth_plain, Base64Token} ->
+            case decode_sasl_plain(Base64Token) of
+                {ok, User, _Pass} ->
+                    Success = <<"<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>">>,
+                    {reply, Success, State#{state => authenticated, user => User}};
+                error ->
+                    {error, invalid_credentials, State}
             end;
-        {stay, session_established, NewS, _} ->
-            case Event of
-                {chat_message, _Id, To, _Body} -> {ok, {routed, To}, NewS};
-                _ -> {reply, ok, NewS}
-            end;
-        {stay, _, NewS, Out} ->
-            Reply = case Out of [] -> ok; [H|_] -> H end,
-            {reply, Reply, NewS};
-        {stop, normal, NewS, _} ->
-            {stop, normal, NewS}
+        _ ->
+            {error, not_authorized, State}
+    end;
+
+handle_event(Event, #{state := authenticated, domain := Domain, user := User} = State) ->
+    case Event of
+        {bind_resource, Id, Resource} ->
+            FullJid = <<User/binary, "@", Domain/binary, "/", Resource/binary>>,
+            Result = <<"<iq type='result' id='", Id/binary, "'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>", FullJid/binary, "</jid></bind></iq>">>,
+            {reply, Result, State#{state => session_established, full_jid => FullJid}};
+        _ ->
+            {error, expected_bind, State}
+    end;
+
+handle_event(Event, #{state := session_established} = State) ->
+    case Event of
+        {chat_message, To, _Id, _Body} ->
+            {ok, {routed, To}, State};
+        {presence, Type} ->
+            {ok, {presence_updated, Type}, State};
+        _ ->
+            {error, unknown_event, State}
+    end;
+
+handle_event(_Event, State) ->
+    {error, unknown_state, State}.
+
+%% @doc Extract and return the current FSM state atom from State.
+-spec get_state(fsm_state()) -> atom().
+get_state(#{state := StateName}) -> StateName.
+
+decode_sasl_plain(Base64Token) ->
+    try
+        Decoded = base64:decode(Base64Token),
+        case Decoded of
+            <<0, Rest/binary>> ->
+                case binary:split(Rest, <<0>>) of
+                    [User, Pass] when byte_size(User) > 0 ->
+                        {ok, binary:copy(User), binary:copy(Pass)};
+                    _ -> error
+                end;
+            _ ->
+                case binary:split(Decoded, <<0>>, [global]) of
+                    [User, Pass] when byte_size(User) > 0 ->
+                        {ok, binary:copy(User), binary:copy(Pass)};
+                    _ -> error
+                end
+        end
+    catch
+        _:_ -> error
     end.
 `,
 			},

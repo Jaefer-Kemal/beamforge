@@ -2212,7 +2212,7 @@ try_extract_element(Bin, TagName) ->
     title: 'The C2S Connection Handshake State Machine (RFC 6120)',
     difficulty: 'Advanced',
     xpReward: 100,
-        visualScene: 'tcp_xmpp_stream_framing',
+    visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Why does the C2S connection state machine set inet:setopts(Socket, [{active, once}]) after receiving each TCP packet instead of using {active, true}?',
       options: [
@@ -2248,83 +2248,131 @@ In production servers like **MongooseIM** (\`mongoose_c2s.erl\`) and **ejabberd*
 
 Before a client can send or receive chat messages, it MUST navigate a strict cryptographic and protocol handshake. If an unauthenticated client sends a chat \`<message>\` or an \`<iq>\` before authenticating, the server MUST reject it immediately to prevent unauthorized spoofing.
 
+> [!IMPORTANT]
 > **C2S Client Handshake Finite State Machine:**
-> - \`wait_for_stream\` -> Initial state waiting for \`<stream:stream>\` header.
-> - \`wait_for_sasl\` -> Negotiates SASL PLAIN credentials; rejects any \`<iq>\` or \`<message>\`.
-> - \`authenticated\` -> Stream restarts; waits for \`<iq type='set'><bind>\` resource bind.
-> - \`session_established\` -> Bound Full JID registered; real-time chat stanzas routed.
+> - **\`wait_for_stream\`** -> Initial state awaiting the domain-matched \`stream_open\` event.
+> - **\`wait_for_sasl\`** -> Negotiates SASL PLAIN credentials; rejects any premature stanza or bind attempt.
+> - **\`authenticated\`** -> Identity verified; awaits resource binding before opening stanza delivery.
+> - **\`session_established\`** -> Bound Full JID active; routes chat messages and updates presence.
 
 ## Deep Concept Breakdown & Under the Hood
 
-### 1. The SASL PLAIN Token
-In RFC 6120 and RFC 4616, SASL PLAIN credentials are transmitted as a Base64-encoded binary formatted as:
+### 1. The SASL PLAIN Credential Format (RFC 4616)
+In RFC 6120 and RFC 4616, SASL PLAIN transmits identity tokens as a Base64-encoded triple separated by null (\`0\`) bytes:
+\`\`\`text
+Base64( authzid || 0x00 || authcid || 0x00 || passwd )
 \`\`\`
-Base64( \0 || username || \0 || password )
-\`\`\`
-For example:
-- \`base64:encode(<<"\\0alice\\0secret">>)\` produces \`<<"AGFsaWNlAHNlY3JldA==">>\`.
-- When decoding:
-  \`\`\`erlang
-  Decoded = base64:decode(AuthPayload),
-  <<0, Rest/binary>> = Decoded,
-  [User, Password] = binary:split(Rest, <<0>>)
-  \`\`\`
+For anonymous \`authzid\`, the decoded binary starts with byte \`0\` followed by \`username\`, \`0\`, and \`password\`. Decoders strip an optional leading null byte, split the remainder on \`<<0>>\`, enforce non-empty credentials, and copy extracted slices with \`binary:copy/1\` inside a \`try ... catch\` guard against invalid Base64 input.
 
-### 2. State Guarding
-The FSM ensures protocol security:
-- In \`wait_for_stream\`, any stanza other than \`{stream_open, Domain}\` returns \`{error, unexpected_stanza_before_stream, State}\`.
-- In \`wait_for_sasl\`, any stanza other than \`{auth_plain, Base64}\` returns \`{error, not_authorized, State}\`.
+### 2. Phase-Gated Security Invariants
+Pure OTP state machines reject out-of-order protocol events cleanly without crashing or mutating state:
+- Receiving non-handshake stanzas before the stream opens leaves the connection in \`wait_for_stream\` and returns a structured pre-stream error tuple.
+- Receiving chat messages or bind requests while unauthenticated in \`wait_for_sasl\` refuses the operation with an authorization failure while keeping the FSM in \`wait_for_sasl\`.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Official OTP Base64 Decoding
-base64:decode(Base64) -> binary()
+%% Official OTP Signatures (stdlib / base64 & binary)
+base64:decode(Base64) -> Data
   Types:
     Base64 = binary() | string()
+    Data = binary()
+
+binary:split(Subject, Pattern, Options) -> [binary()]
+  Types:
+    Subject = Pattern = binary()
+    Options = [global | trim | trim_all]
 \`\`\`
+
+Consult the attached documentation cards below for \`base64:decode/1\` and \`binary:split/3\` semantics.
+
+## Parallel Worked Example: Token-Gated Telemetry Channel FSM
+
+Consider a separate domain: a **Gateway Telemetry Channel State Machine** (\`channel_auth_fsm\`) progressing through \`await_hello\` -> \`await_key\` -> \`ready\` using exact map matching (\`:=\`), \`base64:decode/1\`, colon-delimited binary slicing with \`binary:copy/1\`, and strict out-of-phase error rejections:
+
+\`\`\`erlang
+-module(channel_auth_fsm).
+-export([boot/1, dispatch/2, current_phase/1]).
+
+%% @doc Initialize a gateway channel state map locked in await_hello phase.
+boot(Cluster) ->
+    #{phase => await_hello, cluster => Cluster, client => <<>>}.
+
+%% @doc Transition the channel FSM cleanly across handshake, key verification, and telemetry emit.
+dispatch({hello, Cluster}, #{phase := await_hello, cluster := Cluster} = St) ->
+    {reply, <<"CHALLENGE:BASE64_KEY">>, St#{phase => await_key}};
+dispatch(_Other, #{phase := await_hello} = St) ->
+    {error, hello_required, St};
+dispatch({verify_key, B64}, #{phase := await_key} = St) ->
+    case decode_key_pair(B64) of
+        {ok, ClientId, _Secret} ->
+            {reply, <<"KEY_ACCEPTED">>, St#{phase => ready, client => ClientId}};
+        bad_key ->
+            {error, invalid_key, St}
+    end;
+dispatch(_Other, #{phase := await_key} = St) ->
+    {error, key_required, St};
+dispatch({emit, Metric}, #{phase := ready, cluster := Cluster, client := Client} = St) ->
+    Endpoint = <<Client/binary, "@", Cluster/binary>>,
+    {ok, {accepted, Endpoint, Metric}, St};
+dispatch(_Other, #{phase := ready} = St) ->
+    {error, unsupported_cmd, St}.
+
+%% @doc Read the active phase atom from a channel state map.
+current_phase(#{phase := Phase}) ->
+    Phase.
+
+decode_key_pair(B64) ->
+    try
+        Raw = base64:decode(B64),
+        case Raw of
+            <<$:, Tail/binary>> ->
+                case binary:split(Tail, <<":">>) of
+                    [Id, Sec] when byte_size(Id) > 0 ->
+                        {ok, binary:copy(Id), binary:copy(Sec)};
+                    _ -> bad_key
+                end;
+            _ -> bad_key
+        end
+    catch
+        _:_ -> bad_key
+    end.
+\`\`\`
+
+### What ERTS Does at Runtime
+- **Compile-Time Exact Key Assertions**: Using \`#{phase := ...}\` asserts key existence in the map header check and fails fast on corrupted state maps while updating only changed keys (\`St#{phase => ready}\`).
+- **Exception-Safe Decoding**: Wrapping \`base64:decode/1\` in \`try ... catch\` ensures malformed client payloads return \`{error, invalid_key, St}\` rather than crashing the FSM worker process.
 
 ## Assignment Specification
 
-Implement the module \`xmpp_c2s_fsm\` in \`src/xmpp_c2s_fsm.erl\` with the following exports:
+Implement \`xmpp_c2s_fsm\` in \`src/xmpp_c2s_fsm.erl\` exporting \`init/1\`, \`handle_event/2\`, and \`get_state/1\`.
 
-\`\`\`erlang
--module(xmpp_c2s_fsm).
--export([
-    init/1,
-    handle_event/2,
-    get_state/1
-]).
-\`\`\`
+### \`init/1\`
+- **Input**: \`Binary Domain\` (server domain handled by this C2S session).
+- **Behavior**: Returns an initial session state map whose current phase is \`wait_for_stream\`, storing \`domain\` set to \`Domain\` and empty binaries for \`user\` and \`full_jid\`.
+- **Examples**:
+  - \`xmpp_c2s_fsm:get_state(xmpp_c2s_fsm:init(<<"localhost">>))\` returns \`wait_for_stream\`.
 
-### States and Transitions:
-1. **\`init(Domain)\`**:
-   - Returns initial state: \`#{state => wait_for_stream, domain => Domain, user => <<>>, full_jid => <<>>}\`.
-2. **\`handle_event(Event, State)\`**:
-   - In \`wait_for_stream\`:
-     - On \`{stream_open, Domain}\`: Transitions to \`wait_for_sasl\`. Emits reply:
-       \`[<<"<stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>">>]’\`.
-     - On any other event: Returns \`{error, unexpected_stanza_before_stream, State}\`.
-   - In \`wait_for_sasl\`:
-     - On \`{auth_plain, Base64Payload}\`:
-       - Decodes Base64 payload (\`<<0, User/binary, 0, Password/binary>>\` or split on \`0\`).
-       - If valid user: Transitions to \`authenticated\` with \`user => User\`. Emits reply:
-         \`<<"<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>">>\`.
-     - On any other event: Returns \`{error, not_authorized, State}\`.
-   - In \`authenticated\`:
-     - On \`{bind_resource, Id, Resource}\`:
-       - Forms \`FullJid = <<User/binary, "@", Domain/binary, "/", Resource/binary>>\`.
-       - Transitions to \`session_established\` with \`full_jid => FullJid\`. Emits reply:
-         \`xmpp_stanza:build_bind_result(Id, FullJid)\` or equivalent XML.
-   - In \`session_established\`:
-     - On \`{chat_message, To, Id, Body}\`:
-       - Returns \`{ok, {routed, To}, State}\`.
-3. **\`get_state(State)\`**: Returns current state atom (\`wait_for_stream\`, \`wait_for_sasl\`, \`authenticated\`, or \`session_established\`).
+### \`handle_event/2\`
+- **Input**: Tagged event tuple and current FSM state map.
+- **Behavior**: Dispatches events strictly according to the active phase:
+  - **In \`wait_for_stream\`**: A domain-matching \`stream_open\` event transitions state to \`wait_for_sasl\` and replies with the SASL PLAIN \`stream:features\` XML banner. Any other event preserves state and returns an \`unexpected_stanza_before_stream\` error tuple.
+  - **In \`wait_for_sasl\`**: An \`auth_plain\` event carrying a Base64-encoded RFC 4616 credential token decodes the token cleanly (handling both leading-null binary stripping and global null-splitting), detaches the non-empty username with \`binary:copy/1\`, stores \`user\`, transitions to \`authenticated\`, and replies with the SASL \`<success/>\` XML stanza (invalid Base64 or malformed tokens return an \`invalid_credentials\` error tuple without advancing state). Any non-auth event in \`wait_for_sasl\` returns a \`not_authorized\` error tuple.
+  - **In \`authenticated\`**: A \`bind_resource\` event carrying stanza \`Id\` and client \`Resource\` constructs \`FullJid\` in \`user@domain/resource\` format, stores \`full_jid\`, transitions to \`session_established\`, and replies with an RFC 6120 IQ bind \`result\` XML stanza carrying \`FullJid\` under \`urn:ietf:params:xml:ns:xmpp-bind\`. Any other event returns an \`expected_bind\` error tuple.
+  - **In \`session_established\`**: A \`chat_message\` event carrying target JID, stanza id, and body returns an \`ok\` routing result with \`{routed, To}\` and unchanged state; a \`presence\` event carrying \`Type\` returns an \`ok\` result with \`{presence_updated, Type}\`; any other event returns an \`unknown_event\` error tuple.
+- **Examples**:
+  - After \`{stream_open, <<"localhost">>}\` from initial state, \`handle_event\` returns \`{reply, FeaturesXml, NextState}\` with \`get_state(NextState) =:= wait_for_sasl\`.
+  - Sending \`{chat_message, <<"bob">>, <<"1">>, <<"hi">>}\` in \`wait_for_sasl\` returns \`{error, not_authorized, State}\`.
+
+### \`get_state/1\`
+- **Input**: FSM state map containing a \`state\` key.
+- **Behavior**: Extracts and returns the active state atom (\`wait_for_stream\`, \`wait_for_sasl\`, \`authenticated\`, or \`session_established\`).
+- **Examples**:
+  - \`xmpp_c2s_fsm:get_state(#{state => authenticated, domain => <<"localhost">>, user => <<"alice">>, full_jid => <<>>})\` returns \`authenticated\`.
 
 ## Rules & Verification Constraints
-
-- Must enforce authentication order strictly.
-- Must decode SASL PLAIN Base64 tokens.`,
+- **AST Checks**: \`bf_ast_verifier\` enforces \`base64:decode/1\`, \`binary:copy/1\`, \`bit_syntax\`, and \`map_exact_match\`.
+- **Handshake Ordering**: Unauthenticated messages must be rejected cleanly with \`not_authorized\`; resource binding must produce an exact RFC 6120 IQ result carrying \`user@domain/resource\`.`,
     otpDocCards: [
       {
         functionName: 'decode',
@@ -2353,7 +2401,7 @@ Implement the module \`xmpp_c2s_fsm\` in \`src/xmpp_c2s_fsm.erl\` with the follo
         githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl',
       },
     ],
-        files: [
+    files: [
       {
         path: 'src/xmpp_c2s_fsm.erl',
         name: 'xmpp_c2s_fsm.erl',
@@ -2364,33 +2412,17 @@ Implement the module \`xmpp_c2s_fsm\` in \`src/xmpp_c2s_fsm.erl\` with the follo
     get_state/1
 ]).
 
--type fsm_state() :: #{
-    state := atom(),
-    domain := binary(),
-    user := binary(),
-    full_jid := binary()
-}.
+%% @doc Initialize a fresh RFC 6120 C2S handshake state map for Domain awaiting the initial stream opening header.
+init(_Domain) ->
+    ok.
 
-%% @doc Initializes the connection FSM in wait_for_stream state.
--spec init(binary()) -> fsm_state().
-init(Domain) ->
-    #{state => wait_for_stream, domain => Domain, user => <<>>, full_jid => <<>>}.
-
-%% @doc Handles protocol events and enforces strict authentication transitions.
--spec handle_event(term(), fsm_state()) ->
-    {reply, binary() | [binary()], fsm_state()} |
-    {ok, term(), fsm_state()} |
-    {error, atom(), fsm_state()}.
-handle_event(Event, State) ->
-    %% % TODO: Implement state transitions:
-    %% 1. wait_for_stream -> wait_for_sasl
-    %% 2. wait_for_sasl -> authenticated
-    %% 3. authenticated -> session_established
+%% @doc Process an XMPP stream, SASL PLAIN, resource-bind, or session stanza event against State, returning a reply, routing ok result, or phase-specific error tuple.
+handle_event(_Event, State) ->
     {error, not_implemented, State}.
 
-%% @doc Returns the current state name atom.
--spec get_state(fsm_state()) -> atom().
-get_state(#{state := StateName}) -> StateName.
+%% @doc Extract and return the current FSM state atom from State.
+get_state(_State) ->
+    undefined.
 `,
       },
     ],
@@ -2409,10 +2441,12 @@ get_state(#{state := StateName}) -> StateName.
     full_jid := binary()
 }.
 
+%% @doc Initialize a fresh RFC 6120 C2S handshake state map for Domain awaiting the initial stream opening header.
 -spec init(binary()) -> fsm_state().
 init(Domain) ->
     #{state => wait_for_stream, domain => Domain, user => <<>>, full_jid => <<>>}.
 
+%% @doc Process an XMPP stream, SASL PLAIN, resource-bind, or session stanza event against State, returning a reply, routing ok result, or phase-specific error tuple.
 -spec handle_event(term(), fsm_state()) ->
     {reply, binary() | [binary()], fsm_state()} |
     {ok, term(), fsm_state()} |
@@ -2458,8 +2492,12 @@ handle_event(Event, #{state := session_established} = State) ->
             {ok, {presence_updated, Type}, State};
         _ ->
             {error, unknown_event, State}
-    end.
+    end;
 
+handle_event(_Event, State) ->
+    {error, unknown_state, State}.
+
+%% @doc Extract and return the current FSM state atom from State.
 -spec get_state(fsm_state()) -> atom().
 get_state(#{state := StateName}) -> StateName.
 
@@ -2469,12 +2507,14 @@ decode_sasl_plain(Base64Token) ->
         case Decoded of
             <<0, Rest/binary>> ->
                 case binary:split(Rest, <<0>>) of
-                    [User, Pass] -> {ok, binary:copy(User), binary:copy(Pass)};
+                    [User, Pass] when byte_size(User) > 0 ->
+                        {ok, binary:copy(User), binary:copy(Pass)};
                     _ -> error
                 end;
             _ ->
                 case binary:split(Decoded, <<0>>, [global]) of
-                    [User, Pass] -> {ok, binary:copy(User), binary:copy(Pass)};
+                    [User, Pass] when byte_size(User) > 0 ->
+                        {ok, binary:copy(User), binary:copy(Pass)};
                     _ -> error
                 end
         end
@@ -2490,33 +2530,17 @@ decode_sasl_plain(Base64Token) ->
     get_state/1
 ]).
 
--type fsm_state() :: #{
-    state := atom(),
-    domain := binary(),
-    user := binary(),
-    full_jid := binary()
-}.
+%% @doc Initialize a fresh RFC 6120 C2S handshake state map for Domain awaiting the initial stream opening header.
+init(_Domain) ->
+    ok.
 
-%% @doc Initializes the connection FSM in wait_for_stream state.
--spec init(binary()) -> fsm_state().
-init(Domain) ->
-    #{state => wait_for_stream, domain => Domain, user => <<>>, full_jid => <<>>}.
-
-%% @doc Handles protocol events and enforces strict authentication transitions.
--spec handle_event(term(), fsm_state()) ->
-    {reply, binary() | [binary()], fsm_state()} |
-    {ok, term(), fsm_state()} |
-    {error, atom(), fsm_state()}.
-handle_event(Event, State) ->
-    %% % TODO: Implement state transitions:
-    %% 1. wait_for_stream -> wait_for_sasl
-    %% 2. wait_for_sasl -> authenticated
-    %% 3. authenticated -> session_established
+%% @doc Process an XMPP stream, SASL PLAIN, resource-bind, or session stanza event against State, returning a reply, routing ok result, or phase-specific error tuple.
+handle_event(_Event, State) ->
     {error, not_implemented, State}.
 
-%% @doc Returns the current state name atom.
--spec get_state(fsm_state()) -> atom().
-get_state(#{state := StateName}) -> StateName.
+%% @doc Extract and return the current FSM state atom from State.
+get_state(_State) ->
+    undefined.
 `,
     visibleTestCases: [
       {
@@ -2542,7 +2566,10 @@ get_state(#{state := StateName}) -> StateName.
       },
     ],
     astRules: {
-      requiredCalls: ['inet:setopts/2', 'gen_tcp:send/2'],
+      requireTailRecursion: [],
+      forbiddenCalls: [],
+      requiredCalls: ['base64:decode/1', 'binary:copy/1'],
+      requiredConstructs: ['bit_syntax', 'map_exact_match'],
     },
     solutionCode: `-module(xmpp_c2s_fsm).
 -export([
@@ -2558,10 +2585,12 @@ get_state(#{state := StateName}) -> StateName.
     full_jid := binary()
 }.
 
+%% @doc Initialize a fresh RFC 6120 C2S handshake state map for Domain awaiting the initial stream opening header.
 -spec init(binary()) -> fsm_state().
 init(Domain) ->
     #{state => wait_for_stream, domain => Domain, user => <<>>, full_jid => <<>>}.
 
+%% @doc Process an XMPP stream, SASL PLAIN, resource-bind, or session stanza event against State, returning a reply, routing ok result, or phase-specific error tuple.
 -spec handle_event(term(), fsm_state()) ->
     {reply, binary() | [binary()], fsm_state()} |
     {ok, term(), fsm_state()} |
@@ -2607,8 +2636,12 @@ handle_event(Event, #{state := session_established} = State) ->
             {ok, {presence_updated, Type}, State};
         _ ->
             {error, unknown_event, State}
-    end.
+    end;
 
+handle_event(_Event, State) ->
+    {error, unknown_state, State}.
+
+%% @doc Extract and return the current FSM state atom from State.
 -spec get_state(fsm_state()) -> atom().
 get_state(#{state := StateName}) -> StateName.
 
@@ -2618,12 +2651,14 @@ decode_sasl_plain(Base64Token) ->
         case Decoded of
             <<0, Rest/binary>> ->
                 case binary:split(Rest, <<0>>) of
-                    [User, Pass] -> {ok, binary:copy(User), binary:copy(Pass)};
+                    [User, Pass] when byte_size(User) > 0 ->
+                        {ok, binary:copy(User), binary:copy(Pass)};
                     _ -> error
                 end;
             _ ->
                 case binary:split(Decoded, <<0>>, [global]) of
-                    [User, Pass] -> {ok, binary:copy(User), binary:copy(Pass)};
+                    [User, Pass] when byte_size(User) > 0 ->
+                        {ok, binary:copy(User), binary:copy(Pass)};
                     _ -> error
                 end
         end
