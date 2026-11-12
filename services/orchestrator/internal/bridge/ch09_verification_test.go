@@ -341,11 +341,13 @@ get_wallet_balance(Owner) ->
 
 -type currency() :: usd | eur | etb.
 
+%% @doc Calculate the integer transaction fee for Amount and supported Currency atom.
 -spec calculate_fee(pos_integer(), currency()) -> non_neg_integer().
 calculate_fee(Amount, usd) when Amount > 0 -> (Amount * 15) div 1000;
 calculate_fee(Amount, eur) when Amount > 0 -> (Amount * 20) div 1000;
 calculate_fee(Amount, etb) when Amount > 0 -> (Amount * 10) div 1000.
 
+%% @doc Validate Amount bounds, deduct Amount plus fee from Balance, and return the remainder or error.
 -spec validate_transfer_spec(non_neg_integer(), integer(), currency()) ->
     {ok, non_neg_integer()} | {error, insufficient_funds | invalid_amount}.
 validate_transfer_spec(_Balance, Amount, _Currency) when Amount =< 0 ->
@@ -372,12 +374,14 @@ transfer_test_() ->
         ?_assertEqual({error, invalid_amount}, validate_transfer_spec(100, -10, usd))
     ].
 
+%% @doc Execute all embedded EUnit generator tests for the ledger module and return ok on pass.
 run_unit_checks() ->
     case eunit:test(?MODULE, [quiet]) of
         ok -> ok;
         _ -> {error, tests_failed}
     end.
 
+%% @doc Alias executing the embedded EUnit suite via run_unit_checks/0.
 run_unit_tests() ->
     run_unit_checks().
 `,

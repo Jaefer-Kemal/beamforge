@@ -2738,6 +2738,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l05` (`VERIFIED 100% PASSED`, score=100, 3 stages in `1.26s`, `1.601s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l05 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `10.34s` / `10.358s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 160: Pedagogical Despoiling & Live Tri-Verification of Chapter 9 Lecture 6 (`ch09-l06`)
+- [x] **160.1: De-Spoil `calculate_fee` Guide, Replace Incomplete PWE, Fix AST Rule & Add 10/10 `@doc` Contracts (`ch09-l06`: `ledger_specs_and_tests.erl`)**:
+  - Replaced the exact `calculate_fee/2` + `currency()` copy-paste spoiler in `## Deep Concept Breakdown & Under the Hood` with an unrelated `priority()` / `sla_minutes/2` illustration and fixed the `=: =` typo.
+  - Replaced `pricing_contract` PWE with a complete, domain-disjoint runnable module: `bandwidth_tier_qa.erl` (`reserve_mbps/2`, `admit_flow/3`, `flow_suite_test_/0`, `verify_suite/0`), pairing Dialyzer `-type` / `-spec` contracts with a 6-test `?_assertEqual` generator and `eunit:test(?MODULE, [quiet])`.
+  - Upgraded `conceptMarkdown` (`ch09.ts`) to strict Spec 04 section order and structured `Input`/`Behavior`/`Examples` blocks with zero syntax spoilers, added an `eunit:test/2` `otpDocCards` card, and fixed `astRules.requiredCalls` from non-matching local `'ledger_specs_and_tests:calculate_fee/2'` to `'eunit:test/2'`.
+  - Added 10/10 `@doc` contracts across `starterCode`, `files[0].content`, `solutionCode`, `solutionFiles['src/ledger_specs_and_tests.erl']`, and `ch09_verification_test.go`, and stripped the leaked `-type currency()` and `0.` / `{error, not_implemented}.` stubs from starter code in favor of neutral `ok.` stubs.
+- [x] **160.2: Mandatory Live Tri-Verification & Compiler Suite (`ch09-l06`)**:
+  - **Parallel Worked Example (`bandwidth_tier_qa.erl`)**: Extracted from `ch09.ts`, compiled with `erlc.exe -Wall` (exit code 0, 0 warnings), and verified all 6 EUnit generator assertions (`PWE_CH09_L06_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe` exit code 0) and executed all 4 neutral stubs safely (`STARTER_CH09_L06 exports=true stubs={ok,ok,ok,ok}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `erlc.exe -Wall +debug_info` (exit code 0, 0 warnings), passed `bf_ast_verifier` (`eunit:test/2`), and passed all 6 EUnit assertions + 2/2 visible tests (`SOLUTION_CH09_L06_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l06` (`VERIFIED 100% PASSED`, score=100, 3 stages in `1.68s`, `2.057s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l06 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `10.68s` / `10.707s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 

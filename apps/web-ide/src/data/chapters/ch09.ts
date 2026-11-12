@@ -2151,97 +2151,155 @@ get_wallet_balance(Owner) ->
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-In mission-critical BEAM architectures, dynamic typing gives incredible development velocity and runtime hot-code loading. But how do telecom switches, banking ledgers, and payment platforms guarantee that a function never crashes with a \`function_clause\` or \`badarith\` error in production?
+In mission-critical BEAM architectures, dynamic typing gives rapid iteration and hot-code loading, yet payment engines and telecom switches still require hard guarantees that invalid inputs cannot slip into production unnoticed.
 
-The Erlang ecosystem solves this with a two-tiered Quality Assurance pipeline:
-1. **Dialyzer (Discrepancy Analyzer for Erlang)**: Uses **Success Typing** to statically analyze your code without running it. It verifies that function arguments and return types strictly obey your \`-spec\` and \`-type\` declarations, catching type errors, dead code, and broken contracts at compile time!
-2. **EUnit**: The standard unit testing framework built into OTP. EUnit allows developers to write unit tests directly alongside code, supporting assert macros (\`?assertEqual\`), test generators (\`?_assertEqual\`), and fixture setup/teardown pipelines.
+The Erlang/OTP toolchain enforces correctness with a two-layer QA pipeline:
+1. **Dialyzer (\`-type\` & \`-spec\`)**: Static **Success Typing** analyzer that inspects BEAM Core Erlang bytecode without executing code. Whenever it can prove a call or return path breaches a declared contract, Dialyzer rejects the build at CI time.
+2. **EUnit (\`-include_lib("eunit/include/eunit.hrl").\`)**: OTP's built-in unit testing framework supporting eager assertions (\`?assertEqual\`, \`?assertMatch\`, \`?assertError\`) and lazy test generators (\`*_test_()\`) driven programmatically via \`eunit:test/2\`.
 
 > [!NOTE]
-> **Static Checking vs Unit Testing:**
-> - **Dialyzer (\`-spec\`):** Proves mathematically that no inputs will violate the declared types across all execution branches.
-> - **EUnit (\`eunit.hrl\`):** Proves behaviorally that concrete execution produces the expected business logic results.
+> **Static vs. Runtime Assurance:** Dialyzer catches structural type mismatches and unreachable clauses statically across all call graphs, while EUnit verifies concrete arithmetic and domain business rules at runtime.
 
 ## Deep Concept Breakdown & Under the Hood
 
-### Dialyzer Type Specifications (\`-type\` and \`-spec\`)
+### 1. Defining Custom Union Types & \`-spec\` Contracts
+
+You declare domain unions with \`-type\` and document function signatures above function heads with \`-spec\`:
 
 \`\`\`erlang
--type currency() :: usd | eur | etb.
--type balance() :: non_neg_integer().
+-type priority() :: low | normal | high.
 
--spec calculate_fee(pos_integer(), currency()) -> non_neg_integer().
-calculate_fee(Amount, usd) -> (Amount * 15) div 1000;
-calculate_fee(Amount, eur) -> (Amount * 20) div 1000;
-calculate_fee(Amount, etb) -> (Amount * 10) div 1000.
+-spec sla_minutes(pos_integer(), priority()) -> pos_integer().
+sla_minutes(Base, low)    -> Base * 4;
+sla_minutes(Base, normal) -> Base * 2;
+sla_minutes(Base, high)   -> Base.
 \`\`\`
 
-If you pass an atom \`gbp\` to \`calculate_fee/2\`, Dialyzer detects that the contract is breached before your code ever deploys to production!
+Notice that \`priority()\` restricts the allowed atoms statically: if another module calls \`sla_minutes(15, urgent)\`, Dialyzer immediately reports that \`urgent\` violates the contract even if that branch hasn't executed in tests yet.
 
-### EUnit Test Assertions and Test Generators
+### 2. Immediate Macros vs. Test Generators in EUnit
 
-When you include \`-include_lib("eunit/include/eunit.hrl").\`:
-1. **Immediate Assertions**:
-   - \`?assertEqual(Expected, Expression)\`: Evaluates \`Expression\` immediately and raises an exception if not identical (\`=: = \`).
-   - \`?assertMatch(Pattern, Expression)\`: Matches result against a pattern.
-   - \`?assertError(Reason, Expression)\`: Asserts that \`Expression\` crashes with error \`Reason\`.
-2. **Test Generators (\`_test_()\` Functions)**:
-   Functions ending in \`_test_()\` return a test representation (or list of tests) to be executed by EUnit. They use underscore-prefixed macros:
-   - \`?_assertEqual(Expected, Expression)\`: Returns an executable fun test object.
-
-### Parallel Worked Example: Pricing Contract with EUnit
-
-\`\`\`erlang
--module(pricing_contract).
--include_lib("eunit/include/eunit.hrl").
-
--type plan() :: free | pro | enterprise.
--spec discount(pos_integer(), plan()) -> non_neg_integer().
-discount(Amount, free) -> 0;
-discount(Amount, pro) -> (Amount * 10) div 100;
-discount(Amount, enterprise) -> (Amount * 25) div 100.
-
-pricing_test_() ->
-    [
-        ?_assertEqual(0, discount(100, free)),
-        ?_assertEqual(10, discount(100, pro)),
-        ?_assertEqual(25, discount(100, enterprise))
-    ].
-\`\`\`
+Including \`-include_lib("eunit/include/eunit.hrl").\` provides two styles of checks:
+- **Immediate Assertion (\`?assertEqual(Expect, Expr)\`)**: Evaluates \`Expr\` immediately and checks exact Erlang identity (\`=:=\`).
+- **Test Generator (\`*_test_()\`)**: Any zero-arity function whose name ends in \`_test_\` returns a list of delayed test objects built with underscore-prefixed macros (\`?_assertEqual(Expect, Expr)\`, \`?_assertMatch(Pattern, Expr)\`). EUnit wraps each generator item in an isolated execution context and reports failures line-by-line when invoked via \`eunit:test(?MODULE, [quiet])\`.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Official EUnit Macros (eunit/include/eunit.hrl)
-?assertEqual(Expected, Expr)
-?assertMatch(Pattern, Expr)
-?assertError(Reason, Expr)
+%% Official EUnit Functions & Macros (stdlib / eunit)
+eunit:test(Tests, Options) -> ok | error
+  Types:
+    Tests = module() | [module()] | test_representation()
+    Options = [quiet | verbose]
 
-?_assertEqual(Expected, Expr)
-?_assertMatch(Pattern, Expr)
+%% EUnit Header Macros (-include_lib("eunit/include/eunit.hrl").)
+?assertEqual(Expect, Expr)   %% Eager exact-match (=:=) assertion
+?assertMatch(Pattern, Expr)  %% Eager pattern assertion
+?assertError(Reason, Expr)   %% Eager error exception assertion
+?_assertEqual(Expect, Expr)  %% Lazy generator test object (=:=)
+?_assertMatch(Pattern, Expr) %% Lazy generator pattern object
 \`\`\`
+
+Refer to the attached documentation cards below for macro identity semantics and runner options.
+
+## Parallel Worked Example: Network QoS Burst Contract
+
+Consider a separate domain: a traffic-shaper module (\`bandwidth_tier_qa\`) validating QoS tier reservations with Dialyzer union types, multi-clause guards, an EUnit generator \`flow_suite_test_()\`, and a quiet runner \`verify_suite/0\`:
+
+\`\`\`erlang
+-module(bandwidth_tier_qa).
+-include_lib("eunit/include/eunit.hrl").
+
+-export([reserve_mbps/2, admit_flow/3, verify_suite/0]).
+
+-type link_tier() :: bronze | silver | gold.
+
+%% @doc Return burst headroom Mbps granted for BaseMbps at a given QoS link tier.
+-spec reserve_mbps(pos_integer(), link_tier()) -> non_neg_integer().
+reserve_mbps(BaseMbps, bronze) when BaseMbps > 0 -> BaseMbps div 10;
+reserve_mbps(BaseMbps, silver) when BaseMbps > 0 -> BaseMbps div 4;
+reserve_mbps(BaseMbps, gold)   when BaseMbps > 0 -> BaseMbps div 2.
+
+%% @doc Validate Requested Mbps plus burst reservation against AvailableMbps capacity.
+-spec admit_flow(non_neg_integer(), integer(), link_tier()) ->
+    {ok, non_neg_integer()} | {error, bad_rate | capacity_full}.
+admit_flow(_AvailableMbps, Requested, _Tier) when Requested =< 0 ->
+    {error, bad_rate};
+admit_flow(AvailableMbps, Requested, Tier) when AvailableMbps >= 0, Requested > 0 ->
+    Reserved = Requested + reserve_mbps(Requested, Tier),
+    case AvailableMbps >= Reserved of
+        true  -> {ok, AvailableMbps - Reserved};
+        false -> {error, capacity_full}
+    end.
+
+flow_suite_test_() ->
+    [
+        ?_assertEqual(10, reserve_mbps(100, bronze)),
+        ?_assertEqual(25, reserve_mbps(100, silver)),
+        ?_assertEqual(50, reserve_mbps(100, gold)),
+        ?_assertEqual({ok, 390}, admit_flow(500, 100, bronze)),
+        ?_assertEqual({error, capacity_full}, admit_flow(50, 100, gold)),
+        ?_assertEqual({error, bad_rate}, admit_flow(500, 0, silver))
+    ].
+
+%% @doc Execute the embedded EUnit generator suite and normalize status.
+verify_suite() ->
+    case eunit:test(?MODULE, [quiet]) of
+        ok -> ok;
+        error -> {error, suite_failed}
+    end.
+\`\`\`
+
+### What OTP Does at Compilation & Test Time
+
+- **Success-Typing Guard Contracts**: Both \`reserve_mbps/2\` and \`admit_flow/3\` declare explicit \`-spec\` annotations referencing the closed union \`link_tier()\`, letting Dialyzer verify callers statically while \`when\` guards enforce runtime numeric bounds.
+- **Lazy Test Generators (\`?_assertEqual\`)**: Prefixing \`?\` with an underscore wraps each assertion inside a zero-arity fun; EUnit collects all 6 tests returned by \`flow_suite_test_()\` automatically when \`eunit:test(?MODULE, [quiet])\` runs—even though \`flow_suite_test_/0\` does not need to be manually listed in user API docs beyond EUnit's header export rule.
 
 ## Assignment Specification
 
-Implement module \`ledger_specs_and_tests\` exporting:
-1. \`calculate_fee(Amount, Currency) -> non_neg_integer()\`:
-   - \`-type currency() :: usd | eur | etb.\`
-   - \`-spec calculate_fee(pos_integer(), currency()) -> non_neg_integer().\`
-   - Returns fee: \`usd\` -> \`(Amount * 15) div 1000\`, \`eur\` -> \`(Amount * 20) div 1000\`, \`etb\` -> \`(Amount * 10) div 1000\`.
-2. \`validate_transfer_spec(Balance, Amount, Currency) -> {ok, Remaining} | {error, Reason}\`:
-   - \`-spec validate_transfer_spec(non_neg_integer(), integer(), currency()) -> {ok, non_neg_integer()} | {error, insufficient_funds | invalid_amount}.\`
-   - Rejects \`Amount =< 0\` with \`{error, invalid_amount}\`.
-   - Computes \`TotalDeduction = Amount + calculate_fee(Amount, Currency)\`.
-   - If \`Balance < TotalDeduction\`, returns \`{error, insufficient_funds}\`.
-   - Otherwise returns \`{ok, Balance - TotalDeduction}\`.
-3. \`run_unit_checks/0 -> ok\` AND \`run_unit_tests/0 -> ok\`:
-   - Runs built-in EUnit tests for the functions and returns \`ok\`.
+Implement module \`src/ledger_specs_and_tests.erl\` including EUnit's standard header, declaring a custom \`currency()\` union type covering \`usd\`, \`eur\`, and \`etb\` with Dialyzer \`-spec\` annotations, and exporting \`calculate_fee/2\`, \`validate_transfer_spec/3\`, \`run_unit_checks/0\`, and \`run_unit_tests/0\`.
+
+### \`calculate_fee/2\`
+- **Input**: Positive integer \`Amount\`, \`currency()\` atom (\`usd\`, \`eur\`, or \`etb\`).
+- **Behavior**: Declared with a Dialyzer spec accepting a positive integer and \`currency()\` and returning a non-negative integer. Computes integer division fees using \`div 1000\`: \`1.5%\` (factor \`15\`) for \`usd\`, \`2.0%\` (factor \`20\`) for \`eur\`, and \`1.0%\` (factor \`10\`) for \`etb\`.
+- **Examples**:
+  - \`ledger_specs_and_tests:calculate_fee(1000, usd)\` returns \`15\`.
+  - \`ledger_specs_and_tests:calculate_fee(1000, eur)\` returns \`20\`.
+  - \`ledger_specs_and_tests:calculate_fee(1000, etb)\` returns \`10\`.
+
+### \`validate_transfer_spec/3\`
+- **Input**: Non-negative integer \`Balance\`, integer \`Amount\`, \`currency()\` atom.
+- **Behavior**: Declared with a Dialyzer spec returning either an \`ok\`-tagged non-negative remaining balance or an \`error\` tuple tagged \`invalid_amount\` or \`insufficient_funds\`. Rejects non-positive \`Amount\` with \`{error, invalid_amount}\`; otherwise sums \`Amount\` plus \`calculate_fee(Amount, Currency)\`, returning \`{error, insufficient_funds}\` if \`Balance\` is smaller or \`{ok, Remaining}\` with the fee-adjusted remainder.
+- **Examples**:
+  - \`ledger_specs_and_tests:validate_transfer_spec(1000, 500, usd)\` returns \`{ok, 493}\` (500 + 7 fee deducted).
+  - \`ledger_specs_and_tests:validate_transfer_spec(100, 200, usd)\` returns \`{error, insufficient_funds}\`.
+  - \`ledger_specs_and_tests:validate_transfer_spec(100, -5, usd)\` returns \`{error, invalid_amount}\`.
+
+### \`run_unit_checks/0\` and \`run_unit_tests/0\`
+- **Input**: None.
+- **Behavior**: Executes embedded EUnit generator tests (\`*_test_()\`) verifying fee math, successful transfer deductions, insufficient-funds rejections, and invalid-amount rejections quietly via \`eunit:test/2\`, returning \`ok\` when all unit checks pass. \`run_unit_tests/0\` delegates cleanly to \`run_unit_checks/0\`.
+- **Examples**:
+  - \`ledger_specs_and_tests:run_unit_checks()\` returns \`ok\`.
 
 ## Rules & Verification Constraints
-- Must define type specs using \`-spec\` and \`-type\`.
-- Must include \`-include_lib("eunit/include/eunit.hrl").\`
+
+- **Required Header & Specs**: Must include \`-include_lib("eunit/include/eunit.hrl").\` and declare \`-type\` and \`-spec\` contracts for \`calculate_fee/2\` and \`validate_transfer_spec/3\`.
+- **Required Remote Call**: \`astRules\` checks \`eunit:test/2\` execution inside the module's test runner.
 `,
     otpDocCards: [
+      {
+        functionName: 'test',
+        module: 'eunit',
+        signature: 'eunit:test(Tests, Options) -> ok | error',
+        typesSpec: [
+          'Tests = module() | test_representation()',
+          'Options = [quiet | verbose]'
+        ],
+        description: 'Executes all EUnit tests and test generators found in the target module with the specified output options.',
+        complexityNote: 'Runs each test/generator sequentially in isolated test processes.',
+        officialUrl: 'https://www.erlang.org/doc/apps/eunit/eunit.html#test/2',
+        githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/eunit/src/eunit.erl'
+      },
       {
         functionName: 'assert',
         module: 'eunit',
@@ -2290,17 +2348,19 @@ Implement module \`ledger_specs_and_tests\` exporting:
 
 -export([calculate_fee/2, validate_transfer_spec/3, run_unit_checks/0, run_unit_tests/0]).
 
--type currency() :: usd | eur | etb.
-
+%% @doc Calculate the integer transaction fee for Amount and supported Currency atom.
 calculate_fee(Amount, Currency) ->
-    0.
+    ok.
 
+%% @doc Validate Amount bounds, deduct Amount plus fee from Balance, and return the remainder or error.
 validate_transfer_spec(Balance, Amount, Currency) ->
-    {error, not_implemented}.
+    ok.
 
+%% @doc Execute all embedded EUnit generator tests for the ledger module and return ok on pass.
 run_unit_checks() ->
     ok.
 
+%% @doc Alias executing the embedded EUnit suite via run_unit_checks/0.
 run_unit_tests() ->
     ok.
 `,
@@ -2311,11 +2371,13 @@ run_unit_tests() ->
 
 -type currency() :: usd | eur | etb.
 
+%% @doc Calculate the integer transaction fee for Amount and supported Currency atom.
 -spec calculate_fee(pos_integer(), currency()) -> non_neg_integer().
 calculate_fee(Amount, usd) when Amount > 0 -> (Amount * 15) div 1000;
 calculate_fee(Amount, eur) when Amount > 0 -> (Amount * 20) div 1000;
 calculate_fee(Amount, etb) when Amount > 0 -> (Amount * 10) div 1000.
 
+%% @doc Validate Amount bounds, deduct Amount plus fee from Balance, and return the remainder or error.
 -spec validate_transfer_spec(non_neg_integer(), integer(), currency()) ->
     {ok, non_neg_integer()} | {error, insufficient_funds | invalid_amount}.
 validate_transfer_spec(_Balance, Amount, _Currency) when Amount =< 0 ->
@@ -2342,12 +2404,14 @@ transfer_test_() ->
         ?_assertEqual({error, invalid_amount}, validate_transfer_spec(100, -10, usd))
     ].
 
+%% @doc Execute all embedded EUnit generator tests for the ledger module and return ok on pass.
 run_unit_checks() ->
     case eunit:test(?MODULE, [quiet]) of
         ok -> ok;
         _ -> {error, tests_failed}
     end.
 
+%% @doc Alias executing the embedded EUnit suite via run_unit_checks/0.
 run_unit_tests() ->
     run_unit_checks().
 `,
@@ -2360,17 +2424,19 @@ run_unit_tests() ->
 
 -export([calculate_fee/2, validate_transfer_spec/3, run_unit_checks/0, run_unit_tests/0]).
 
--type currency() :: usd | eur | etb.
-
+%% @doc Calculate the integer transaction fee for Amount and supported Currency atom.
 calculate_fee(Amount, Currency) ->
-    0.
+    ok.
 
+%% @doc Validate Amount bounds, deduct Amount plus fee from Balance, and return the remainder or error.
 validate_transfer_spec(Balance, Amount, Currency) ->
-    {error, not_implemented}.
+    ok.
 
+%% @doc Execute all embedded EUnit generator tests for the ledger module and return ok on pass.
 run_unit_checks() ->
     ok.
 
+%% @doc Alias executing the embedded EUnit suite via run_unit_checks/0.
 run_unit_tests() ->
     ok.
 `,
@@ -2384,11 +2450,13 @@ run_unit_tests() ->
 
 -type currency() :: usd | eur | etb.
 
+%% @doc Calculate the integer transaction fee for Amount and supported Currency atom.
 -spec calculate_fee(pos_integer(), currency()) -> non_neg_integer().
 calculate_fee(Amount, usd) when Amount > 0 -> (Amount * 15) div 1000;
 calculate_fee(Amount, eur) when Amount > 0 -> (Amount * 20) div 1000;
 calculate_fee(Amount, etb) when Amount > 0 -> (Amount * 10) div 1000.
 
+%% @doc Validate Amount bounds, deduct Amount plus fee from Balance, and return the remainder or error.
 -spec validate_transfer_spec(non_neg_integer(), integer(), currency()) ->
     {ok, non_neg_integer()} | {error, insufficient_funds | invalid_amount}.
 validate_transfer_spec(_Balance, Amount, _Currency) when Amount =< 0 ->
@@ -2415,12 +2483,14 @@ transfer_test_() ->
         ?_assertEqual({error, invalid_amount}, validate_transfer_spec(100, -10, usd))
     ].
 
+%% @doc Execute all embedded EUnit generator tests for the ledger module and return ok on pass.
 run_unit_checks() ->
     case eunit:test(?MODULE, [quiet]) of
         ok -> ok;
         _ -> {error, tests_failed}
     end.
 
+%% @doc Alias executing the embedded EUnit suite via run_unit_checks/0.
 run_unit_tests() ->
     run_unit_checks().
 `,
@@ -2442,7 +2512,7 @@ run_unit_tests() ->
       }
     ],
     astRules: {
-      requiredCalls: ['ledger_specs_and_tests:calculate_fee/2']
+      requiredCalls: ['eunit:test/2']
     },
     solutionExplanation: 'Combines Dialyzer type specs with EUnit assertions and test generators to provide static and runtime quality assurance.',
   },
