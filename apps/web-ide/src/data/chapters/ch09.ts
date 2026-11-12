@@ -428,17 +428,16 @@ get_user_profile(UserId) ->
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-In a high-throughput API gateway, thousands of concurrent requests need to validate auth tokens on every HTTP request. If token verification is handled by sending a message to a \`gen_server\`, that server's mailbox becomes a severe single-threaded bottleneck: 50,000 requests/sec will queue up, causing latency spikes and timeouts.
+In a high-throughput API gateway, tens of thousands of incoming requests per second need to validate bearer tokens and enforce roles concurrently. Routing every lookup through a single \`gen_server\` mailbox forces requests into a FIFO queue, causing severe tail-latency spikes under traffic bursts.
 
-The standard OTP architectural solution is the **Protected ETS Architecture**:
-1. A single \`gen_server\` owns a **\`protected\`** ETS table.
-2. Only the owner process is permitted to write (inserting new tokens, refreshing leases). This eliminates write-write race conditions.
-3. Any process across the entire BEAM VM can read directly from the ETS table with **lock-free concurrency** via \`ets:lookup/2\` or \`ets:select/2\`.
-4. Over 100,000 concurrent client requests read auth data directly from C memory with **zero message passing and zero mailbox serialization**!
+OTP systems eliminate that bottleneck with the **Protected ETS Architecture**:
+1. One coordinator process owns a **\`protected\`** (or \`public\`) ETS table and serializes mutations safely.
+2. Worker processes bypass the owner mailbox completely and query ETS directly from ERTS off-heap memory in parallel.
+3. Filtering and TTL sweeps run directly in C via match specifications rather than copying whole tables onto worker heaps.
 
 > [!NOTE]
 > **ETS Access Protections:**
-> - **\`public\`**: Any process can read and write.
+> - **\`public\`**: Any process on the node can read and write.
 > - **\`protected\` (Default)**: Any process can read; only the owner process can write.
 > - **\`private\`**: Only the owner process can read or write.
 
@@ -446,82 +445,131 @@ The standard OTP architectural solution is the **Protected ETS Architecture**:
 
 ### Pattern Matching with \`ets:match_object/2\`
 
-For simple tuple pattern queries, \`ets:match_object/2\` uses the atom \`'_'\` as a wildcard:
+For structural matching without inequality comparisons, \`ets:match_object/2\` matches full tuples where any wildcard slot uses the atom \`'_'\`:
 
 \`\`\`erlang
-%% Matches any session for user 101 regardless of Token or CreatedAt
-ets:match_object(Table, {session, '_', 101, '_'})
+ets:match_object(Tab, {entry, '_', target_group, '_'})
 \`\`\`
+
+Every matched tuple is copied in full onto the caller's heap.
 
 ### Match Specifications (\`ets:select/2\` & \`ets:select_delete/2\`)
 
-When you need conditional filtering (e.g., *"Find all tokens expired before Timestamp X"* or *"Delete all expired tokens in one atomic scan"*), \`match_object\` is not enough. You must use **Match Specifications**:
+When you need numeric comparisons (\`<\`, \`>=\`), boolean combinations (\`andalso\`), or column projection so only specific fields cross from C memory into Erlang, use a **Match Specification**: a list of 3-element clauses \`[{MatchHead, GuardList, ReturnBody}]\`:
 
-A match spec is a list of three-element tuples:
-\`\`\`erlang
-[{HeadPattern, [GuardConditions], [ResultFormat]}]
-\`\`\`
-
-1. **Head Pattern**: Tuple structure using match variables (\`'$1'\`, \`'$2'\`, \`'$3'\`, \`'$4'\`).
-2. **Guard Conditions**: Boolean test expressions using prefix notation: \`[{'<', '$4', CurrentTimestamp}]\`.
-3. **Result Format**: What to return: \`['$2']\` (returns UserId), or \`[true]\` for \`select_delete\`.
-
-### Why Match Specs are Dramatically Faster
-
-When you call \`ets:select_delete(Tab, MatchSpec)\`:
-- The entire scan and deletion happens **inside the ERTS C runtime**.
-- Non-matching records are never copied onto the Erlang process heap.
-- Memory from expired rows is freed immediately without generating garbage collection overhead!
-
-### Parallel Worked Example: Expired Job Eviction
-
-\`\`\`erlang
--module(job_cleaner).
--export([init_table/0, store_job/3, purge_completed/1]).
-
-init_table() ->
-    ets:new(jobs_tab, [set, public, named_table, {keypos, 2}]).
-
-store_job(JobId, Status, CreatedAt) ->
-    ets:insert(jobs_tab, {job, JobId, Status, CreatedAt}),
-    ok.
-
-purge_completed(CutoffTime) ->
-    %% MatchSpec: delete all {job, JobId, completed, CreatedAt} where CreatedAt < CutoffTime
-    MatchSpec = [
-        {{job, '$1', completed, '$2'},
-         [{'<', '$2', CutoffTime}],
-         [true]}
-    ],
-    ets:select_delete(jobs_tab, MatchSpec).
-\`\`\`
+1. **\`MatchHead\`**: Tuple pattern binding positional placeholders \`'$1'\`, \`'$2'\`, ... or \`'_'\` to ignore slots.
+2. **\`GuardList\`**: Prefix-notation boolean expressions such as \`[{'>=', '$2', Cutoff}]\` or \`[{'andalso', {'=:=', '$1', Tag}, {'<', '$2', Limit}}]\`.
+3. **\`ReturnBody\`**: Projection expression for \`ets:select/2\` (e.g., \`['$1']\` to extract only the matched field) or \`[true]\` for \`ets:select_delete/2\` to instruct ERTS to unlink and free the tuple directly in C memory without allocating anything on the Erlang heap.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Official ETS Match Calls (stdlib / ets)
-ets:match_object(Tab, Pattern) -> [tuple()]
-ets:select(Tab, MatchSpec) -> [term()]
-ets:select_delete(Tab, MatchSpec) -> NumDeleted :: integer()
+%% Official OTP Signatures (stdlib / ets)
+ets:match_object(Tab, Pattern) -> [Object :: tuple()]
+  Types:
+    Tab = tid() | atom()
+    Pattern = match_pattern()
+
+ets:select(Tab, MatchSpec) -> [Match :: term()]
+  Types:
+    Tab = tid() | atom()
+    MatchSpec = match_spec()
+
+ets:select_delete(Tab, MatchSpec) -> NumDeleted :: non_neg_integer()
+  Types:
+    Tab = tid() | atom()
+    MatchSpec = match_spec()
 \`\`\`
+
+Refer to the attached documentation cards below for exact complexity notes and standard library links.
+
+## Parallel Worked Example: DNS Resolver Cache
+
+Consider a separate domain: an internal DNS record cache \`dns_cache\` storing entries shaped \`{record, HostBin, RegionAtom, ExpiryEpoch}\`, protected so only its coordinator writes while callers run pattern queries and compound regional TTL sweeps:
+
+\`\`\`erlang
+-module(dns_cache_tab).
+-export([init_cache/0, cache_host/3, hosts_in_region/1, active_hosts_after/1, purge_region_before/2]).
+
+%% @doc Create the protected named DNS cache table indexed by host binary.
+init_cache() ->
+    case ets:info(dns_cache) of
+        undefined ->
+            ets:new(dns_cache, [set, protected, named_table, {keypos, 2}]),
+            ok;
+        _Info ->
+            ok
+    end.
+
+%% @doc Insert or refresh a DNS host record keyed at tuple element 2.
+cache_host(HostBin, RegionAtom, ExpiryEpoch) ->
+    ets:insert(dns_cache, {record, HostBin, RegionAtom, ExpiryEpoch}),
+    ok.
+
+%% @doc Extract all host binaries assigned to RegionAtom using match_object/2.
+hosts_in_region(RegionAtom) ->
+    Matches = ets:match_object(dns_cache, {record, '_', RegionAtom, '_'}),
+    [Host || {record, Host, _, _} <- Matches].
+
+%% @doc Project only host binaries whose expiry timestamp is at least NowSec.
+active_hosts_after(NowSec) ->
+    MatchSpec = [
+        {{record, '$1', '_', '$2'},
+         [{'>=', '$2', NowSec}],
+         ['$1']}
+    ],
+    ets:select(dns_cache, MatchSpec).
+
+%% @doc Atomically purge stale entries for one specific region before CutoffSec.
+purge_region_before(RegionAtom, CutoffSec) ->
+    MatchSpec = [
+        {{record, '_', '$1', '$2'},
+         [{'andalso', {'=:=', '$1', RegionAtom}, {'<', '$2', CutoffSec}}],
+         [true]}
+    ],
+    ets:select_delete(dns_cache, MatchSpec).
+\`\`\`
+
+### What ERTS Does at Runtime
+
+- **Protected Single-Writer Ownership**: \`init_cache/0\` uses \`protected\` access mode paired with \`{keypos, 2}\` so \`HostBin\` acts as the primary key and external processes cannot corrupt cache rows.
+- **Full-Tuple Matching vs. Zero-Copy Projection**: \`hosts_in_region/1\` fetches full tuples via \`ets:match_object/2\`, whereas \`active_hosts_after/1\` pushes the \`>=\` guard and \`'$1'\` projection into C memory via \`ets:select/2\` so expired rows and extra columns never touch the caller's heap.
+- **Atomic Compound Eviction**: \`purge_region_before/2\` uses a compound \`andalso\` guard inside \`ets:select_delete/2\` and returns \`[true]\` to reclaim matching records in a single off-heap pass, returning the integer count deleted.
 
 ## Assignment Specification
 
-Implement module \`ets_query_engine\` exporting:
-1. \`init_auth_table/0 -> ok\`:
-   - Creates a \`named_table\` named \`auth_token_table\` with options \`[set, public, named_table, {keypos, 2}]\`.
-   - If the table already exists, returns \`ok\`.
-2. \`store_token(TokenBin, UserId, Role, ExpiresAt) -> ok\`:
-   - Inserts \`{token, TokenBin, UserId, Role, ExpiresAt}\` into \`auth_token_table\`.
-3. \`find_users_by_role(Role) -> [UserId]\`:
-   - Uses match specs or \`ets:match_object/2\` to return a list of unique \`UserId\` integers possessing that \`Role\`.
-4. \`delete_expired_tokens(CurrentTimestamp) -> integer()\`:
-   - Uses \`ets:select_delete/2\` to atomically purge all records where \`ExpiresAt < CurrentTimestamp\`.
-   - Returns the integer count of purged records.
+Implement module \`src/ets_query_engine.erl\` exporting \`init_auth_table/0\`, \`store_token/4\`, \`find_users_by_role/1\`, and \`delete_expired_tokens/1\`, backed by the named table \`auth_token_table\`.
+
+### \`init_auth_table/0\`
+- **Input**: None.
+- **Behavior**: Idempotently initializes the named ETS table \`auth_token_table\` as a public \`set\` indexed on element \`2\` of each stored tuple. Returns \`ok\` whether newly allocated or already present.
+- **Examples**:
+  - \`ets_query_engine:init_auth_table()\` returns \`ok\`.
+
+### \`store_token/4\`
+- **Input**: Binary token \`TokenBin\`, integer \`UserId\`, atom \`Role\`, integer timestamp \`ExpiresAt\`.
+- **Behavior**: Inserts a 5-element tuple tagged \`token\` at position \`1\`, followed by \`TokenBin\`, \`UserId\`, \`Role\`, and \`ExpiresAt\` into \`auth_token_table\`, overwriting any existing entry for \`TokenBin\` and returning \`ok\`.
+- **Examples**:
+  - \`ets_query_engine:store_token(<<"tok_1">>, 101, admin, 9999)\` returns \`ok\`.
+
+### \`find_users_by_role/1\`
+- **Input**: Atom \`Role\`.
+- **Behavior**: Queries \`auth_token_table\` for all stored token records whose role equals \`Role\`, extracts each record's \`UserId\`, and returns a sorted list of unique user IDs via \`lists:usort/1\`.
+- **Examples**:
+  - After storing \`admin\` tokens for users \`10\`, \`30\`, and \`10\`, \`ets_query_engine:find_users_by_role(admin)\` returns \`[10, 30]\`.
+  - Querying a role with no matching tokens returns \`[]\`.
+
+### \`delete_expired_tokens/1\`
+- **Input**: Integer \`CurrentTimestamp\`.
+- **Behavior**: Uses \`ets:select_delete/2\` to atomically delete all token entries in \`auth_token_table\` whose \`ExpiresAt\` timestamp is strictly less than \`CurrentTimestamp\`, preserving tokens equal to or greater than \`CurrentTimestamp\`. Returns the integer count of deleted records.
+- **Examples**:
+  - With token expiries \`100\`, \`200\`, and \`500\`, \`ets_query_engine:delete_expired_tokens(300)\` returns \`2\` and leaves only the \`500\` token in \`auth_token_table\`.
 
 ## Rules & Verification Constraints
-- Table must use \`{keypos, 2}\` so \`TokenBin\` is the primary key.
-- \`delete_expired_tokens/1\` must use \`ets:select_delete/2\`.
+
+- **Required Calls**: \`bf_ast_verifier\` enforces \`ets:new/2\`, \`ets:select_delete/2\`, and \`lists:usort/1\`.
+- **Key Indexing**: \`auth_token_table\` must configure element \`2\` (\`keypos\`) so \`TokenBin\` is the lookup key.
+- **C-Level Eviction**: Expired token cleanup must execute inside ERTS via \`ets:select_delete/2\` rather than manual \`tab2list\` loops.
 `,
     otpDocCards: [
       {
@@ -600,23 +648,28 @@ Implement module \`ets_query_engine\` exporting:
 
 -define(TAB, auth_token_table).
 
+%% @doc Create the named public ETS auth token table keyed on element 2 idempotently.
 init_auth_table() ->
     ok.
 
+%% @doc Insert or overwrite a token entry keyed by TokenBin in auth_token_table.
 store_token(TokenBin, UserId, Role, ExpiresAt) ->
     ok.
 
+%% @doc Return a sorted list of unique user IDs whose stored tokens match Role.
 find_users_by_role(Role) ->
-    [].
+    ok.
 
+%% @doc Atomically purge all tokens expired strictly before CurrentTimestamp and return the count.
 delete_expired_tokens(CurrentTimestamp) ->
-    0.
+    ok.
 `,
     solutionCode: `-module(ets_query_engine).
 -export([init_auth_table/0, store_token/4, find_users_by_role/1, delete_expired_tokens/1]).
 
 -define(TAB, auth_token_table).
 
+%% @doc Create the named public ETS auth token table keyed on element 2 idempotently.
 init_auth_table() ->
     case ets:whereis(?TAB) of
         undefined ->
@@ -631,16 +684,19 @@ init_auth_table() ->
             ok
     end.
 
+%% @doc Insert or overwrite a token entry keyed by TokenBin in auth_token_table.
 store_token(TokenBin, UserId, Role, ExpiresAt) ->
     ets:insert(?TAB, {token, TokenBin, UserId, Role, ExpiresAt}),
     ok.
 
+%% @doc Return a sorted list of unique user IDs whose stored tokens match Role.
 find_users_by_role(Role) ->
     MatchSpec = [
         {{token, '_', '$1', Role, '_'}, [], ['$1']}
     ],
     lists:usort(ets:select(?TAB, MatchSpec)).
 
+%% @doc Atomically purge all tokens expired strictly before CurrentTimestamp and return the count.
 delete_expired_tokens(CurrentTimestamp) ->
     MatchSpec = [
         {{token, '_', '_', '_', '$1'},
@@ -658,17 +714,21 @@ delete_expired_tokens(CurrentTimestamp) ->
 
 -define(TAB, auth_token_table).
 
+%% @doc Create the named public ETS auth token table keyed on element 2 idempotently.
 init_auth_table() ->
     ok.
 
+%% @doc Insert or overwrite a token entry keyed by TokenBin in auth_token_table.
 store_token(TokenBin, UserId, Role, ExpiresAt) ->
     ok.
 
+%% @doc Return a sorted list of unique user IDs whose stored tokens match Role.
 find_users_by_role(Role) ->
-    [].
+    ok.
 
+%% @doc Atomically purge all tokens expired strictly before CurrentTimestamp and return the count.
 delete_expired_tokens(CurrentTimestamp) ->
-    0.
+    ok.
 `,
       },
     ],
@@ -678,6 +738,7 @@ delete_expired_tokens(CurrentTimestamp) ->
 
 -define(TAB, auth_token_table).
 
+%% @doc Create the named public ETS auth token table keyed on element 2 idempotently.
 init_auth_table() ->
     case ets:whereis(?TAB) of
         undefined ->
@@ -692,16 +753,19 @@ init_auth_table() ->
             ok
     end.
 
+%% @doc Insert or overwrite a token entry keyed by TokenBin in auth_token_table.
 store_token(TokenBin, UserId, Role, ExpiresAt) ->
     ets:insert(?TAB, {token, TokenBin, UserId, Role, ExpiresAt}),
     ok.
 
+%% @doc Return a sorted list of unique user IDs whose stored tokens match Role.
 find_users_by_role(Role) ->
     MatchSpec = [
         {{token, '_', '$1', Role, '_'}, [], ['$1']}
     ],
     lists:usort(ets:select(?TAB, MatchSpec)).
 
+%% @doc Atomically purge all tokens expired strictly before CurrentTimestamp and return the count.
 delete_expired_tokens(CurrentTimestamp) ->
     MatchSpec = [
         {{token, '_', '_', '_', '$1'},
@@ -728,7 +792,7 @@ delete_expired_tokens(CurrentTimestamp) ->
       }
     ],
     astRules: {
-      requiredCalls: ['ets:new/2', 'ets:select_delete/2']
+      requiredCalls: ['ets:new/2', 'ets:select_delete/2', 'lists:usort/1']
     },
     solutionExplanation: 'Uses {keypos, 2} to index records by token and compiles match specifications for select and atomic select_delete.',
   },

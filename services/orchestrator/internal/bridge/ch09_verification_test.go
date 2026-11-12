@@ -75,6 +75,7 @@ get_user_profile(UserId) ->
 
 -define(TAB, auth_token_table).
 
+%% @doc Create the named public ETS auth token table keyed on element 2 idempotently.
 init_auth_table() ->
     case ets:whereis(?TAB) of
         undefined ->
@@ -89,16 +90,19 @@ init_auth_table() ->
             ok
     end.
 
+%% @doc Insert or overwrite a token entry keyed by TokenBin in auth_token_table.
 store_token(TokenBin, UserId, Role, ExpiresAt) ->
     ets:insert(?TAB, {token, TokenBin, UserId, Role, ExpiresAt}),
     ok.
 
+%% @doc Return a sorted list of unique user IDs whose stored tokens match Role.
 find_users_by_role(Role) ->
     MatchSpec = [
         {{token, '_', '$1', Role, '_'}, [], ['$1']}
     ],
     lists:usort(ets:select(?TAB, MatchSpec)).
 
+%% @doc Atomically purge all tokens expired strictly before CurrentTimestamp and return the count.
 delete_expired_tokens(CurrentTimestamp) ->
     MatchSpec = [
         {{token, '_', '_', '_', '$1'},

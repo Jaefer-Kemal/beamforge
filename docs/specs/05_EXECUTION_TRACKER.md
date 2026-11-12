@@ -2689,6 +2689,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l01` (`VERIFIED 100% PASSED`, score=100, 5 stages in `1.38s`, `1.786s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l01 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `11.71s` / `11.736s` total).
   - **Workspace Compilers**: `CH01_08_SPEC_COUNT=0` (zero `-spec` in `ch09-l01`); `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 156: Pedagogical Despoiling & Live Tri-Verification of Chapter 9 Lecture 2 (`ch09-l02`)
+- [x] **156.1: Replace Clone PWE, Align AST Rules & Add 10/10 `@doc` Contracts (`ch09-l02`: `ets_query_engine.erl`)**:
+  - Replaced the non-idempotent 1:1 `job_cleaner` clone with a genuinely domain-disjoint, runnable Parallel Worked Example: `dns_cache_tab.erl` (`init_cache/0`, `cache_host/3`, `hosts_in_region/1`, `active_hosts_after/1`, `purge_region_before/2`), illustrating `protected` table ownership, `ets:match_object/2`, `ets:select/2`, and compound `andalso` match specs in `ets:select_delete/2`.
+  - Upgraded `conceptMarkdown` (`ch09.ts`) to strict Spec 04 section order and structured `Input`/`Behavior`/`Examples` blocks with zero syntax spoilers.
+  - Aligned `astRules.requiredCalls` in `ch09.ts` (`['ets:new/2', 'ets:select_delete/2', 'lists:usort/1']`) and `## Rules & Verification Constraints` with `erl_runner_chapters.go` (`required_remote_calls => [{ets, new, 2}, {ets, select_delete, 2}, {lists, usort, 1}]`).
+  - Added 10/10 `@doc` contracts across `starterCode`, `files[0].content`, `solutionCode`, `solutionFiles['src/ets_query_engine.erl']`, and `ch09_verification_test.go`, and converted starter return stubs (`[].`, `0.`) to neutral `ok.` stubs (zero `-spec`).
+- [x] **156.2: Mandatory Live Tri-Verification & Compiler Suite (`ch09-l02`)**:
+  - **Parallel Worked Example (`dns_cache_tab.erl`)**: Extracted from `ch09.ts`, compiled with `erlc.exe -Wall` (exit code 0, 0 warnings), and verified live idempotent initialization, pattern queries, and compound regional eviction (`PWE_CH09_L02_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe` exit code 0) and executed all 4 neutral stubs safely (`STARTER_CH09_L02 exports=true stubs={ok,ok,ok,ok}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `erlc.exe -Wall +debug_info` (exit code 0, 0 warnings), passed `bf_ast_verifier` (`ets:new/2`, `ets:select_delete/2`, `lists:usort/1`), and passed 2/2 visible tests (`SOLUTION_CH09_L02_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l02` (`VERIFIED 100% PASSED`, score=100, 5 stages in `1.10s`, `1.434s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l02 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `11.08s` / `11.101s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 
