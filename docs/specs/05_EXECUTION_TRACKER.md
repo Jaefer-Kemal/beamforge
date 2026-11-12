@@ -2647,6 +2647,20 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter8Verification/ch08-l05` (`VERIFIED 100% PASSED`, score=100, 4 stages in `1.12s`, `1.485s` package total) and `TEST_CHAPTER=8 TestDynamicVisibleTestsCurriculum` (`ch08-l05 | 3/3 tests passed`, all 7 Ch. 8 lessons passed in `8.66s`).
   - **Workspace Compilers**: `Select-String` confirmed `0` `-spec` declarations across `ch01`–`ch08`; `go build ./...`, `npx tsc --noEmit`, and `npm run build` (8/8 routes) all passed with exit code 0.
 
+## Phase 153: Pedagogical Despoiling & Live Tri-Verification of Chapter 8 Lecture 6 (`ch08-l06`)
+- [x] **153.1: Incident Triage Upgrade, Anti-Spoiler Alignment & Harness Hardening (`ch08-l06`: `incident_wrong_strategy.erl`)**:
+  - Fixed inconsistent worker terminology across `incidentAlert` and `conceptMarkdown` (replacing mismatched `auth_cache` / `api_router` references with the actual module children `worker_db`, `worker_cache`, and `worker_http`) and removed verbatim syntax spoilers from `incidentAlert.rootCauseHint` and `incidentAlert.fixObjective`.
+  - Replaced the ASCII pipeline box diagram inside `conceptMarkdown` with prose referencing the attached `<BeamConceptVisualizer/>` (`supervision_rest_for_one_ets_heir`), and upgraded `conceptMarkdown` to full Spec 04 & Spec 08 compliance (`## Why This Matters in Production`, `## Deep Concept Breakdown & Under the Hood`, `## Official Erlang Docs & Function Reference` paired with `supervisor:start_link/2` and `supervisor:which_children/1` cards, runnable domain-disjoint PWE `media_pipeline_sup.erl`, clean `Input`/`Behavior`/`Examples` specification, and `## Rules & Verification Constraints`).
+  - Added 10/10 `@doc` contracts across all 6 exported functions in `starterCode`, `files[0].content`, `solutionCode`, and `solutionFiles['src/incident_wrong_strategy.erl']` (zero `-spec`, starter retains original INC-104 bugs).
+  - Hardened `test_chaos_cascade/0` (`ch08.ts` and `ch08_verification_test.go`) with `unlink(Sup)`, safe `lists:keyfind/3` pattern handling when `temporary` children vanish from `which_children/1` on starter/broken code, `is_process_alive(Sup)` guard, and monitored `exit(Sup, shutdown)` cleanup.
+  - Updated `erl_runner_incidents.go` (`case "ch08-l06"`) so `buildIncidentVerificationScript` enforces `Intensity >= 5 andalso Period =:= 10` alongside `rest_for_one` + 3 `permanent` workers, and `buildIncidentRunScript` runs both visible tests (`audit_flags/0` + `test_chaos_cascade/0`).
+- [x] **153.2: Mandatory Live Tri-Verification & Compiler Suite (`ch08-l06`)**:
+  - **Parallel Worked Example (`media_pipeline_sup.erl`)**: Extracted from `ch08.ts`, compiled with `erlc.exe -Wall` (exit code 0, 0 warnings), and verified live `rest_for_one` recovery via escript (`PWE_L06_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe` exit code 0) and returned `{ok, one_for_one, [temporary, temporary, temporary]}` + `{error, cascade_failed}` cleanly without crashing (`STARTER_L06 exports=true`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled cleanly (`erlc.exe -Wall +debug_info` exit code 0, 0 warnings), passed `bf_ast_verifier` (`supervisor:start_link/2`), and passed 2/2 visible tests (`SOLUTION_L06_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter8Verification/ch08-l06` (`VERIFIED 100% PASSED`, score=100, 3 stages in `1.32s`, `1.652s` package total); `TEST_CHAPTER=8 TestDynamicVisibleTestsCurriculum` (`ch08-l06 | 2/2 tests passed`, all 7 Ch. 8 lessons passed in `8.70s` / `8.727s` total).
+  - **Workspace Compilers**: `Select-String` confirmed `SPEC_COUNT=0` across `ch01`–`ch08`; `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 

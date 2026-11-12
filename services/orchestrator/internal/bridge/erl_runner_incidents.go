@@ -113,22 +113,31 @@ init:stop().
 		return `
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
-    {ok, {SupFlags, ChildSpecs}} = incident_wrong_strategy:init([]),
-    Strat = maps:get(strategy, SupFlags, undefined),
-    Restarts = [maps:get(restart, S, undefined) || S <- ChildSpecs],
-    PassedAudit = (Strat =:= rest_for_one) andalso (Restarts =:= [permanent, permanent, permanent]),
-    CascadeRes = incident_wrong_strategy:test_chaos_cascade(),
-    Passed = PassedAudit andalso (CascadeRes =:= {ok, db_unaffected, downstream_restarted}),
-    #{call_str => <<"incident_wrong_strategy:test_chaos_cascade()">>,
-      expected => <<"{ok, db_unaffected, downstream_restarted}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("Strat: ~p, Cascade: ~p", [Strat, CascadeRes]))),
-      passed => Passed,
+    AuditRes = incident_wrong_strategy:audit_flags(),
+    Passed1 = (AuditRes =:= {ok, rest_for_one, [permanent, permanent, permanent]}),
+    #{call_str => <<"incident_wrong_strategy:audit_flags()">>,
+      expected => <<"{ok, rest_for_one, [permanent, permanent, permanent]}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [AuditRes]))),
+      passed => Passed1,
       time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"incident_wrong_strategy test">>, expected => <<"{ok, db_unaffected, downstream_restarted}">>,
+    #{call_str => <<"incident_wrong_strategy:audit_flags()">>, expected => <<"{ok, rest_for_one, [permanent, permanent, permanent]}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    CascadeRes = incident_wrong_strategy:test_chaos_cascade(),
+    Passed2 = (CascadeRes =:= {ok, db_unaffected, downstream_restarted}),
+    #{call_str => <<"incident_wrong_strategy:test_chaos_cascade()">>,
+      expected => <<"{ok, db_unaffected, downstream_restarted}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [CascadeRes]))),
+      passed => Passed2,
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"incident_wrong_strategy:test_chaos_cascade()">>, expected => <<"{ok, db_unaffected, downstream_restarted}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -378,11 +387,13 @@ end,
 S1_SupFlags = try
     {ok, {SupFlags, ChildSpecs}} = incident_wrong_strategy:init([]),
     Strategy = maps:get(strategy, SupFlags, undefined),
+    Intensity = maps:get(intensity, SupFlags, 0),
+    Period = maps:get(period, SupFlags, 0),
     Restarts = [maps:get(restart, Spec, undefined) || Spec <- ChildSpecs],
     AllPermanent = lists:all(fun(R) -> R =:= permanent end, Restarts),
-    case Strategy =:= rest_for_one andalso AllPermanent andalso length(ChildSpecs) =:= 3 of
-        true -> #{id => <<"supervision_flags_audit">>, title => <<"rest_for_one Strategy & Permanent Restarts Audit">>, status => <<"passed">>, time_ms => 8, details => <<"Supervisor configured with strategy => rest_for_one and restart => permanent.">>};
-        false -> #{id => <<"supervision_flags_audit">>, title => <<"rest_for_one Strategy & Permanent Restarts Audit">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Expected rest_for_one and all permanent, got strategy: ~p, restarts: ~p", [Strategy, Restarts]))}
+    case Strategy =:= rest_for_one andalso Intensity >= 5 andalso Period =:= 10 andalso AllPermanent andalso length(ChildSpecs) =:= 3 of
+        true -> #{id => <<"supervision_flags_audit">>, title => <<"rest_for_one Strategy & Permanent Restarts Audit">>, status => <<"passed">>, time_ms => 8, details => <<"Supervisor configured with strategy => rest_for_one, intensity >= 5, period => 10, and restart => permanent.">>};
+        false -> #{id => <<"supervision_flags_audit">>, title => <<"rest_for_one Strategy & Permanent Restarts Audit">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Expected rest_for_one, intensity >= 5, period 10, and all permanent, got strategy: ~p, intensity: ~p, period: ~p, restarts: ~p", [Strategy, Intensity, Period, Restarts]))}
     end
 catch C1:R1 ->
     #{id => <<"supervision_flags_audit">>, title => <<"rest_for_one Strategy & Permanent Restarts Audit">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}

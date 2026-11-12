@@ -2047,40 +2047,122 @@ init([]) ->
       incidentId: 'INC-104',
       severity: 'HIGH',
       serviceName: 'auth-pipeline-sup',
-      symptom: 'When auth_cache crashes under memory pressure, it never restarts (leaving the cache dead), and downstream api_router continues running with broken references!',
-      rootCauseHint: 'init/1 in incident_wrong_strategy.erl configured strategy => one_for_one instead of rest_for_one, set intensity => 0 (so the very first crash kills the supervisor!), and marked auth_cache as restart => temporary.',
-      fixObjective: 'Fix init([]) to return strategy => rest_for_one, intensity => 5, period => 10, and ensure all 3 pipeline children ([worker_db, worker_cache, worker_http]) have restart => permanent and type => worker.',
-      impact: 'Total failure of authentication routing when cache worker crashes.',
+      symptom: 'When worker_cache crashes under memory pressure, it never restarts (leaving the cache dead), and downstream worker_http continues running with stale process references.',
+      rootCauseHint: 'incident_wrong_strategy:init/1 defines children in [worker_db, worker_cache, worker_http] pipeline order, but configures an isolated restart strategy, zero restart intensity tolerance, and non-permanent child restart policies.',
+      fixObjective: 'Reconfigure init/1 in src/incident_wrong_strategy.erl to restart downstream dependents when an upstream worker fails, allow up to 5 restarts within a 10-second window, and enforce unconditional permanent restarts across all 3 workers.',
+      impact: 'Total failure of authentication routing whenever worker_cache crashes under load.',
     },
-    conceptMarkdown: `## Postmortem & Triage Lab: Incident #104
+    conceptMarkdown: `## Why This Matters in Production
 
-You are on call for the authentication gateway cluster. At 03:14 UTC, an alert triggered:
+At 03:14 UTC, a P1 alert fired on \`auth-pipeline-sup\`: incoming HTTP traffic failed with dead-process lookup errors because \`worker_cache\` exited under memory pressure and never came back, while downstream \`worker_http\` stayed alive holding stale PIDs.
 
-> **CRITICAL OUTAGE:** Authentication requests are failing with \`{error, bad_cache_pid}\`. Downstream \`api_router\` is logging thousands of dead process crashes, while the supervisor itself remains idle and the cache process is nowhere to be found!
+In OTP supervision trees, choosing the wrong restart strategy or child restart policy turns a recoverable single-worker crash into a silent zombie outage. When sequential pipeline stages depend on earlier siblings (with \`worker_db\` starting first, followed by \`worker_cache\`, and finally \`worker_http\`), the interactive diagram below illustrates how ordered supervision tears down and rebuilds only the broken downstream tail while keeping healthy upstream stages intact.
 
-### System Topology
+## Deep Concept Breakdown & Under the Hood
 
-The authentication subsystem is a sequential dependency pipeline:
+Inside OTP's \`supervisor\` behaviour loop, every \`init/1\` return tuple configures three distinct fault-recovery invariants:
+
+1. **Ordered Dependency Restarts vs. Isolated Restarts**: Under an isolated strategy, killing the middle child restarts only that single worker, leaving later children in the list holding broken PIDs or dead ETS handles. Under an ordered downstream strategy, terminating an upstream worker causes the supervisor to shut down every child declared *after* it (in reverse startup order, to ensure clean teardown) and then restart the crashed worker and its downstream dependents in forward startup order—without touching earlier healthy siblings.
+2. **Sliding-Window Restart Budget**: The \`supervisor\` tracks a sliding list of child-restart timestamps over the configured \`period\` (in seconds). Before spawning a replacement child, it counts recent restarts within that window. If the count exceeds \`intensity\`, the supervisor concludes the node is stuck in a crash loop, terminates all remaining children, and shuts itself down. Setting \`intensity\` to zero gives a budget of zero restarts: the very first permanent child failure immediately kills the supervisor itself.
+3. **Child Restart Lifecycle Policy**: Each child specification controls whether its exits trigger recovery. A temporary child is removed silently when it terminates—even on an abnormal crash—and never restarted or counted against the budget. Marking pipeline stages as permanent guarantees OTP always restores them regardless of exit reason.
+
+## Official Erlang Docs & Function Reference
+
+\`\`\`erlang
+%% Official OTP Signatures (stdlib / supervisor)
+supervisor:start_link(Module, Args) -> startlink_ret()
+  Types:
+    Module = module()
+    Args = term()
+    startlink_ret() = {ok, pid()} | ignore | {error, startlink_err()}
+
+supervisor:which_children(SupRef) -> [{Id, Child, Type, Modules}]
+  Types:
+    SupRef = sup_ref()
+    Id = child_id() | undefined
+    Child = pid() | undefined | restarting
+    Type = worker | supervisor
+    Modules = [module()] | dynamic
 \`\`\`
-[worker_db] -> [worker_cache] -> [worker_http]
+
+Use the attached reference cards below to check valid \`which_children/1\` status atoms (\`restarting\` or \`undefined\` instead of a live \`pid()\`) when diagnosing unrecovered workers in production.
+
+## Parallel Worked Example: Media Transcoding Pipeline
+
+Consider a separate domain: a real-time video pipeline supervisor \`media_pipeline_sup\` managing three ordered stages (\`demuxer\`, \`transcoder\`, \`streamer\`). If \`transcoder\` crashes, \`demuxer\` continues buffering incoming frames untouched, while \`streamer\` must restart to bind to the new \`transcoder\` worker:
+
+\`\`\`erlang
+-module(media_pipeline_sup).
+-behaviour(supervisor).
+
+-export([start_link/0, init/1, stage_loop/1, inspect_stages/1]).
+
+%% @doc Start an unnamed media pipeline supervisor linked to the caller.
+start_link() ->
+    supervisor:start_link(?MODULE, []).
+
+%% @doc Configure ordered downstream recovery with permanent stage workers.
+init([]) ->
+    SupFlags = #{
+        strategy => rest_for_one,
+        intensity => 3,
+        period => 5
+    },
+    StageIds = [demuxer, transcoder, streamer],
+    ChildSpecs = [
+        #{
+            id => Stage,
+            start => {?MODULE, stage_loop, [Stage]},
+            restart => permanent,
+            shutdown => 3000,
+            type => worker,
+            modules => [?MODULE]
+        }
+        || Stage <- StageIds
+    ],
+    {ok, {SupFlags, ChildSpecs}}.
+
+%% @doc Spawn and link an individual pipeline stage worker process.
+stage_loop(Stage) ->
+    Pid = spawn_link(fun() -> run_stage(Stage) end),
+    {ok, Pid}.
+
+run_stage(Stage) ->
+    receive
+        stop -> ok;
+        _Msg -> run_stage(Stage)
+    end.
+
+%% @doc Return a map of stage identifiers to live child PIDs.
+inspect_stages(SupPid) ->
+    maps:from_list([
+        {Id, Child}
+        || {Id, Child, _Type, _Mods} <- supervisor:which_children(SupPid)
+    ]).
 \`\`\`
-1. \`worker_db\`: Manages the primary credentials database.
-2. \`worker_cache\`: In-memory cache dependent on \`worker_db\`.
-3. \`worker_http\`: External HTTP routing gateway dependent on \`worker_cache\`.
 
-### Root Cause Analysis
+### What OTP Does at Runtime
 
-Inspecting \`incident_wrong_strategy:init/1\` reveals three critical bugs:
-1. **Wrong Strategy (\`one_for_one\`):** When \`worker_cache\` crashes, \`one_for_one\` ignores downstream \`worker_http\`. The HTTP gateway continues running, attempting to query a dead cache PID!
-2. **Temporary Restart Policy (\`temporary\`):** \`worker_cache\` was marked \`restart => temporary\`! When it crashed under memory pressure, the supervisor never restarted it at all!
-3. **Zero Restart Intensity (\`intensity => 0\`):** The supervisor configured \`intensity => 0\`, meaning if *any* process crashed, the supervisor would commit suicide immediately!
+- **Ordered Recovery Budget**: \`SupFlags\` sets \`strategy => rest_for_one\` with \`intensity => 3\` and \`period => 5\`, allowing up to 3 restarts in any 5-second window before escalating shutdown.
+- **Pipeline Spec Generation**: The list comprehension generates three \`worker\` child specifications in dependency order (\`demuxer\`, \`transcoder\`, \`streamer\`), each marked \`restart => permanent\` with a \`3000\` ms shutdown timeout.
+- **Non-Disruptive Stage Inspection**: \`inspect_stages/1\` converts the tuples returned by \`supervisor:which_children/1\` into a stage-to-PID map via \`maps:from_list/1\`, making it straightforward to verify that \`demuxer\` retains its original PID while downstream stages receive fresh PIDs after a crash.
 
-### Triage & Fix Objective
+## Assignment Specification
 
-1. Update the restart strategy to **\`rest_for_one\`**.
-2. Set **\`intensity => 5, period => 10\`** to tolerate transient blizzards.
-3. Update all 3 child specifications to **\`restart => permanent\`**.
-4. Keep \`shutdown => 2000\`, \`type => worker\`, and \`modules => [incident_wrong_strategy]\`.
+Repair the production bug inside \`src/incident_wrong_strategy.erl\` without altering its exported function signatures or diagnostic helpers (\`start_link/0\`, \`build_pipeline_specs/0\`, \`audit_flags/0\`, \`test_chaos_cascade/0\`, \`worker_loop/1\`).
+
+### \`init/1\`
+- **Input**: Empty list \`[]\` supplied by \`supervisor:start_link/2\`.
+- **Behavior**: Returns the standard supervisor configuration tuple containing a supervisor flags map and a 3-element list of worker child specifications ordered from upstream to downstream (\`worker_db\`, then \`worker_cache\`, then \`worker_http\`). Reconfigure the supervisor flags so downstream children restart after an upstream crash, tolerate up to 5 restarts within a 10-second period, and mark every worker specification with unconditional permanent restart behavior (preserving the existing \`2000\` ms shutdown timeout, worker type, and module list).
+- **Examples**:
+  - \`incident_wrong_strategy:audit_flags()\` returns \`{ok, rest_for_one, [permanent, permanent, permanent]}\`.
+  - \`incident_wrong_strategy:test_chaos_cascade()\` kills the cache worker and returns \`{ok, db_unaffected, downstream_restarted}\`.
+
+## Rules & Verification Constraints
+
+- **Required Call**: AST verification requires \`supervisor:start_link/2\`.
+- **Ordered Restart & Budget Audit**: \`init/1\` must configure downstream-ordered recovery (\`rest_for_one\`), allow 5 restarts per 10 seconds, and assign \`permanent\` restart policies to all 3 worker specs (\`worker_db\`, \`worker_cache\`, \`worker_http\`).
+- **Live Chaos Cascade**: Killing \`worker_cache\` must restart both \`worker_cache\` and \`worker_http\` with new PIDs while preserving the exact PID of upstream \`worker_db\`.
 `,
     mentalModelCheck: {
       question: 'Why is rest_for_one mandatory for [db -> cache -> http] pipelines instead of one_for_one?',
@@ -2113,6 +2195,18 @@ Inspecting \`incident_wrong_strategy:init/1\` reveals three critical bugs:
     },
     otpDocCards: [
       {
+        functionName: 'start_link',
+        module: 'supervisor',
+        signature: 'supervisor:start_link(Module, Args) -> {ok, Pid} | ignore | {error, Reason}',
+        typesSpec: [
+          'Module = module()',
+          'Args = term()'
+        ],
+        description: 'Creates an unnamed supervisor process as part of a supervision tree and invokes Module:init(Args) to obtain flags and child specs.',
+        complexityNote: 'Blocks until init/1 and all initial child start calls finish.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/supervisor.html#start_link/2',
+      },
+      {
         functionName: 'which_children',
         module: 'supervisor',
         signature: 'supervisor:which_children(SupRef) -> [{Id, Child, Type, Modules}]',
@@ -2137,11 +2231,12 @@ Inspecting \`incident_wrong_strategy:init/1\` reveals three critical bugs:
 ]).
 -export([worker_loop/1]).
 
+%% @doc Start an unnamed supervision tree instance linked to the caller.
 start_link() ->
     supervisor:start_link(?MODULE, []).
 
+%% @doc Return supervisor flags and pipeline child specs for auth-pipeline-sup.
 init([]) ->
-    %% BUGGY IMPLEMENTATION (INCIDENT #104):
     SupFlags = #{
         strategy => one_for_one,
         intensity => 0,
@@ -2175,10 +2270,12 @@ init([]) ->
     ],
     {ok, {SupFlags, ChildSpecs}}.
 
+%% @doc Extract the ordered list of child specifications from init/1.
 build_pipeline_specs() ->
     {ok, {_SupFlags, ChildSpecs}} = init([]),
     ChildSpecs.
 
+%% @doc Spawn and link a pipeline stage worker loop for the given role.
 worker_loop(Role) ->
     Pid = spawn_link(fun() -> run_worker(Role) end),
     {ok, Pid}.
@@ -2189,29 +2286,54 @@ run_worker(Role) ->
         _ -> run_worker(Role)
     end.
 
+%% @doc Audit the configured supervision strategy and child restart policies.
 audit_flags() ->
     {ok, {SupFlags, ChildSpecs}} = init([]),
     Strategy = maps:get(strategy, SupFlags),
     Restarts = [maps:get(restart, Spec) || Spec <- ChildSpecs],
     {ok, Strategy, Restarts}.
 
+%% @doc Kill the cache worker and verify upstream survival with downstream recovery.
 test_chaos_cascade() ->
     {ok, Sup} = start_link(),
+    unlink(Sup),
     Children1 = supervisor:which_children(Sup),
     {_, Db1, _, _} = lists:keyfind(worker_db, 1, Children1),
     {_, Cache1, _, _} = lists:keyfind(worker_cache, 1, Children1),
     {_, Http1, _, _} = lists:keyfind(worker_http, 1, Children1),
     exit(Cache1, kill),
     timer:sleep(50),
-    Children2 = supervisor:which_children(Sup),
-    {_, Db2, _, _} = lists:keyfind(worker_db, 1, Children2),
-    {_, Cache2, _, _} = lists:keyfind(worker_cache, 1, Children2),
-    {_, Http2, _, _} = lists:keyfind(worker_http, 1, Children2),
+    Result = case is_process_alive(Sup) of
+        true ->
+            Children2 = supervisor:which_children(Sup),
+            Db2 = case lists:keyfind(worker_db, 1, Children2) of
+                {_, P1, _, _} -> P1;
+                false -> undefined
+            end,
+            Cache2 = case lists:keyfind(worker_cache, 1, Children2) of
+                {_, P2, _, _} -> P2;
+                false -> undefined
+            end,
+            Http2 = case lists:keyfind(worker_http, 1, Children2) of
+                {_, P3, _, _} -> P3;
+                false -> undefined
+            end,
+            case is_pid(Db2) andalso is_pid(Cache2) andalso is_pid(Http2)
+                 andalso Db1 =:= Db2 andalso Cache1 =/= Cache2 andalso Http1 =/= Http2 of
+                true -> {ok, db_unaffected, downstream_restarted};
+                false -> {error, cascade_failed}
+            end;
+        false ->
+            {error, cascade_failed}
+    end,
+    Ref = monitor(process, Sup),
     exit(Sup, shutdown),
-    case Db1 =:= Db2 andalso Cache1 =/= Cache2 andalso Http1 =/= Http2 of
-        true -> {ok, db_unaffected, downstream_restarted};
-        false -> {error, cascade_failed}
-    end.
+    receive
+        {'DOWN', Ref, process, Sup, _} -> ok
+    after 1000 ->
+        ok
+    end,
+    Result.
 `,
     solutionCode: `-module(incident_wrong_strategy).
 -behaviour(supervisor).
@@ -2225,9 +2347,11 @@ test_chaos_cascade() ->
 ]).
 -export([worker_loop/1]).
 
+%% @doc Start an unnamed supervision tree instance linked to the caller.
 start_link() ->
     supervisor:start_link(?MODULE, []).
 
+%% @doc Return supervisor flags and pipeline child specs for auth-pipeline-sup.
 init([]) ->
     SupFlags = #{
         strategy => rest_for_one,
@@ -2262,10 +2386,12 @@ init([]) ->
     ],
     {ok, {SupFlags, ChildSpecs}}.
 
+%% @doc Extract the ordered list of child specifications from init/1.
 build_pipeline_specs() ->
     {ok, {_SupFlags, ChildSpecs}} = init([]),
     ChildSpecs.
 
+%% @doc Spawn and link a pipeline stage worker loop for the given role.
 worker_loop(Role) ->
     Pid = spawn_link(fun() -> run_worker(Role) end),
     {ok, Pid}.
@@ -2276,31 +2402,56 @@ run_worker(Role) ->
         _ -> run_worker(Role)
     end.
 
+%% @doc Audit the configured supervision strategy and child restart policies.
 audit_flags() ->
     {ok, {SupFlags, ChildSpecs}} = init([]),
     Strategy = maps:get(strategy, SupFlags),
     Restarts = [maps:get(restart, Spec) || Spec <- ChildSpecs],
     {ok, Strategy, Restarts}.
 
+%% @doc Kill the cache worker and verify upstream survival with downstream recovery.
 test_chaos_cascade() ->
     {ok, Sup} = start_link(),
+    unlink(Sup),
     Children1 = supervisor:which_children(Sup),
     {_, Db1, _, _} = lists:keyfind(worker_db, 1, Children1),
     {_, Cache1, _, _} = lists:keyfind(worker_cache, 1, Children1),
     {_, Http1, _, _} = lists:keyfind(worker_http, 1, Children1),
     exit(Cache1, kill),
     timer:sleep(50),
-    Children2 = supervisor:which_children(Sup),
-    {_, Db2, _, _} = lists:keyfind(worker_db, 1, Children2),
-    {_, Cache2, _, _} = lists:keyfind(worker_cache, 1, Children2),
-    {_, Http2, _, _} = lists:keyfind(worker_http, 1, Children2),
+    Result = case is_process_alive(Sup) of
+        true ->
+            Children2 = supervisor:which_children(Sup),
+            Db2 = case lists:keyfind(worker_db, 1, Children2) of
+                {_, P1, _, _} -> P1;
+                false -> undefined
+            end,
+            Cache2 = case lists:keyfind(worker_cache, 1, Children2) of
+                {_, P2, _, _} -> P2;
+                false -> undefined
+            end,
+            Http2 = case lists:keyfind(worker_http, 1, Children2) of
+                {_, P3, _, _} -> P3;
+                false -> undefined
+            end,
+            case is_pid(Db2) andalso is_pid(Cache2) andalso is_pid(Http2)
+                 andalso Db1 =:= Db2 andalso Cache1 =/= Cache2 andalso Http1 =/= Http2 of
+                true -> {ok, db_unaffected, downstream_restarted};
+                false -> {error, cascade_failed}
+            end;
+        false ->
+            {error, cascade_failed}
+    end,
+    Ref = monitor(process, Sup),
     exit(Sup, shutdown),
-    case Db1 =:= Db2 andalso Cache1 =/= Cache2 andalso Http1 =/= Http2 of
-        true -> {ok, db_unaffected, downstream_restarted};
-        false -> {error, cascade_failed}
-    end.
+    receive
+        {'DOWN', Ref, process, Sup, _} -> ok
+    after 1000 ->
+        ok
+    end,
+    Result.
 `,
-    solutionExplanation: 'Fixed Incident #104 by reconfiguring supervisor with strategy => rest_for_one, intensity => 5, period => 10, and setting all pipeline workers to permanent restart.',
+    solutionExplanation: 'Fixed Incident #104 by reconfiguring the supervisor with rest_for_one, intensity 5 over a 10-second period, and permanent restart policies across worker_db, worker_cache, and worker_http.',
     files: [
       {
         name: 'incident_wrong_strategy.erl',
@@ -2317,11 +2468,12 @@ test_chaos_cascade() ->
 ]).
 -export([worker_loop/1]).
 
+%% @doc Start an unnamed supervision tree instance linked to the caller.
 start_link() ->
     supervisor:start_link(?MODULE, []).
 
+%% @doc Return supervisor flags and pipeline child specs for auth-pipeline-sup.
 init([]) ->
-    %% BUGGY IMPLEMENTATION (INCIDENT #104):
     SupFlags = #{
         strategy => one_for_one,
         intensity => 0,
@@ -2355,10 +2507,12 @@ init([]) ->
     ],
     {ok, {SupFlags, ChildSpecs}}.
 
+%% @doc Extract the ordered list of child specifications from init/1.
 build_pipeline_specs() ->
     {ok, {_SupFlags, ChildSpecs}} = init([]),
     ChildSpecs.
 
+%% @doc Spawn and link a pipeline stage worker loop for the given role.
 worker_loop(Role) ->
     Pid = spawn_link(fun() -> run_worker(Role) end),
     {ok, Pid}.
@@ -2369,29 +2523,54 @@ run_worker(Role) ->
         _ -> run_worker(Role)
     end.
 
+%% @doc Audit the configured supervision strategy and child restart policies.
 audit_flags() ->
     {ok, {SupFlags, ChildSpecs}} = init([]),
     Strategy = maps:get(strategy, SupFlags),
     Restarts = [maps:get(restart, Spec) || Spec <- ChildSpecs],
     {ok, Strategy, Restarts}.
 
+%% @doc Kill the cache worker and verify upstream survival with downstream recovery.
 test_chaos_cascade() ->
     {ok, Sup} = start_link(),
+    unlink(Sup),
     Children1 = supervisor:which_children(Sup),
     {_, Db1, _, _} = lists:keyfind(worker_db, 1, Children1),
     {_, Cache1, _, _} = lists:keyfind(worker_cache, 1, Children1),
     {_, Http1, _, _} = lists:keyfind(worker_http, 1, Children1),
     exit(Cache1, kill),
     timer:sleep(50),
-    Children2 = supervisor:which_children(Sup),
-    {_, Db2, _, _} = lists:keyfind(worker_db, 1, Children2),
-    {_, Cache2, _, _} = lists:keyfind(worker_cache, 1, Children2),
-    {_, Http2, _, _} = lists:keyfind(worker_http, 1, Children2),
+    Result = case is_process_alive(Sup) of
+        true ->
+            Children2 = supervisor:which_children(Sup),
+            Db2 = case lists:keyfind(worker_db, 1, Children2) of
+                {_, P1, _, _} -> P1;
+                false -> undefined
+            end,
+            Cache2 = case lists:keyfind(worker_cache, 1, Children2) of
+                {_, P2, _, _} -> P2;
+                false -> undefined
+            end,
+            Http2 = case lists:keyfind(worker_http, 1, Children2) of
+                {_, P3, _, _} -> P3;
+                false -> undefined
+            end,
+            case is_pid(Db2) andalso is_pid(Cache2) andalso is_pid(Http2)
+                 andalso Db1 =:= Db2 andalso Cache1 =/= Cache2 andalso Http1 =/= Http2 of
+                true -> {ok, db_unaffected, downstream_restarted};
+                false -> {error, cascade_failed}
+            end;
+        false ->
+            {error, cascade_failed}
+    end,
+    Ref = monitor(process, Sup),
     exit(Sup, shutdown),
-    case Db1 =:= Db2 andalso Cache1 =/= Cache2 andalso Http1 =/= Http2 of
-        true -> {ok, db_unaffected, downstream_restarted};
-        false -> {error, cascade_failed}
-    end.
+    receive
+        {'DOWN', Ref, process, Sup, _} -> ok
+    after 1000 ->
+        ok
+    end,
+    Result.
 `,
       },
     ],
@@ -2408,9 +2587,11 @@ test_chaos_cascade() ->
 ]).
 -export([worker_loop/1]).
 
+%% @doc Start an unnamed supervision tree instance linked to the caller.
 start_link() ->
     supervisor:start_link(?MODULE, []).
 
+%% @doc Return supervisor flags and pipeline child specs for auth-pipeline-sup.
 init([]) ->
     SupFlags = #{
         strategy => rest_for_one,
@@ -2445,10 +2626,12 @@ init([]) ->
     ],
     {ok, {SupFlags, ChildSpecs}}.
 
+%% @doc Extract the ordered list of child specifications from init/1.
 build_pipeline_specs() ->
     {ok, {_SupFlags, ChildSpecs}} = init([]),
     ChildSpecs.
 
+%% @doc Spawn and link a pipeline stage worker loop for the given role.
 worker_loop(Role) ->
     Pid = spawn_link(fun() -> run_worker(Role) end),
     {ok, Pid}.
@@ -2459,29 +2642,54 @@ run_worker(Role) ->
         _ -> run_worker(Role)
     end.
 
+%% @doc Audit the configured supervision strategy and child restart policies.
 audit_flags() ->
     {ok, {SupFlags, ChildSpecs}} = init([]),
     Strategy = maps:get(strategy, SupFlags),
     Restarts = [maps:get(restart, Spec) || Spec <- ChildSpecs],
     {ok, Strategy, Restarts}.
 
+%% @doc Kill the cache worker and verify upstream survival with downstream recovery.
 test_chaos_cascade() ->
     {ok, Sup} = start_link(),
+    unlink(Sup),
     Children1 = supervisor:which_children(Sup),
     {_, Db1, _, _} = lists:keyfind(worker_db, 1, Children1),
     {_, Cache1, _, _} = lists:keyfind(worker_cache, 1, Children1),
     {_, Http1, _, _} = lists:keyfind(worker_http, 1, Children1),
     exit(Cache1, kill),
     timer:sleep(50),
-    Children2 = supervisor:which_children(Sup),
-    {_, Db2, _, _} = lists:keyfind(worker_db, 1, Children2),
-    {_, Cache2, _, _} = lists:keyfind(worker_cache, 1, Children2),
-    {_, Http2, _, _} = lists:keyfind(worker_http, 1, Children2),
+    Result = case is_process_alive(Sup) of
+        true ->
+            Children2 = supervisor:which_children(Sup),
+            Db2 = case lists:keyfind(worker_db, 1, Children2) of
+                {_, P1, _, _} -> P1;
+                false -> undefined
+            end,
+            Cache2 = case lists:keyfind(worker_cache, 1, Children2) of
+                {_, P2, _, _} -> P2;
+                false -> undefined
+            end,
+            Http2 = case lists:keyfind(worker_http, 1, Children2) of
+                {_, P3, _, _} -> P3;
+                false -> undefined
+            end,
+            case is_pid(Db2) andalso is_pid(Cache2) andalso is_pid(Http2)
+                 andalso Db1 =:= Db2 andalso Cache1 =/= Cache2 andalso Http1 =/= Http2 of
+                true -> {ok, db_unaffected, downstream_restarted};
+                false -> {error, cascade_failed}
+            end;
+        false ->
+            {error, cascade_failed}
+    end,
+    Ref = monitor(process, Sup),
     exit(Sup, shutdown),
-    case Db1 =:= Db2 andalso Cache1 =/= Cache2 andalso Http1 =/= Http2 of
-        true -> {ok, db_unaffected, downstream_restarted};
-        false -> {error, cascade_failed}
-    end.
+    receive
+        {'DOWN', Ref, process, Sup, _} -> ok
+    after 1000 ->
+        ok
+    end,
+    Result.
 `,
     },
     astRules: {

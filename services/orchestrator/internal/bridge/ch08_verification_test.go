@@ -356,23 +356,47 @@ audit_flags() ->
     Restarts = [maps:get(restart, Spec) || Spec <- ChildSpecs],
     {ok, Strategy, Restarts}.
 
+%% @doc Kill the cache worker and verify upstream survival with downstream recovery.
 test_chaos_cascade() ->
     {ok, Sup} = start_link(),
+    unlink(Sup),
     Children1 = supervisor:which_children(Sup),
     {_, Db1, _, _} = lists:keyfind(worker_db, 1, Children1),
     {_, Cache1, _, _} = lists:keyfind(worker_cache, 1, Children1),
     {_, Http1, _, _} = lists:keyfind(worker_http, 1, Children1),
     exit(Cache1, kill),
     timer:sleep(50),
-    Children2 = supervisor:which_children(Sup),
-    {_, Db2, _, _} = lists:keyfind(worker_db, 1, Children2),
-    {_, Cache2, _, _} = lists:keyfind(worker_cache, 1, Children2),
-    {_, Http2, _, _} = lists:keyfind(worker_http, 1, Children2),
+    Result = case is_process_alive(Sup) of
+        true ->
+            Children2 = supervisor:which_children(Sup),
+            Db2 = case lists:keyfind(worker_db, 1, Children2) of
+                {_, P1, _, _} -> P1;
+                false -> undefined
+            end,
+            Cache2 = case lists:keyfind(worker_cache, 1, Children2) of
+                {_, P2, _, _} -> P2;
+                false -> undefined
+            end,
+            Http2 = case lists:keyfind(worker_http, 1, Children2) of
+                {_, P3, _, _} -> P3;
+                false -> undefined
+            end,
+            case is_pid(Db2) andalso is_pid(Cache2) andalso is_pid(Http2)
+                 andalso Db1 =:= Db2 andalso Cache1 =/= Cache2 andalso Http1 =/= Http2 of
+                true -> {ok, db_unaffected, downstream_restarted};
+                false -> {error, cascade_failed}
+            end;
+        false ->
+            {error, cascade_failed}
+    end,
+    Ref = monitor(process, Sup),
     exit(Sup, shutdown),
-    case Db1 =:= Db2 andalso Cache1 =/= Cache2 andalso Http1 =/= Http2 of
-        true -> {ok, db_unaffected, downstream_restarted};
-        false -> {error, cascade_failed}
-    end.
+    receive
+        {'DOWN', Ref, process, Sup, _} -> ok
+    after 1000 ->
+        ok
+    end,
+    Result.
 `,
 			},
 		},
