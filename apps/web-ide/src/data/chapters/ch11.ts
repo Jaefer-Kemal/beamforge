@@ -434,7 +434,7 @@ print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := 
     title: 'XMPP Addressing (RFC 7622): Parsing, Validating & Normalizing JIDs',
     difficulty: 'Intermediate',
     xpReward: 100,
-        visualScene: 'tcp_xmpp_stream_framing',
+    visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Under RFC 7622, what is the architectural difference between a Bare JID (user@domain) and a Full JID (user@domain/resource)?',
       options: [
@@ -472,6 +472,7 @@ A single user account has a **Bare JID** (\`alice@chat.beamforge.io\`), represen
 - \`alice@chat.beamforge.io/mobile_ios\`
 - \`alice@chat.beamforge.io/macbook_desktop\`
 
+> [!IMPORTANT]
 > **RFC 7622 JID Addressing Structure:**
 > - **Localpart:** \`alice\` (Account identity)
 > - **Domainpart:** \`chat.beamforge.io\` (Server host)
@@ -486,21 +487,20 @@ If your parser fails to validate empty resources, handles sub-binaries incorrect
 ### 1. Memory Safety: Avoiding Sub-Binary Memory Leaks
 When an Erlang process receives a 64KB network packet from a socket and extracts small fields using binary pattern matching:
 \`\`\`erlang
-<<User:5/binary, "@", Rest/binary>> = PacketBin
+<<Prefix:5/binary, "@", Rest/binary>> = PacketBin
 \`\`\`
-Erlang creates a **sub-binary reference** that points directly into the original 64KB heap allocation! If you store \`User\` inside an ETS table or process state, the **entire 64KB parent binary is pinned in memory** and cannot be garbage collected.
+Erlang creates a **sub-binary reference** that points directly into the original 64KB heap allocation! If you store \`Prefix\` inside an ETS table or process state, the **entire 64KB parent binary is pinned in memory** and cannot be garbage collected.
 
-To prevent this critical production memory leak, whenever you extract string fields from network packets, you MUST invoke:
+To prevent this critical production memory leak, whenever you extract string fields from long-lived network packets, allocate an unpinned slice with:
 \`\`\`erlang
-CleanUser = binary:copy(User)
+Detached = binary:copy(Prefix)
 \`\`\`
 \`binary:copy/1\` forces the BEAM VM to allocate a fresh, minimal byte slice on the heap, allowing the large socket buffer to be freed immediately!
 
-### 2. Validation Rules (RFC 7622)
-1. A valid JID MUST contain an \`@\` symbol separating the \`user\` (localpart) and \`domain\` (domainpart).
-2. Neither \`user\` nor \`domain\` may be empty binary (\`<<>>\`).
-3. If a forward slash \`/\` is present, the \`resource\` (resourcepart) MUST NOT be empty. (e.g. \`alice@localhost/\` is invalid).
-4. If no \`/\` is present, it is a valid **Bare JID**, and \`resource\` is normalized to \`<<>>\`.
+### 2. RFC 7622 Addressing Rules
+1. Every valid JID separates a non-empty localpart from a non-empty domainpart with a single \`@\` separator.
+2. An optional resourcepart follows a \`/\` separator; when \`/\` is present, the resourcepart cannot be empty (and a resourcepart itself may contain slashes).
+3. When no \`/\` appears, the address is a **Bare JID** with an empty binary resource.
 
 ## Official Erlang Docs & Function Reference
 
@@ -517,39 +517,85 @@ binary:copy(Subject) -> binary()
     Subject = binary()
 \`\`\`
 
-## Assignment Specification
+Consult the attached documentation cards below for \`binary:split/2\` zero-copy slicing and \`binary:copy/1\` reference detachment complexity.
 
-Implement the module \`xmpp_jid\` in \`src/xmpp_jid.erl\` with the following exports:
+## Parallel Worked Example: Unpinned Service Endpoint Parser
+
+Consider a separate domain: an **HTTP Endpoint Descriptor Parser** (\`uri_route_parser\`) that splits URLs shaped like \`<<"https://api.internal/v1/health">>\` into unpinned scheme, host, and path binaries using \`binary:split/2\`, detaches slices with \`binary:copy/1\`, validates non-empty fields via guards, and re-serializes canonical endpoints:
 
 \`\`\`erlang
--module(xmpp_jid).
--export([
-    parse/1,
-    to_bare/1,
-    format_jid/1,
-    is_same_bare_jid/2
-]).
+-module(uri_route_parser).
+-export([parse_endpoint/1, render_endpoint/1]).
+
+%% @doc Parse a scheme://host[/path] binary into unpinned tuple components or {error, bad_endpoint}.
+parse_endpoint(RawUrl) when is_binary(RawUrl) ->
+    case binary:split(RawUrl, <<"://">>) of
+        [Scheme, HostAndPath] when byte_size(Scheme) > 0, byte_size(HostAndPath) > 0 ->
+            split_host_path(binary:copy(Scheme), HostAndPath);
+        _ ->
+            {error, bad_endpoint}
+    end;
+parse_endpoint(_) ->
+    {error, bad_endpoint}.
+
+split_host_path(Scheme, Rest) ->
+    case binary:split(Rest, <<"/">>) of
+        [Host, Path] when byte_size(Host) > 0, byte_size(Path) > 0 ->
+            {ok, {Scheme, binary:copy(Host), binary:copy(Path)}};
+        [Host] when byte_size(Host) > 0 ->
+            {ok, {Scheme, binary:copy(Host), <<>>}};
+        _ ->
+            {error, bad_endpoint}
+    end.
+
+%% @doc Reconstruct a canonical endpoint binary from a parsed 3-tuple.
+render_endpoint({Scheme, Host, <<>>}) ->
+    <<Scheme/binary, "://", Host/binary>>;
+render_endpoint({Scheme, Host, Path}) ->
+    <<Scheme/binary, "://", Host/binary, "/", Path/binary>>.
 \`\`\`
 
-### Functions to Implement:
-1. **\`parse(JidBin) -> {ok, JidMap} | {error, invalid_jid}\`**:
-   - Parses a binary JID into a map:
-     \`#{user => User, domain => Domain, resource => Resource, bare => Bare}\`
-   - Uses \`binary:copy/1\` on all extracted components.
-   - Returns \`{error, invalid_jid}\` for malformed inputs (empty user, empty domain, trailing slash without resource, or missing \`@\`).
-2. **\`to_bare(JidInput) -> binary() | {error, invalid_jid}\`**:
-   - Accepts either a parsed JID map (\`#{bare := Bare}\`) or a raw binary. Returns the Bare JID binary.
-3. **\`format_jid(JidMap) -> binary()\`**:
-   - Given \`#{user := U, domain := D, resource := R}\`, formats:
-     - \`<<U/binary, "@", D/binary>>\` if \`R == <<>>\`
-     - \`<<U/binary, "@", D/binary, "/", R/binary>>\` if \`R =/= <<>>\`
-4. **\`is_same_bare_jid(Jid1, Jid2) -> boolean()\`**:
-   - Returns \`true\` if both JIDs share the same Bare JID (comparing either binaries or maps); \`false\` otherwise.
+### What ERTS Does at Runtime
+- **Sub-Binary Detachment**: Both \`Scheme\` and \`Host\`/\`Path\` returned by \`binary:split/2\` share a reference count with \`RawUrl\`; passing each token through \`binary:copy/1\` frees the original 64KB packet buffer as soon as the caller drops \`RawUrl\`.
+- **Two-Stage Guard Validation**: Guard checks on \`byte_size/1\` reject missing schemes, empty hosts, and trailing slashes with empty path segments before building the returned tuple.
+
+## Assignment Specification
+
+Implement the module \`xmpp_jid\` in \`src/xmpp_jid.erl\` exporting \`parse/1\`, \`to_bare/1\`, \`format_jid/1\`, and \`is_same_bare_jid/2\`.
+
+### \`parse/1\`
+- **Input**: \`Binary JidBin\` (arbitrary Erlang term accepted at boundary for rejection).
+- **Behavior**: Validates and parses an RFC 7622 binary JID into an \`ok\` tuple wrapping a 4-key map with \`user\`, \`domain\`, \`resource\`, and \`bare\` binary entries. Uses \`binary:split/2\` to decompose the wire binary, enforces non-empty \`user\`, non-empty \`domain\`, and a single \`@\` inside the bare segment, rejects an empty trailing resource after \`/\`, defaults missing resource to an empty binary, and copies all stored binary slices with \`binary:copy/1\` so large socket buffers are unpinned. Non-binary or malformed inputs return an \`invalid_jid\` error tuple.
+- **Examples**:
+  - \`xmpp_jid:parse(<<"alice@localhost/mobile">>)\` returns \`{ok,#{bare => <<"alice@localhost">>,domain => <<"localhost">>,resource => <<"mobile">>,user => <<"alice">>}}\`.
+  - \`xmpp_jid:parse(<<"bob@localhost">>)\` returns \`{ok,#{bare => <<"bob@localhost">>,domain => <<"localhost">>,resource => <<>>,user => <<"bob">>}}\`.
+  - \`xmpp_jid:parse(<<"alice@localhost/">>)\` returns \`{error,invalid_jid}\`.
+
+### \`to_bare/1\`
+- **Input**: Parsed JID map containing a \`bare\` binary key, or raw \`Binary JidBin\`.
+- **Behavior**: Returns the normalized \`user@domain\` binary directly when given a parsed JID map, or parses a raw binary and extracts its bare JID binary. Returns an \`invalid_jid\` error tuple for invalid or non-binary inputs.
+- **Examples**:
+  - \`xmpp_jid:to_bare(<<"alice@localhost/mobile">>)\` returns \`<<"alice@localhost">>\`.
+  - \`xmpp_jid:to_bare(<<"bad_jid">>)\` returns \`{error,invalid_jid}\`.
+
+### \`format_jid/1\`
+- **Input**: Parsed JID map with \`user\`, \`domain\`, and \`resource\` binary keys.
+- **Behavior**: Serializes the JID map back to standard XMPP wire binary form using binary construction syntax, omitting the \`/\` separator when \`resource\` is empty and appending \`/\` plus the resource otherwise.
+- **Examples**:
+  - \`xmpp_jid:format_jid(#{user => <<"charlie">>, domain => <<"host">>, resource => <<>>})\` returns \`<<"charlie@host">>\`.
+  - \`xmpp_jid:format_jid(#{user => <<"charlie">>, domain => <<"host">>, resource => <<"pc">>})\` returns \`<<"charlie@host/pc">>\`.
+
+### \`is_same_bare_jid/2\`
+- **Input**: Two JID values (each either a parsed JID map or a raw JID binary).
+- **Behavior**: Resolves both inputs to bare JID binaries via \`to_bare/1\` and returns \`true\` only when both inputs are valid and their bare JIDs match identically; returns \`false\` if either input is malformed or differs.
+- **Examples**:
+  - \`xmpp_jid:is_same_bare_jid(<<"alice@localhost/p1">>, <<"alice@localhost/p2">>)\` returns \`true\`.
+  - \`xmpp_jid:is_same_bare_jid(<<"alice@localhost">>, <<"bad">>)\` returns \`false\`.
 
 ## Rules & Verification Constraints
-
-- Must invoke \`binary:copy/1\` to prevent sub-binary reference pinning.
-- Must reject all malformed JIDs with \`{error, invalid_jid}\`.`,
+- **Required Calls**: \`bf_ast_verifier\` verifies calls to \`binary:split/2\` and \`binary:copy/1\`.
+- **Required Constructs**: Must use bit syntax (\`bit_syntax\`) for JID reconstruction and guard clauses (\`guards\`) for length/type validation.
+- **Validation Coverage**: All malformed inputs (non-binaries, empty JID, missing \`@\`, multiple \`@\`, empty localpart/domainpart, and trailing \`/\`) must return \`{error, invalid_jid}\`.`,
     otpDocCards: [
       {
         functionName: 'split',
@@ -577,7 +623,7 @@ Implement the module \`xmpp_jid\` in \`src/xmpp_jid.erl\` with the following exp
         githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl',
       },
     ],
-        files: [
+    files: [
       {
         path: 'src/xmpp_jid.erl',
         name: 'xmpp_jid.erl',
@@ -589,43 +635,20 @@ Implement the module \`xmpp_jid\` in \`src/xmpp_jid.erl\` with the following exp
     is_same_bare_jid/2
 ]).
 
--type jid_map() :: #{
-    user => binary(),
-    domain => binary(),
-    resource => binary(),
-    bare => binary()
-}.
+%% @doc Parse an RFC 7622 binary JID into unpinned user, domain, resource, and bare components, returning an invalid_jid error tuple on malformed or non-binary input.
+parse(_JidBin) ->
+    ok.
 
-%% @doc Parses a raw binary JID into validated components.
-%% Ensures sub-binaries are unpinned using binary:copy/1.
--spec parse(binary()) -> {ok, jid_map()} | {error, invalid_jid}.
-parse(JidBin) when is_binary(JidBin) ->
-    %% % TODO: Implement RFC 7622 JID parser
-    %% 1. Split on "/" to separate Resource (if present)
-    %% 2. Split Bare part on "@" to extract User and Domain
-    %% 3. Validate neither User nor Domain is empty
-    %% 4. Use binary:copy/1 on all slices
-    {error, not_implemented}.
+%% @doc Extract the normalized bare JID binary from a parsed JID map or raw JID binary, returning an invalid_jid error tuple for malformed inputs.
+to_bare(_JidInput) ->
+    ok.
 
-%% @doc Extracts the Bare JID binary from either a map or binary JID.
--spec to_bare(jid_map() | binary()) -> binary() | {error, invalid_jid}.
-to_bare(#{bare := Bare}) -> Bare;
-to_bare(JidBin) when is_binary(JidBin) ->
-    case parse(JidBin) of
-        {ok, #{bare := Bare}} -> Bare;
-        Error -> Error
-    end.
-
-%% @doc Formats a JID map back into standard wire format.
--spec format_jid(jid_map()) -> binary().
-format_jid(#{user := User, domain := Domain, resource := Resource}) ->
-    %% % TODO: Return User@Domain if Resource is <<>>, else User@Domain/Resource
+%% @doc Format a parsed JID map back into canonical wire binary form with or without a resource segment.
+format_jid(_JidMap) ->
     <<>>.
 
-%% @doc Returns true if two JIDs represent the same user account.
--spec is_same_bare_jid(jid_map() | binary(), jid_map() | binary()) -> boolean().
-is_same_bare_jid(Jid1, Jid2) ->
-    %% % TODO: Compare bare JID representations
+%% @doc Return whether two JID binaries or parsed JID maps refer to the same valid bare JID, returning false if either is malformed or differs.
+is_same_bare_jid(_Jid1, _Jid2) ->
     false.
 `,
       },
@@ -646,6 +669,7 @@ is_same_bare_jid(Jid1, Jid2) ->
     bare => binary()
 }.
 
+%% @doc Parse an RFC 7622 binary JID into unpinned user, domain, resource, and bare components, returning an invalid_jid error tuple on malformed or non-binary input.
 -spec parse(binary()) -> {ok, jid_map()} | {error, invalid_jid}.
 parse(JidBin) when is_binary(JidBin) ->
     case binary:split(JidBin, <<"/">>) of
@@ -662,23 +686,30 @@ parse(_) ->
 
 parse_bare(BareBin, ResourceBin) ->
     case binary:split(BareBin, <<"@">>) of
-        [UserPart, DomainPart] when byte_size(UserPart) > 0 andalso byte_size(DomainPart) > 0 ->
-            CleanUser = binary:copy(UserPart),
-            CleanDomain = binary:copy(DomainPart),
-            CleanResource = binary:copy(ResourceBin),
-            CleanBare = binary:copy(<<CleanUser/binary, "@", CleanDomain/binary>>),
-            {ok, #{
-                user => CleanUser,
-                domain => CleanDomain,
-                resource => CleanResource,
-                bare => CleanBare
-            }};
+        [UserPart, DomainPart] when byte_size(UserPart) > 0, byte_size(DomainPart) > 0 ->
+            case binary:match(DomainPart, <<"@">>) of
+                nomatch ->
+                    CleanUser = binary:copy(UserPart),
+                    CleanDomain = binary:copy(DomainPart),
+                    CleanResource = binary:copy(ResourceBin),
+                    CleanBare = binary:copy(<<CleanUser/binary, "@", CleanDomain/binary>>),
+                    {ok, #{
+                        user => CleanUser,
+                        domain => CleanDomain,
+                        resource => CleanResource,
+                        bare => CleanBare
+                    }};
+                _ ->
+                    {error, invalid_jid}
+            end;
         _ ->
             {error, invalid_jid}
     end.
 
+%% @doc Extract the normalized bare JID binary from a parsed JID map or raw JID binary, returning an invalid_jid error tuple for malformed inputs.
 -spec to_bare(jid_map() | binary()) -> binary() | {error, invalid_jid}.
-to_bare(#{bare := Bare}) -> Bare;
+to_bare(#{bare := Bare}) ->
+    Bare;
 to_bare(JidBin) when is_binary(JidBin) ->
     case parse(JidBin) of
         {ok, #{bare := Bare}} -> Bare;
@@ -687,6 +718,7 @@ to_bare(JidBin) when is_binary(JidBin) ->
 to_bare(_) ->
     {error, invalid_jid}.
 
+%% @doc Format a parsed JID map back into canonical wire binary form with or without a resource segment.
 -spec format_jid(jid_map()) -> binary().
 format_jid(#{user := User, domain := Domain, resource := Resource}) ->
     case Resource of
@@ -694,6 +726,7 @@ format_jid(#{user := User, domain := Domain, resource := Resource}) ->
         _    -> <<User/binary, "@", Domain/binary, "/", Resource/binary>>
     end.
 
+%% @doc Return whether two JID binaries or parsed JID maps refer to the same valid bare JID, returning false if either is malformed or differs.
 -spec is_same_bare_jid(jid_map() | binary(), jid_map() | binary()) -> boolean().
 is_same_bare_jid(Jid1, Jid2) ->
     case {to_bare(Jid1), to_bare(Jid2)} of
@@ -711,43 +744,20 @@ is_same_bare_jid(Jid1, Jid2) ->
     is_same_bare_jid/2
 ]).
 
--type jid_map() :: #{
-    user => binary(),
-    domain => binary(),
-    resource => binary(),
-    bare => binary()
-}.
+%% @doc Parse an RFC 7622 binary JID into unpinned user, domain, resource, and bare components, returning an invalid_jid error tuple on malformed or non-binary input.
+parse(_JidBin) ->
+    ok.
 
-%% @doc Parses a raw binary JID into validated components.
-%% Ensures sub-binaries are unpinned using binary:copy/1.
--spec parse(binary()) -> {ok, jid_map()} | {error, invalid_jid}.
-parse(JidBin) when is_binary(JidBin) ->
-    %% % TODO: Implement RFC 7622 JID parser
-    %% 1. Split on "/" to separate Resource (if present)
-    %% 2. Split Bare part on "@" to extract User and Domain
-    %% 3. Validate neither User nor Domain is empty
-    %% 4. Use binary:copy/1 on all slices
-    {error, not_implemented}.
+%% @doc Extract the normalized bare JID binary from a parsed JID map or raw JID binary, returning an invalid_jid error tuple for malformed inputs.
+to_bare(_JidInput) ->
+    ok.
 
-%% @doc Extracts the Bare JID binary from either a map or binary JID.
--spec to_bare(jid_map() | binary()) -> binary() | {error, invalid_jid}.
-to_bare(#{bare := Bare}) -> Bare;
-to_bare(JidBin) when is_binary(JidBin) ->
-    case parse(JidBin) of
-        {ok, #{bare := Bare}} -> Bare;
-        Error -> Error
-    end.
-
-%% @doc Formats a JID map back into standard wire format.
--spec format_jid(jid_map()) -> binary().
-format_jid(#{user := User, domain := Domain, resource := Resource}) ->
-    %% % TODO: Return User@Domain if Resource is <<>>, else User@Domain/Resource
+%% @doc Format a parsed JID map back into canonical wire binary form with or without a resource segment.
+format_jid(_JidMap) ->
     <<>>.
 
-%% @doc Returns true if two JIDs represent the same user account.
--spec is_same_bare_jid(jid_map() | binary(), jid_map() | binary()) -> boolean().
-is_same_bare_jid(Jid1, Jid2) ->
-    %% % TODO: Compare bare JID representations
+%% @doc Return whether two JID binaries or parsed JID maps refer to the same valid bare JID, returning false if either is malformed or differs.
+is_same_bare_jid(_Jid1, _Jid2) ->
     false.
 `,
     visibleTestCases: [
@@ -774,7 +784,10 @@ is_same_bare_jid(Jid1, Jid2) ->
       },
     ],
     astRules: {
+      requireTailRecursion: [],
+      forbiddenCalls: [],
       requiredCalls: ['binary:split/2', 'binary:copy/1'],
+      requiredConstructs: ['bit_syntax', 'guards'],
     },
     solutionCode: `-module(xmpp_jid).
 -export([
@@ -791,6 +804,7 @@ is_same_bare_jid(Jid1, Jid2) ->
     bare => binary()
 }.
 
+%% @doc Parse an RFC 7622 binary JID into unpinned user, domain, resource, and bare components, returning an invalid_jid error tuple on malformed or non-binary input.
 -spec parse(binary()) -> {ok, jid_map()} | {error, invalid_jid}.
 parse(JidBin) when is_binary(JidBin) ->
     case binary:split(JidBin, <<"/">>) of
@@ -807,23 +821,30 @@ parse(_) ->
 
 parse_bare(BareBin, ResourceBin) ->
     case binary:split(BareBin, <<"@">>) of
-        [UserPart, DomainPart] when byte_size(UserPart) > 0 andalso byte_size(DomainPart) > 0 ->
-            CleanUser = binary:copy(UserPart),
-            CleanDomain = binary:copy(DomainPart),
-            CleanResource = binary:copy(ResourceBin),
-            CleanBare = binary:copy(<<CleanUser/binary, "@", CleanDomain/binary>>),
-            {ok, #{
-                user => CleanUser,
-                domain => CleanDomain,
-                resource => CleanResource,
-                bare => CleanBare
-            }};
+        [UserPart, DomainPart] when byte_size(UserPart) > 0, byte_size(DomainPart) > 0 ->
+            case binary:match(DomainPart, <<"@">>) of
+                nomatch ->
+                    CleanUser = binary:copy(UserPart),
+                    CleanDomain = binary:copy(DomainPart),
+                    CleanResource = binary:copy(ResourceBin),
+                    CleanBare = binary:copy(<<CleanUser/binary, "@", CleanDomain/binary>>),
+                    {ok, #{
+                        user => CleanUser,
+                        domain => CleanDomain,
+                        resource => CleanResource,
+                        bare => CleanBare
+                    }};
+                _ ->
+                    {error, invalid_jid}
+            end;
         _ ->
             {error, invalid_jid}
     end.
 
+%% @doc Extract the normalized bare JID binary from a parsed JID map or raw JID binary, returning an invalid_jid error tuple for malformed inputs.
 -spec to_bare(jid_map() | binary()) -> binary() | {error, invalid_jid}.
-to_bare(#{bare := Bare}) -> Bare;
+to_bare(#{bare := Bare}) ->
+    Bare;
 to_bare(JidBin) when is_binary(JidBin) ->
     case parse(JidBin) of
         {ok, #{bare := Bare}} -> Bare;
@@ -832,6 +853,7 @@ to_bare(JidBin) when is_binary(JidBin) ->
 to_bare(_) ->
     {error, invalid_jid}.
 
+%% @doc Format a parsed JID map back into canonical wire binary form with or without a resource segment.
 -spec format_jid(jid_map()) -> binary().
 format_jid(#{user := User, domain := Domain, resource := Resource}) ->
     case Resource of
@@ -839,6 +861,7 @@ format_jid(#{user := User, domain := Domain, resource := Resource}) ->
         _    -> <<User/binary, "@", Domain/binary, "/", Resource/binary>>
     end.
 
+%% @doc Return whether two JID binaries or parsed JID maps refer to the same valid bare JID, returning false if either is malformed or differs.
 -spec is_same_bare_jid(jid_map() | binary(), jid_map() | binary()) -> boolean().
 is_same_bare_jid(Jid1, Jid2) ->
     case {to_bare(Jid1), to_bare(Jid2)} of

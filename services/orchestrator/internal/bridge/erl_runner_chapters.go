@@ -3446,39 +3446,38 @@ init:stop().
 		return `
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
-    {ok, #{user := U1, domain := D1, resource := R1, bare := B1}} = xmpp_jid:parse(<<"alice@localhost/mobile">>),
-    Pass1 = (U1 =:= <<"alice">>) andalso (D1 =:= <<"localhost">>) andalso (R1 =:= <<"mobile">>) andalso (B1 =:= <<"alice@localhost">>),
+    Exp1 = {ok, #{user => <<"alice">>, domain => <<"localhost">>, resource => <<"mobile">>, bare => <<"alice@localhost">>}},
+    Act1 = xmpp_jid:parse(<<"alice@localhost/mobile">>),
     #{call_str => <<"xmpp_jid:parse(<<\"alice@localhost/mobile\">>)">>,
-      expected => <<"{ok, #{user => <<\"alice\">>, domain => <<\"localhost\">>, resource => <<\"mobile\">>, bare => <<\"alice@localhost\">>}}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("~p", [{ok, #{user => U1, domain => D1, resource => R1, bare => B1}}]))),
-      passed => Pass1, time_ms => erlang:system_time(millisecond) - T1_Start}
+      expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp1]))),
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Act1]))),
+      passed => (Act1 =:= Exp1), time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"xmpp_jid:parse(...)">>, expected => <<"{ok, #{...}}">>,
+    #{call_str => <<"xmpp_jid:parse(<<\"alice@localhost/mobile\">>)">>, expected => <<"{ok, #{...}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try
-    {Bare2, Res2} = xmpp_jid:parse_jid(<<"alice@localhost/obsidian">>),
-    Pass2 = (Bare2 =:= <<"alice@localhost">>) andalso (Res2 =:= <<"obsidian">>),
-    #{call_str => <<"xmpp_jid:parse_jid(<<\"alice@localhost/obsidian\">>)">>,
-      expected => <<"{<<\"alice@localhost\">>, <<\"obsidian\">>}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("~p", [{Bare2, Res2}]))),
-      passed => Pass2, time_ms => erlang:system_time(millisecond) - T2_Start}
+    Exp2 = {ok, #{user => <<"bob">>, domain => <<"localhost">>, resource => <<>>, bare => <<"bob@localhost">>}},
+    Act2 = xmpp_jid:parse(<<"bob@localhost">>),
+    #{call_str => <<"xmpp_jid:parse(<<\"bob@localhost\">>)">>,
+      expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp2]))),
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Act2]))),
+      passed => (Act2 =:= Exp2), time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
-    #{call_str => <<"xmpp_jid:parse_jid(...)">>, expected => <<"{Bare, Resource}">>,
+    #{call_str => <<"xmpp_jid:parse(<<\"bob@localhost\">>)">>, expected => <<"{ok, #{...}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
 T3_Res = try
-    Same = xmpp_jid:is_same_bare_jid(<<"alice@localhost/phone">>, <<"alice@localhost/laptop">>),
-    Diff = xmpp_jid:is_same_bare_jid(<<"alice@localhost">>, <<"bob@localhost">>),
-    Pass3 = (Same =:= true) andalso (Diff =:= false),
-    #{call_str => <<"xmpp_jid:is_same_bare_jid(same vs different)">>,
-      expected => <<"{true, false}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("~p", [{Same, Diff}]))),
-      passed => Pass3, time_ms => erlang:system_time(millisecond) - T3_Start}
+    Act3 = {xmpp_jid:parse(<<"@localhost">>), xmpp_jid:parse(<<"alice@">>), xmpp_jid:parse(<<"alice@localhost/">>)},
+    Exp3 = {{error, invalid_jid}, {error, invalid_jid}, {error, invalid_jid}},
+    #{call_str => <<"{xmpp_jid:parse(<<\"@localhost\">>), xmpp_jid:parse(<<\"alice@\">>), xmpp_jid:parse(<<\"alice@localhost/\">>)}">>,
+      expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp3]))),
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Act3]))),
+      passed => (Act3 =:= Exp3), time_ms => erlang:system_time(millisecond) - T3_Start}
 catch C3:R3 ->
-    #{call_str => <<"xmpp_jid:is_same_bare_jid(...)">>, expected => <<"{true, false}">>,
+    #{call_str => <<"xmpp_jid:parse(malformed)">>, expected => <<"{{error,invalid_jid},{error,invalid_jid},{error,invalid_jid}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res],
@@ -8330,7 +8329,7 @@ Stages = [CompileStage, S1_Ast, S2_DemoWireExecution]
 		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(xmpp_jid) of
     {module, xmpp_jid} ->
-        Req = [{parse, 1}, {parse_jid, 1}, {to_bare, 1}, {format_jid, 1}, {is_same_bare_jid, 2}],
+        Req = [{parse, 1}, {to_bare, 1}, {format_jid, 1}, {is_same_bare_jid, 2}],
         Exports = xmpp_jid:module_info(exports),
         case [E || E <- Req, not lists:member(E, Exports)] of
             [] -> #{id => <<"compile">>, title => <<"Compile xmpp_jid.erl">>, status => <<"passed">>, time_ms => 12, details => <<"Compilation succeeded; all JID functions exported.">>};
@@ -8341,38 +8340,43 @@ CompileStage = case code:ensure_loaded(xmpp_jid) of
 end,
 S1_Ast = try
     SrcPath = filename:join(["%s", "src", "xmpp_jid.erl"]),
-    Rules = #{required_remote_calls => [{binary, copy, 1}, {binary, split, 2}]},
+    Rules = #{
+        required_calls => [{binary, copy, 1}, {binary, split, 2}],
+        required_constructs => [bit_syntax, guards]
+    },
     case bf_ast_verifier:verify_rules(SrcPath, Rules) of
-        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Memory Safety binary:copy/1">>, status => <<"passed">>, time_ms => 15, details => <<"Verified binary:copy/1 and binary:split/2 prevent sub-binary memory pinning.">>};
-        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Memory Safety binary:copy/1">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
+        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: binary:copy/1, Bit Syntax & Guards">>, status => <<"passed">>, time_ms => 15, details => <<"Verified binary:copy/1, binary:split/2, bit_syntax, and guards.">>};
+        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: binary:copy/1, Bit Syntax & Guards">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
     end
 catch CatchClass_L02_1:CatchReason_L02_1 ->
-    #{id => <<"ast_verification">>, title => <<"AST Analysis: Memory Safety binary:copy/1">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [CatchClass_L02_1, CatchReason_L02_1]))}
+    #{id => <<"ast_verification">>, title => <<"AST Analysis: binary:copy/1, Bit Syntax & Guards">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [CatchClass_L02_1, CatchReason_L02_1]))}
 end,
 S2_UnitJidParsing = try
     {ok, J1} = xmpp_jid:parse(<<"alice@localhost/mobile">>),
     Check1 = (maps:get(user, J1) =:= <<"alice">>) andalso (maps:get(domain, J1) =:= <<"localhost">>) andalso (maps:get(resource, J1) =:= <<"mobile">>) andalso (maps:get(bare, J1) =:= <<"alice@localhost">>),
     {ok, J2} = xmpp_jid:parse(<<"bob@chat.beamforge.io">>),
     Check2 = (maps:get(user, J2) =:= <<"bob">>) andalso (maps:get(domain, J2) =:= <<"chat.beamforge.io">>) andalso (maps:get(resource, J2) =:= <<>>) andalso (maps:get(bare, J2) =:= <<"bob@chat.beamforge.io">>),
-    {BareP1, ResP1} = xmpp_jid:parse_jid(<<"alice@localhost/mobile">>),
-    CheckP1 = (BareP1 =:= <<"alice@localhost">>) andalso (ResP1 =:= <<"mobile">>),
-    {BareP2, ResP2} = xmpp_jid:parse_jid(<<"bob@chat.beamforge.io">>),
-    CheckP2 = (BareP2 =:= <<"bob@chat.beamforge.io">>) andalso (ResP2 =:= <<>>),
     Err1 = xmpp_jid:parse(<<"@localhost">>),
     Err2 = xmpp_jid:parse(<<"alice@">>),
     Err3 = xmpp_jid:parse(<<"alice@localhost/">>),
     Err4 = xmpp_jid:parse(<<>>),
-    CheckErrs = (Err1 =:= {error, invalid_jid}) andalso (Err2 =:= {error, invalid_jid}) andalso (Err3 =:= {error, invalid_jid}) andalso (Err4 =:= {error, invalid_jid}),
-    {ok, BareFromBin} = xmpp_jid:to_bare(<<"alice@localhost/mobile">>),
-    CheckBare = (BareFromBin =:= <<"alice@localhost">>),
+    Err5 = xmpp_jid:parse(<<"alice@bob@localhost">>),
+    Err6 = xmpp_jid:parse(not_a_binary),
+    CheckErrs = (Err1 =:= {error, invalid_jid}) andalso (Err2 =:= {error, invalid_jid}) andalso (Err3 =:= {error, invalid_jid}) andalso (Err4 =:= {error, invalid_jid}) andalso (Err5 =:= {error, invalid_jid}) andalso (Err6 =:= {error, invalid_jid}),
+    BareFromBin = xmpp_jid:to_bare(<<"alice@localhost/mobile">>),
+    BareFromMap = xmpp_jid:to_bare(J1),
+    BareErr = xmpp_jid:to_bare(<<"invalid_no_at">>),
+    CheckBare = (BareFromBin =:= <<"alice@localhost">>) andalso (BareFromMap =:= <<"alice@localhost">>) andalso (BareErr =:= {error, invalid_jid}),
     FmtFull = xmpp_jid:format_jid(#{user => <<"charlie">>, domain => <<"host">>, resource => <<"pc">>}),
     FmtBare = xmpp_jid:format_jid(#{user => <<"charlie">>, domain => <<"host">>, resource => <<>>}),
     CheckFmt = (FmtFull =:= <<"charlie@host/pc">>) andalso (FmtBare =:= <<"charlie@host">>),
     Same1 = xmpp_jid:is_same_bare_jid(<<"alice@localhost/p1">>, <<"alice@localhost/p2">>),
+    Same2 = xmpp_jid:is_same_bare_jid(J1, <<"alice@localhost/desktop">>),
     Diff1 = xmpp_jid:is_same_bare_jid(<<"alice@localhost">>, <<"bob@localhost">>),
-    CheckSame = (Same1 =:= true) andalso (Diff1 =:= false),
-    case Check1 andalso Check2 andalso CheckP1 andalso CheckP2 andalso CheckErrs andalso CheckBare andalso CheckFmt andalso CheckSame of
-        true -> #{id => <<"unit_jid_parsing">>, title => <<"Unit Tests: JID Parsing, Normalization & RFC 7622 Validation">>, status => <<"passed">>, time_ms => 20, details => <<"Full and bare JIDs parsed, parse_jid helper verified, malformed JIDs rejected, formatting verified.">>};
+    DiffBad = xmpp_jid:is_same_bare_jid(<<"alice@localhost">>, <<"malformed">>),
+    CheckSame = (Same1 =:= true) andalso (Same2 =:= true) andalso (Diff1 =:= false) andalso (DiffBad =:= false),
+    case Check1 andalso Check2 andalso CheckErrs andalso CheckBare andalso CheckFmt andalso CheckSame of
+        true -> #{id => <<"unit_jid_parsing">>, title => <<"Unit Tests: JID Parsing, Normalization & RFC 7622 Validation">>, status => <<"passed">>, time_ms => 20, details => <<"Full and bare JIDs parsed, malformed inputs rejected, bare extraction, formatting, and comparison verified.">>};
         false -> #{id => <<"unit_jid_parsing">>, title => <<"Unit Tests: JID Parsing, Normalization & RFC 7622 Validation">>, status => <<"failed">>, time_ms => 20, details => <<"JID parser validation assertion failed.">>}
     end
 catch CatchClass_L02_2:CatchReason_L02_2 ->
