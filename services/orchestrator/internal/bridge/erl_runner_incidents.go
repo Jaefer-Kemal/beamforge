@@ -213,19 +213,35 @@ init:stop().
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
     RejectionRes = incident_xmpp_auth_bypass:test_pre_auth_rejection(),
-    {ok, Escaped} = incident_xmpp_auth_bypass:test_xml_escaping(),
-    ExpectedXml = <<"&lt;b&gt;Tom &amp; Jerry &gt; 1&lt;/b&gt;">>,
-    Passed = (RejectionRes =:= {ok, pre_auth_rejected}) andalso (Escaped =:= ExpectedXml),
-    #{call_str => <<"incident_xmpp_auth_bypass:test_xml_escaping()">>,
-      expected => ExpectedXml,
-      actual => Escaped,
-      passed => Passed,
+    #{call_str => <<"incident_xmpp_auth_bypass:test_pre_auth_rejection()">>,
+      expected => <<"{ok, pre_auth_rejected}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [RejectionRes]))),
+      passed => (RejectionRes =:= {ok, pre_auth_rejected}),
       time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"incident_xmpp_auth_bypass test">>, expected => <<"XML escaped & pre-auth rejected">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+    #{call_str => <<"incident_xmpp_auth_bypass:test_pre_auth_rejection()">>,
+      expected => <<"{ok, pre_auth_rejected}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])),
+      passed => false,
+      time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    XmlRes = incident_xmpp_auth_bypass:test_xml_escaping(),
+    ExpectedXml = {ok, <<"&lt;b&gt;Tom &amp; Jerry &gt; 1&lt;/b&gt;">>},
+    #{call_str => <<"incident_xmpp_auth_bypass:test_xml_escaping()">>,
+      expected => <<"{ok, <<\"&lt;b&gt;Tom &amp; Jerry &gt; 1&lt;/b&gt;\">>}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [XmlRes]))),
+      passed => (XmlRes =:= ExpectedXml),
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"incident_xmpp_auth_bypass:test_xml_escaping()">>,
+      expected => <<"{ok, <<\"&lt;b&gt;Tom &amp; Jerry &gt; 1&lt;/b&gt;\">>}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])),
+      passed => false,
+      time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -540,20 +556,36 @@ CompileStage = case code:ensure_loaded(incident_xmpp_auth_bypass) of
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_PreAuthRejection = try
+S1_Ast = try
+    BeamPath = code:which(incident_xmpp_auth_bypass),
+    WsRoot = filename:dirname(filename:dirname(BeamPath)),
+    SrcPath = filename:join([WsRoot, "src", "incident_xmpp_auth_bypass.erl"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    Rules = #{
+        required_constructs => [bit_syntax]
+    },
+    case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
+        {ok, _} -> #{id => <<"ast_bit_syntax_audit">>, title => <<"AST Audit: Bit-Syntax Binary Scanning & XML Framing">>, status => <<"passed">>, time_ms => 10, details => <<"Verified bit_syntax binary scanning/construction in incident_xmpp_auth_bypass.erl.">>};
+        {error, AstViol} -> #{id => <<"ast_bit_syntax_audit">>, title => <<"AST Audit: Bit-Syntax Binary Scanning & XML Framing">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Violations: ~p", [AstViol]))}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_bit_syntax_audit">>, title => <<"AST Audit: Bit-Syntax Binary Scanning & XML Framing">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_PreAuthRejection = try
     State = #{jid => undefined},
     Msg = {chat_message, <<"victim@localhost">>, <<"Spoofed">>},
     Rej1 = incident_xmpp_auth_bypass:process_c2s_stanza(wait_for_stream, Msg, State),
     Rej2 = incident_xmpp_auth_bypass:process_c2s_stanza(wait_for_sasl, Msg, State),
+    Rej3 = incident_xmpp_auth_bypass:process_c2s_stanza(resource_bind, Msg, State),
     ExpectedRej = {reject, <<"<stream:error><not-authorized/></stream:error>">>, State},
-    case Rej1 =:= ExpectedRej andalso Rej2 =:= ExpectedRej of
-        true -> #{id => <<"pre_auth_rejection_boundary">>, title => <<"RFC 6120 Pre-Auth Stanza Rejection Boundary">>, status => <<"passed">>, time_ms => 8, details => <<"Pre-auth chat stanzas strictly rejected with <not-authorized/>. Zero auth bypass.">>};
-        false -> #{id => <<"pre_auth_rejection_boundary">>, title => <<"RFC 6120 Pre-Auth Stanza Rejection Boundary">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Expected strict rejection, got: ~p, ~p", [Rej1, Rej2]))}
+    case Rej1 =:= ExpectedRej andalso Rej2 =:= ExpectedRej andalso Rej3 =:= ExpectedRej of
+        true -> #{id => <<"pre_auth_rejection_boundary">>, title => <<"RFC 6120 Pre-Auth Stanza Rejection Boundary">>, status => <<"passed">>, time_ms => 8, details => <<"Pre-auth and non-established chat stanzas strictly rejected fail-closed with <not-authorized/>.">>};
+        false -> #{id => <<"pre_auth_rejection_boundary">>, title => <<"RFC 6120 Pre-Auth Stanza Rejection Boundary">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Expected strict rejection, got: ~p, ~p, ~p", [Rej1, Rej2, Rej3]))}
     end
 catch C1:R1 ->
     #{id => <<"pre_auth_rejection_boundary">>, title => <<"RFC 6120 Pre-Auth Stanza Rejection Boundary">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
 end,
-S2_XmlEscaping = try
+S3_XmlEscaping = try
     Dangerous = <<"Hello <script>alert('xss')</script> & 1 > 2">>,
     Escaped = incident_xmpp_auth_bypass:escape_xml_text(Dangerous),
     Expected = <<"Hello &lt;script&gt;alert('xss')&lt;/script&gt; &amp; 1 &gt; 2">>,
@@ -563,14 +595,21 @@ S2_XmlEscaping = try
         {chat_message, <<"bob@localhost">>, Dangerous},
         StateAuth
     ),
-    case Escaped =:= Expected andalso binary:match(StanzaXml, Expected) =/= nomatch of
-        true -> #{id => <<"xml_entity_sanitization">>, title => <<"XML Entity Sanitization & Tag Injection Protection">>, status => <<"passed">>, time_ms => 10, details => <<"All &, <, and > characters safely escaped. Zero raw XML tag injection.">>};
-        false -> #{id => <<"xml_entity_sanitization">>, title => <<"XML Entity Sanitization & Tag Injection Protection">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Escaped output mismatch: ~s", [Escaped]))}
+    {route, <<"bob@localhost">>, FallbackXml, _} = incident_xmpp_auth_bypass:process_c2s_stanza(
+        session_established,
+        {chat_message, <<"bob@localhost">>, <<"ok & fine">>},
+        #{}
+    ),
+    HasDefaultFrom = binary:match(FallbackXml, <<"from='system@localhost'">>) =/= nomatch,
+    HasEscapedFallback = binary:match(FallbackXml, <<"<body>ok &amp; fine</body>">>) =/= nomatch,
+    case Escaped =:= Expected andalso binary:match(StanzaXml, Expected) =/= nomatch andalso HasDefaultFrom andalso HasEscapedFallback of
+        true -> #{id => <<"xml_entity_sanitization">>, title => <<"XML Entity Sanitization & Tag Injection Protection">>, status => <<"passed">>, time_ms => 10, details => <<"All &, <, and > characters safely escaped in single pass. Zero raw XML tag injection.">>};
+        false -> #{id => <<"xml_entity_sanitization">>, title => <<"XML Entity Sanitization & Tag Injection Protection">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Escaped output mismatch: ~s | ~s", [Escaped, FallbackXml]))}
     end
 catch C2:R2 ->
     #{id => <<"xml_entity_sanitization">>, title => <<"XML Entity Sanitization & Tag Injection Protection">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2]))}
 end,
-Stages = [CompileStage, S1_PreAuthRejection, S2_XmlEscaping]
+Stages = [CompileStage, S1_Ast, S2_PreAuthRejection, S3_XmlEscaping]
 `, true
 
 	default:

@@ -2729,28 +2729,120 @@ decode_sasl_plain(Base64Token) ->
       incidentId: 'INC-107',
       severity: 'CRITICAL',
       serviceName: 'xmpp-c2s-gateway',
-      symptom: 'Unauthenticated sockets can inject arbitrary stanzas and corrupt client XML streams with unescaped characters.',
-      impact: 'Privilege escalation and client disconnection cascades across the cluster.',
-      diagnosticClue: 'Connection state machine processed stanzas before SASL auth, and lacked XML entity escaping.',
+      symptom: 'Unauthenticated TCP clients inject routed `<message/>` stanzas during handshake and break downstream XML parsers with unescaped characters.',
+      impact: 'Pre-auth message spoofing across tenant JIDs and parser-desync client disconnect cascades cluster-wide.',
+      diagnosticClue: 'The C2S dispatcher routes chat tuples regardless of stream phase and interpolates raw body bytes directly into XML elements.',
     },
     conceptMarkdown: `## Incident Briefing: INC-107 Pre-Auth Stanza Injection & XML Entity Attacks
 
-### Production Outage Summary
-At 03:14 UTC, security telemetry detected unauthorized messages injected into VIP chat streams without credentials. Attackers exploited an edge case in the C2S connection handling where client sockets in \`wait_for_stream\` and \`wait_for_sasl\` were permitted to dispatch stanzas before authentication succeeded.
+Post-mortem telemetry from \`xmpp-c2s-gateway\` shows two stacked security regressions inside \`src/incident_xmpp_auth_bypass.erl\`:
+1. **Unauthenticated Stanza Bypass**: \`process_c2s_stanza/3\` pattern-matches \`{chat_message, To, Body}\` with an ignored \`_Phase\` wildcard, allowing clients still in \`wait_for_stream\` or \`wait_for_sasl\` to forge and route messages before SASL authentication completes.
+2. **XML Tag Injection / Parser Desync**: \`escape_xml_text/1\` returns the raw input binary unmodified, allowing \`<\`, \`>\`, and \`&\` inside message text to terminate \`<body>\` prematurely and inject arbitrary child stanzas.
 
-Furthermore, attackers injected unescaped XML markup (e.g. \`<b>Tom & Jerry > 1</b>\`), corrupting downstream client XML parsers and causing cascade disconnections.
+---
 
-### Root Cause Analysis
-1. **Missing Pre-Auth Guard**: Stanza dispatch did not check connection state, allowing unauthenticated sockets to send chat stanzas.
-2. **Missing XML Character Escaping**: User messages containing \`&\`, \`<\`, or \`>\` were concatenated directly into XML binaries without escaping.
+## Why This Matters in Production
 
-### Required Architecture Fix
-1. Reject any stanzas received during \`wait_for_stream\` and \`wait_for_sasl\` by returning:
-   \`{reject, <<"<stream:error><not-authorized/></stream:error>">>, State}\`
-2. Implement recursive binary character escaping for chat bodies:
-   - \`&\` -> \`&amp;\`
-   - \`<\` -> \`&lt;\`
-   - \`>\` -> \`&gt;\`
+In RFC 6120 (XMPP Core), a client-to-server (C2S) TCP connection progresses through strict protocol states: TCP stream initiation (\`wait_for_stream\`), TLS/SASL authentication (\`wait_for_sasl\`), resource binding, and only finally \`session_established\`. Every XMPP connection shares one long-lived XML stream document per socket; injecting an unescaped \`</body></message><iq .../>\` payload corrupts framing for the entire stream or smuggles unauthorized commands.
+
+Equally critical is **fail-closed state gating**: real incidents happen when routers allow a command on wildcard states instead of exclusively enabling routing on the authenticated terminal state and rejecting all earlier or unexpected states.
+
+---
+
+## Deep Concept Breakdown & Under the Hood
+
+### 1. Fail-Closed State Machine Dispatch
+Instead of writing blacklist clauses for individual pre-auth states and risking a forgotten intermediate phase, bind \`session_established\` explicitly for routing and reject \`wait_for_stream\`, \`wait_for_sasl\`, and the catch-all \`_OtherState\`. In Erlang pattern matching, clause order matters: putting specific rejection heads and a single authenticated route clause followed by a catch-all rejection guarantees no state slips through.
+
+### 2. Single-Pass Bit-Syntax Escaping vs Double-Escaping Bugs
+Naive multi-pass string replacement fails subtly when escaping markup:
+- If you replace \`<\` with \`&lt;\` first and \`&\` with \`&amp;\` second, \`<\` becomes \`&amp;lt;\`!
+- Even in the reverse order, allocating intermediate binaries per pass wastes heap and risks desync.
+
+Using an Erlang bit-syntax tail-recursive scan (\`<<Byte, Rest/binary>>\`) walks each byte **exactly once** in $O(N)$ time. Because \`Acc\` is passed directly into \`<<Acc/binary, ...>>\` in tail position, the BEAM runtime uses its appendable-binary optimization (in-place buffer growth with amortized linear time and zero intermediate sub-binary retention).
+
+---
+
+## Official Erlang Docs & Function Reference
+
+- **\`maps:get/3\`**: Retrieves \`jid\` from the connection state map with an explicit fallback binary when the key is absent *(see OTP reference cards below)*.
+- **\`erlang:is_binary/1\` & Bit Syntax Matching**: Guard and single-pass byte extraction (\`<<"&", Rest/binary>>\`, \`<<C, Rest/binary>>\`) *(see OTP reference cards below)*.
+
+---
+
+## Parallel Worked Example (Disjoint Domain: Telemetry Gatekeeper)
+
+The standalone module below demonstrates **fail-closed phase gating** and **single-pass bit-syntax character escaping** for an industrial sensor telemetry bus percent-encoding \`;\` and \`=\` delimiters:
+
+\`\`\`erlang
+-module(telemetry_cmd_gate).
+-export([handle_frame/3, escape_field/1, demo/0]).
+
+%% Only the armed state permits telemetry frames; all earlier or unknown phases deny fail-closed.
+handle_frame(awaiting_sync, _Cmd, Ctx) ->
+    {denied, not_calibrated, Ctx};
+handle_frame(armed, {emit, Sensor, RawVal}, Ctx) ->
+    Safe = escape_field(RawVal),
+    Node = maps:get(node_id, Ctx, <<"unknown-node">>),
+    Frame = <<"NODE=", Node/binary, ";SENSOR=", Sensor/binary, ";VAL=", Safe/binary>>,
+    {forward, Sensor, Frame, Ctx};
+handle_frame(_OtherPhase, _Cmd, Ctx) ->
+    {denied, not_calibrated, Ctx}.
+
+%% Single-pass O(N) bit-syntax escaping prevents delimiter injection and double-escaping.
+escape_field(Bin) when is_binary(Bin) ->
+    scan_bytes(Bin, <<>>).
+
+scan_bytes(<<>>, Acc) -> Acc;
+scan_bytes(<<";", Rest/binary>>, Acc) -> scan_bytes(Rest, <<Acc/binary, "%3B">>);
+scan_bytes(<<"=", Rest/binary>>, Acc) -> scan_bytes(Rest, <<Acc/binary, "%3D">>);
+scan_bytes(<<C, Rest/binary>>, Acc)   -> scan_bytes(Rest, <<Acc/binary, C>>).
+
+demo() ->
+    Pre = handle_frame(awaiting_sync, {emit, <<"t1">>, <<"9=ok;1">>}, #{node_id => <<"rack-4">>}),
+    Post = handle_frame(armed, {emit, <<"t1">>, <<"9=ok;1">>}, #{node_id => <<"rack-4">>}),
+    {Pre, Post}.
+\`\`\`
+
+---
+
+## Assignment Specification
+
+Repair \`src/incident_xmpp_auth_bypass.erl\` so both security vulnerabilities are eliminated while preserving all exported test probes:
+
+### 1. \`process_c2s_stanza(Phase, Stanza, State)\`
+- **Input**:
+  - \`Phase :: atom()\` (e.g., \`wait_for_stream\`, \`wait_for_sasl\`, \`session_established\`, or any other phase)
+  - \`Stanza :: {chat_message, To :: binary(), Body :: binary()} | term()\`
+  - \`State :: map()\` (typically contains \`jid => binary()\`, or \`undefined\`)
+- **Behavior**:
+  - Whenever \`Phase\` is \`wait_for_stream\`, \`wait_for_sasl\`, or any non-\`session_established\` state (fail-closed catch-all), return:
+    \`{reject, <<"<stream:error><not-authorized/></stream:error>">>, State}\`
+  - Only when \`Phase\` is \`session_established\` AND \`Stanza\` matches \`{chat_message, To, Body}\`:
+    - Sanitize \`Body\` with \`escape_xml_text/1\`.
+    - Read \`From\` using \`maps:get(jid, State, <<"system@localhost">>)\`.
+    - Format \`Xml\` as \`<message from='<From>' to='<To>' type='chat'><body><EscapedBody></body></message>\`.
+    - Return \`{route, To, Xml, State}\`.
+- **Examples**:
+  - \`process_c2s_stanza(wait_for_stream, {chat_message, <<"victim@localhost">>, <<"Hi">>}, #{jid => undefined})\` -> \`{reject, <<"<stream:error><not-authorized/></stream:error>">>, #{jid => undefined}}\`
+  - \`process_c2s_stanza(session_established, {chat_message, <<"bob@localhost">>, <<"A & B">>}, #{jid => <<"alice@localhost">>})\` -> \`{route, <<"bob@localhost">>, <<"<message from='alice@localhost' to='bob@localhost' type='chat'><body>A &amp; B</body></message>">>, #{jid => <<"alice@localhost">>}}\`
+
+### 2. \`escape_xml_text(Bin)\`
+- **Input**: \`Bin :: binary()\`
+- **Behavior**: Escapes every byte in a single bit-syntax pass over \`Bin\`, replacing:
+  - \`&\` with \`&amp;\`
+  - \`<\` with \`&lt;\`
+  - \`>\` with \`&gt;\`
+  - All other bytes preserved verbatim in original order.
+- **Examples**:
+  - \`escape_xml_text(<<"<b>Tom & Jerry > 1</b>">>)\` -> \`<<"&lt;b&gt;Tom &amp; Jerry &gt; 1&lt;/b&gt;">>\`
+
+---
+
+## Rules & Verification Constraints
+- Compile cleanly with \`erlc -Wall\` (zero warnings).
+- Use Erlang bit syntax (\`<<...>>\`) for binary matching/construction inside \`incident_xmpp_auth_bypass.erl\` — do not bypass binary processing with string-list \`lists:flatten\` conversions.
+- Keep \`test_pre_auth_rejection/0\` and \`test_xml_escaping/0\` exported and unmodified so both Run probes verify your fix.
 `,
     files: [
       {
@@ -2759,27 +2851,25 @@ Furthermore, attackers injected unescaped XML markup (e.g. \`<b>Tom & Jerry > 1<
         content: `-module(incident_xmpp_auth_bypass).
 -export([process_c2s_stanza/3, escape_xml_text/1, test_pre_auth_rejection/0, test_xml_escaping/0]).
 
-%% % TODO: Reject unauthenticated stanzas during pre-auth states (wait_for_stream, wait_for_sasl)
-%% When in wait_for_stream or wait_for_sasl:
-%%   return {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}
-%% When in session_established and receiving {chat_message, To, Body}:
-%%   escape Body with escape_xml_text/1, construct <message>, return {route, To, Xml, State}
-%% Any other state/stanza:
-%%   return {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}
-process_c2s_stanza(wait_for_stream, _Stanza, State) ->
-    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
-process_c2s_stanza(wait_for_sasl, _Stanza, State) ->
-    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
-process_c2s_stanza(session_established, {chat_message, _To, _Body}, State) ->
-    %% % TODO: Escape Body and format <message from='...' to='...' type='chat'><body>...</body></message>
-    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
-process_c2s_stanza(_OtherState, _Stanza, State) ->
+%% @doc Dispatches an incoming XMPP C2S stanza according to connection phase.
+%% Production incident baseline (BUGGY): routes chat messages in any phase
+%% without verifying session_established or escaping Body XML entities.
+process_c2s_stanza(_Phase, {chat_message, To, Body}, State) ->
+    From = case maps:get(jid, State, undefined) of
+        Bin when is_binary(Bin) -> Bin;
+        _ -> <<"unauthenticated@localhost">>
+    end,
+    Xml = <<"<message from='", From/binary, "' to='", To/binary, "' type='chat'><body>", Body/binary, "</body></message>">>,
+    {route, To, Xml, State};
+process_c2s_stanza(_OtherPhase, _Stanza, State) ->
     {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}.
 
-%% % TODO: Recursive binary loop escaping &, <, > to &amp;, &lt;, &gt;
+%% @doc Escapes XML entity characters (&, <, >) in a UTF-8 binary payload.
+%% Production incident baseline (BUGGY): returns raw bytes unescaped.
 escape_xml_text(Bin) when is_binary(Bin) ->
     Bin.
 
+%% @doc Visible verification probe asserting pre-auth stanzas are rejected.
 test_pre_auth_rejection() ->
     State = #{jid => undefined},
     Msg = {chat_message, <<"victim@localhost">>, <<"Spoofed">>},
@@ -2791,6 +2881,7 @@ test_pre_auth_rejection() ->
         false -> {error, failed_rejection}
     end.
 
+%% @doc Visible verification probe asserting XML entity sanitization on chat text.
 test_xml_escaping() ->
     Input = <<"<b>Tom & Jerry > 1</b>">>,
     Escaped = escape_xml_text(Input),
@@ -2802,6 +2893,8 @@ test_xml_escaping() ->
       'src/incident_xmpp_auth_bypass.erl': `-module(incident_xmpp_auth_bypass).
 -export([process_c2s_stanza/3, escape_xml_text/1, test_pre_auth_rejection/0, test_xml_escaping/0]).
 
+%% @doc Dispatches an incoming XMPP C2S stanza fail-closed by connection phase,
+%% rejecting pre-auth stanzas and XML-escaping established chat bodies.
 process_c2s_stanza(wait_for_stream, {chat_message, _To, _Body}, State) ->
     {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
 process_c2s_stanza(wait_for_sasl, {chat_message, _To, _Body}, State) ->
@@ -2814,6 +2907,7 @@ process_c2s_stanza(session_established, {chat_message, To, Body}, State) ->
 process_c2s_stanza(_OtherState, _Stanza, State) ->
     {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}.
 
+%% @doc Escapes XML entity characters (&, <, >) in a single O(N) binary pass.
 escape_xml_text(Bin) when is_binary(Bin) ->
     escape_loop(Bin, <<>>).
 
@@ -2823,6 +2917,7 @@ escape_loop(<<"<", Rest/binary>>, Acc) -> escape_loop(Rest, <<Acc/binary, "&lt;"
 escape_loop(<<">", Rest/binary>>, Acc) -> escape_loop(Rest, <<Acc/binary, "&gt;">>);
 escape_loop(<<C, Rest/binary>>, Acc)   -> escape_loop(Rest, <<Acc/binary, C>>).
 
+%% @doc Visible verification probe asserting pre-auth stanzas are rejected.
 test_pre_auth_rejection() ->
     State = #{jid => undefined},
     Msg = {chat_message, <<"victim@localhost">>, <<"Spoofed">>},
@@ -2834,6 +2929,7 @@ test_pre_auth_rejection() ->
         false -> {error, failed_rejection}
     end.
 
+%% @doc Visible verification probe asserting XML entity sanitization on chat text.
 test_xml_escaping() ->
     Input = <<"<b>Tom & Jerry > 1</b>">>,
     Escaped = escape_xml_text(Input),
@@ -2843,27 +2939,25 @@ test_xml_escaping() ->
     starterCode: `-module(incident_xmpp_auth_bypass).
 -export([process_c2s_stanza/3, escape_xml_text/1, test_pre_auth_rejection/0, test_xml_escaping/0]).
 
-%% % TODO: Reject unauthenticated stanzas during pre-auth states (wait_for_stream, wait_for_sasl)
-%% When in wait_for_stream or wait_for_sasl:
-%%   return {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}
-%% When in session_established and receiving {chat_message, To, Body}:
-%%   escape Body with escape_xml_text/1, construct <message>, return {route, To, Xml, State}
-%% Any other state/stanza:
-%%   return {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}
-process_c2s_stanza(wait_for_stream, _Stanza, State) ->
-    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
-process_c2s_stanza(wait_for_sasl, _Stanza, State) ->
-    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
-process_c2s_stanza(session_established, {chat_message, _To, _Body}, State) ->
-    %% % TODO: Escape Body and format <message from='...' to='...' type='chat'><body>...</body></message>
-    {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
-process_c2s_stanza(_OtherState, _Stanza, State) ->
+%% @doc Dispatches an incoming XMPP C2S stanza according to connection phase.
+%% Production incident baseline (BUGGY): routes chat messages in any phase
+%% without verifying session_established or escaping Body XML entities.
+process_c2s_stanza(_Phase, {chat_message, To, Body}, State) ->
+    From = case maps:get(jid, State, undefined) of
+        Bin when is_binary(Bin) -> Bin;
+        _ -> <<"unauthenticated@localhost">>
+    end,
+    Xml = <<"<message from='", From/binary, "' to='", To/binary, "' type='chat'><body>", Body/binary, "</body></message>">>,
+    {route, To, Xml, State};
+process_c2s_stanza(_OtherPhase, _Stanza, State) ->
     {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}.
 
-%% % TODO: Recursive binary loop escaping &, <, > to &amp;, &lt;, &gt;
+%% @doc Escapes XML entity characters (&, <, >) in a UTF-8 binary payload.
+%% Production incident baseline (BUGGY): returns raw bytes unescaped.
 escape_xml_text(Bin) when is_binary(Bin) ->
     Bin.
 
+%% @doc Visible verification probe asserting pre-auth stanzas are rejected.
 test_pre_auth_rejection() ->
     State = #{jid => undefined},
     Msg = {chat_message, <<"victim@localhost">>, <<"Spoofed">>},
@@ -2875,6 +2969,7 @@ test_pre_auth_rejection() ->
         false -> {error, failed_rejection}
     end.
 
+%% @doc Visible verification probe asserting XML entity sanitization on chat text.
 test_xml_escaping() ->
     Input = <<"<b>Tom & Jerry > 1</b>">>,
     Escaped = escape_xml_text(Input),
@@ -2883,6 +2978,8 @@ test_xml_escaping() ->
     solutionCode: `-module(incident_xmpp_auth_bypass).
 -export([process_c2s_stanza/3, escape_xml_text/1, test_pre_auth_rejection/0, test_xml_escaping/0]).
 
+%% @doc Dispatches an incoming XMPP C2S stanza fail-closed by connection phase,
+%% rejecting pre-auth stanzas and XML-escaping established chat bodies.
 process_c2s_stanza(wait_for_stream, {chat_message, _To, _Body}, State) ->
     {reject, <<"<stream:error><not-authorized/></stream:error>">>, State};
 process_c2s_stanza(wait_for_sasl, {chat_message, _To, _Body}, State) ->
@@ -2895,6 +2992,7 @@ process_c2s_stanza(session_established, {chat_message, To, Body}, State) ->
 process_c2s_stanza(_OtherState, _Stanza, State) ->
     {reject, <<"<stream:error><not-authorized/></stream:error>">>, State}.
 
+%% @doc Escapes XML entity characters (&, <, >) in a single O(N) binary pass.
 escape_xml_text(Bin) when is_binary(Bin) ->
     escape_loop(Bin, <<>>).
 
@@ -2904,6 +3002,7 @@ escape_loop(<<"<", Rest/binary>>, Acc) -> escape_loop(Rest, <<Acc/binary, "&lt;"
 escape_loop(<<">", Rest/binary>>, Acc) -> escape_loop(Rest, <<Acc/binary, "&gt;">>);
 escape_loop(<<C, Rest/binary>>, Acc)   -> escape_loop(Rest, <<Acc/binary, C>>).
 
+%% @doc Visible verification probe asserting pre-auth stanzas are rejected.
 test_pre_auth_rejection() ->
     State = #{jid => undefined},
     Msg = {chat_message, <<"victim@localhost">>, <<"Spoofed">>},
@@ -2915,6 +3014,7 @@ test_pre_auth_rejection() ->
         false -> {error, failed_rejection}
     end.
 
+%% @doc Visible verification probe asserting XML entity sanitization on chat text.
 test_xml_escaping() ->
     Input = <<"<b>Tom & Jerry > 1</b>">>,
     Escaped = escape_xml_text(Input),
@@ -2922,18 +3022,29 @@ test_xml_escaping() ->
 `,
     otpDocCards: [
       {
-        functionName: 'escape_xml_text',
-        module: 'incident_xmpp_auth_bypass',
-        signature: 'escape_xml_text(Bin) -> EscapedBin',
-        typesSpec: ['Bin = binary()', 'EscapedBin = binary()'],
-        description: 'Recursively escapes &, <, and > characters into XML entities.',
-        complexityNote: 'Tail-recursive binary fold in O(N) time.',
-        officialUrl: 'https://datatracker.ietf.org/doc/html/rfc6120',
-        githubSourceUrl: 'https://github.com/erlang/otp',
+        functionName: 'get',
+        module: 'maps',
+        signature: 'maps:get(Key, Map, Default) -> Value',
+        typesSpec: ['Key = term()', 'Map = #{Key => Value}', 'Default = Value'],
+        description: 'Looks up Key in Map and returns its associated value, or Default if Key is not present — safe against badkey crashes when building sender attributes.',
+        complexityNote: 'O(1) for small maps (=<32 keys); O(log32 N) HAMT lookup for larger maps.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/maps.html#get/3',
+        githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/maps.erl',
+      },
+      {
+        functionName: 'bit_syntax',
+        module: 'erlang',
+        signature: '<<Byte, Rest/binary>> / <<Acc/binary, "&amp;">>',
+        typesSpec: ['Rest = binary()', 'Acc = binary()'],
+        description: 'Single-pass binary pattern matching and BEAM appendable-binary construction used to escape XML delimiters without double-escaping or list allocation.',
+        complexityNote: 'O(N) amortized linear time via BEAM binary append optimization in tail recursion.',
+        officialUrl: 'https://www.erlang.org/doc/system/bit_syntax.html',
+        githubSourceUrl: 'https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_bits.c',
       },
     ],
     astRules: {
-      requiredCalls: ['escape_xml_text/1'],
+      requiredCalls: [],
+      requiredConstructs: ['bit_syntax'],
     },
     visibleTestCases: [
       {
