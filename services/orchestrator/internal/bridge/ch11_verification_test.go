@@ -585,70 +585,95 @@ test_xml_escaping() ->
 			exerciseID: "ch11-l08",
 			files: map[string]string{
 				"src/xmpp_presence_router.erl": `-module(xmpp_presence_router).
--export([upsert_session/5, remove_session_by_pid/2, resolve_message_targets/2, broadcast_presence/4]).
+-export([
+    upsert_session/5,
+    remove_session_by_pid/2,
+    resolve_message_targets/2,
+    broadcast_presence/4
+]).
 
-upsert_session(SessionsList, FullJid, Priority, Pid, RosterMap) ->
-    Clean = [S || S <- SessionsList, maps:get(jid, S) =/= FullJid],
-    [#{jid => FullJid, priority => Priority, pid => Pid, roster => RosterMap} | Clean].
+-type session() :: {session, FullJid :: binary(), BareJid :: binary(), Resource :: binary(), Priority :: integer(), Pid :: pid()}.
+-type roster_map() :: #{binary() => [binary()]}.
 
-remove_session_by_pid(SessionsList, DeadPid) ->
-    remove_loop(SessionsList, DeadPid, []).
+%% @doc Inserts a new session entry or replaces the existing entry for FullJid,
+%% clamping caller-supplied Priority to -128..127 and detaching split JID slices.
+-spec upsert_session([session()], binary(), integer(), pid(), roster_map()) -> [session()].
+upsert_session(Sessions, FullJid, Priority, Pid, _RosterMap) ->
+    {BareJid, Resource} = split_jid(FullJid),
+    ClampedPriority = clamp_priority(Priority),
+    NewSession = {session, FullJid, BareJid, Resource, ClampedPriority, Pid},
+    Filtered = [S || S = {session, F, _, _, _, _} <- Sessions, F =/= FullJid],
+    [NewSession | Filtered].
 
-remove_loop([], _DeadPid, Acc) ->
+%% @doc Returns the session list with all entries owned by DeadPid pruned using tail recursion.
+-spec remove_session_by_pid([session()], pid()) -> [session()].
+remove_session_by_pid(Sessions, DeadPid) ->
+    remove_pid_loop(Sessions, DeadPid, []).
+
+remove_pid_loop([], _DeadPid, Acc) ->
     lists:reverse(Acc);
-remove_loop([#{pid := DeadPid} | Rest], DeadPid, Acc) ->
-    remove_loop(Rest, DeadPid, Acc);
-remove_loop([Session | Rest], DeadPid, Acc) ->
-    remove_loop(Rest, DeadPid, [Session | Acc]).
+remove_pid_loop([{session, _, _, _, _, Pid} | Rest], DeadPid, Acc) when Pid =:= DeadPid ->
+    remove_pid_loop(Rest, DeadPid, Acc);
+remove_pid_loop([Session | Rest], DeadPid, Acc) ->
+    remove_pid_loop(Rest, DeadPid, [Session | Acc]).
 
-resolve_message_targets(SessionsList, TargetJid) ->
-    case binary:split(TargetJid, <<"/">>) of
-        [_Bare, _Res] ->
-            case [maps:get(pid, S) || S <- SessionsList, maps:get(jid, S) =:= TargetJid] of
-                [Pid | _] -> {route_online, [Pid]};
+%% @doc Resolves recipient PIDs for TargetJid by exact Full JID match first, then
+%% highest non-negative priority resources, or returns offline storage fallback.
+-spec resolve_message_targets([session()], binary()) ->
+    {route_online, [pid()]} | {store_offline, binary()}.
+resolve_message_targets(Sessions, TargetJid) ->
+    case binary:match(TargetJid, <<"/">>) of
+        {_, _} ->
+            case [Pid || {session, F, _, _, _, Pid} <- Sessions, F =:= TargetJid] of
+                [ExactPid | _] ->
+                    {route_online, [ExactPid]};
                 [] ->
-                    route_to_bare(SessionsList, TargetJid)
+                    {Bare, _} = split_jid(TargetJid),
+                    route_bare(Sessions, Bare)
             end;
-        [_BareOnly] ->
-            route_to_bare(SessionsList, TargetJid)
+        nomatch ->
+            route_bare(Sessions, TargetJid)
     end.
 
-route_to_bare(SessionsList, TargetJid) ->
-    BareTarget = case binary:split(TargetJid, <<"/">>) of
-        [B, _] -> B;
-        [B] -> B
-    end,
-    UserSessions = lists:filter(fun(S) ->
-        Jid = maps:get(jid, S),
-        [BarePart | _] = binary:split(Jid, <<"/">>),
-        BarePart =:= BareTarget andalso maps:get(priority, S) >= 0
-    end, SessionsList),
-    case UserSessions of
+route_bare(Sessions, BareJid) ->
+    Matching = [{P, Pid} || {session, _, B, _, P, Pid} <- Sessions, B =:= BareJid, P >= 0],
+    case Matching of
         [] ->
-            {store_offline, BareTarget};
+            {store_offline, BareJid};
         _ ->
-            MaxPriority = lists:max([maps:get(priority, S) || S <- UserSessions]),
-            HighestPids = [maps:get(pid, S) || S <- UserSessions, maps:get(priority, S) =:= MaxPriority],
-            {route_online, HighestPids}
+            MaxPriority = lists:max([P || {P, _} <- Matching]),
+            BestPids = [Pid || {P, Pid} <- Matching, P =:= MaxPriority],
+            {route_online, BestPids}
     end.
 
-broadcast_presence(SessionsList, RosterMap, SenderFullJid, PresenceStanzaBin) ->
-    [SenderBare | _] = binary:split(SenderFullJid, <<"/">>),
-    Contacts = maps:get(SenderBare, RosterMap, []),
-    OtherResources = [maps:get(pid, S) || S <- SessionsList,
-                      maps:get(jid, S) =/= SenderFullJid,
-                      begin
-                          [B | _] = binary:split(maps:get(jid, S), <<"/">>),
-                          B =:= SenderBare
-                      end],
-    ContactPids = [maps:get(pid, S) || S <- SessionsList,
-                   begin
-                       [B | _] = binary:split(maps:get(jid, S), <<"/">>),
-                       lists:member(B, Contacts)
-                   end],
-    AllPids = lists:usort(OtherResources ++ ContactPids),
-    lists:foreach(fun(Pid) -> Pid ! {presence, PresenceStanzaBin} end, AllPids),
-    length(AllPids).
+%% @doc Delivers PresenceStanza to unique PIDs of roster contacts and own alternate
+%% resources excluding SenderFullJid, returning the count of notified processes.
+-spec broadcast_presence([session()], roster_map(), binary(), binary()) -> non_neg_integer().
+broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
+    {SenderBare, _} = split_jid(SenderFullJid),
+    Subscribers = maps:get(SenderBare, RosterMap, []),
+    TargetBares = [SenderBare | Subscribers],
+    TargetSessions = [
+        Pid || {session, Full, Bare, _, _, Pid} <- Sessions,
+        Full =/= SenderFullJid,
+        lists:member(Bare, TargetBares)
+    ],
+    UniquePids = lists:usort(TargetSessions),
+    lists:foreach(fun(Pid) ->
+        Pid ! {xmpp_presence, SenderFullJid, PresenceStanza}
+    end, UniquePids),
+    length(UniquePids).
+
+split_jid(FullJid) ->
+    case binary:split(FullJid, <<"/">>) of
+        [Bare, Res] -> {binary:copy(Bare), binary:copy(Res)};
+        [Bare]      -> {binary:copy(Bare), <<>>}
+    end.
+
+clamp_priority(P) when is_integer(P), P < -128 -> -128;
+clamp_priority(P) when is_integer(P), P > 127  -> 127;
+clamp_priority(P) when is_integer(P)           -> P;
+clamp_priority(_)                              -> 0.
 `,
 			},
 		},

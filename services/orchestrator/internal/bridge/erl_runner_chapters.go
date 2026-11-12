@@ -3673,13 +3673,15 @@ T1_Res = try
     S3 = xmpp_presence_router:upsert_session(S2, <<"alice@host/desktop">>, 10, P3, #{}),
     R_Bare = xmpp_presence_router:resolve_message_targets(S3, <<"alice@host">>),
     R_Full = xmpp_presence_router:resolve_message_targets(S3, <<"alice@host/phone">>),
-    Pass1 = (R_Bare =:= {route_online, [P3]}) andalso (R_Full =:= {route_online, [P2]}),
+    PassBare = (R_Bare =:= {route_online, [P3]}),
+    PassFull = (R_Full =:= {route_online, [P2]}),
+    Pass1 = PassBare andalso PassFull,
     #{call_str => <<"resolve_message_targets(Bare vs Full)">>,
-      expected => <<"{{route_online, [P3]}, {route_online, [P2]}}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("~p", [{R_Bare, R_Full}]))),
+      expected => <<"{true, true}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [{PassBare, PassFull}]))),
       passed => Pass1, time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"resolve_message_targets(...)">>, expected => <<"routing result">>,
+    #{call_str => <<"resolve_message_targets(...)">>, expected => <<"{true, true}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
@@ -3692,11 +3694,11 @@ T2_Res = try
     R_Pruned = xmpp_presence_router:resolve_message_targets(S2, <<"bob@host/web">>),
     Pass2 = (R_Pruned =:= {route_online, [P2]}),
     #{call_str => <<"remove_session_by_pid(DeadPid)">>,
-      expected => <<"{route_online, [P2]}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("~p", [R_Pruned]))),
+      expected => <<"true">>,
+      actual => list_to_binary(atom_to_list(Pass2)),
       passed => Pass2, time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
-    #{call_str => <<"remove_session_by_pid(...)">>, expected => <<"{route_online, [P2]}">>,
+    #{call_str => <<"remove_session_by_pid(...)">>, expected => <<"true">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
@@ -8652,13 +8654,16 @@ S1_Ast = try
     SrcPath = filename:join(["%s", "src", "xmpp_presence_router.erl"]),
     BeamPath = filename:join(["%s", "ebin", "xmpp_presence_router.beam"]),
     {ok, BeamBin} = file:read_file(BeamPath),
-    Rules = #{require_tail_recursion => [{remove_session_by_pid, 2}]},
+    Rules = #{
+        require_tail_recursion => [{remove_session_by_pid, 2}],
+        required_remote_calls => [{binary, split, 2}, {binary, copy, 1}, {lists, usort, 1}]
+    },
     case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
-        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Tail Recursion on Session Pruning">>, status => <<"passed">>, time_ms => 15, details => <<"Verified remove_session_by_pid/2 is strictly tail-recursive.">>};
-        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Tail Recursion on Session Pruning">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
+        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Tail Recursion & Unpinning Calls">>, status => <<"passed">>, time_ms => 15, details => <<"Verified remove_session_by_pid/2 is tail-recursive and uses binary:split/2, binary:copy/1, lists:usort/1.">>};
+        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Tail Recursion & Unpinning Calls">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
     end
 catch CatchClass_L08_1:CatchReason_L08_1 ->
-    #{id => <<"ast_verification">>, title => <<"AST Analysis: Tail Recursion on Session Pruning">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [CatchClass_L08_1, CatchReason_L08_1]))}
+    #{id => <<"ast_verification">>, title => <<"AST Analysis: Tail Recursion & Unpinning Calls">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [CatchClass_L08_1, CatchReason_L08_1]))}
 end,
 S2_UnitLifecycleAndRouting = try
     PWatch = spawn(fun() -> ok end),
@@ -8666,34 +8671,46 @@ S2_UnitLifecycleAndRouting = try
     PDesk1 = spawn(fun() -> ok end),
     PDesk2 = spawn(fun() -> ok end),
     S0 = [],
-    S1 = xmpp_presence_router:upsert_session(S0, <<"alice@host/watch">>, -10, PWatch, #{}),
+    S1 = xmpp_presence_router:upsert_session(S0, <<"alice@host/watch">>, -200, PWatch, #{}),
     S2 = xmpp_presence_router:upsert_session(S1, <<"alice@host/phone">>, 5, PPhone, #{}),
     S3 = xmpp_presence_router:upsert_session(S2, <<"alice@host/desktop1">>, 10, PDesk1, #{}),
-    S4 = xmpp_presence_router:upsert_session(S3, <<"alice@host/desktop2">>, 10, PDesk2, #{}),
+    S4 = xmpp_presence_router:upsert_session(S3, <<"alice@host/desktop2">>, 200, PDesk2, #{}),
+    CheckClamp = (lists:keymember(-128, 5, S1)) andalso (lists:keymember(127, 5, S4)),
+    S3Upsert = xmpp_presence_router:upsert_session(S4, <<"alice@host/desktop2">>, 10, PDesk2, #{}),
+    CheckOverwrite = (length(S3Upsert) =:= 4),
     %% 1. Full JID exact match
-    {route_online, [TargetPhone]} = xmpp_presence_router:resolve_message_targets(S4, <<"alice@host/phone">>),
+    {route_online, [TargetPhone]} = xmpp_presence_router:resolve_message_targets(S3Upsert, <<"alice@host/phone">>),
     CheckFull = (TargetPhone =:= PPhone),
     %% 2. Bare JID highest priority tie (PDesk1 and PDesk2 both priority 10)
-    {route_online, TiedPids} = xmpp_presence_router:resolve_message_targets(S4, <<"alice@host">>),
+    {route_online, TiedPids} = xmpp_presence_router:resolve_message_targets(S3Upsert, <<"alice@host">>),
     CheckTied = (lists:sort(TiedPids) =:= lists:sort([PDesk1, PDesk2])),
-    %% 3. Negative priority exclusion: remove desktop1, desktop2, phone -> only watch remains with priority -10
-    S5 = xmpp_presence_router:remove_session_by_pid(S4, PDesk1),
+    %% 3. Negative priority exclusion: remove desktop1, desktop2, phone -> only watch remains with priority -128
+    S5 = xmpp_presence_router:remove_session_by_pid(S3Upsert, PDesk1),
     S6 = xmpp_presence_router:remove_session_by_pid(S5, PDesk2),
     S7 = xmpp_presence_router:remove_session_by_pid(S6, PPhone),
     OfflineRes = xmpp_presence_router:resolve_message_targets(S7, <<"alice@host">>),
     CheckNeg = (OfflineRes =:= {store_offline, <<"alice@host">>}),
-    case CheckFull andalso CheckTied andalso CheckNeg of
-        true -> #{id => <<"unit_priority_routing">>, title => <<"Unit Tests: RFC 6121 Priority Routing & Negative Priority Exclusion">>, status => <<"passed">>, time_ms => 20, details => <<"Full JID routing, tied highest priorities, and negative priority offline fallback verified.">>};
-        false -> #{id => <<"unit_priority_routing">>, title => <<"Unit Tests: RFC 6121 Priority Routing & Negative Priority Exclusion">>, status => <<"failed">>, time_ms => 20, details => <<"Priority routing assertion failed.">>}
+    case CheckClamp andalso CheckOverwrite andalso CheckFull andalso CheckTied andalso CheckNeg of
+        true -> #{id => <<"unit_priority_routing">>, title => <<"Unit Tests: RFC 6121 Priority Routing & Negative Priority Exclusion">>, status => <<"passed">>, time_ms => 20, details => <<"Priority clamping (-128..127), Full JID routing, tied priorities, and negative priority offline fallback verified.">>};
+        false -> #{id => <<"unit_priority_routing">>, title => <<"Unit Tests: RFC 6121 Priority Routing & Negative Priority Exclusion">>, status => <<"failed">>, time_ms => 20, details => <<"Priority routing or clamping assertion failed.">>}
     end
 catch CatchClass_L08_2:CatchReason_L08_2 ->
     #{id => <<"unit_priority_routing">>, title => <<"Unit Tests: RFC 6121 Priority Routing & Negative Priority Exclusion">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Routing error: ~p:~p", [CatchClass_L08_2, CatchReason_L08_2]))}
 end,
 S3_UnitPresenceBroadcast = try
     Self = self(),
-    PContact1 = spawn(fun() -> receive _ -> ok end end),
-    PContact2 = spawn(fun() -> receive _ -> ok end end),
-    POtherResource = spawn(fun() -> receive _ -> ok end end),
+    Ack = fun(Tag) ->
+        spawn(fun() ->
+            receive
+                {xmpp_presence, <<"alice@host/phone">>, <<"<presence type='available'/>">>} -> Self ! {ack, Tag}
+            after 500 ->
+                Self ! {miss, Tag}
+            end
+        end)
+    end,
+    PContact1 = Ack(c1),
+    PContact2 = Ack(c2),
+    POtherResource = Ack(self_res),
     Roster = #{<<"alice@host">> => [<<"bob@host">>, <<"carol@host">>]},
     BS0 = [],
     BS1 = xmpp_presence_router:upsert_session(BS0, <<"alice@host/phone">>, 5, Self, Roster),
@@ -8701,9 +8718,11 @@ S3_UnitPresenceBroadcast = try
     BS3 = xmpp_presence_router:upsert_session(BS2, <<"bob@host/office">>, 5, PContact1, Roster),
     BS4 = xmpp_presence_router:upsert_session(BS3, <<"carol@host/home">>, 5, PContact2, Roster),
     DeliveredCount = xmpp_presence_router:broadcast_presence(BS4, Roster, <<"alice@host/phone">>, <<"<presence type='available'/>">>),
-    case DeliveredCount of
-        3 -> #{id => <<"unit_presence_broadcast">>, title => <<"Unit Tests: Roster Presence Fan-Out & Self-Resource Delivery">>, status => <<"passed">>, time_ms => 25, details => <<"Presence delivered to 2 subscribed contacts and 1 alternate self resource; sender omitted.">>};
-        OtherCount -> #{id => <<"unit_presence_broadcast">>, title => <<"Unit Tests: Roster Presence Fan-Out & Self-Resource Delivery">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Delivered count expected 3, got: ~p", [OtherCount]))}
+    GotAcks = [receive {ack, T} -> T after 600 -> timeout end || T <- [c1, c2, self_res]],
+    SenderUntouched = receive {xmpp_presence, _, _} -> false after 20 -> true end,
+    case (DeliveredCount =:= 3) andalso (lists:sort(GotAcks) =:= [c1, c2, self_res]) andalso SenderUntouched of
+        true -> #{id => <<"unit_presence_broadcast">>, title => <<"Unit Tests: Roster Presence Fan-Out & Self-Resource Delivery">>, status => <<"passed">>, time_ms => 25, details => <<"Presence {xmpp_presence, SenderFullJid, Stanza} delivered to 2 contacts and 1 alternate resource; sender omitted.">>};
+        false -> #{id => <<"unit_presence_broadcast">>, title => <<"Unit Tests: Roster Presence Fan-Out & Self-Resource Delivery">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Delivered=~p Acks=~p SenderUntouched=~p", [DeliveredCount, GotAcks, SenderUntouched]))}
     end
 catch CatchClass_L08_3:CatchReason_L08_3 ->
     #{id => <<"unit_presence_broadcast">>, title => <<"Unit Tests: Roster Presence Fan-Out & Self-Resource Delivery">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Presence broadcast error: ~p:~p", [CatchClass_L08_3, CatchReason_L08_3]))}

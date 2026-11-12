@@ -3119,87 +3119,174 @@ test_xml_escaping() ->
     },
     conceptMarkdown: `## Why This Matters in Production
 
-In real-world chat networks, every active user is logged into multiple devices simultaneously: phone, smartwatch, desktop app, and web browser. 
+In real-world chat networks (WhatsApp, ejabberd, MongooseIM), an active user is routinely connected from several devices at the same time: phone, smartwatch, desktop client, and web tab. When a peer sends a message to a Bare JID (\`alice@chat.beamforge.io\`), the server must deterministically pick which live socket process(es) receive the stanza rather than broadcasting blindly to every tab or dropping it.
 
-When Bob sends a message to \`alice@chat.beamforge.io\` (a Bare JID), how does the server decide which of Alice's devices should ring? 
+**RFC 6121 Section 8 (Priority-Based Message Routing & Presence Broadcast)** solves both multi-device delivery and presence fan-out without external coordination overhead:
 
-The answer is **RFC 6121 Section 8 (Priority-Based Message Routing & Presence Broadcast)**. This algorithm is the heartbeat of enterprise XMPP servers like ejabberd and MongooseIM.
+> [!IMPORTANT]
+> **RFC 6121 Priority & Fan-Out Invariants:**
+> 1. **Negative Priority Exclusion:** Sessions with priority below zero (such as \`-5\` Do-Not-Disturb / passive background clients) are excluded from bare-JID message delivery.
+> 2. **Highest Non-Negative Priority & Ties:** Bare-JID messages route to the session(s) sharing the highest priority \`>= 0\`, fanning out to all tied PIDs.
+> 3. **Exact Resource Lookup with Fallback:** Messages addressed to a Full JID (\`user@host/res\`) deliver straight to that exact resource if connected; otherwise routing falls back to bare-JID priority resolution.
+> 4. **Offline Fallback:** If no non-negative priority sessions remain online, the router returns an offline-storage directive instead of dropping the stanza.
 
-> **RFC 6121 Multi-Device Priority Routing Rules:**
-> 1. **Negative Priority Exclusion:** Sessions with negative priority (e.g. \`Priority: -5\` DND) are strictly excluded from message delivery.
-> 2. **Highest Numerical Priority:** Messages delivered to a Bare JID are routed exclusively to the session with the highest positive priority.
-> 3. **Tied Priority Fan-Out:** If multiple sessions share the identical highest priority, stanzas fan out to all tied sessions.
-> 4. **Offline Fallback:** If all sessions are offline or negative priority, the stanza is stored in the offline message spool.
+---
 
 ## Deep Concept Breakdown & Under the Hood
 
-### 1. Data Representation
-To represent active user sessions cleanly in Erlang memory without external database overhead:
-- A session is represented as a 6-element tuple:
-  \`\`\`erlang
-  {session, FullJidBin, BareJidBin, ResourceBin, PriorityInt, WorkerPid}
-  \`\`\`
-- \`PriorityInt\` is an integer between \`-128\` and \`127\` (standard XMPP priority range).
-- The user's roster subscriptions map stores mutual contacts:
-  \`\`\`erlang
-  RosterMap = #{BareJidBin => [ContactBareJid1, ContactBareJid2, ...]}
-  \`\`\`
+### 1. Memory Unpinning When Indexing Sub-Binaries
+Because XMPP Full JIDs arrive over TCP inside larger packet buffers, slicing \`<<"alice@host/phone">>\` with \`binary:split/2\` creates **SubBinary** descriptors referencing the original off-heap \`ProcBin\`. Copying the split bare JID and resource binaries via \`binary:copy/1\` detaches long-lived session entries from transient packet buffers so socket receive heaps can be garbage-collected immediately.
 
-### 2. The 4 Core Operations
-1. **\`upsert_session/5\`**: Adds or updates a session for a given Full JID. If the user reconnects from the same device (same Full JID), the old session entry is replaced with the new PID and priority.
-2. **\`remove_session_by_pid/2\`**: When an Erlang C2S worker crashes or closes its TCP socket, the supervisor or monitor notifies the router. It must prune all sessions belonging to that dead PID using tail recursion.
-3. **\`resolve_message_targets/2\`**:
-   - If \`TargetJid\` is a **Full JID** (\`user@host/res\`) and that exact session is online: deliver to that specific PID.
-   - If \`TargetJid\` is a **Bare JID** (or the target Full JID is offline): find all sessions for \`BareJid\` with \`Priority >= 0\`. Select the session(s) tied for the **highest priority** and return \`{route_online, [HighestPids]}\`.
-   - If no online sessions with \`Priority >= 0\` exist: return \`{store_offline, BareJid}\`.
-4. **\`broadcast_presence/4\`**:
-   - When Alice's phone changes presence (e.g. goes online or sets away status), the server looks up Alice's contacts in \`RosterMap\`.
-   - Sends \`Pid ! {xmpp_presence, SenderFullJid, PresenceStanzaBin}\` to all online sessions belonging to those contacts, **plus** Alice's own other connected devices!
-   - Returns the count of distinct worker PIDs notified.
+### 2. Constant-Stack Session Pruning (TCO)
+When a C2S connection supervisor emits a \`DOWN\` signal, the router must evict every session owned by that dead PID. A body-recursive filter would push one stack frame per active session, risking stack growth under burst disconnects. Using an accumulator-based helper loop in **tail position** allows the BEAM VM to reuse a single stack frame ($O(1)$ stack space) via \`call_last\` regardless of active table size.
+
+### 3. Deduplicating Roster & Self-Resource Fan-Out
+When presence changes, updates go both to subscribed contacts in the user's roster map **and** to the sender's own alternate connected resources (excluding the originating connection). Deduplicating target PIDs with \`lists:usort/1\` prevents a user who appears in a self-subscribed or duplicated roster list from receiving duplicate XML presence frames.
+
+---
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% IETF RFC 6121 Section 8.3: Inbound Message Routing
-%% Priority Rules:
-%% - Sessions with negative priority MUST NOT receive bare-JID messages.
-%% - Messages sent to bare JIDs MUST be delivered to the resource with
-%%   the highest non-negative priority.
+%% Official OTP Signatures (stdlib / binary & lists)
+binary:split(Subject, Pattern) -> Parts
+  Types: Subject = binary(), Pattern = binary(), Parts = [binary()]
+
+binary:copy(Subject) -> binary()
+  Types: Subject = binary()
+
+lists:max(List) -> Max
+  Types: List = [T, ...], Max = T
+
+lists:usort(List1) -> List2
+  Types: List1 = [T], List2 = [T]
 \`\`\`
+
+Read the OTP signatures alongside the attached reference cards *(below)*: \`binary:split/2\` returns sub-binary slices (unpinned with \`binary:copy/1\`), \`lists:max/1\` expects a non-empty list, and \`lists:usort/1\` sorts and deduplicates candidate target PIDs in $O(N \\log N)$ time.
+
+---
+
+## Parallel Worked Example (Disjoint Domain: Batch Worker Pool Dispatcher)
+
+This standalone module demonstrates the four core BEAM mechanics—**sub-binary unpinning** (\`binary:split/2\` + \`binary:copy/1\`), **tail-recursive PID pruning**, **non-negative max-weight routing with tie fan-out**, and **deduplicated watcher notification** (\`lists:usort/1\`)—on a compute worker pool:
+
+\`\`\`erlang
+-module(worker_pool_dispatcher).
+-export([register_worker/4, evict_pid/2, dispatch_group/2, notify_group/3, demo/0]).
+
+%% Unpins split group/slot binaries and replaces any matching tag entry.
+register_worker(Workers, NodeTag, Weight, Pid) ->
+    Group = case binary:split(NodeTag, <<":">>) of
+        [G, _Slot] -> binary:copy(G);
+        [G]         -> binary:copy(G)
+    end,
+    Bounded = max(-50, min(50, Weight)),
+    Clean = [W || {worker, T, _, _, _} = W <- Workers, T =/= NodeTag],
+    [{worker, NodeTag, Group, Bounded, Pid} | Clean].
+
+%% Accumulator tail recursion prunes a crashed worker PID in O(1) stack space.
+evict_pid(Workers, DeadPid) ->
+    evict_loop(Workers, DeadPid, []).
+
+evict_loop([], _DeadPid, Acc) ->
+    lists:reverse(Acc);
+evict_loop([{worker, _, _, _, Pid} | Rest], DeadPid, Acc) when Pid =:= DeadPid ->
+    evict_loop(Rest, DeadPid, Acc);
+evict_loop([W | Rest], DeadPid, Acc) ->
+    evict_loop(Rest, DeadPid, [W | Acc]).
+
+%% Selects all non-negative workers tied for highest weight, or returns {queued, Group}.
+dispatch_group(Workers, Group) ->
+    Eligible = [{W, Pid} || {worker, _, G, W, Pid} <- Workers, G =:= Group, W >= 0],
+    case Eligible of
+        [] -> {queued, Group};
+        _ ->
+            BestW = lists:max([W || {W, _} <- Eligible]),
+            {dispatch, [Pid || {W, Pid} <- Eligible, W =:= BestW]}
+    end.
+
+%% Deduplicates recipient PIDs with lists:usort/1 and excludes the origin PID.
+notify_group(Workers, OriginPid, AlertBin) ->
+    PeerPids = lists:usort([Pid || {worker, _, _, _, Pid} <- Workers, Pid =/= OriginPid]),
+    lists:foreach(fun(Pid) -> Pid ! {pool_alert, OriginPid, AlertBin} end, PeerPids),
+    length(PeerPids).
+
+demo() ->
+    P1 = self(),
+    P2 = spawn(fun() -> receive _ -> ok end end),
+    P3 = spawn(fun() -> receive _ -> ok end end),
+    W1 = register_worker([], <<"eu-west:a">>, -10, P1),
+    W2 = register_worker(W1, <<"eu-west:b">>, 20, P2),
+    W3 = register_worker(W2, <<"eu-west:c">>, 20, P3),
+    Picked = dispatch_group(W3, <<"eu-west">>),
+    Sent = notify_group(W3, P1, <<"scale_up">>),
+    W4 = evict_pid(W3, P2),
+    {Picked, Sent, dispatch_group(W4, <<"eu-west">>)}.
+\`\`\`
+
+---
 
 ## Assignment Specification
 
-Implement \`src/xmpp_presence_router.erl\` with the following exports:
+Implement \`src/xmpp_presence_router.erl\` exporting \`upsert_session/5\`, \`remove_session_by_pid/2\`, \`resolve_message_targets/2\`, and \`broadcast_presence/4\`. Every session entry uses the 6-tuple \`{session, FullJidBin, BareJidBin, ResourceBin, PriorityInt, WorkerPid}\`, and \`RosterMap\` maps \`BareJidBin => [ContactBareJidBin, ...]\`.
 
-\`\`\`erlang
--module(xmpp_presence_router).
--export([
-    upsert_session/5,
-    remove_session_by_pid/2,
-    resolve_message_targets/2,
-    broadcast_presence/4
-]).
-\`\`\`
+### 1. \`upsert_session(SessionsList, FullJid, Priority, Pid, RosterMap)\`
+- **Input**: List of existing session tuples, Full JID binary, integer priority, worker PID, and roster map.
+- **Behavior**: Split \`FullJid\` on \`"/"\` into unpinned \`BareJid\` and \`Resource\` binaries (\`binary:split/2\` + \`binary:copy/1\`), clamp \`Priority\` to the signed RFC 6121 byte range \`-128..127\` (defaulting non-integers to \`0\`), remove any existing session matching \`FullJid\`, and prepend the new 6-tuple session entry.
+- **Examples**:
+  - \`upsert_session([], <<"alice@host/phone">>, 200, Pid, #{})\` -> \`[{session, <<"alice@host/phone">>, <<"alice@host">>, <<"phone">>, 127, Pid}]\`
+  - Updating an existing \`<<"alice@host/phone">>\` replaces the prior tuple for that Full JID without duplicating it.
 
-### Function Details:
-1. **\`upsert_session(SessionsList, FullJid, Priority, Pid, RosterMap) -> UpdatedSessionsList\`**:
-   - Extracts \`BareJid\` and \`Resource\` from \`FullJid\`.
-   - Replaces any existing entry with matching \`FullJid\` or adds \`{session, FullJid, BareJid, Resource, Priority, Pid}\`.
-2. **\`remove_session_by_pid(SessionsList, DeadPid) -> UpdatedSessionsList\`**:
-   - Must be implemented with **tail recursion**. Removes any session whose PID equals \`DeadPid\`.
-3. **\`resolve_message_targets(SessionsList, TargetJid) -> {route_online, [pid()]} | {store_offline, binary()}\`**:
-   - Applies RFC 6121 routing rules as specified above.
-4. **\`broadcast_presence(SessionsList, RosterMap, SenderFullJid, PresenceStanzaBin) -> integer()\`**:
-   - Finds all PIDs belonging to \`SenderBareJid\`'s roster contacts plus \`SenderBareJid\`'s other resources (excluding the sender PID itself).
-   - Sends \`Pid ! {xmpp_presence, SenderFullJid, PresenceStanzaBin}\` to each.
-   - Returns the integer count of delivered messages.
+### 2. \`remove_session_by_pid(SessionsList, DeadPid)\`
+- **Input**: List of session tuples and the PID of a terminated connection worker.
+- **Behavior**: Remove every session tuple whose worker PID equals \`DeadPid\` using a strictly **tail-recursive** accumulator loop preserving relative order of surviving sessions.
+- **Examples**:
+  - \`remove_session_by_pid([S_P1, S_P2], P1)\` -> \`[S_P2]\`
+
+### 3. \`resolve_message_targets(SessionsList, TargetJid)\`
+- **Input**: Active session list and destination Full JID (\`user@host/res\`) or Bare JID (\`user@host\`).
+- **Behavior**:
+  - If \`TargetJid\` is a Full JID and an online session matches that exact Full JID, return \`{route_online, [ExactPid]}\`.
+  - If \`TargetJid\` is a Bare JID—or is a Full JID whose resource is offline—extract the Bare JID, keep only sessions with \`Priority >= 0\`, find the maximum priority with \`lists:max/1\`, and return \`{route_online, HighestPids}\` containing all tied highest-priority PIDs.
+  - If no session for that Bare JID has \`Priority >= 0\`, return \`{store_offline, BareJid}\`.
+- **Examples**:
+  - Watch (\`-5\`), Phone (\`5\`), Desktop (\`10\`): \`resolve_message_targets(S, <<"alice@host">>)\` -> \`{route_online, [DesktopPid]}\`, while \`resolve_message_targets(S, <<"alice@host/phone">>)\` -> \`{route_online, [PhonePid]}\`.
+  - When all remaining sessions for \`<<"alice@host">>\` have negative priority (\`-10\`), returns \`{store_offline, <<"alice@host">>}\`.
+
+### 4. \`broadcast_presence(SessionsList, RosterMap, SenderFullJid, PresenceStanzaBin)\`
+- **Input**: Session list, \`RosterMap\`, originating \`SenderFullJid\`, and XML presence stanza binary.
+- **Behavior**: Extract \`SenderBare\`, look up subscribed contacts in \`RosterMap\`, collect all PIDs belonging to those contacts plus \`SenderBare\`'s other connected resources (excluding \`SenderFullJid\` itself), deduplicate recipients via \`lists:usort/1\`, send \`{xmpp_presence, SenderFullJid, PresenceStanzaBin}\` to each PID, and return the integer count of distinct notified PIDs.
+- **Examples**:
+  - Alice sends \`<<"<presence/>">>\` from \`<<"alice@host/phone">>\` with Alice's laptop, Bob's office, and Carol's home online -> delivers to all 3 other PIDs and returns \`3\`.
+
+---
 
 ## Rules & Verification Constraints
-
-- \`remove_session_by_pid/2\` must be strictly tail-recursive.
-- Must honor negative priority exclusion (\`Priority < 0\`).
-- Must correctly resolve tied highest-priority sessions by returning all tied PIDs.`,
+- Compile cleanly with \`erlc -Wall\` (zero warnings).
+- \`remove_session_by_pid/2\` must be strictly **tail-recursive** (verified at BEAM bytecode level).
+- Must invoke \`binary:split/2\`, \`binary:copy/1\`, and \`lists:usort/1\` (verified via AST analysis).
+- Must enforce priority clamping (\`-128..127\`), negative priority exclusion (\`Priority < 0\`), tied highest-priority fan-out, and offline fallback.`,
     otpDocCards: [
+      {
+        functionName: 'split',
+        module: 'binary',
+        signature: 'binary:split(Subject, Pattern) -> Parts',
+        typesSpec: ['Subject = binary()', 'Pattern = binary()', 'Parts = [binary()]'],
+        description: 'Splits a JID binary on "/" into bare JID and resource slices without allocating character lists.',
+        complexityNote: 'O(N) fast C-BIF substring search producing zero-copy SubBinary slices.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/binary.html#split/2',
+        githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl',
+      },
+      {
+        functionName: 'copy',
+        module: 'binary',
+        signature: 'binary:copy(Subject) -> binary()',
+        typesSpec: ['Subject = binary()'],
+        description: 'Creates an independent binary copy of a SubBinary slice so long-lived session tuples do not pin large TCP ProcBins.',
+        complexityNote: 'O(M) copy of the short JID slice; frees parent off-heap buffer.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/binary.html#copy/1',
+        githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl',
+      },
       {
         functionName: 'max',
         module: 'lists',
@@ -3208,7 +3295,7 @@ Implement \`src/xmpp_presence_router.erl\` with the following exports:
           'List = [T, ...]',
           'Max = T',
         ],
-        description: 'Finds the maximum priority integer among connected client sessions.',
+        description: 'Finds the maximum priority integer among connected non-negative client sessions.',
         complexityNote: 'Linear O(N) traversal across session candidates.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/lists.html#max/1',
         githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/lists.erl',
@@ -3221,8 +3308,8 @@ Implement \`src/xmpp_presence_router.erl\` with the following exports:
           'List1 = [T]',
           'List2 = [T]',
         ],
-        description: 'Sorts and removes duplicates from recipient PID list before fan-out.',
-        complexityNote: 'O(N log N) merge sort guaranteeing unique message delivery.',
+        description: 'Sorts and removes duplicate PIDs from presence broadcast targets before message fan-out.',
+        complexityNote: 'O(N log N) merge sort guaranteeing at-most-once delivery per session PID.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/lists.html#usort/1',
         githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/lists.erl',
       },
@@ -3242,29 +3329,28 @@ Implement \`src/xmpp_presence_router.erl\` with the following exports:
 -type session() :: {session, FullJid :: binary(), BareJid :: binary(), Resource :: binary(), Priority :: integer(), Pid :: pid()}.
 -type roster_map() :: #{binary() => [binary()]}.
 
-%% @doc Adds or updates a connected user session.
+%% @doc Inserts a new session entry or replaces the existing entry for FullJid,
+%% clamping caller-supplied Priority to -128..127 and detaching split JID slices.
 -spec upsert_session([session()], binary(), integer(), pid(), roster_map()) -> [session()].
-upsert_session(Sessions, FullJid, Priority, Pid, _RosterMap) ->
-    %% % TODO: Extract BareJid and Resource, replace matching FullJid or insert
+upsert_session(_Sessions, _FullJid, _Priority, _Pid, _RosterMap) ->
     [].
 
-%% @doc Removes all sessions owned by DeadPid using tail recursion.
+%% @doc Returns the session list with all entries owned by DeadPid pruned using tail recursion.
 -spec remove_session_by_pid([session()], pid()) -> [session()].
-remove_session_by_pid(Sessions, DeadPid) ->
-    %% % TODO: Tail-recursive session pruning
+remove_session_by_pid(_Sessions, _DeadPid) ->
     [].
 
-%% @doc Resolves message targets according to RFC 6121 priority rules.
+%% @doc Resolves recipient PIDs for TargetJid by exact Full JID match first, then
+%% highest non-negative priority resources, or returns offline storage fallback.
 -spec resolve_message_targets([session()], binary()) ->
     {route_online, [pid()]} | {store_offline, binary()}.
-resolve_message_targets(Sessions, TargetJid) ->
-    %% % TODO: Check Full JID match; fallback to highest non-negative priority
+resolve_message_targets(_Sessions, TargetJid) ->
     {store_offline, TargetJid}.
 
-%% @doc Broadcasts presence updates to roster subscribers and own other resources.
+%% @doc Delivers PresenceStanza to unique PIDs of roster contacts and own alternate
+%% resources excluding SenderFullJid, returning the count of notified processes.
 -spec broadcast_presence([session()], roster_map(), binary(), binary()) -> non_neg_integer().
-broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
-    %% % TODO: Fan out {xmpp_presence, SenderFullJid, PresenceStanza} to contacts
+broadcast_presence(_Sessions, _RosterMap, _SenderFullJid, _PresenceStanza) ->
     0.
 `,
       },
@@ -3281,6 +3367,8 @@ broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
 -type session() :: {session, FullJid :: binary(), BareJid :: binary(), Resource :: binary(), Priority :: integer(), Pid :: pid()}.
 -type roster_map() :: #{binary() => [binary()]}.
 
+%% @doc Inserts a new session entry or replaces the existing entry for FullJid,
+%% clamping caller-supplied Priority to -128..127 and detaching split JID slices.
 -spec upsert_session([session()], binary(), integer(), pid(), roster_map()) -> [session()].
 upsert_session(Sessions, FullJid, Priority, Pid, _RosterMap) ->
     {BareJid, Resource} = split_jid(FullJid),
@@ -3289,6 +3377,7 @@ upsert_session(Sessions, FullJid, Priority, Pid, _RosterMap) ->
     Filtered = [S || S = {session, F, _, _, _, _} <- Sessions, F =/= FullJid],
     [NewSession | Filtered].
 
+%% @doc Returns the session list with all entries owned by DeadPid pruned using tail recursion.
 -spec remove_session_by_pid([session()], pid()) -> [session()].
 remove_session_by_pid(Sessions, DeadPid) ->
     remove_pid_loop(Sessions, DeadPid, []).
@@ -3300,17 +3389,17 @@ remove_pid_loop([{session, _, _, _, _, Pid} | Rest], DeadPid, Acc) when Pid =:= 
 remove_pid_loop([Session | Rest], DeadPid, Acc) ->
     remove_pid_loop(Rest, DeadPid, [Session | Acc]).
 
+%% @doc Resolves recipient PIDs for TargetJid by exact Full JID match first, then
+%% highest non-negative priority resources, or returns offline storage fallback.
 -spec resolve_message_targets([session()], binary()) ->
     {route_online, [pid()]} | {store_offline, binary()}.
 resolve_message_targets(Sessions, TargetJid) ->
     case binary:match(TargetJid, <<"/">>) of
         {_, _} ->
-            %% Target is Full JID: check exact resource first
             case [Pid || {session, F, _, _, _, Pid} <- Sessions, F =:= TargetJid] of
                 [ExactPid | _] ->
                     {route_online, [ExactPid]};
                 [] ->
-                    %% Specific resource is offline; fall back to Bare JID routing rules
                     {Bare, _} = split_jid(TargetJid),
                     route_bare(Sessions, Bare)
             end;
@@ -3329,18 +3418,18 @@ route_bare(Sessions, BareJid) ->
             {route_online, BestPids}
     end.
 
+%% @doc Delivers PresenceStanza to unique PIDs of roster contacts and own alternate
+%% resources excluding SenderFullJid, returning the count of notified processes.
 -spec broadcast_presence([session()], roster_map(), binary(), binary()) -> non_neg_integer().
 broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
     {SenderBare, _} = split_jid(SenderFullJid),
     Subscribers = maps:get(SenderBare, RosterMap, []),
     TargetBares = [SenderBare | Subscribers],
-    
     TargetSessions = [
         Pid || {session, Full, Bare, _, _, Pid} <- Sessions,
         Full =/= SenderFullJid,
         lists:member(Bare, TargetBares)
     ],
-    
     UniquePids = lists:usort(TargetSessions),
     lists:foreach(fun(Pid) ->
         Pid ! {xmpp_presence, SenderFullJid, PresenceStanza}
@@ -3353,14 +3442,10 @@ split_jid(FullJid) ->
         [Bare]      -> {binary:copy(Bare), <<>>}
     end.
 
-clamp_priority(P) when is_integer(P) ->
-    if
-        P < -128 -> -128;
-        P > 127  -> 127;
-        true     -> P
-    end;
-clamp_priority(_) ->
-    0.
+clamp_priority(P) when is_integer(P), P < -128 -> -128;
+clamp_priority(P) when is_integer(P), P > 127  -> 127;
+clamp_priority(P) when is_integer(P)           -> P;
+clamp_priority(_)                              -> 0.
 `,
     },
     starterCode: `-module(xmpp_presence_router).
@@ -3374,29 +3459,28 @@ clamp_priority(_) ->
 -type session() :: {session, FullJid :: binary(), BareJid :: binary(), Resource :: binary(), Priority :: integer(), Pid :: pid()}.
 -type roster_map() :: #{binary() => [binary()]}.
 
-%% @doc Adds or updates a connected user session.
+%% @doc Inserts a new session entry or replaces the existing entry for FullJid,
+%% clamping caller-supplied Priority to -128..127 and detaching split JID slices.
 -spec upsert_session([session()], binary(), integer(), pid(), roster_map()) -> [session()].
-upsert_session(Sessions, FullJid, Priority, Pid, _RosterMap) ->
-    %% % TODO: Extract BareJid and Resource, replace matching FullJid or insert
+upsert_session(_Sessions, _FullJid, _Priority, _Pid, _RosterMap) ->
     [].
 
-%% @doc Removes all sessions owned by DeadPid using tail recursion.
+%% @doc Returns the session list with all entries owned by DeadPid pruned using tail recursion.
 -spec remove_session_by_pid([session()], pid()) -> [session()].
-remove_session_by_pid(Sessions, DeadPid) ->
-    %% % TODO: Tail-recursive session pruning
+remove_session_by_pid(_Sessions, _DeadPid) ->
     [].
 
-%% @doc Resolves message targets according to RFC 6121 priority rules.
+%% @doc Resolves recipient PIDs for TargetJid by exact Full JID match first, then
+%% highest non-negative priority resources, or returns offline storage fallback.
 -spec resolve_message_targets([session()], binary()) ->
     {route_online, [pid()]} | {store_offline, binary()}.
-resolve_message_targets(Sessions, TargetJid) ->
-    %% % TODO: Check Full JID match; fallback to highest non-negative priority
+resolve_message_targets(_Sessions, TargetJid) ->
     {store_offline, TargetJid}.
 
-%% @doc Broadcasts presence updates to roster subscribers and own other resources.
+%% @doc Delivers PresenceStanza to unique PIDs of roster contacts and own alternate
+%% resources excluding SenderFullJid, returning the count of notified processes.
 -spec broadcast_presence([session()], roster_map(), binary(), binary()) -> non_neg_integer().
-broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
-    %% % TODO: Fan out {xmpp_presence, SenderFullJid, PresenceStanza} to contacts
+broadcast_presence(_Sessions, _RosterMap, _SenderFullJid, _PresenceStanza) ->
     0.
 `,
     visibleTestCases: [
@@ -3423,6 +3507,7 @@ broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
       },
     ],
     astRules: {
+      requireTailRecursion: ['remove_session_by_pid/2'],
       requiredCalls: ['binary:split/2', 'binary:copy/1', 'lists:usort/1'],
     },
     solutionCode: `-module(xmpp_presence_router).
@@ -3436,6 +3521,8 @@ broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
 -type session() :: {session, FullJid :: binary(), BareJid :: binary(), Resource :: binary(), Priority :: integer(), Pid :: pid()}.
 -type roster_map() :: #{binary() => [binary()]}.
 
+%% @doc Inserts a new session entry or replaces the existing entry for FullJid,
+%% clamping caller-supplied Priority to -128..127 and detaching split JID slices.
 -spec upsert_session([session()], binary(), integer(), pid(), roster_map()) -> [session()].
 upsert_session(Sessions, FullJid, Priority, Pid, _RosterMap) ->
     {BareJid, Resource} = split_jid(FullJid),
@@ -3444,6 +3531,7 @@ upsert_session(Sessions, FullJid, Priority, Pid, _RosterMap) ->
     Filtered = [S || S = {session, F, _, _, _, _} <- Sessions, F =/= FullJid],
     [NewSession | Filtered].
 
+%% @doc Returns the session list with all entries owned by DeadPid pruned using tail recursion.
 -spec remove_session_by_pid([session()], pid()) -> [session()].
 remove_session_by_pid(Sessions, DeadPid) ->
     remove_pid_loop(Sessions, DeadPid, []).
@@ -3455,17 +3543,17 @@ remove_pid_loop([{session, _, _, _, _, Pid} | Rest], DeadPid, Acc) when Pid =:= 
 remove_pid_loop([Session | Rest], DeadPid, Acc) ->
     remove_pid_loop(Rest, DeadPid, [Session | Acc]).
 
+%% @doc Resolves recipient PIDs for TargetJid by exact Full JID match first, then
+%% highest non-negative priority resources, or returns offline storage fallback.
 -spec resolve_message_targets([session()], binary()) ->
     {route_online, [pid()]} | {store_offline, binary()}.
 resolve_message_targets(Sessions, TargetJid) ->
     case binary:match(TargetJid, <<"/">>) of
         {_, _} ->
-            %% Target is Full JID: check exact resource first
             case [Pid || {session, F, _, _, _, Pid} <- Sessions, F =:= TargetJid] of
                 [ExactPid | _] ->
                     {route_online, [ExactPid]};
                 [] ->
-                    %% Specific resource is offline; fall back to Bare JID routing rules
                     {Bare, _} = split_jid(TargetJid),
                     route_bare(Sessions, Bare)
             end;
@@ -3484,18 +3572,18 @@ route_bare(Sessions, BareJid) ->
             {route_online, BestPids}
     end.
 
+%% @doc Delivers PresenceStanza to unique PIDs of roster contacts and own alternate
+%% resources excluding SenderFullJid, returning the count of notified processes.
 -spec broadcast_presence([session()], roster_map(), binary(), binary()) -> non_neg_integer().
 broadcast_presence(Sessions, RosterMap, SenderFullJid, PresenceStanza) ->
     {SenderBare, _} = split_jid(SenderFullJid),
     Subscribers = maps:get(SenderBare, RosterMap, []),
     TargetBares = [SenderBare | Subscribers],
-    
     TargetSessions = [
         Pid || {session, Full, Bare, _, _, Pid} <- Sessions,
         Full =/= SenderFullJid,
         lists:member(Bare, TargetBares)
     ],
-    
     UniquePids = lists:usort(TargetSessions),
     lists:foreach(fun(Pid) ->
         Pid ! {xmpp_presence, SenderFullJid, PresenceStanza}
@@ -3508,20 +3596,16 @@ split_jid(FullJid) ->
         [Bare]      -> {binary:copy(Bare), <<>>}
     end.
 
-clamp_priority(P) when is_integer(P) ->
-    if
-        P < -128 -> -128;
-        P > 127  -> 127;
-        true     -> P
-    end;
-clamp_priority(_) ->
-    0.
+clamp_priority(P) when is_integer(P), P < -128 -> -128;
+clamp_priority(P) when is_integer(P), P > 127  -> 127;
+clamp_priority(P) when is_integer(P)           -> P;
+clamp_priority(_)                              -> 0.
 `,
     solutionExplanation: `The presence router implements RFC 6121 priority routing:
-1. upsert_session normalizes Bare and Resource components and replaces matching Full JIDs.
-2. remove_session_by_pid implements an accumulator-based tail-recursive loop, cleanly pruning disconnected PIDs.
-3. resolve_message_targets checks if TargetJid is a Full JID. If the exact resource is online, it delivers to that PID. Otherwise, it filters online sessions for the Bare JID where Priority >= 0, selects the highest priority (handling ties by returning all tied PIDs), or returns {store_offline, BareJid}.
-4. broadcast_presence looks up subscribed contacts in RosterMap, adds the sender's other resources, dedupes PIDs using lists:usort/1, delivers the stanza via BEAM message passing, and returns the delivered count.`,
+1. upsert_session splits and unpins Bare and Resource components via binary:split/2 and binary:copy/1, clamps Priority to -128..127, and replaces any matching Full JID.
+2. remove_session_by_pid implements an accumulator-based tail-recursive loop, pruning disconnected PIDs in O(1) stack space.
+3. resolve_message_targets checks exact Full JID matches first, then filters Bare JID sessions with Priority >= 0, selects all PIDs tied for lists:max/1 priority, or falls back to {store_offline, BareJid}.
+4. broadcast_presence resolves roster subscribers plus the sender's other connected resources, deduplicates PIDs using lists:usort/1, sends {xmpp_presence, SenderFullJid, PresenceStanza}, and returns the distinct recipient count.`,
     references: [
       {
         title: 'IETF RFC 6121: XMPP Instant Messaging and Presence (Section 8 Message Routing)',
