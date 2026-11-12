@@ -1346,12 +1346,12 @@ The specifier components (\`Type-Signedness-Endianness-Unit\`) include:
   - \`little\` (x86 architecture order): Least significant byte first (\`<<512:16/little>> == <<0, 2>>\`).
 
 ### 2. Packing Bit-Level Fields
-Consider an IoT sensor header packing a 4-bit Device Type, a 4-bit Alert Priority, and a 16-bit Metric Reading:
+Consider an IoT sensor header packing a 5-bit Sensor Class, a 3-bit Alert Priority, and a 16-bit Metric Reading:
 
 \`\`\`erlang
-%% Device Type: 3 (0011), Priority: 1 (0001) => 00110001 = 0x31 (decimal 49)
+%% Sensor Class: 6 (00110), Priority: 1 (001) => 00110001 = 0x31 (decimal 49)
 %% Metric Reading: 512 => 0x0200 (decimal 2, 0)
-TelemetryHeader = <<3:4, 1:4, 512:16/big>>.
+TelemetryHeader = <<6:5, 1:3, 512:16/big>>.
 %% Result is a 3-byte binary: <<49, 2, 0>>!
 \`\`\`
 
@@ -1367,73 +1367,91 @@ In Erlang, you can bind a variable in an earlier segment of a binary pattern and
 
 If \`Packet\` contains fewer than \`Len\` bytes, the pattern match fails cleanly without memory overrun exceptions.
 
-## Parallel Worked Example: DNS Query Header Wire Formatter
+## Parallel Worked Example: Cold-Chain Sensor Wire Codec
 
-The following module demonstrates packing and pattern-matching bit fields in a DNS question header domain:
+The following module packs and decodes industrial cold-chain telemetry frames using little-endian signed temperature deltas and dynamic-length site labels:
 
 \`\`\`erlang
--module(dns_header).
--export([encode_query_header/3, decode_query_header/1]).
+-module(sensor_frame).
+-export([seal_reading/3, open_reading/1]).
 
-%% Encodes 16-bit ID, 1-bit QR, 4-bit Opcode, and 16-bit QuestionCount:
-encode_query_header(TxId, Opcode, QCount) ->
-    <<TxId:16/big, 0:1, Opcode:4, 0:11, QCount:16/big>>.
+%% Phase 1: Pack a 5-bit protocol marker (3), 3-bit flags, signed 16-bit little-endian delta,
+%% and an 8-bit label length prefix before the raw binary site label.
+seal_reading(SiteLabel, Flags, TempDelta) when is_binary(SiteLabel) ->
+    LabelBytes = byte_size(SiteLabel),
+    <<3:5, Flags:3, TempDelta:16/little-signed-integer, LabelBytes:8, SiteLabel/binary>>.
 
-%% Matches header fields:
-decode_query_header(<<TxId:16/big, QR:1, Opcode:4, _Flags:11, QCount:16/big, Rest/binary>>) ->
-    {ok, TxId, QR, Opcode, QCount, Rest};
-decode_query_header(_) ->
-    {error, malformed_dns_header}.
+%% Phase 2: Destructure header bits, match dynamic LabelBytes binary slice, and capture Rest.
+open_reading(<<3:5, Flags:3, TempDelta:16/little-signed-integer, LabelBytes:8, SiteLabel:LabelBytes/binary, Rest/binary>>) ->
+    {ok, #{flags => Flags, temp_delta => TempDelta, site => SiteLabel}, Rest};
+open_reading(_) ->
+    {error, invalid_sensor_frame}.
 \`\`\`
+
+**What the BEAM is doing in each phase:**
+- **Phase 1 (Bit Packing & Guarded Sizing):** The \`is_binary/1\` guard rejects non-binary site labels before computing \`byte_size(SiteLabel)\` in $O(1)$ time. At runtime, \`3:5\` and \`Flags:3\` pack into the first byte without bitwise shifting in Erlang code, while \`TempDelta:16/little-signed-integer\` writes two's-complement bytes low-byte-first.
+- **Phase 2 (Single-Pass Pattern Slicing):** Incoming packets only match the first clause if the top 5 bits equal \`3\` and the remaining buffer holds at least \`LabelBytes\` bytes; \`Rest/binary\` becomes a zero-copy sub-binary view pointing directly into the caller's trailing buffer.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
+%% Bit Syntax Grammar (Erlang Reference Manual)
 <<Segment1, Segment2, ...>>
 Segment = Value[:Size][/TypeSpecifierList]
 TypeSpecifiers = Type-Signedness-Endianness-Unit
+
+%% Official OTP Signature (stdlib / erlang)
+erlang:byte_size(Bitstring) -> integer() >= 0
+  Types:
+    Bitstring = bitstring()
+
+erlang:is_binary(Term) -> boolean()
+  Types:
+    Term = term()
 \`\`\`
+
+In OTP type specs, \`bitstring()\` accepts both bitstrings and byte-aligned binaries in $O(1)$ time, while \`is_binary/1\` returns \`true\` only for byte-aligned binaries and is guard-safe. See the attached **OTP Docs** reference cards for bit syntax specifiers and binary BIF contracts.
 
 ## Assignment Specification
 
-Implement binary wire packing and header unpacking in \`src/bit_packer.erl\`.
+Implement binary wire packing and header unpacking in module \`bit_packer\` (\`src/bit_packer.erl\`), exporting \`pack_header/3\`, \`unpack_header/1\`, and \`encode_utf8_tagged/1\`.
 
 ### Functions to Implement
 
 #### \`pack_header/3\`
 - **Input**:
-  - \`Version\`: non-negative integer (4-bit unsigned)
-  - \`Flags\`: non-negative integer (4-bit unsigned)
-  - \`Length\`: non-negative integer (16-bit unsigned)
+  - \`Version\`: non-negative 4-bit unsigned integer
+  - \`Flags\`: non-negative 4-bit unsigned integer
+  - \`Length\`: non-negative 16-bit unsigned integer
 - **Behavior**: Packs the 4-bit version, 4-bit flags, and 16-bit big-endian unsigned length into a compact 3-byte binary header.
 - **Examples**:
-  - \`pack_header(4, 2, 1024)\` $\\rightarrow$ \`<<66, 4, 0>>\`
-  - \`pack_header(1, 15, 65535)\` $\\rightarrow$ \`<<31, 255, 255>>\`
+  - \`bit_packer:pack_header(4, 2, 1024)\` returns \`<<66, 4, 0>>\`.
+  - \`bit_packer:pack_header(1, 15, 65535)\` returns \`<<31, 255, 255>>\`.
 
 #### \`unpack_header/1\`
 - **Input**:
   - \`Binary\`: a binary stream
-- **Behavior**: Inspects \`Binary\` for a 3-byte header. If at least 3 bytes are available, extracts the 4-bit \`Version\`, 4-bit \`Flags\`, and 16-bit big-endian \`Length\`, and captures all remaining trailing bytes as \`Payload\`, returning \`{ok, Version, Flags, Length, Payload}\`. If fewer than 3 bytes are provided, returns \`{error, insufficient_bytes}\`.
+- **Behavior**: Inspects \`Binary\` for a 3-byte big-endian header. If at least 3 bytes are available, extracts the 4-bit \`Version\`, 4-bit \`Flags\`, and 16-bit big-endian \`Length\`, and captures all remaining trailing bytes as \`Payload\`, returning \`{ok, Version, Flags, Length, Payload}\`. If fewer than 3 bytes are provided, returns \`{error, insufficient_bytes}\`.
 - **Examples**:
-  - \`unpack_header(<<66, 4, 0, "PAYLOAD">>)\` $\\rightarrow$ \`{ok, 4, 2, 1024, <<"PAYLOAD">>}\`
-  - \`unpack_header(<<66, 4>>)\` $\\rightarrow$ \`{error, insufficient_bytes}\`
+  - \`bit_packer:unpack_header(<<66, 4, 0, "PAYLOAD">>)\` returns \`{ok, 4, 2, 1024, <<"PAYLOAD">>}\`.
+  - \`bit_packer:unpack_header(<<66, 4>>)\` returns \`{error, insufficient_bytes}\`.
 
 #### \`encode_utf8_tagged/1\`
 - **Input**:
   - \`TextBinary\`: a binary text string
-- **Behavior**: Constructs a length-prefixed tagged binary message by packing:
-  1. An 8-bit tag byte with hexadecimal value \`16#01\` (decimal \`1\`),
+- **Behavior**: Rejects non-binary inputs via a guard clause, and otherwise constructs a length-prefixed tagged binary message by packing:
+  1. An 8-bit unsigned version tag byte with decimal value 1 (hexadecimal 0x01),
   2. A 16-bit big-endian unsigned integer representing the byte length of \`TextBinary\`,
   3. The raw \`TextBinary\` payload bytes.
 - **Examples**:
-  - \`encode_utf8_tagged(<<"HELLO">>)\` $\\rightarrow$ \`<<1, 0, 5, "HELLO">>\`
-  - \`encode_utf8_tagged(<<"HELLO_OTP">>)\` $\\rightarrow$ \`<<1, 0, 9, "HELLO_OTP">>\`
+  - \`bit_packer:encode_utf8_tagged(<<"HELLO">>)\` returns \`<<1, 0, 5, "HELLO">>\`.
+  - \`bit_packer:encode_utf8_tagged(<<"HELLO_OTP">>)\` returns \`<<1, 0, 9, "HELLO_OTP">>\`.
 
 ## Rules & Verification Constraints
 
-- Must use Bit Syntax \`<<...>>\`.
-- All multi-byte numeric fields must use big-endian (\`big\`) network byte ordering.
-- Guard \`encode_utf8_tagged/1\` with \`is_binary/1\`.`,
+- Must construct and destructure headers using Erlang bit syntax rather than manual bitwise shifts.
+- All multi-byte numeric fields must use big-endian network byte ordering.
+- Guard \`encode_utf8_tagged/1\` with \`is_binary/1\` so non-binary arguments fail with \`function_clause\`, and compute byte length using \`byte_size/1\`.`,
     otpDocCards: [
       {
         functionName: 'bit_syntax',
@@ -1444,21 +1462,39 @@ Implement binary wire packing and header unpacking in \`src/bit_packer.erl\`.
         complexityNote: 'Executed using hardware vector instructions in ERTS.',
         officialUrl: 'https://www.erlang.org/doc/programming_examples/bit_syntax.html',
       },
+      {
+        functionName: 'byte_size/1',
+        module: 'erlang',
+        signature: 'byte_size(Bitstring) -> integer() >= 0',
+        typesSpec: ['Bitstring = bitstring()'],
+        description: 'Returns the integer number of bytes that contain Bitstring.',
+        complexityNote: 'O(1) constant-time header read.',
+        officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#byte_size/1',
+      },
+      {
+        functionName: 'is_binary/1',
+        module: 'erlang',
+        signature: 'is_binary(Term) -> boolean()',
+        typesSpec: ['Term = term()'],
+        description: 'Guard-safe BIF returning true if Term is a byte-aligned binary.',
+        complexityNote: 'O(1) BEAM tag test permitted inside function guards.',
+        officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#is_binary/1',
+      },
     ],
     mentalModelCheck: {
-      question: 'What is the binary representation of <<3:4, 1:4, 512:16/big>>?',
+      question: 'What is the binary representation of <<6:5, 1:3, 512:16/big>>?',
       options: [
         {
           id: 'A',
-          label: '<<49, 2, 0>> (0x31 = 0011 0001 = 49, and 512 in 16-bit big-endian is 0x0200 = 2, 0)',
+          label: '<<49, 2, 0>> (0x31 = 00110 001 = 49, and 512 in 16-bit big-endian is 0x0200 = 2, 0)',
           isCorrect: true,
-          explanation: '3 (0011) and 1 (0001) pack into the first byte (00110001 = 49); 512 in 16 bits big-endian is high byte 2 and low byte 0.',
+          explanation: '6 (00110 in 5 bits) and 1 (001 in 3 bits) pack into the first byte (00110001 = 49); 512 in 16 bits big-endian is high byte 2 and low byte 0.',
         },
         {
           id: 'B',
-          label: '<<3, 1, 5, 12>>',
+          label: '<<6, 1, 5, 12>>',
           isCorrect: false,
-          explanation: '3 and 1 are 4-bit nibbles that pack together into a single 8-bit byte.',
+          explanation: '6 and 1 occupy 5-bit and 3-bit segments that pack together into a single 8-bit byte.',
         },
         {
           id: 'C',
@@ -1499,9 +1535,10 @@ Implement binary wire packing and header unpacking in \`src/bit_packer.erl\`.
       },
     ],
     astRules: {
-      requiredConstructs: ['bit_syntax'],
+      requiredConstructs: ['bit_syntax', 'guards'],
+      requiredCalls: ['erlang:byte_size/1', 'erlang:is_binary/1'],
     },
-    solutionExplanation: 'Demonstrates <<V:4, F:4, L:16/big>> packing, pattern matching with trailing binary capture, and length-prefixed encoding.',
+    solutionExplanation: 'Demonstrates <<V:4, F:4, L:16/big>> packing, pattern matching with trailing binary capture, and guarded length-prefixed encoding.',
     files: [
       {
         name: 'bit_packer.erl',
@@ -1509,31 +1546,34 @@ Implement binary wire packing and header unpacking in \`src/bit_packer.erl\`.
         content: `-module(bit_packer).
 -export([pack_header/3, unpack_header/1, encode_utf8_tagged/1]).
 
-%% @doc Pack 4-bit Version, 4-bit Flags, and 16-bit big-endian Length into a 3-byte binary.
+%% @doc Pack caller-supplied 4-bit Version, 4-bit Flags, and 16-bit big-endian Length into a compact 3-byte binary header.
 pack_header(_Version, _Flags, _Length) ->
-    <<>>.
+    ok.
 
-%% @doc Unpack 3-byte header and extract trailing payload binary.
+%% @doc Decode a 3-byte big-endian header and remaining payload binary from Binary, or return an insufficient-bytes error tuple when shorter than 3 bytes.
 unpack_header(_Binary) ->
-    {error, insufficient_bytes}.
+    ok.
 
-%% @doc Encode length-prefixed tagged text binary.
+%% @doc Reject non-binary inputs via guard validation and return TextBinary prefixed with a 1-byte version tag of value 1 and a 16-bit big-endian byte length.
 encode_utf8_tagged(_TextBinary) ->
-    <<>>.`,
+    ok.`,
       },
     ],
     solutionFiles: {
       'src/bit_packer.erl': `-module(bit_packer).
 -export([pack_header/3, unpack_header/1, encode_utf8_tagged/1]).
 
+%% @doc Pack caller-supplied 4-bit Version, 4-bit Flags, and 16-bit big-endian Length into a compact 3-byte binary header.
 pack_header(Version, Flags, Length) ->
     <<Version:4, Flags:4, Length:16/big-unsigned-integer>>.
 
+%% @doc Decode a 3-byte big-endian header and remaining payload binary from Binary, or return an insufficient-bytes error tuple when shorter than 3 bytes.
 unpack_header(<<Version:4, Flags:4, Length:16/big-unsigned-integer, Payload/binary>>) ->
     {ok, Version, Flags, Length, Payload};
 unpack_header(_) ->
     {error, insufficient_bytes}.
 
+%% @doc Reject non-binary inputs via guard validation and return TextBinary prefixed with a 1-byte version tag of value 1 and a 16-bit big-endian byte length.
 encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
     Len = byte_size(TextBinary),
     <<16#01:8, Len:16/big-unsigned-integer, TextBinary/binary>>.`,
@@ -1541,28 +1581,31 @@ encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
     starterCode: `-module(bit_packer).
 -export([pack_header/3, unpack_header/1, encode_utf8_tagged/1]).
 
-%% @doc Pack 4-bit Version, 4-bit Flags, and 16-bit big-endian Length into a 3-byte binary.
+%% @doc Pack caller-supplied 4-bit Version, 4-bit Flags, and 16-bit big-endian Length into a compact 3-byte binary header.
 pack_header(_Version, _Flags, _Length) ->
-    <<>>.
+    ok.
 
-%% @doc Unpack 3-byte header and extract trailing payload binary.
+%% @doc Decode a 3-byte big-endian header and remaining payload binary from Binary, or return an insufficient-bytes error tuple when shorter than 3 bytes.
 unpack_header(_Binary) ->
-    {error, insufficient_bytes}.
+    ok.
 
-%% @doc Encode length-prefixed tagged text binary.
+%% @doc Reject non-binary inputs via guard validation and return TextBinary prefixed with a 1-byte version tag of value 1 and a 16-bit big-endian byte length.
 encode_utf8_tagged(_TextBinary) ->
-    <<>>.`,
+    ok.`,
     solutionCode: `-module(bit_packer).
 -export([pack_header/3, unpack_header/1, encode_utf8_tagged/1]).
 
+%% @doc Pack caller-supplied 4-bit Version, 4-bit Flags, and 16-bit big-endian Length into a compact 3-byte binary header.
 pack_header(Version, Flags, Length) ->
     <<Version:4, Flags:4, Length:16/big-unsigned-integer>>.
 
+%% @doc Decode a 3-byte big-endian header and remaining payload binary from Binary, or return an insufficient-bytes error tuple when shorter than 3 bytes.
 unpack_header(<<Version:4, Flags:4, Length:16/big-unsigned-integer, Payload/binary>>) ->
     {ok, Version, Flags, Length, Payload};
 unpack_header(_) ->
     {error, insufficient_bytes}.
 
+%% @doc Reject non-binary inputs via guard validation and return TextBinary prefixed with a 1-byte version tag of value 1 and a 16-bit big-endian byte length.
 encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
     Len = byte_size(TextBinary),
     <<16#01:8, Len:16/big-unsigned-integer, TextBinary/binary>>.`,

@@ -1550,25 +1550,62 @@ init:stop().
 		}
 		return `
 T1_Start = erlang:system_time(millisecond),
-T1_Res = try
-    H = bit_packer:pack_header(4, 2, 1024),
-    U = bit_packer:unpack_header(<<H/binary, "PAYLOAD">>),
-    T = bit_packer:encode_utf8_tagged(<<"HELLO">>),
-    case {H, U, T} of
-        {<<66, 4, 0>>, {ok, 4, 2, 1024, <<"PAYLOAD">>}, <<1, 0, 5, "HELLO">>} ->
-            #{call_str => <<"bit_packer:pack_header(4, 2, 1024) + unpack_header + encode_utf8_tagged">>,
-              expected => <<"{<<66, 4, 0>>, {ok, 4, 2, 1024, <<\"PAYLOAD\">>}, <<1, 0, 5, \"HELLO\">>}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [{H, U, T}]))),
-              passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
-        Got1 ->
-            #{call_str => <<"bit_packer operations">>, expected => <<"{<<66, 4, 0>>, ...}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got1]))), passed => false, time_ms => 0}
-    end
+T1_Res = try bit_packer:pack_header(4, 2, 1024) of
+    <<66, 4, 0>> = R1 ->
+        #{call_str => <<"bit_packer:pack_header(4, 2, 1024)">>,
+          expected => <<"<<66, 4, 0>>">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
+    Got1 ->
+        #{call_str => <<"bit_packer:pack_header(4, 2, 1024)">>, expected => <<"<<66, 4, 0>>">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"bit_packer operations">>, expected => <<"{<<66, 4, 0>>, ...}">>,
+    #{call_str => <<"bit_packer:pack_header(4, 2, 1024)">>, expected => <<"<<66, 4, 0>>">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try bit_packer:unpack_header(<<66, 4, 0, "PAYLOAD">>) of
+    {ok, 4, 2, 1024, <<"PAYLOAD">>} = R2 ->
+        #{call_str => <<"bit_packer:unpack_header(<<66, 4, 0, \"PAYLOAD\">>)">>,
+          expected => <<"{ok, 4, 2, 1024, <<\"PAYLOAD\">>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T2_Start};
+    Got2 ->
+        #{call_str => <<"bit_packer:unpack_header(<<66, 4, 0, \"PAYLOAD\">>)">>, expected => <<"{ok, 4, 2, 1024, <<\"PAYLOAD\">>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got2]))), passed => false, time_ms => 0}
+catch C2:R2 ->
+    #{call_str => <<"bit_packer:unpack_header(<<66, 4, 0, \"PAYLOAD\">>)">>, expected => <<"{ok, 4, 2, 1024, <<\"PAYLOAD\">>}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try bit_packer:unpack_header(<<66, 4>>) of
+    {error, insufficient_bytes} = R3 ->
+        #{call_str => <<"bit_packer:unpack_header(<<66, 4>>)">>,
+          expected => <<"{error, insufficient_bytes}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T3_Start};
+    Got3 ->
+        #{call_str => <<"bit_packer:unpack_header(<<66, 4>>)">>, expected => <<"{error, insufficient_bytes}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got3]))), passed => false, time_ms => 0}
+catch C3:R3 ->
+    #{call_str => <<"bit_packer:unpack_header(<<66, 4>>)">>, expected => <<"{error, insufficient_bytes}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+T4_Start = erlang:system_time(millisecond),
+T4_Res = try bit_packer:encode_utf8_tagged(<<"HELLO">>) of
+    <<1, 0, 5, "HELLO">> = R4 ->
+        #{call_str => <<"bit_packer:encode_utf8_tagged(<<\"HELLO\">>)">>,
+          expected => <<"<<1, 0, 5, \"HELLO\">>">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R4]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T4_Start};
+    Got4 ->
+        #{call_str => <<"bit_packer:encode_utf8_tagged(<<\"HELLO\">>)">>, expected => <<"<<1, 0, 5, \"HELLO\">>">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got4]))), passed => false, time_ms => 0}
+catch C4:R4 ->
+    #{call_str => <<"bit_packer:encode_utf8_tagged(<<\"HELLO\">>)">>, expected => <<"<<1, 0, 5, \"HELLO\">>">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -6355,30 +6392,122 @@ Stages = [CompileStage_M05_Old, S1_Tlv_Old]
 		return fmt.Sprintf(`
 CompileStage_M05 = case code:ensure_loaded(bit_packer) of
     {module, bit_packer} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"bit_packer.erl compiled cleanly; pack_header/3, unpack_header/1, encode_utf8_tagged/1 exported">>};
+        Exports_M05 = bit_packer:module_info(exports),
+        Req_M05 = [{pack_header, 3}, {unpack_header, 1}, {encode_utf8_tagged, 1}],
+        Missing_M05 = [FA || FA <- Req_M05, not lists:member(FA, Exports_M05)],
+        case Missing_M05 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"bit_packer.erl compiled cleanly; pack_header/3, unpack_header/1, encode_utf8_tagged/1 exported">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_M05]))}
+        end;
     {error, E_M05} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_M05]))}
+end,
+S_Ast_M05 = try
+    SourceCandidates_M05 = [
+        filename:join(["%s", "src", "bit_packer.erl"]),
+        filename:join(["%s", "bit_packer.erl"])
+    ],
+    SourceFile_M05 = case [P || P <- SourceCandidates_M05, filelib:is_regular(P)] of
+        [ValidSrc_M05 | _] -> ValidSrc_M05;
+        [] -> hd(SourceCandidates_M05)
+    end,
+    Rules_M05 = #{
+        required_constructs => [bit_syntax, guards],
+        required_remote_calls => [{erlang, byte_size, 1}, {erlang, is_binary, 1}]
+    },
+    BitAstAudit_M05 = case epp:parse_file(SourceFile_M05, []) of
+        {ok, Forms_M05} ->
+            WalkBit_M05 = fun WalkB(Node, Pred) ->
+                case Pred(Node) of
+                    true -> true;
+                    false when is_tuple(Node) -> WalkB(tuple_to_list(Node), Pred);
+                    false when is_list(Node) -> lists:any(fun(El) -> WalkB(El, Pred) end, Node);
+                    false -> false
+                end
+            end,
+            HasExplicitBitSeg_M05 = fun(SubTree) ->
+                WalkBit_M05(SubTree, fun
+                    ({bin_element, _, _, {integer, _, _}, _}) -> true;
+                    (_) -> false
+                end)
+            end,
+            PackClauses_M05 = lists:flatten([Clauses || {function, _, pack_header, 3, Clauses} <- Forms_M05]),
+            UnpackClauses_M05 = lists:flatten([Clauses || {function, _, unpack_header, 1, Clauses} <- Forms_M05]),
+            EncodeClauses_M05 = lists:flatten([Clauses || {function, _, encode_utf8_tagged, 1, Clauses} <- Forms_M05]),
+            HasPackBitSyntax_M05 = HasExplicitBitSeg_M05([Body || {clause, _, _, _, Body} <- PackClauses_M05]),
+            HasUnpackBitPattern_M05 = HasExplicitBitSeg_M05([Pats || {clause, _, Pats, _, _} <- UnpackClauses_M05]),
+            HasEncodeBitSyntax_M05 = HasExplicitBitSeg_M05([Body || {clause, _, _, _, Body} <- EncodeClauses_M05]),
+            HasIsBinaryGuard_M05 = WalkBit_M05([Guards || {clause, _, _, Guards, _} <- EncodeClauses_M05], fun
+                ({call, _, {atom, _, is_binary}, _}) -> true;
+                ({call, _, {remote, _, {atom, _, erlang}, {atom, _, is_binary}}, _}) -> true;
+                (_) -> false
+            end),
+            case {HasPackBitSyntax_M05, HasUnpackBitPattern_M05, HasEncodeBitSyntax_M05, HasIsBinaryGuard_M05} of
+                {true, true, true, true} -> ok;
+                _ ->
+                    {error, iolist_to_binary(io_lib:format(
+                        "Expected explicit bit-width bit syntax across pack_header/3 (~p), unpack_header/1 (~p), encode_utf8_tagged/1 (~p), and is_binary/1 guard on encode_utf8_tagged/1 (~p).",
+                        [HasPackBitSyntax_M05, HasUnpackBitPattern_M05, HasEncodeBitSyntax_M05, HasIsBinaryGuard_M05]
+                    ))}
+            end;
+        {error, ParseErr_M05} ->
+            {error, iolist_to_binary(io_lib:format("Failed to inspect bit syntax AST: ~p", [ParseErr_M05]))}
+    end,
+    case {bf_ast_verifier:verify_rules(SourceFile_M05, <<>>, Rules_M05), BitAstAudit_M05} of
+        {{ok, _}, ok} ->
+            #{id => <<"ast_bit_packer_audit">>, title => <<"AST Bit Syntax & Guard Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified explicit bit-width <<...>> packing/unpacking, is_binary/1 guard on encode_utf8_tagged/1, and byte_size/1.">>};
+        {{error, AstViolations_M05}, _} ->
+            FirstMsg_M05 = case AstViolations_M05 of
+                [#{message := M_M05} | _] -> M_M05;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_M05]))
+            end,
+            #{id => <<"ast_bit_packer_audit">>, title => <<"AST Bit Syntax & Guard Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_M05, error => AstViolations_M05};
+        {_, {error, BitAuditMsg_M05}} ->
+            #{id => <<"ast_bit_packer_audit">>, title => <<"AST Bit Syntax & Guard Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => BitAuditMsg_M05}
+    end
+catch Class_Ast_M05:Err_Ast_M05 ->
+    #{id => <<"ast_bit_packer_audit">>, title => <<"AST Bit Syntax & Guard Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [Class_Ast_M05, Err_Ast_M05]))}
 end,
 S1_Bits = try
     H1 = bit_packer:pack_header(4, 2, 1024),
     H2 = bit_packer:pack_header(1, 15, 65535),
+    H0 = bit_packer:pack_header(0, 0, 0),
     U1 = bit_packer:unpack_header(<<H1/binary, "PAYLOAD_DATA">>),
+    UExact = bit_packer:unpack_header(<<H2/binary>>),
     U2 = bit_packer:unpack_header(<<1:8>>),
+    UShort = bit_packer:unpack_header(<<66, 4>>),
+    UEmpty = bit_packer:unpack_header(<<>>),
     T1 = bit_packer:encode_utf8_tagged(<<"HELLO_OTP">>),
-    case {H1, H2, U1, U2, T1} of
-        {<<66, 4, 0>>, <<31, 255, 255>>,
+    TEmpty = bit_packer:encode_utf8_tagged(<<>>),
+    TUtf8 = bit_packer:encode_utf8_tagged(<<206, 169>>),
+    GuardRes = try bit_packer:encode_utf8_tagged("HELLO") of
+        BadRet -> {unexpected_return, BadRet}
+    catch
+        error:function_clause -> guard_ok;
+        OtherClass:OtherReason -> {wrong_error, OtherClass, OtherReason}
+    end,
+    case {H1, H2, H0, U1, UExact, U2, UShort, UEmpty, T1, TEmpty, TUtf8, GuardRes} of
+        {<<66, 4, 0>>, <<31, 255, 255>>, <<0, 0, 0>>,
          {ok, 4, 2, 1024, <<"PAYLOAD_DATA">>},
+         {ok, 1, 15, 65535, <<>>},
          {error, insufficient_bytes},
-         <<16#01:8, 9:16/big, "HELLO_OTP">>} ->
-            #{id => <<"bit_syntax_wire_format">>, title => <<"Bit Syntax <<...>> Protocol Packing & Endianness">>, status => <<"passed">>, time_ms => 8, details => <<"Verified 24-bit header packing, big-endian length, dynamic slicing, and UTF-8 length tagging">>};
+         {error, insufficient_bytes},
+         {error, insufficient_bytes},
+         <<16#01:8, 9:16/big, "HELLO_OTP">>,
+         <<1, 0, 0>>,
+         <<1, 0, 2, 206, 169>>,
+         guard_ok} ->
+            #{id => <<"bit_syntax_wire_format">>, title => <<"Bit Syntax <<...>> Protocol Packing & Endianness">>, status => <<"passed">>, time_ms => 8, details => <<"Verified 24-bit big-endian packing, exact 3-byte & trailing-payload unpacking, truncated stream errors, UTF-8 length tagging, and is_binary/1 guard enforcement">>};
         Got_M05 ->
             #{id => <<"bit_syntax_wire_format">>, title => <<"Bit Syntax <<...>> Protocol Packing & Endianness">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Bit mismatch: ~p", [Got_M05]))}
     end
 catch Class_M05:Err_M05 ->
     #{id => <<"bit_syntax_wire_format">>, title => <<"Bit Syntax <<...>> Protocol Packing & Endianness">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_M05, Err_M05]))}
 end,
-Stages = [CompileStage_M05, S1_Bits]
-`), true
+Stages = [CompileStage_M05, S_Ast_M05, S1_Bits]
+`, wsDir, wsDir), true
 
 	case "ch04-l06":
 		return fmt.Sprintf(`

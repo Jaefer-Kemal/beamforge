@@ -116,6 +116,25 @@ flatten_iolist(IoList) ->
     {iolist_size(IoList), iolist_to_binary(IoList)}.
 `
 
+	bitPackerSolution := `-module(bit_packer).
+-export([pack_header/3, unpack_header/1, encode_utf8_tagged/1]).
+
+%% @doc Pack caller-supplied 4-bit Version, 4-bit Flags, and 16-bit big-endian Length into a compact 3-byte binary header.
+pack_header(Version, Flags, Length) ->
+    <<Version:4, Flags:4, Length:16/big-unsigned-integer>>.
+
+%% @doc Decode a 3-byte big-endian header and remaining payload binary from Binary, or return an insufficient-bytes error tuple when shorter than 3 bytes.
+unpack_header(<<Version:4, Flags:4, Length:16/big-unsigned-integer, Payload/binary>>) ->
+    {ok, Version, Flags, Length, Payload};
+unpack_header(_) ->
+    {error, insufficient_bytes}.
+
+%% @doc Reject non-binary inputs via guard validation and return TextBinary prefixed with a 1-byte version tag of value 1 and a 16-bit big-endian byte length.
+encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
+    Len = byte_size(TextBinary),
+    <<16#01:8, Len:16/big-unsigned-integer, TextBinary/binary>>.
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -140,6 +159,11 @@ flatten_iolist(IoList) ->
 			exerciseID:   "ch04-l04",
 			visibleCount: 3,
 			files:        map[string]string{"src/iolist_builder.erl": iolistBuilderSolution},
+		},
+		{
+			exerciseID:   "ch04-l05",
+			visibleCount: 4,
+			files:        map[string]string{"src/bit_packer.erl": bitPackerSolution},
 		},
 	}
 
@@ -581,6 +605,101 @@ flatten_iolist(IoList) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected binary_and_iolist_construction stage to fail when HTTP response is flattened binary instead of IOList, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l05 rejects bitwise shift/list_to_binary bypass and missing is_binary guard via AST audit", func(t *testing.T) {
+		sessionID := "test-ch04-l05-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		bypass := map[string]string{
+			"src/bit_packer.erl": `-module(bit_packer).
+-export([pack_header/3, unpack_header/1, encode_utf8_tagged/1]).
+
+%% Bypass: manually shifts bits via list_to_binary instead of explicit bit syntax segments.
+pack_header(Version, Flags, Length) ->
+    list_to_binary([(Version bsl 4) bor Flags, Length bsr 8, Length band 255]).
+
+unpack_header(<<Byte1, Hi, Lo, Payload/binary>>) ->
+    {ok, Byte1 bsr 4, Byte1 band 15, (Hi bsl 8) bor Lo, Payload};
+unpack_header(_) ->
+    {error, insufficient_bytes}.
+
+%% Bypass: omits is_binary/1 guard on encode_utf8_tagged/1.
+encode_utf8_tagged(TextBinary) ->
+    Len = byte_size(TextBinary),
+    <<16#01:8, Len:16/big-unsigned-integer, TextBinary/binary>>.
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l05", bypass)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when bit syntax or is_binary/1 guard is bypassed, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_bit_packer_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_bit_packer_audit stage to fail when bit syntax / is_binary guard is bypassed, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l05 rejects little-endian packing bug and empty-binary unpack bug", func(t *testing.T) {
+		sessionID := "test-ch04-l05-neg-edge"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		littleEndianBug := map[string]string{
+			"src/bit_packer.erl": `-module(bit_packer).
+-export([pack_header/3, unpack_header/1, encode_utf8_tagged/1]).
+
+%% Bug: encodes Length in little-endian instead of big-endian network byte order.
+pack_header(Version, Flags, Length) ->
+    <<Version:4, Flags:4, Length:16/little-unsigned-integer>>.
+
+unpack_header(<<Version:4, Flags:4, Length:16/little-unsigned-integer, Payload/binary>>) ->
+    {ok, Version, Flags, Length, Payload};
+unpack_header(_) ->
+    {error, insufficient_bytes}.
+
+encode_utf8_tagged(TextBinary) when is_binary(TextBinary) ->
+    Len = byte_size(TextBinary),
+    <<16#01:8, Len:16/little-unsigned-integer, TextBinary/binary>>.
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l05", littleEndianBug)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when little-endian ordering is used instead of big-endian, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "bit_syntax_wire_format" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected bit_syntax_wire_format stage to fail when little-endian ordering is used, stages=%+v", report.Stages)
 		}
 	})
 }
