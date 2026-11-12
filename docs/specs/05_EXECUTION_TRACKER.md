@@ -2567,6 +2567,22 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `erlc.exe -Wall`: Compiled `ingestion_sup.erl` and `strategy_planner.erl` cleanly with 0 warnings/errors.
   - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-8].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
 
+## Phase 147: Codify 10/10 Starter `@doc` & Example-Prose Parity Rules and Refine `ch08-l01`
+- [x] **147.1: Codify Strict 10/10 Rules in Pedagogical Specs**:
+  - Updated `docs/specs/08_PEDAGOGICAL_AUDIT_AND_ANTI_SPOILER_PROTOCOL.md` (Pillars 1 & 3) and `docs/specs/04_PEDAGOGY_AND_LESSON_TEMPLATE.md` (§1 & §2) with three general quality invariants:
+    1. **10/10 Starter `@doc` Contract Precision Standard**: `@doc` lines must distinguish caller-supplied inputs/limits from computed outputs, explicitly state guard-rejection vs. error-return boundaries in plain English (no syntax spoilers), and avoid opaque jargon without domain context.
+    2. **Example-Prose Parity Invariant**: Commentary below a Parallel Worked Example must only explain constructs and guard combinations literally demonstrated in the example code above it.
+    3. **Zero Table-List Redundancy**: Summary tables must never be followed immediately by bullet lists repeating identical rows verbatim.
+- [x] **147.2: Refine `ch08-l01` to 10/10 Standards**:
+  - Refined `starterCode`, `files[0].content`, `solutionCode`, and `solutionFiles['src/strategy_planner.erl']` `@doc` comments to clearly distinguish input limits from derived crash-rate telemetry, state invalid-bound rejection vs. unknown-topology error tuple returns, and describe validated fields in plain English.
+  - Replaced the duplicate 4-strategy list beneath the restart-strategy table with distinct VM startup-ordering and `simple_one_for_one` pool-boot invariants.
+  - Upgraded `ingestion_sup` example `start_link/2` to demonstrate parenthesized `orelse` combined with comma-separated numeric guards (`PoolSize > 0`), restoring 100% Example-Prose Parity with the commentary bullet underneath.
+- [x] **147.3: Multi-Compiler Verification**:
+  - `erlc.exe -Wall`: Compiled refined `ingestion_sup.erl` cleanly with 0 warnings/errors.
+  - `Select-String -Path 'apps\web-ide\src\data\chapters\ch0[1-8].ts' -Pattern '^-spec '`: 0 occurrences across all chapters.
+  - `go test -count=1 -v -run TestChapter8Verification/ch08-l01 ./internal/bridge`: Uncached Go orchestrator run 100% passed (`score=100`, 5 stages).
+  - `npx tsc --noEmit` & `npm run build`: Passed cleanly with 0 errors across 8/8 routes.
+
 
 
 

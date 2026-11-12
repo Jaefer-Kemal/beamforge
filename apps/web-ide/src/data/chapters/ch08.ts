@@ -32,14 +32,8 @@ Restoring workers safely requires choosing the right **Restart Strategy**. If an
 | \`one_for_all\` | **All** children under the supervisor | Mutually dependent peers that cannot run independently |
 | \`simple_one_for_one\` | Single dynamic worker instance | Dynamic connection pools (e.g., per-socket TCP/XMPP handlers) |
 
-1. **\`one_for_one\` (Independent Workers)**:
-   - Only the terminated child is restarted; siblings remain untouched.
-2. **\`rest_for_one\` (Sequential Dependency Pipeline)**:
-   - Any child started **after** the crashed child in the specification list is terminated in reverse startup order and restarted in forward startup order. Upstream children remain untouched.
-3. **\`one_for_all\` (Tightly Coupled Cluster)**:
-   - Every surviving sibling is immediately terminated in reverse startup order and restarted alongside the failed child.
-4. **\`simple_one_for_one\` (Dynamic Worker Factory)**:
-   - Holds a single template child specification and starts with zero children at boot, spawning identical workers on demand via \`supervisor:start_child/2\`.
+- **Startup Ordering Invariant (\`rest_for_one\` & \`one_for_all\`)**: Because supervisors terminate affected siblings in **reverse startup order** and reboot them in **forward startup order**, dependency pipelines only work safely when upstream resources appear earlier in the child specification list than their downstream consumers.
+- **Dynamic Pool Boot (\`simple_one_for_one\`)**: Unlike the three static strategies, a \`simple_one_for_one\` supervisor holds a single template child specification, boots with zero active children, and attaches workers dynamically on demand via \`supervisor:start_child/2\`.
 
 ### What the BEAM Does Under the Hood: Sliding Windows & Escalation
 
@@ -76,7 +70,7 @@ In OTP callback specs, \`non_neg_integer()\` allows \`0\` and positive integers,
 
 ## Parallel Worked Example: Log Ingestion Supervisor
 
-Consider \`ingestion_sup\`, a log ingestion supervisor in a telemetry collector. Notice how it combines compound guard expressions (\`when ... orelse ...\`), multi-clause pattern matching for symbolic sink validation, floating-point division for rate metrics, and the \`SupFlags\` map inside \`init/1\`:
+Consider \`ingestion_sup\`, a log ingestion supervisor in a telemetry collector. Notice how \`start_link/2\` pairs parenthesized \`orelse\` atom validation with comma-separated integer guards, while \`is_valid_sink/1\` and \`throughput_metric/2\` demonstrate clause fallbacks and floating-point division alongside supervisor \`init/1\`:
 
 \`\`\`erlang
 -module(ingestion_sup).
@@ -84,7 +78,7 @@ Consider \`ingestion_sup\`, a log ingestion supervisor in a telemetry collector.
 
 %% Public API & Policy Helpers
 -export([
-    start_link/1,
+    start_link/2,
     is_valid_sink/1,
     throughput_metric/2
 ]).
@@ -92,9 +86,11 @@ Consider \`ingestion_sup\`, a log ingestion supervisor in a telemetry collector.
 %% Supervisor Callback
 -export([init/1]).
 
-%% @doc Start the log ingestion supervisor with a configured sink mode.
-start_link(Sink) when Sink =:= stdout orelse Sink =:= disk orelse Sink =:= s3 ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, Sink).
+%% @doc Start the log ingestion supervisor for a supported sink atom and worker count.
+start_link(Sink, PoolSize)
+  when (Sink =:= stdout orelse Sink =:= disk orelse Sink =:= s3),
+       is_integer(PoolSize), PoolSize > 0 ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, {Sink, PoolSize}).
 
 %% @doc Verify whether a destination atom matches a supported log sink.
 is_valid_sink(stdout) -> true;
@@ -112,7 +108,7 @@ throughput_metric(Messages, WindowSec)
     }.
 
 %% @doc Initialize the ingestion supervisor flags and ordered child pipeline.
-init(_Sink) ->
+init({_Sink, _PoolSize}) ->
     SupFlags = #{
         strategy => rest_for_one,
         intensity => 4,
@@ -122,8 +118,8 @@ init(_Sink) ->
 \`\`\`
 
 Key Erlang mechanics illustrated above:
-- **Compound \`orelse\` Guards**: Parenthesizing multiple \`=:=\` alternatives lets Erlang validate an enum atom safely alongside comma-separated numeric checks (\`,\` acts as \`andalso\` in guards).
-- **Floating-Point Division (\`/\`)**: Unlike \`div\`, Erlang's \`/\` operator always evaluates to a \`float()\` even when the operands divide evenly (e.g., \`10 / 2\` produces \`5.0\`).
+- **Compound \`orelse\` Guards**: Parenthesizing multiple \`=:=\` alternatives (as shown in \`start_link/2\`) lets Erlang validate an enum atom cleanly alongside comma-separated numeric checks (\`,\` acts as guard conjunction).
+- **Floating-Point Division (\`/\`)**: Unlike \`div\`, Erlang's \`/\` operator always evaluates to a \`float()\` even when operands divide evenly (e.g., \`10 / 2\` produces \`5.0\`).
 
 ## Assignment Specification
 
@@ -217,15 +213,15 @@ Implement \`src/strategy_planner.erl\` with the following exports:
     calculate_restart_budget/2
 ]).
 
-%% @doc Construct a validated OTP sup_flags() map for supervisor initialization.
+%% @doc Build a supervisor flags map from a valid restart strategy atom, non-negative crash intensity, and positive period; rejects invalid bounds.
 build_sup_flags(Strategy, Intensity, Period) ->
     ok.
 
-%% @doc Map an architectural topology atom to the optimal OTP restart strategy.
+%% @doc Map a recognized architecture topology atom to its OTP restart strategy, or return an error tuple for unknown inputs.
 select_strategy_for_topology(Topology) ->
     ok.
 
-%% @doc Compute crash rate telemetry and budget limits over a sliding time window.
+%% @doc Compute per-second crash rate telemetry from a crash limit and positive time window in seconds; rejects invalid numeric bounds.
 calculate_restart_budget(MaxCrashes, WindowSeconds) ->
     ok.
 `,
@@ -237,7 +233,7 @@ calculate_restart_budget(MaxCrashes, WindowSeconds) ->
     calculate_restart_budget/2
 ]).
 
-%% @doc Construct a validated OTP sup_flags() map for supervisor initialization.
+%% @doc Build a supervisor flags map from a valid restart strategy atom, non-negative crash intensity, and positive period; rejects invalid bounds.
 build_sup_flags(Strategy, Intensity, Period)
   when (Strategy =:= one_for_one orelse Strategy =:= rest_for_one orelse
         Strategy =:= one_for_all orelse Strategy =:= simple_one_for_one),
@@ -249,14 +245,14 @@ build_sup_flags(Strategy, Intensity, Period)
         period => Period
     }.
 
-%% @doc Map an architectural topology atom to the optimal OTP restart strategy.
+%% @doc Map a recognized architecture topology atom to its OTP restart strategy, or return an error tuple for unknown inputs.
 select_strategy_for_topology(independent_workers) -> one_for_one;
 select_strategy_for_topology(dependent_pipeline)  -> rest_for_one;
 select_strategy_for_topology(coupled_cluster)     -> one_for_all;
 select_strategy_for_topology(dynamic_pool)        -> simple_one_for_one;
 select_strategy_for_topology(_)                   -> {error, unknown_topology}.
 
-%% @doc Compute crash rate telemetry and budget limits over a sliding time window.
+%% @doc Compute per-second crash rate telemetry from a crash limit and positive time window in seconds; rejects invalid numeric bounds.
 calculate_restart_budget(MaxCrashes, WindowSeconds)
   when is_integer(MaxCrashes), is_integer(WindowSeconds), MaxCrashes >= 0, WindowSeconds > 0 ->
     Rate = MaxCrashes / WindowSeconds,
@@ -279,15 +275,15 @@ calculate_restart_budget(MaxCrashes, WindowSeconds)
     calculate_restart_budget/2
 ]).
 
-%% @doc Construct a validated OTP sup_flags() map for supervisor initialization.
+%% @doc Build a supervisor flags map from a valid restart strategy atom, non-negative crash intensity, and positive period; rejects invalid bounds.
 build_sup_flags(Strategy, Intensity, Period) ->
     ok.
 
-%% @doc Map an architectural topology atom to the optimal OTP restart strategy.
+%% @doc Map a recognized architecture topology atom to its OTP restart strategy, or return an error tuple for unknown inputs.
 select_strategy_for_topology(Topology) ->
     ok.
 
-%% @doc Compute crash rate telemetry and budget limits over a sliding time window.
+%% @doc Compute per-second crash rate telemetry from a crash limit and positive time window in seconds; rejects invalid numeric bounds.
 calculate_restart_budget(MaxCrashes, WindowSeconds) ->
     ok.
 `,
@@ -302,7 +298,7 @@ calculate_restart_budget(MaxCrashes, WindowSeconds) ->
     calculate_restart_budget/2
 ]).
 
-%% @doc Construct a validated OTP sup_flags() map for supervisor initialization.
+%% @doc Build a supervisor flags map from a valid restart strategy atom, non-negative crash intensity, and positive period; rejects invalid bounds.
 build_sup_flags(Strategy, Intensity, Period)
   when (Strategy =:= one_for_one orelse Strategy =:= rest_for_one orelse
         Strategy =:= one_for_all orelse Strategy =:= simple_one_for_one),
@@ -314,14 +310,14 @@ build_sup_flags(Strategy, Intensity, Period)
         period => Period
     }.
 
-%% @doc Map an architectural topology atom to the optimal OTP restart strategy.
+%% @doc Map a recognized architecture topology atom to its OTP restart strategy, or return an error tuple for unknown inputs.
 select_strategy_for_topology(independent_workers) -> one_for_one;
 select_strategy_for_topology(dependent_pipeline)  -> rest_for_one;
 select_strategy_for_topology(coupled_cluster)     -> one_for_all;
 select_strategy_for_topology(dynamic_pool)        -> simple_one_for_one;
 select_strategy_for_topology(_)                   -> {error, unknown_topology}.
 
-%% @doc Compute crash rate telemetry and budget limits over a sliding time window.
+%% @doc Compute per-second crash rate telemetry from a crash limit and positive time window in seconds; rejects invalid numeric bounds.
 calculate_restart_budget(MaxCrashes, WindowSeconds)
   when is_integer(MaxCrashes), is_integer(WindowSeconds), MaxCrashes >= 0, WindowSeconds > 0 ->
     Rate = MaxCrashes / WindowSeconds,

@@ -36,6 +36,10 @@ Every lecture must be strictly audited and certified against all four pillars:
 - **Chunked Reference Architecture for Complex Capstones**:
   - In Capstones, Mini-Capstones, and complex multi-feature Problem Sets, break large multi-component architectures into 2–3 annotated sections (e.g., *1. State Initialization & Atomic Monitoring*, *2. Idempotency Gate / Routing*, *3. Failure Recovery & State Preservation*), or ensure complete modules are deeply explained in digestible steps.
   - This equips learners with an authentic, illuminating reference when stuck—allowing them to understand how to compose the architecture without spoiling the specific assignment.
+- **Example-Prose Parity Invariant**:
+  - Every syntax pattern, operator precedence rule, guard structure, or OTP mechanic highlighted in explanatory prose underneath a Parallel Worked Example MUST literally appear in that example's code block. Never write commentary explaining a construct that the accompanying code failed to demonstrate.
+- **Zero Table-List Redundancy**:
+  - Never follow a summary comparison table immediately with a bulleted list repeating the same rows verbatim. Either let the table carry the comparison or limit follow-up notes to non-obvious VM mechanics, edge cases, and ordering pitfalls not shown in the table.
 - **Demonstrate Mechanics, Not Answers**:
   Show how the syntax, operator, or pattern behaves in isolation so the learner understands the tool, but must apply it creatively.
 
@@ -48,13 +52,17 @@ Every function in the `## Assignment Specification` must follow this exact 3-par
 - **Zero Syntax Spoilers in Prompt Text**:
   - **NEVER** write Erlang expressions in backticks in the prompt bullets (e.g., strictly forbid `using the cons operator [Item | List]` or `returns (Bytes * 8) div Seconds`).
 
-### Pillar 3: Professional `@doc` Comments & Anti-Pre-Solved Starter Code
-- Starter templates (`files[0].content` and `starterCode`) must contain only standard, clean EDoc/rebar3 style documentation:
+### Pillar 3: Strict `@doc` Contract Precision & Anti-Pre-Solved Starter Code
+- Starter templates (`files[0].content` and `starterCode`) must contain clean, factually exact EDoc/rebar3 style `%% @doc` documentation above every exported function and callback:
   ```erlang
   %% @doc Return whole integer bits per second given byte count and elapsed seconds.
   calculate_bandwidth(Bytes, Seconds) ->
       ok.
   ```
+- **The 10/10 Starter `@doc` Precision Standard**:
+  1. **Input-vs-Computation Accuracy**: Distinguish strictly between caller-supplied configuration/limits and values computed by the function (never write *"compute limits"* when limits are inputs used to calculate a derived rate or state).
+  2. **Explicit Failure vs. Error Return Boundaries**: State plainly whether bad/unrecognized inputs fail (e.g., reject invalid bounds via guard validation) or return a structured error value (e.g., return an error tuple for unknown inputs), without leaking exact Erlang syntax or literal atoms in the starter doc comment.
+  3. **Plain-English Clarity Over Opaque Jargon**: Pair any OTP abstraction name with the concrete domain properties being validated or constructed so the starter file reads cleanly on its own in the editor.
 - **Forbidden**: Step-by-step implementation hints or code comments inside function bodies (e.g., `%% Convert Bytes to bits and compute whole integer bits per second using div.` or `%% Use =:= to check equality`).
 - **The "Anti-Pre-Solved Starter Code" Invariant (No Free Rides)**:
   - Starter templates must provide genuine, un-spoiled scaffolding (module/behaviour declarations, export lists, function heads, and neutral minimal return stubs like `ok.`, `{noreply, State}`, or `{keep_state, Data}`).

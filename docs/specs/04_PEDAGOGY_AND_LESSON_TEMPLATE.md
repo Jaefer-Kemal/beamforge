@@ -8,7 +8,8 @@ Every lesson's markdown guide MUST include these 5 sections:
 2. **`## Deep Concept Breakdown & Under the Hood`**:
    - Step-by-step explanation with concrete, annotated Erlang code blocks.
    - Explanation of what the BEAM VM is doing under the hood (e.g., stack frames, heap allocation, mailbox pointers, or TCP socket buffers).
-3. **`## 📖 Official Erlang Docs & Function Reference`**:
+   - **Zero Table-List Redundancy**: When summarizing tradeoffs in a comparison table, never immediately repeat those exact rows in a bulleted list; follow-up notes must add distinct VM invariants or pitfalls.
+3. **`## Official Erlang Docs & Function Reference`**:
    - Whenever standard library functions or BIFs are used, include a clear signature block showing how to read the official Erlang documentation:
      ```erlang
      %% Official OTP Signature (stdlib / lists)
@@ -23,6 +24,7 @@ Every lesson's markdown guide MUST include these 5 sections:
    - Complete, runnable Erlang modules (`-module(...)`, full exports, realistic production flow) are welcome and encouraged, provided they maintain strict domain disjunction and avoid 1:1 functional mirroring.
    - Every example must be clearly understandable: divided into digestible sections or annotated with clear prose so the learner understands *what the BEAM is doing* at each phase.
    - **Proportional Simplicity**: Never overcomplicate or make parallel examples "over the top". Avoid bloated secondary domains or extraneous nested models; demonstrate the target BEAM/OTP pattern in the cleanest, most direct, and elegant manner possible.
+   - **Example-Prose Parity**: Every Erlang construct or guard combination called out in explanatory bullets below a worked example MUST actually appear in that example's code block.
    - For Capstones & complex Problem Sets, prioritize chunked architectural references or deeply explained modules that guide composition without spoiling the assignment's exact arity or endpoints.
 5. **`## Assignment Specification`** (for coding lessons & problem sets):
    - Exact module name and `-export([...])` list.
@@ -33,7 +35,8 @@ Every lesson's markdown guide MUST include these 5 sections:
 
 ## 2. Right-Pane Starter Template, Visible Test Cases & Solution
 Every lesson object MUST provide:
-- **`starterFiles` & `starterCode`**: Ready-to-edit Erlang module template with `-module(...)`, `-export([...])`, professional EDoc `@doc` comments, and clean function skeletons.
+- **`starterFiles` & `starterCode`**: Ready-to-edit Erlang module template with `-module(...)`, `-export([...])`, strict 10/10 EDoc `%% @doc` comments, and clean function skeletons.
+  - **Strict `@doc` Contract Precision**: Every `@doc` line must accurately distinguish caller-supplied inputs from computed values, state whether invalid inputs reject/fail vs. return an error value in plain English (zero syntax spoilers), and avoid opaque jargon without concrete domain context.
   - **No Pre-Solved Core Logic**: Skeletons must provide neutral minimal return stubs (e.g. `ok.`, `{noreply, State}`, `{keep_state, Data}`). Never pre-solve core state transitions, fast-fails, or event matching clauses that give away the assignment's central challenge.
 - **`visibleTestCases`**: Array of `{ id, title, erlangCall, expectedOutput, explanation }` displayed in the **`🧪 Test Cases`** drawer and executed when clicking **`▷ Run`**.
 - **`astRules`**: Structured rule spec passed to `bf_ast_verifier:verify_rules/3` when clicking **`▶ Submit`**:
