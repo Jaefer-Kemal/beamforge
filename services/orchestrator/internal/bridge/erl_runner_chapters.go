@@ -1392,26 +1392,72 @@ init:stop().
 	case "ch04-l03":
 		return `
 T1_Start = erlang:system_time(millisecond),
-T1_Res = try
-    F0 = record_frames:new_frame(1, ack, ok),
-    F1 = record_frames:advance_seq(F0),
-    Idx = record_frames:frame_seq_index(),
-    Found = record_frames:find_frame_by_seq([F0, F1], 2),
-    case {F0, F1, Idx, Found} of
-        {{frame, 1, ack, ok}, {frame, 2, ack, ok}, 2, {ok, {frame, 2, ack, ok}}} ->
-            #{call_str => <<"record_frames:new_frame(1, ack, ok) + advance_seq + frame_seq_index + find_frame_by_seq">>,
-              expected => <<"{{frame, 1, ack, ok}, {frame, 2, ack, ok}, 2, {ok, {frame, 2, ack, ok}}}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [{F0, F1, Idx, Found}]))),
-              passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
-        Got1 ->
-            #{call_str => <<"record_frames operations">>, expected => <<"{{frame, 1, ack, ok}, ...}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got1]))), passed => false, time_ms => 0}
-    end
-catch C1:R1 ->
-    #{call_str => <<"record_frames operations">>, expected => <<"{{frame, ...}}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+T1_Res = try record_frames:new_frame(1, ack, ok) of
+    {frame, 1, ack, ok} = R1 ->
+        #{call_str => <<"record_frames:new_frame(1, ack, ok)">>,
+          expected => <<"{frame, 1, ack, ok}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
+          time_ms => erlang:system_time(millisecond) - T1_Start};
+    Other1 ->
+        #{call_str => <<"record_frames:new_frame(1, ack, ok)">>,
+          expected => <<"{frame, 1, ack, ok}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
+catch C1:Err1 ->
+    #{call_str => <<"record_frames:new_frame(1, ack, ok)">>,
+      expected => <<"{frame, 1, ack, ok}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    F_T2 = record_frames:new_frame(10, data, ping),
+    case record_frames:advance_seq(F_T2) of
+        {frame, 11, data, ping} = R2 ->
+            #{call_str => <<"begin F = record_frames:new_frame(10, data, ping), record_frames:advance_seq(F) end">>,
+              expected => <<"{frame, 11, data, ping}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
+              time_ms => erlang:system_time(millisecond) - T2_Start};
+        Other2 ->
+            #{call_str => <<"begin F = record_frames:new_frame(10, data, ping), record_frames:advance_seq(F) end">>,
+              expected => <<"{frame, 11, data, ping}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
+    end
+catch C2:Err2 ->
+    #{call_str => <<"begin F = record_frames:new_frame(10, data, ping), record_frames:advance_seq(F) end">>,
+      expected => <<"{frame, 11, data, ping}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try record_frames:frame_seq_index() of
+    2 ->
+        #{call_str => <<"record_frames:frame_seq_index()">>,
+          expected => <<"2">>, actual => <<"2">>, passed => true,
+          time_ms => erlang:system_time(millisecond) - T3_Start};
+    Other3 ->
+        #{call_str => <<"record_frames:frame_seq_index()">>,
+          expected => <<"2">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
+catch C3:Err3 ->
+    #{call_str => <<"record_frames:frame_seq_index()">>,
+      expected => <<"2">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3])), passed => false, time_ms => 0}
+end,
+T4_Start = erlang:system_time(millisecond),
+T4_Res = try record_frames:find_frame_by_seq([{frame, 1, data, hello}, {frame, 2, ack, world}], 2) of
+    {ok, {frame, 2, ack, world}} = R4 ->
+        #{call_str => <<"record_frames:find_frame_by_seq([{frame, 1, data, hello}, {frame, 2, ack, world}], 2)">>,
+          expected => <<"{ok, {frame, 2, ack, world}}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R4]))), passed => true,
+          time_ms => erlang:system_time(millisecond) - T4_Start};
+    Other4 ->
+        #{call_str => <<"record_frames:find_frame_by_seq([{frame, 1, data, hello}, {frame, 2, ack, world}], 2)">>,
+          expected => <<"{ok, {frame, 2, ack, world}}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other4]))), passed => false, time_ms => 0}
+catch C4:Err4 ->
+    #{call_str => <<"record_frames:find_frame_by_seq([{frame, 1, data, hello}, {frame, 2, ack, world}], 2)">>,
+      expected => <<"{ok, {frame, 2, ack, world}}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, Err4])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -6074,28 +6120,106 @@ Stages = [CompileStage_M02, S_Ast_M02, S1_Stdlib]
 		return fmt.Sprintf(`
 CompileStage_M03 = case code:ensure_loaded(record_frames) of
     {module, record_frames} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"record_frames.erl compiled cleanly; new_frame/3, advance_seq/1, frame_seq_index/0, find_frame_by_seq/2 exported">>};
+        Exports_M03 = record_frames:module_info(exports),
+        Req_M03 = [{new_frame, 3}, {advance_seq, 1}, {frame_seq_index, 0}, {find_frame_by_seq, 2}],
+        Missing_M03 = [FA || FA <- Req_M03, not lists:member(FA, Exports_M03)],
+        case Missing_M03 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"record_frames.erl compiled cleanly; new_frame/3, advance_seq/1, frame_seq_index/0, find_frame_by_seq/2 exported">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_M03]))}
+        end;
     {error, E_M03} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_M03]))}
+end,
+S_Ast_M03 = try
+    SourceCandidates_M03 = [
+        filename:join(["%s", "src", "record_frames.erl"]),
+        filename:join(["%s", "record_frames.erl"])
+    ],
+    SourceFile_M03 = case [P || P <- SourceCandidates_M03, filelib:is_regular(P)] of
+        [ValidSrc_M03 | _] -> ValidSrc_M03;
+        [] -> hd(SourceCandidates_M03)
+    end,
+    Rules_M03 = #{
+        required_constructs => [record_def],
+        required_remote_calls => [{lists, keyfind, 3}]
+    },
+    RecAstAudit_M03 = case epp:parse_file(SourceFile_M03, []) of
+        {ok, Forms_M03} ->
+            RecFieldNames_M03 = [case RF of
+                {typed_record_field, BaseRF, _} when tuple_size(BaseRF) >= 3 -> element(3, element(3, BaseRF));
+                _ when tuple_size(RF) >= 3, element(1, RF) =:= record_field -> element(3, element(3, RF));
+                _ -> invalid
+            end || {attribute, _, record, {frame, Fields}} <- Forms_M03, RF <- Fields],
+            WalkRec_M03 = fun WalkR(Node, Pred) ->
+                case Pred(Node) of
+                    true -> true;
+                    false when is_tuple(Node) -> WalkR(tuple_to_list(Node), Pred);
+                    false when is_list(Node) -> lists:any(fun(El) -> WalkR(El, Pred) end, Node);
+                    false -> false
+                end
+            end,
+            IsRecCtor_M03 = fun({record, _, frame, _}) -> true; (_) -> false end,
+            IsSeqIdx_M03 = fun({record_index, _, frame, {atom, _, seq}}) -> true; ({call, _, {atom, _, frame_seq_index}, []}) -> true; (_) -> false end,
+            HasInFun_M03 = fun(FName, FArity, Pred) ->
+                lists:any(fun({function, _, FN, FA, Clauses}) when FN =:= FName, FA =:= FArity -> WalkRec_M03(Clauses, Pred); (_) -> false end, Forms_M03)
+            end,
+            HasExactIdxLit_M03 = HasInFun_M03(find_frame_by_seq, 2, fun({call, _, {remote, _, {atom, _, lists}, {atom, _, keyfind}}, [_, {integer, _, _}, _]}) -> true; (_) -> false end),
+            Checks_M03 = [
+                {schema_mismatch, RecFieldNames_M03 =:= [seq, type, payload]},
+                {missing_record_ctor_in_new_frame, HasInFun_M03(new_frame, 3, IsRecCtor_M03)},
+                {missing_record_index_in_frame_seq_index, HasInFun_M03(frame_seq_index, 0, fun({record_index, _, frame, {atom, _, seq}}) -> true; (_) -> false end)},
+                {missing_record_index_in_keyfind, (not HasExactIdxLit_M03) andalso HasInFun_M03(find_frame_by_seq, 2, IsSeqIdx_M03)}
+            ],
+            [Tag || {Tag, false} <- Checks_M03];
+        _ ->
+            [parse_error]
+    end,
+    case {bf_ast_verifier:verify_rules(SourceFile_M03, <<>>, Rules_M03), RecAstAudit_M03} of
+        {{ok, _}, []} ->
+            #{id => <<"ast_record_frames_audit">>, title => <<"AST Record & #frame.seq Index Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified -record(frame, {seq, type, payload}), record instantiation, #frame.seq compile-time offset usage, and lists:keyfind/3.">>};
+        {{ok, _}, RecFails_M03} ->
+            #{id => <<"ast_record_frames_audit">>, title => <<"AST Record & #frame.seq Index Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Record/offset AST checks failed: ~p", [RecFails_M03]))};
+        {{error, AstViolations_M03}, _} ->
+            FirstMsg_M03 = case AstViolations_M03 of
+                [#{message := M_M03} | _] -> M_M03;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_M03]))
+            end,
+            #{id => <<"ast_record_frames_audit">>, title => <<"AST Record & #frame.seq Index Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_M03, error => AstViolations_M03}
+    end
+catch Class_Ast_M03:Err_Ast_M03 ->
+    #{id => <<"ast_record_frames_audit">>, title => <<"AST Record & #frame.seq Index Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [Class_Ast_M03, Err_Ast_M03]))}
 end,
 S1_Records = try
     F0 = record_frames:new_frame(1, ack, ok),
     F1 = record_frames:advance_seq(F0),
     F2 = record_frames:new_frame(3, data, ping),
+    F00 = record_frames:new_frame(0, heartbeat, {tag, 99}),
+    F01 = record_frames:advance_seq(F00),
     SeqIdx = record_frames:frame_seq_index(),
     FindOk = record_frames:find_frame_by_seq([F0, F1, F2], 2),
+    FindFirst = record_frames:find_frame_by_seq([F0, F2, {frame, 3, ack, dup}], 3),
     FindMissing = record_frames:find_frame_by_seq([F0, F1, F2], 99),
-    case {F0, F1, SeqIdx, FindOk, FindMissing} of
-        {{frame, 1, ack, ok}, {frame, 2, ack, ok}, 2, {ok, {frame, 2, ack, ok}}, not_found} ->
-            #{id => <<"record_definitions_and_indices">>, title => <<"Record Macro Definition, Sugar & Field Tuple Indices">>, status => <<"passed">>, time_ms => 8, details => <<"Verified -record(frame, ...) compile-time sugar, #frame.seq evaluation to 2, and lists:keyfind search">>};
+    FindEmpty = record_frames:find_frame_by_seq([], 1),
+    case {F0, F1, F01, SeqIdx, FindOk, FindFirst, FindMissing, FindEmpty} of
+        {{frame, 1, ack, ok},
+         {frame, 2, ack, ok},
+         {frame, 1, heartbeat, {tag, 99}},
+         2,
+         {ok, {frame, 2, ack, ok}},
+         {ok, {frame, 3, data, ping}},
+         not_found,
+         not_found} ->
+            #{id => <<"record_definitions_and_indices">>, title => <<"Record Macro Definition, Sugar & Field Tuple Indices">>, status => <<"passed">>, time_ms => 8, details => <<"Verified -record(frame, ...) compile-time sugar, immutable seq increment, #frame.seq evaluation to 2, and lists:keyfind search with empty/missing edges">>};
         Got_M03 ->
             #{id => <<"record_definitions_and_indices">>, title => <<"Record Macro Definition, Sugar & Field Tuple Indices">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Record mismatch: ~p", [Got_M03]))}
     end
 catch Class_M03:Err_M03 ->
     #{id => <<"record_definitions_and_indices">>, title => <<"Record Macro Definition, Sugar & Field Tuple Indices">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_M03, Err_M03]))}
 end,
-Stages = [CompileStage_M03, S1_Records]
-`), true
+Stages = [CompileStage_M03, S_Ast_M03, S1_Records]
+`, wsDir, wsDir), true
 
 	case "ch04-l04":
 		return fmt.Sprintf(`

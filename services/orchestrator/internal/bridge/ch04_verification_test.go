@@ -63,6 +63,37 @@ sum_map_values(NumericMap) ->
     end, 0, NumericMap).
 `
 
+	recordFramesSolution := `-module(record_frames).
+-export([new_frame/3, advance_seq/1, frame_seq_index/0, find_frame_by_seq/2]).
+
+-record(frame, {
+    seq = 0 :: non_neg_integer(),
+    type = data :: atom(),
+    payload :: term()
+}).
+
+%% @doc Construct and return a frame record populated with Seq, Type, and Payload.
+new_frame(Seq, Type, Payload) ->
+    #frame{seq = Seq, type = Type, payload = Payload}.
+
+%% @doc Return a copy of Frame with its sequence number incremented by one while keeping type and payload unchanged.
+advance_seq(#frame{seq = S} = Frame) ->
+    Frame#frame{seq = S + 1}.
+
+%% @doc Return the compile-time 1-based tuple position index of the seq field inside the frame record.
+frame_seq_index() ->
+    #frame.seq.
+
+%% @doc Search FrameList for the first frame matching TargetSeq by sequence field index, returning an ok pair if found or not_found otherwise.
+find_frame_by_seq(FrameList, TargetSeq) ->
+    case lists:keyfind(TargetSeq, #frame.seq, FrameList) of
+        #frame{} = Frame ->
+            {ok, Frame};
+        false ->
+            not_found
+    end.
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -77,6 +108,11 @@ sum_map_values(NumericMap) ->
 			exerciseID:   "ch04-l02",
 			visibleCount: 4,
 			files:        map[string]string{"src/map_stdlib.erl": mapStdlibSolution},
+		},
+		{
+			exerciseID:   "ch04-l03",
+			visibleCount: 4,
+			files:        map[string]string{"src/record_frames.erl": recordFramesSolution},
 		},
 	}
 
@@ -319,6 +355,109 @@ sum_map_values(NumericMap) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected maps_stdlib_functions stage to fail for merge precedence and update_with bugs, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l03 rejects hardcoded tuple and magic index 2 bypass missing -record/#frame.seq via AST audit", func(t *testing.T) {
+		sessionID := "test-ch04-l03-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		magicNumberBypass := map[string]string{
+			"src/record_frames.erl": `-module(record_frames).
+-export([new_frame/3, advance_seq/1, frame_seq_index/0, find_frame_by_seq/2]).
+
+%% Bypass: no -record(frame, ...), uses raw tuples and hardcoded magic index 2.
+new_frame(Seq, Type, Payload) ->
+    {frame, Seq, Type, Payload}.
+
+advance_seq({frame, Seq, Type, Payload}) ->
+    {frame, Seq + 1, Type, Payload}.
+
+frame_seq_index() ->
+    2.
+
+find_frame_by_seq(FrameList, TargetSeq) ->
+    case lists:keyfind(TargetSeq, 2, FrameList) of
+        {frame, TargetSeq, _, _} = Frame -> {ok, Frame};
+        false -> not_found
+    end.
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l03", magicNumberBypass)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when -record and #frame.seq are bypassed with magic index 2, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_record_frames_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_record_frames_audit stage to fail when record_def/#frame.seq are bypassed, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l03 rejects wrong record update and missing not_found clause in record_definitions_and_indices", func(t *testing.T) {
+		sessionID := "test-ch04-l03-neg-edge"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		buggy := map[string]string{
+			"src/record_frames.erl": `-module(record_frames).
+-export([new_frame/3, advance_seq/1, frame_seq_index/0, find_frame_by_seq/2]).
+
+-record(frame, {seq = 0, type = data, payload}).
+
+new_frame(Seq, Type, Payload) ->
+    #frame{seq = Seq, type = Type, payload = Payload}.
+
+%% Bug: creates a fresh #frame without preserving Frame's type field.
+advance_seq(#frame{seq = S, payload = P}) ->
+    #frame{seq = S + 1, payload = P}.
+
+frame_seq_index() ->
+    #frame.seq.
+
+%% Bug: returns raw false on missing frame instead of not_found.
+find_frame_by_seq(FrameList, TargetSeq) ->
+    case lists:keyfind(TargetSeq, #frame.seq, FrameList) of
+        #frame{} = Frame -> {ok, Frame};
+        false -> false
+    end.
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l03", buggy)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict for lost record type field and raw false miss return, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "record_definitions_and_indices" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected record_definitions_and_indices stage to fail for record update and not_found bugs, stages=%+v", report.Stages)
 		}
 	})
 }

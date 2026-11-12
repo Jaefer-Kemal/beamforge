@@ -663,15 +663,16 @@ sum_map_values(NumericMap) ->
 
 While maps provide dynamic key flexibility, **records** provide named field access with **zero runtime lookup overhead**.
 
-In Erlang, records are not an independent runtime data type. The BEAM compiler translates records directly into standard tagged tuples at compile time:
-\`#sensor_reading{sensor_id = 101, timestamp = 160000, value = 42.5, status = ok}\` literally compiles to \`{sensor_reading, 101, 160000, 42.5, ok}\` in \`.beam\` bytecode.
+In Erlang, records are not a separate runtime type—the compiler translates every record expression directly into a standard **tagged tuple** at compile time:
+\`#sensor_reading{sensor_id = 101, timestamp = 160000, value = 42.5, status = ok}\` compiles into \`{sensor_reading, 101, 160000, 42.5, ok}\` in \`.beam\` bytecode.
 
-In ultra-low-latency protocol engines (such as telecommunication packet switches and high-frequency financial order books), records eliminate hash lookups and key dictionaries entirely while preserving readable field names for developers.
+In low-latency protocol parsers, packet framers, and trading order books, records eliminate hash/trie lookups while keeping field references immune to tuple-offset bugs when schemas evolve.
 
 ## Deep Concept Breakdown & Under the Hood
 
-### 1. Record Declaration & Compilation
-A record is declared at module level using the \`-record\` directive:
+### 1. Record Declaration & Compile-Time Expansion
+
+A record is declared at module scope with the \`-record\` attribute:
 
 \`\`\`erlang
 -record(sensor_reading, {
@@ -682,146 +683,144 @@ A record is declared at module level using the \`-record\` directive:
 }).
 \`\`\`
 
-When compiled into BEAM bytecode:
-- **Construction:** \`#sensor_reading{sensor_id = 42, value = 98.6}\` compiles into \`{sensor_reading, 42, 0, 98.6, ok}\` (substituting defaults for unspecified fields).
-- **Field Extraction:** \`Reading#sensor_reading.value\` compiles directly to the BIF call \`element(4, Reading)\`.
-- **Field Update:** \`Reading#sensor_reading{value = 99.1}\` compiles directly to the BIF call \`setelement(4, Reading, 99.1)\`.
+At compile time, the BEAM transforms record operations directly into tuple instructions:
+- **Construction:** Unspecified fields receive their configured default (or the atom \`undefined\` when no default is given).
+- **Field Extraction:** Reading \`Reading#sensor_reading.value\` compiles directly to an $O(1)$ \`element(4, Reading)\` tuple lookup.
+- **Immutable Update:** \`Reading#sensor_reading{value = 99.1}\` compiles directly to \`setelement(4, Reading, 99.1)\`.
 
-### 2. The Compile-Time Tuple Index: \`#RecordName.FieldName\`
-Notice the crucial difference between accessing a field on an existing variable vs writing the record name directly:
-- \`Var#sensor_reading.value\` extracts the value of \`value\` from the record stored in \`Var\`.
-- **\`#sensor_reading.value\`** (without a variable prefix) is a **compile-time macro** that evaluates to the **1-based integer index position** of \`value\` inside the underlying tuple!
+### 2. Compile-Time Field Offset: \`#RecordName.FieldName\`
 
-In \`-record(sensor_reading, {sensor_id, timestamp = 0, value, status = ok})\`:
-- Position 1 is the tuple tag: \`sensor_reading\`
-- Position 2 is \`sensor_id\` $\\rightarrow$ \`#sensor_reading.sensor_id\` evaluates to \`2\`
-- Position 3 is \`timestamp\` $\\rightarrow$ \`#sensor_reading.timestamp\` evaluates to \`3\`
-- Position 4 is \`value\` $\\rightarrow$ \`#sensor_reading.value\` evaluates to \`4\`
-- Position 5 is \`status\` $\\rightarrow$ \`#sensor_reading.status\` evaluates to \`5\`
+Distinguish between prefixing with a variable vs. prefixing directly with \`#\`:
+- \`Var#sensor_reading.value\` extracts the stored \`value\` field from \`Var\`.
+- **\`#sensor_reading.value\`** (with no variable prefix) evaluates at **compile time** to the **1-based integer tuple position** of that field!
 
-### 3. Keypos Integration with Standard Libraries
-In functions like \`lists:keyfind/3\` or ETS table lookups, standard OTP libraries require a key position integer (\`KeyPos\`). Without records, developers hardcode magic numbers like \`2\` or \`3\`. If a new field is ever added or reordered in the tuple, hardcoded offsets silently corrupt data!
+For \`-record(sensor_reading, {sensor_id, timestamp = 0, value, status = ok})\`:
+- Element 1 is the record tag atom (\`sensor_reading\`).
+- \`#sensor_reading.sensor_id\` evaluates to \`2\`, \`#sensor_reading.timestamp\` evaluates to \`3\`, \`#sensor_reading.value\` evaluates to \`4\`, and \`#sensor_reading.status\` evaluates to \`5\`.
 
-With records, writing:
-\`\`\`erlang
-lists:keyfind(TargetId, #sensor_reading.sensor_id, ReadingList)
-\`\`\`
-instructs the compiler to emit the exact integer index. If the record definition changes in the future, the compiler automatically updates the index across every call site without off-by-one errors.
+### 3. Offset Safety with \`lists:keyfind/3\` & ETS
 
-> [!warning] Syntax Watch: The Dot on Record Updates
-> - **Extraction:** \`Var#rec.field\` (dot before field name).
-> - **Update:** \`Var#rec{field = NewVal}\` (**NO dot** before the curly brace!).
-> Writing \`Var.#rec{...}\` or \`Var#rec.{...}\` is an immediate compile syntax error.
+Passing hardcoded integer positions like \`lists:keyfind(Id, 2, Items)\` silently breaks if someone prepends a new field to the tuple later. Passing \`#sensor_reading.sensor_id\` instructs the compiler to emit the exact 1-based offset automatically across all call sites.
 
-## Parallel Worked Example: Audit Event Logging
+> [!warning] Common Beginner Trap: Dot Placement on Record Updates
+> - **Field Extraction:** \`Var#rec.field\` (**dot** before field name).
+> - **Field Update:** \`Var#rec{field = NewVal}\` (**NO dot** before \`{\`!). Writing \`Var#rec.{...}\` fails to compile.
 
-The following module demonstrates record construction, immutable field updating, compile-time tuple index extraction, and keyed list searching in an audit logging domain:
+## Parallel Worked Example
+
+The module below manages cached proxy routes. Notice how \`register_default_edge/2\` uses default field fallbacks, while \`promote_matching_edge/3\` searches by \`#edge_entry.node_key\` (1-based tuple position \`3\`), extracts an existing field via dot syntax, and returns an updated record copy:
 
 \`\`\`erlang
--module(audit_logger).
--export([create_event/3, escalate_severity/1, severity_keypos/0, find_by_tenant/2]).
+-module(route_cache).
+-export([register_default_edge/2, promote_matching_edge/3]).
 
--record(audit_event, {
-    tenant_id             :: non_neg_integer(),
-    action                :: atom(),
-    severity = low        :: atom(),
-    timestamp = 0         :: non_neg_integer()
+-record(edge_entry, {
+    region = global :: atom(),
+    node_key        :: atom() | integer(),
+    weight = 10     :: non_neg_integer(),
+    healthy = true  :: boolean()
 }).
 
-%% 1. Record instantiation with field defaults
-create_event(TenantId, Action, Severity) ->
-    #audit_event{tenant_id = TenantId, action = Action, severity = Severity}.
+%% ── Phase 1: Instantiation Relying on Record Field Defaults ────────────────
+%% Initializes an edge_entry with weight=10 and healthy=true defaults.
+register_default_edge(Region, NodeKey) ->
+    #edge_entry{region = Region, node_key = NodeKey}.
 
-%% 2. Record immutable update
-escalate_severity(#audit_event{severity = _Current} = Event) ->
-    Event#audit_event{severity = critical}.
-
-%% 3. Compile-time tuple index (#audit_event.severity evaluates to 4)
-severity_keypos() ->
-    #audit_event.severity.
-
-%% 4. Keyed search using compile-time record index
-find_by_tenant(EventList, TargetTenantId) ->
-    case lists:keyfind(TargetTenantId, #audit_event.tenant_id, EventList) of
-        {audit_event, TargetTenantId, _, _, _} = Event ->
-            {ok, Event};
+%% ── Phase 2: Compile-Time Offset Keyfind & Dot/Brace Field Update ──────────
+%% Looks up TargetKey at compile-time offset #edge_entry.node_key (index 3),
+%% reads weight via dot syntax, and returns an immutably updated record.
+promote_matching_edge(Edges, TargetKey, BonusWeight) ->
+    case lists:keyfind(TargetKey, #edge_entry.node_key, Edges) of
+        #edge_entry{} = Found ->
+            CurrentW = Found#edge_entry.weight,
+            {updated, Found#edge_entry{weight = CurrentW + BonusWeight, region = primary}};
         false ->
-            not_found
+            {error, missing_edge}
     end.
 \`\`\`
+
+How the BEAM executes this pipeline:
+- **Phase 1 (\`register_default_edge/2\`)**: Expands at compile time to a 5-element tuple \`{edge_entry, Region, NodeKey, 10, true}\` with zero runtime map overhead.
+- **Phase 2 (\`promote_matching_edge/3\`)**: Compiles \`#edge_entry.node_key\` directly to index \`3\` inside \`lists:keyfind/3\`, matches the record tag cleanly via \`#edge_entry{} = Found\`, reads \`weight\` via \`element/2\`, and allocates a single updated tuple via \`setelement\`.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Record definition at module scope
--record(RecordName, {Field1 = Default1, Field2, ...}).
+%% Compile-time record declaration & operations
+-record(RecordName, {Field1 = Default1, Field2}).
+#RecordName{Field1 = Val1}         %% Construct record
+Var#RecordName.Field1              %% Extract field (O(1) element/2)
+Var#RecordName{Field1 = NewVal}    %% Immutable field update (setelement/3)
+#RecordName.Field1                 %% Compile-time 1-based integer index
 
-%% Record operations
-#RecordName{Field1 = Value1}   %% Instantiation
-Var#RecordName.Field1          %% Field extraction
-Var#RecordName{Field1 = NewVal} %% Non-destructive copy with updated field
-#RecordName.Field1             %% Compile-time 1-based integer index
+%% Integration with keyed C BIF lookup
+lists:keyfind(Key, N, TupleList) -> Tuple | false
+  Types:
+    Key = term()
+    N = pos_integer()              %% e.g. #RecordName.Field1
+    TupleList = [tuple()]
 \`\`\`
+
+> How to read these forms: Every record compiles down to a tuple whose first element is \`RecordName\`, shifting user fields to 1-based indices starting at \`2\`. Open the attached **Reference Cards** for \`record_syntax\` and \`lists:keyfind/3\` documentation.
 
 ## Assignment Specification
 
-Implement protocol framing records and lookup helpers in \`src/record_frames.erl\`.
+Implement protocol framing records and lookup helpers in \`src/record_frames.erl\` using a module-level \`frame\` record whose three ordered fields are \`seq\` (default \`0\`), \`type\` (default \`data\`), and \`payload\` (no default):
 
-### Record Schema: \`frame\`
-Declare a module-level record named \`frame\` with three fields in exact order:
-- \`seq\` with default value \`0\`
-- \`type\` with default value \`data\`
-- \`payload\` with no default value (defaults to \`undefined\`)
-
-### Functions to Implement
-
-#### \`new_frame/3\`
+### 1. \`new_frame(Seq, Type, Payload)\`
 - **Input**:
-  - \`Seq\`: non-negative integer sequence number
-  - \`Type\`: atom indicating the frame type
-  - \`Payload\`: arbitrary term payload
-- **Behavior**: Instantiates and returns a new \`#frame\` record populated with the given fields.
+  - \`Seq\` — Non-negative integer sequence number.
+  - \`Type\` — Atom designating frame kind.
+  - \`Payload\` — Arbitrary Erlang term payload.
+- **Behavior**: Construct and return a \`frame\` record instance populated with \`Seq\`, \`Type\`, and \`Payload\`.
 - **Examples**:
-  - \`new_frame(1, ack, ok)\` $\\rightarrow$ \`{frame, 1, ack, ok}\`
-  - \`new_frame(3, data, ping)\` $\\rightarrow$ \`{frame, 3, data, ping}\`
+  - \`record_frames:new_frame(1, ack, ok)\` returns \`{frame, 1, ack, ok}\`.
+  - \`record_frames:new_frame(3, data, ping)\` returns \`{frame, 3, data, ping}\`.
 
-#### \`advance_seq/1\`
-- **Input**:
-  - \`Frame\`: a \`frame\` record instance
-- **Behavior**: Extracts the current sequence number from \`Frame\` and returns an updated copy of the record with its sequence number incremented by \`1\`.
+### 2. \`advance_seq(Frame)\`
+- **Input**: \`Frame\` — A valid \`frame\` record tuple.
+- **Behavior**: Read the current sequence number from \`Frame\` and return an immutably updated \`frame\` copy with \`seq\` incremented by \`1\`, preserving \`type\` and \`payload\`.
 - **Examples**:
-  - \`advance_seq({frame, 1, ack, ok})\` $\\rightarrow$ \`{frame, 2, ack, ok}\`
-  - \`advance_seq({frame, 10, data, ping})\` $\\rightarrow$ \`{frame, 11, data, ping}\`
+  - \`record_frames:advance_seq({frame, 1, ack, ok})\` returns \`{frame, 2, ack, ok}\`.
+  - \`record_frames:advance_seq({frame, 10, data, ping})\` returns \`{frame, 11, data, ping}\`.
 
-#### \`frame_seq_index/0\`
+### 3. \`frame_seq_index()\`
 - **Input**: None (\`()\`).
-- **Behavior**: Returns the compile-time 1-based integer tuple index of the \`seq\` field in the \`frame\` record using record index syntax.
+- **Behavior**: Return the compile-time 1-based tuple index position of the \`seq\` field inside the \`frame\` record using record-index syntax (not a literal integer).
 - **Examples**:
-  - \`frame_seq_index()\` $\\rightarrow$ \`2\`
+  - \`record_frames:frame_seq_index()\` returns \`2\`.
 
-#### \`find_frame_by_seq/2\`
+### 4. \`find_frame_by_seq(FrameList, TargetSeq)\`
 - **Input**:
-  - \`FrameList\`: a list of \`frame\` records
-  - \`TargetSeq\`: an integer target sequence number
-- **Behavior**: Searches \`FrameList\` for the first frame whose sequence number matches \`TargetSeq\`, using \`lists:keyfind/3\` parameterized with the compile-time sequence field index. Returns \`{ok, Frame}\` when found, or \`not_found\` if absent.
+  - \`FrameList\` — A list of zero or more \`frame\` records.
+  - \`TargetSeq\` — Integer sequence number to locate.
+- **Behavior**: Search \`FrameList\` with \`lists:keyfind/3\` parameterized by the compile-time \`seq\` field index (avoiding hardcoded offset literals). Return an \`ok\` pair carrying the first matching frame if found, or \`not_found\` if absent.
 - **Examples**:
-  - \`find_frame_by_seq([{frame, 1, data, hello}, {frame, 2, ack, world}], 2)\` $\\rightarrow$ \`{ok, {frame, 2, ack, world}}\`
-  - \`find_frame_by_seq([{frame, 1, data, hello}], 99)\` $\\rightarrow$ \`not_found\`
+  - \`record_frames:find_frame_by_seq([{frame, 1, data, hello}, {frame, 2, ack, world}], 2)\` returns \`{ok, {frame, 2, ack, world}}\`.
+  - \`record_frames:find_frame_by_seq([{frame, 1, data, hello}], 99)\` returns \`not_found\`.
 
 ## Rules & Verification Constraints
 
-- Declare \`-record(frame, {seq = 0, type = data, payload}).\` at module scope.
-- Use \`lists:keyfind/3\` in combination with the compile-time field offset for sequence lookups.
-- Do not hardcode magic numbers for tuple positions.`,
+- Declare the module-level \`frame\` record with exact field ordering (\`seq = 0\`, \`type = data\`, \`payload\`).
+- \`bf_ast_verifier\` and AST inspection enforce record usage (\`-record(frame, ...)\`, record syntax construction, \`#frame.seq\` offset extraction without hardcoded position numbers) and \`lists:keyfind/3\`.`,
     otpDocCards: [
       {
         functionName: 'record_syntax',
         module: 'erlang',
         signature: '#record_name{field = Val}',
         typesSpec: ['Compile-time tuple abstraction', 'Zero runtime key dictionary'],
-        description: 'Tagged tuple wrapper providing named field access with O(1) tuple speed.',
+        description: 'Tagged tuple wrapper providing named field access and compile-time #rec.field offsets at O(1) tuple speed.',
         complexityNote: 'Exact same speed and memory footprint as raw tagged tuples.',
         officialUrl: 'https://www.erlang.org/doc/reference_manual/records.html',
+      },
+      {
+        functionName: 'lists:keyfind/3',
+        module: 'lists',
+        signature: 'keyfind(Key, N, TupleList) -> Tuple | false',
+        typesSpec: ['Key = term()', 'N = pos_integer()', 'TupleList = [tuple()]'],
+        description: 'Fast ERTS C BIF searching a list of records/tuples at 1-based element offset N.',
+        complexityNote: 'O(N) native C scan; pairs with #rec.field offsets.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/lists.html#keyfind/3',
       },
     ],
     mentalModelCheck: {
@@ -889,21 +888,21 @@ Declare a module-level record named \`frame\` with three fields in exact order:
         content: `-module(record_frames).
 -export([new_frame/3, advance_seq/1, frame_seq_index/0, find_frame_by_seq/2]).
 
-%% @doc Return a new frame record with the given sequence number, type, and payload.
+%% @doc Construct and return a frame record populated with Seq, Type, and Payload.
 new_frame(_Seq, _Type, _Payload) ->
-    undefined.
+    ok.
 
-%% @doc Return an updated frame record with its sequence number incremented by 1.
-advance_seq(Frame) ->
-    Frame.
+%% @doc Return a copy of Frame with its sequence number incremented by one while keeping type and payload unchanged.
+advance_seq(_Frame) ->
+    ok.
 
-%% @doc Return the compile-time 1-based tuple index of the seq field.
+%% @doc Return the compile-time 1-based tuple position index of the seq field inside the frame record.
 frame_seq_index() ->
-    0.
+    ok.
 
-%% @doc Search a list of frame records for the frame matching TargetSeq.
+%% @doc Search FrameList for the first frame matching TargetSeq by sequence field index, returning an ok pair if found or not_found otherwise.
 find_frame_by_seq(_FrameList, _TargetSeq) ->
-    not_found.`,
+    ok.`,
       },
     ],
     solutionFiles: {
@@ -916,18 +915,22 @@ find_frame_by_seq(_FrameList, _TargetSeq) ->
     payload :: term()
 }).
 
+%% @doc Construct and return a frame record populated with Seq, Type, and Payload.
 new_frame(Seq, Type, Payload) ->
     #frame{seq = Seq, type = Type, payload = Payload}.
 
+%% @doc Return a copy of Frame with its sequence number incremented by one while keeping type and payload unchanged.
 advance_seq(#frame{seq = S} = Frame) ->
     Frame#frame{seq = S + 1}.
 
+%% @doc Return the compile-time 1-based tuple position index of the seq field inside the frame record.
 frame_seq_index() ->
     #frame.seq.
 
+%% @doc Search FrameList for the first frame matching TargetSeq by sequence field index, returning an ok pair if found or not_found otherwise.
 find_frame_by_seq(FrameList, TargetSeq) ->
     case lists:keyfind(TargetSeq, #frame.seq, FrameList) of
-        {frame, TargetSeq, _, _} = Frame ->
+        #frame{} = Frame ->
             {ok, Frame};
         false ->
             not_found
@@ -936,21 +939,21 @@ find_frame_by_seq(FrameList, TargetSeq) ->
     starterCode: `-module(record_frames).
 -export([new_frame/3, advance_seq/1, frame_seq_index/0, find_frame_by_seq/2]).
 
-%% @doc Return a new frame record with the given sequence number, type, and payload.
+%% @doc Construct and return a frame record populated with Seq, Type, and Payload.
 new_frame(_Seq, _Type, _Payload) ->
-    undefined.
+    ok.
 
-%% @doc Return an updated frame record with its sequence number incremented by 1.
-advance_seq(Frame) ->
-    Frame.
+%% @doc Return a copy of Frame with its sequence number incremented by one while keeping type and payload unchanged.
+advance_seq(_Frame) ->
+    ok.
 
-%% @doc Return the compile-time 1-based tuple index of the seq field.
+%% @doc Return the compile-time 1-based tuple position index of the seq field inside the frame record.
 frame_seq_index() ->
-    0.
+    ok.
 
-%% @doc Search a list of frame records for the frame matching TargetSeq.
+%% @doc Search FrameList for the first frame matching TargetSeq by sequence field index, returning an ok pair if found or not_found otherwise.
 find_frame_by_seq(_FrameList, _TargetSeq) ->
-    not_found.`,
+    ok.`,
     solutionCode: `-module(record_frames).
 -export([new_frame/3, advance_seq/1, frame_seq_index/0, find_frame_by_seq/2]).
 
@@ -960,18 +963,22 @@ find_frame_by_seq(_FrameList, _TargetSeq) ->
     payload :: term()
 }).
 
+%% @doc Construct and return a frame record populated with Seq, Type, and Payload.
 new_frame(Seq, Type, Payload) ->
     #frame{seq = Seq, type = Type, payload = Payload}.
 
+%% @doc Return a copy of Frame with its sequence number incremented by one while keeping type and payload unchanged.
 advance_seq(#frame{seq = S} = Frame) ->
     Frame#frame{seq = S + 1}.
 
+%% @doc Return the compile-time 1-based tuple position index of the seq field inside the frame record.
 frame_seq_index() ->
     #frame.seq.
 
+%% @doc Search FrameList for the first frame matching TargetSeq by sequence field index, returning an ok pair if found or not_found otherwise.
 find_frame_by_seq(FrameList, TargetSeq) ->
     case lists:keyfind(TargetSeq, #frame.seq, FrameList) of
-        {frame, TargetSeq, _, _} = Frame ->
+        #frame{} = Frame ->
             {ok, Frame};
         false ->
             not_found
