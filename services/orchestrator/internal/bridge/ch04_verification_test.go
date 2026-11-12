@@ -94,6 +94,28 @@ find_frame_by_seq(FrameList, TargetSeq) ->
     end.
 `
 
+	iolistBuilderSolution := `-module(iolist_builder).
+-export([string_vs_binary_bytes/1, build_http_response_iolist/2, flatten_iolist/1]).
+
+%% @doc Convert CharList into a binary and return a size comparison tuple recording linked-list heap bytes, binary byte size, and the binary itself.
+string_vs_binary_bytes(CharList) ->
+    Bin = list_to_binary(CharList),
+    {size_comparison, length(CharList) * 16, byte_size(Bin), Bin}.
+
+%% @doc Build and return an unflattened HTTP response IOList embedding StatusCodeInt, computed content length, and BodyBin without copying the payload.
+build_http_response_iolist(StatusCodeInt, BodyBin) ->
+    LenBin = integer_to_binary(byte_size(BodyBin)),
+    CodeBin = integer_to_binary(StatusCodeInt),
+    [
+        <<"HTTP/1.1 ">>, CodeBin, <<" OK\r\nContent-Length: ">>,
+        LenBin, <<"\r\n\r\n">>, BodyBin
+    ].
+
+%% @doc Measure total byte length across IoList without extra copying during sizing, flatten it into one contiguous binary, and return the size-and-binary pair.
+flatten_iolist(IoList) ->
+    {iolist_size(IoList), iolist_to_binary(IoList)}.
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -113,6 +135,11 @@ find_frame_by_seq(FrameList, TargetSeq) ->
 			exerciseID:   "ch04-l03",
 			visibleCount: 4,
 			files:        map[string]string{"src/record_frames.erl": recordFramesSolution},
+		},
+		{
+			exerciseID:   "ch04-l04",
+			visibleCount: 3,
+			files:        map[string]string{"src/iolist_builder.erl": iolistBuilderSolution},
 		},
 	}
 
@@ -458,6 +485,102 @@ find_frame_by_seq(FrameList, TargetSeq) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected record_definitions_and_indices stage to fail for record update and not_found bugs, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l04 rejects integer_to_list/manual size bypass missing required binary/IOList BIFs via AST audit", func(t *testing.T) {
+		sessionID := "test-ch04-l04-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		bypass := map[string]string{
+			"src/iolist_builder.erl": `-module(iolist_builder).
+-export([string_vs_binary_bytes/1, build_http_response_iolist/2, flatten_iolist/1]).
+
+string_vs_binary_bytes(CharList) ->
+    Bin = list_to_binary(CharList),
+    {size_comparison, length(CharList) * 16, byte_size(Bin), Bin}.
+
+%% Bypass: avoids integer_to_binary/1 by converting list formatting instead.
+build_http_response_iolist(StatusCodeInt, BodyBin) ->
+    LenBin = list_to_binary(integer_to_list(byte_size(BodyBin))),
+    CodeBin = list_to_binary(integer_to_list(StatusCodeInt)),
+    [<<"HTTP/1.1 ">>, CodeBin, <<" OK\r\nContent-Length: ">>, LenBin, <<"\r\n\r\n">>, BodyBin].
+
+%% Bypass: measures flattened binary with byte_size/1 instead of allocation-free iolist_size/1.
+flatten_iolist(IoList) ->
+    Flat = iolist_to_binary(IoList),
+    {byte_size(Flat), Flat}.
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l04", bypass)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when integer_to_binary/1 and iolist_size/1 are bypassed, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_iolist_builder_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_iolist_builder_audit stage to fail when required binary/IOList BIFs are bypassed, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l04 rejects eager flat-binary HTTP response instead of zero-copy nested IOList", func(t *testing.T) {
+		sessionID := "test-ch04-l04-neg-edge"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		flatCopyBug := map[string]string{
+			"src/iolist_builder.erl": `-module(iolist_builder).
+-export([string_vs_binary_bytes/1, build_http_response_iolist/2, flatten_iolist/1]).
+
+string_vs_binary_bytes(CharList) ->
+    Bin = list_to_binary(CharList),
+    {size_comparison, length(CharList) * 16, byte_size(Bin), Bin}.
+
+%% Bug: eagerly flattens HTTP response into one copied binary instead of returning a zero-copy nested IOList.
+build_http_response_iolist(StatusCodeInt, BodyBin) ->
+    LenBin = integer_to_binary(byte_size(BodyBin)),
+    CodeBin = integer_to_binary(StatusCodeInt),
+    iolist_to_binary([<<"HTTP/1.1 ">>, CodeBin, <<" OK\r\nContent-Length: ">>, LenBin, <<"\r\n\r\n">>, BodyBin]).
+
+flatten_iolist(IoList) ->
+    {iolist_size(IoList), iolist_to_binary(IoList)}.
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l04", flatCopyBug)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when build_http_response_iolist/2 eagerly flattens to a binary, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "binary_and_iolist_construction" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected binary_and_iolist_construction stage to fail when HTTP response is flattened binary instead of IOList, stages=%+v", report.Stages)
 		}
 	})
 }

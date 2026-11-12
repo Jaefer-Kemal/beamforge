@@ -1465,25 +1465,63 @@ init:stop().
 	case "ch04-l04":
 		return `
 T1_Start = erlang:system_time(millisecond),
-T1_Res = try
-    SComp = iolist_builder:string_vs_binary_bytes("hello"),
-    Resp = iolist_builder:build_http_response_iolist(200, <<"OK">>),
-    {Size, Flat} = iolist_builder:flatten_iolist(Resp),
-    case {SComp, Size, Flat} of
-        {{size_comparison, 80, 5, <<"hello">>}, 40, <<"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK">>} ->
-            #{call_str => <<"iolist_builder:string_vs_binary_bytes(\"hello\") + build_http_response_iolist(200, <<\"OK\">>)">>,
-              expected => <<"{{size_comparison, 80, 5, <<\"hello\">>}, 40, <<\"HTTP/1.1 200 OK...OK\">>}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("{~p, ~p, ~p}", [SComp, Size, Flat]))),
-              passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
-        Got1 ->
-            #{call_str => <<"iolist_builder operations">>, expected => <<"{{size_comparison, ...}}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got1]))), passed => false, time_ms => 0}
-    end
-catch C1:R1 ->
-    #{call_str => <<"iolist_builder operations">>, expected => <<"{{size_comparison, ...}}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+T1_Res = try iolist_builder:string_vs_binary_bytes("hello") of
+    {size_comparison, 80, 5, <<"hello">>} = R1 ->
+        #{call_str => <<"iolist_builder:string_vs_binary_bytes(\"hello\")">>,
+          expected => <<"{size_comparison, 80, 5, <<\"hello\">>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
+          time_ms => erlang:system_time(millisecond) - T1_Start};
+    Other1 ->
+        #{call_str => <<"iolist_builder:string_vs_binary_bytes(\"hello\")">>,
+          expected => <<"{size_comparison, 80, 5, <<\"hello\">>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
+catch C1:Err1 ->
+    #{call_str => <<"iolist_builder:string_vs_binary_bytes(\"hello\")">>,
+      expected => <<"{size_comparison, 80, 5, <<\"hello\">>}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try iolist_builder:build_http_response_iolist(200, <<"{\"status\":\"ok\"}">>) of
+    R2 when is_list(R2) ->
+        Flat2 = iolist_to_binary(R2),
+        Exp2 = <<"HTTP/1.1 200 OK\r\nContent-Length: 15\r\n\r\n{\"status\":\"ok\"}">>,
+        case Flat2 =:= Exp2 of
+            true ->
+                #{call_str => <<"iolist_builder:build_http_response_iolist(200, <<\"{\\\"status\\\":\\\"ok\\\"}\">>)">>,
+                  expected => <<"[<<\"HTTP/1.1 \">>, <<\"200\">>, <<\" OK\\r\\nContent-Length: \">>, <<\"15\">>, <<\"\\r\\n\\r\\n\">>, <<\"{\\\"status\\\":\\\"ok\\\"}\">>]">>,
+                  actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
+                  time_ms => erlang:system_time(millisecond) - T2_Start};
+            false ->
+                #{call_str => <<"iolist_builder:build_http_response_iolist(200, <<\"{\\\"status\\\":\\\"ok\\\"}\">>)">>,
+                  expected => <<"[<<\"HTTP/1.1 \">>, <<\"200\">>, <<\" OK\\r\\nContent-Length: \">>, <<\"15\">>, <<\"\\r\\n\\r\\n\">>, <<\"{\\\"status\\\":\\\"ok\\\"}\">>]">>,
+                  actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => false, time_ms => 0}
+        end;
+    Other2 ->
+        #{call_str => <<"iolist_builder:build_http_response_iolist(200, <<\"{\\\"status\\\":\\\"ok\\\"}\">>)">>,
+          expected => <<"[<<\"HTTP/1.1 \">>, <<\"200\">>, <<\" OK\\r\\nContent-Length: \">>, <<\"15\">>, <<\"\\r\\n\\r\\n\">>, <<\"{\\\"status\\\":\\\"ok\\\"}\">>]">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
+catch C2:Err2 ->
+    #{call_str => <<"iolist_builder:build_http_response_iolist(200, <<\"{\\\"status\\\":\\\"ok\\\"}\">>)">>,
+      expected => <<"[<<\"HTTP/1.1 \">>, <<\"200\">>, <<\" OK\\r\\nContent-Length: \">>, <<\"15\">>, <<\"\\r\\n\\r\\n\">>, <<\"{\\\"status\\\":\\\"ok\\\"}\">>]">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try iolist_builder:flatten_iolist([<<"PING">>, [<<"-">>, <<"PONG">>]]) of
+    {9, <<"PING-PONG">>} = R3 ->
+        #{call_str => <<"iolist_builder:flatten_iolist([<<\"PING\">>, [<<\"-\">>, <<\"PONG\">>]])">>,
+          expected => <<"{9, <<\"PING-PONG\">>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))), passed => true,
+          time_ms => erlang:system_time(millisecond) - T3_Start};
+    Other3 ->
+        #{call_str => <<"iolist_builder:flatten_iolist([<<\"PING\">>, [<<\"-\">>, <<\"PONG\">>]])">>,
+          expected => <<"{9, <<\"PING-PONG\">>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
+catch C3:Err3 ->
+    #{call_str => <<"iolist_builder:flatten_iolist([<<\"PING\">>, [<<\"-\">>, <<\"PONG\">>]])">>,
+      expected => <<"{9, <<\"PING-PONG\">>}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -6225,27 +6263,69 @@ Stages = [CompileStage_M03, S_Ast_M03, S1_Records]
 		return fmt.Sprintf(`
 CompileStage_M04 = case code:ensure_loaded(iolist_builder) of
     {module, iolist_builder} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"iolist_builder.erl compiled cleanly; string_vs_binary_bytes/1, build_http_response_iolist/2, flatten_iolist/1 exported">>};
+        Exports_M04 = iolist_builder:module_info(exports),
+        Req_M04 = [{string_vs_binary_bytes, 1}, {build_http_response_iolist, 2}, {flatten_iolist, 1}],
+        Missing_M04 = [FA || FA <- Req_M04, not lists:member(FA, Exports_M04)],
+        case Missing_M04 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"iolist_builder.erl compiled cleanly; string_vs_binary_bytes/1, build_http_response_iolist/2, flatten_iolist/1 exported">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_M04]))}
+        end;
     {error, E_M04} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_M04]))}
 end,
+S_Ast_M04 = try
+    SourceCandidates_M04 = [
+        filename:join(["%s", "src", "iolist_builder.erl"]),
+        filename:join(["%s", "iolist_builder.erl"])
+    ],
+    SourceFile_M04 = case [P || P <- SourceCandidates_M04, filelib:is_regular(P)] of
+        [ValidSrc_M04 | _] -> ValidSrc_M04;
+        [] -> hd(SourceCandidates_M04)
+    end,
+    Rules_M04 = #{
+        required_remote_calls => [{erlang, list_to_binary, 1}, {erlang, byte_size, 1}, {erlang, integer_to_binary, 1}, {erlang, iolist_size, 1}, {erlang, iolist_to_binary, 1}]
+    },
+    case bf_ast_verifier:verify_rules(SourceFile_M04, <<>>, Rules_M04) of
+        {ok, _} ->
+            #{id => <<"ast_iolist_builder_audit">>, title => <<"AST Binary & IOList BIF Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified list_to_binary/1, byte_size/1, integer_to_binary/1, iolist_size/1, and iolist_to_binary/1.">>};
+        {error, AstViolations_M04} ->
+            FirstMsg_M04 = case AstViolations_M04 of
+                [#{message := M_M04} | _] -> M_M04;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_M04]))
+            end,
+            #{id => <<"ast_iolist_builder_audit">>, title => <<"AST Binary & IOList BIF Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_M04, error => AstViolations_M04}
+    end
+catch Class_Ast_M04:Err_Ast_M04 ->
+    #{id => <<"ast_iolist_builder_audit">>, title => <<"AST Binary & IOList BIF Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [Class_Ast_M04, Err_Ast_M04]))}
+end,
 S1_IoList = try
     Comp = iolist_builder:string_vs_binary_bytes("beamforge"),
+    CompEmpty = iolist_builder:string_vs_binary_bytes(""),
     Body = <<"{\"status\":\"ok\"}">>,
     RespIoList = iolist_builder:build_http_response_iolist(200, Body),
+    EmptyResp = iolist_builder:build_http_response_iolist(200, <<>>),
     {IoSz, FlatBin} = iolist_builder:flatten_iolist(RespIoList),
+    FlatNested = iolist_builder:flatten_iolist([<<"PING">>, [<<"-">>, <<"PONG">>]]),
+    FlatEmpty = iolist_builder:flatten_iolist([]),
     ExpectedBin = <<"HTTP/1.1 200 OK\r\nContent-Length: 15\r\n\r\n{\"status\":\"ok\"}">>,
-    case {Comp, IoSz, FlatBin =:= ExpectedBin} of
-        {{size_comparison, 144, 9, <<"beamforge">>}, 54, true} ->
-            #{id => <<"binary_and_iolist_construction">>, title => <<"CharLists vs Binaries & Zero-Copy Nested IOLists">>, status => <<"passed">>, time_ms => 8, details => <<"Verified 16x memory overhead ratio, valid HTTP response IOList nesting, and iolist_size/iolist_to_binary equivalence">>};
+    ExpectedEmptyBin = <<"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n">>,
+    case {Comp, CompEmpty, is_list(RespIoList), is_list(EmptyResp), IoSz, FlatBin =:= ExpectedBin, iolist_to_binary(EmptyResp) =:= ExpectedEmptyBin, FlatNested, FlatEmpty} of
+        {{size_comparison, 144, 9, <<"beamforge">>},
+         {size_comparison, 0, 0, <<>>},
+         true, true, 54, true, true,
+         {9, <<"PING-PONG">>},
+         {0, <<>>}} ->
+            #{id => <<"binary_and_iolist_construction">>, title => <<"CharLists vs Binaries & Zero-Copy Nested IOLists">>, status => <<"passed">>, time_ms => 8, details => <<"Verified 16x heap footprint accounting, unflattened HTTP IOList structure (is_list), empty edges, and iolist_size/iolist_to_binary">>};
         Got_M04 ->
             #{id => <<"binary_and_iolist_construction">>, title => <<"CharLists vs Binaries & Zero-Copy Nested IOLists">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("IOList mismatch: ~p", [Got_M04]))}
     end
 catch Class_M04:Err_M04 ->
     #{id => <<"binary_and_iolist_construction">>, title => <<"CharLists vs Binaries & Zero-Copy Nested IOLists">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_M04, Err_M04]))}
 end,
-Stages = [CompileStage_M04, S1_IoList]
-`), true
+Stages = [CompileStage_M04, S_Ast_M04, S1_IoList]
+`, wsDir, wsDir), true
 
 	case "ch04-l05":
 		if _, err := os.Stat(filepath.Join(session.WorkspaceDir, "packet_parser.erl")); err == nil {
