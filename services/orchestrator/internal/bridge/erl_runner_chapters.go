@@ -1323,27 +1323,68 @@ init:stop().
 	case "ch04-l02":
 		return `
 T1_Start = erlang:system_time(millisecond),
-T1_Res = try
-    L1 = map_stdlib:safe_get_load(#{node_a => 42}, node_a),
-    L2 = map_stdlib:safe_get_load(#{node_a => 42}, node_b),
-    Counts = map_stdlib:increment_tag_counts([auth, db, auth], #{}),
-    Cfg = map_stdlib:merge_configs(#{timeout => 5000, secret_key => <<"old">>}, #{timeout => 10000, secret_key => <<"new">>, port => 8080}),
-    Sum = map_stdlib:sum_map_values(#{a => 10, b => 25, c => 15}),
-    case {L1, L2, Counts, maps:is_key(secret_key, Cfg), maps:get(timeout, Cfg), Sum} of
-        {42, 0, #{auth := 2, db := 1}, false, 10000, 50} ->
-            #{call_str => <<"map_stdlib:safe_get_load + increment_tag_counts + merge_configs + sum_map_values">>,
-              expected => <<"{42, 0, #{auth => 2, db => 1}, false, 10000, 50}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("{~p, ~p, ~p, ~p, ~p, ~p}", [L1, L2, Counts, false, 10000, Sum]))),
-              passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
-        Got1 ->
-            #{call_str => <<"map_stdlib operations">>, expected => <<"{42, 0, ...}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got1]))), passed => false, time_ms => 0}
-    end
-catch C1:R1 ->
-    #{call_str => <<"map_stdlib operations">>, expected => <<"{42, 0, ...}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+T1_Res = try map_stdlib:safe_get_load(#{node_a => 42}, node_b) of
+    0 ->
+        #{call_str => <<"map_stdlib:safe_get_load(#{node_a => 42}, node_b)">>,
+          expected => <<"0">>, actual => <<"0">>, passed => true,
+          time_ms => erlang:system_time(millisecond) - T1_Start};
+    Other1 ->
+        #{call_str => <<"map_stdlib:safe_get_load(#{node_a => 42}, node_b)">>,
+          expected => <<"0">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
+catch C1:Err1 ->
+    #{call_str => <<"map_stdlib:safe_get_load(#{node_a => 42}, node_b)">>,
+      expected => <<"0">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try map_stdlib:increment_tag_counts([api, web, api, db, api], #{}) of
+    #{api := 3, db := 1, web := 1} = R2 when map_size(R2) =:= 3 ->
+        #{call_str => <<"map_stdlib:increment_tag_counts([api, web, api, db, api], #{})">>,
+          expected => <<"#{api => 3, db => 1, web => 1}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
+          time_ms => erlang:system_time(millisecond) - T2_Start};
+    Other2 ->
+        #{call_str => <<"map_stdlib:increment_tag_counts([api, web, api, db, api], #{})">>,
+          expected => <<"#{api => 3, db => 1, web => 1}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
+catch C2:Err2 ->
+    #{call_str => <<"map_stdlib:increment_tag_counts([api, web, api, db, api], #{})">>,
+      expected => <<"#{api => 3, db => 1, web => 1}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try map_stdlib:merge_configs(#{port => 8080, timeout => 5000}, #{port => 9000, secret_key => bad_secret, debug_token => 1234}) of
+    #{port := 9000, timeout := 5000} = R3 when map_size(R3) =:= 2 ->
+        #{call_str => <<"map_stdlib:merge_configs(#{port => 8080, timeout => 5000}, #{port => 9000, secret_key => bad_secret, debug_token => 1234})">>,
+          expected => <<"#{port => 9000, timeout => 5000}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))), passed => true,
+          time_ms => erlang:system_time(millisecond) - T3_Start};
+    Other3 ->
+        #{call_str => <<"map_stdlib:merge_configs(#{port => 8080, timeout => 5000}, #{port => 9000, secret_key => bad_secret, debug_token => 1234})">>,
+          expected => <<"#{port => 9000, timeout => 5000}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
+catch C3:Err3 ->
+    #{call_str => <<"map_stdlib:merge_configs(#{port => 8080, timeout => 5000}, #{port => 9000, secret_key => bad_secret, debug_token => 1234})">>,
+      expected => <<"#{port => 9000, timeout => 5000}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3])), passed => false, time_ms => 0}
+end,
+T4_Start = erlang:system_time(millisecond),
+T4_Res = try map_stdlib:sum_map_values(#{cpu => 25, mem => 45, io => 10}) of
+    80 ->
+        #{call_str => <<"map_stdlib:sum_map_values(#{cpu => 25, mem => 45, io => 10})">>,
+          expected => <<"80">>, actual => <<"80">>, passed => true,
+          time_ms => erlang:system_time(millisecond) - T4_Start};
+    Other4 ->
+        #{call_str => <<"map_stdlib:sum_map_values(#{cpu => 25, mem => 45, io => 10})">>,
+          expected => <<"80">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other4]))), passed => false, time_ms => 0}
+catch C4:Err4 ->
+    #{call_str => <<"map_stdlib:sum_map_values(#{cpu => 25, mem => 45, io => 10})">>,
+      expected => <<"80">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, Err4])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -5964,33 +6005,70 @@ Stages = [CompileStage_M01, S_Ast_M01, S1_Maps]
 		return fmt.Sprintf(`
 CompileStage_M02 = case code:ensure_loaded(map_stdlib) of
     {module, map_stdlib} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"map_stdlib.erl compiled cleanly; safe_get_load/2, increment_tag_counts/2, merge_configs/2, sum_map_values/1 exported">>};
+        Exports_M02 = map_stdlib:module_info(exports),
+        Req_M02 = [{safe_get_load, 2}, {increment_tag_counts, 2}, {merge_configs, 2}, {sum_map_values, 1}],
+        Missing_M02 = [FA || FA <- Req_M02, not lists:member(FA, Exports_M02)],
+        case Missing_M02 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"map_stdlib.erl compiled cleanly; safe_get_load/2, increment_tag_counts/2, merge_configs/2, sum_map_values/1 exported">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_M02]))}
+        end;
     {error, E_M02} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_M02]))}
+end,
+S_Ast_M02 = try
+    SourceCandidates_M02 = [
+        filename:join(["%s", "src", "map_stdlib.erl"]),
+        filename:join(["%s", "map_stdlib.erl"])
+    ],
+    SourceFile_M02 = case [P || P <- SourceCandidates_M02, filelib:is_regular(P)] of
+        [ValidSrc_M02 | _] -> ValidSrc_M02;
+        [] -> hd(SourceCandidates_M02)
+    end,
+    Rules_M02 = #{
+        required_remote_calls => [{maps, get, 3}, {maps, update_with, 4}, {maps, merge, 2}, {maps, without, 2}, {maps, fold, 3}],
+        forbidden_remote_calls => [{maps, to_list, 1}]
+    },
+    case bf_ast_verifier:verify_rules(SourceFile_M02, <<>>, Rules_M02) of
+        {ok, _} ->
+            #{id => <<"ast_map_stdlib_audit">>, title => <<"AST Maps Stdlib BIF Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified maps:get/3, maps:update_with/4, maps:merge/2, maps:without/2, maps:fold/3 and zero maps:to_list/1 bypasses.">>};
+        {error, AstViolations_M02} ->
+            FirstMsg_M02 = case AstViolations_M02 of
+                [#{message := M_M02} | _] -> M_M02;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_M02]))
+            end,
+            #{id => <<"ast_map_stdlib_audit">>, title => <<"AST Maps Stdlib BIF Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_M02, error => AstViolations_M02}
+    end
+catch Class_Ast_M02:Err_Ast_M02 ->
+    #{id => <<"ast_map_stdlib_audit">>, title => <<"AST Maps Stdlib BIF Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [Class_Ast_M02, Err_Ast_M02]))}
 end,
 S1_Stdlib = try
     L1 = map_stdlib:safe_get_load(#{node_a => 75, node_b => 20}, node_a),
     L2 = map_stdlib:safe_get_load(#{node_a => 75, node_b => 20}, node_c),
     Tags = [auth, db, auth, cache, auth, db],
     Counts = map_stdlib:increment_tag_counts(Tags, #{db => 5}),
+    CountsEmpty = map_stdlib:increment_tag_counts([], #{db => 5}),
     DefaultCfg = #{timeout => 5000, secret_key => <<"old_secret">>, port => 80},
     UserCfg = #{timeout => 15000, secret_key => <<"new_secret">>, debug_token => <<"tok">>, retries => 3},
     MergedCfg = map_stdlib:merge_configs(DefaultCfg, UserCfg),
     SumVal = map_stdlib:sum_map_values(#{core1 => 10, core2 => 20, core3 => 30, core4 => 40}),
-    case {L1, L2, Counts, MergedCfg, SumVal} of
+    SumEmpty = map_stdlib:sum_map_values(#{}),
+    case {L1, L2, Counts, CountsEmpty, MergedCfg, SumVal, SumEmpty} of
         {75, 0,
          #{auth := 3, db := 7, cache := 1},
+         #{db := 5},
          #{timeout := 15000, port := 80, retries := 3},
-         100} when not is_map_key(secret_key, MergedCfg) andalso not is_map_key(debug_token, MergedCfg) ->
-            #{id => <<"maps_stdlib_functions">>, title => <<"Standard Library Functions: get/3, update_with/4, merge/2, without/2, fold/3">>, status => <<"passed">>, time_ms => 8, details => <<"Verified maps:get fallback, maps:update_with counter accumulation, maps:merge override with sensitive key stripping, and maps:fold accumulation">>};
+         100, 0} when map_size(Counts) =:= 3 andalso map_size(CountsEmpty) =:= 1 andalso map_size(MergedCfg) =:= 3 andalso not is_map_key(secret_key, MergedCfg) andalso not is_map_key(debug_token, MergedCfg) ->
+            #{id => <<"maps_stdlib_functions">>, title => <<"Standard Library Functions: get/3, update_with/4, merge/2, without/2, fold/3">>, status => <<"passed">>, time_ms => 8, details => <<"Verified maps:get fallback, maps:update_with counter accumulation, maps:merge override with sensitive key stripping, empty-map edges, and maps:fold sum">>};
         Got_M02 ->
             #{id => <<"maps_stdlib_functions">>, title => <<"Standard Library Functions: get/3, update_with/4, merge/2, without/2, fold/3">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Stdlib mismatch: ~p", [Got_M02]))}
     end
 catch Class_M02:Err_M02 ->
     #{id => <<"maps_stdlib_functions">>, title => <<"Standard Library Functions: get/3, update_with/4, merge/2, without/2, fold/3">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_M02, Err_M02]))}
 end,
-Stages = [CompileStage_M02, S1_Stdlib]
-`), true
+Stages = [CompileStage_M02, S_Ast_M02, S1_Stdlib]
+`, wsDir, wsDir), true
 
 	case "ch04-l03":
 		return fmt.Sprintf(`

@@ -38,6 +38,31 @@ is_admin_session(_) ->
     false.
 `
 
+	mapStdlibSolution := `-module(map_stdlib).
+-export([safe_get_load/2, increment_tag_counts/2, merge_configs/2, sum_map_values/1]).
+
+%% @doc Return the integer load recorded for NodeAtom in NodeMetricsMap, or zero when NodeAtom is absent.
+safe_get_load(NodeMetricsMap, NodeAtom) ->
+    maps:get(NodeAtom, NodeMetricsMap, 0).
+
+%% @doc Fold across TagList and update InitialCountsMap so existing tags increment by one and unseen tags initialize to one.
+increment_tag_counts(TagList, InitialCountsMap) ->
+    lists:foldl(fun(Tag, AccMap) ->
+        maps:update_with(Tag, fun(Count) -> Count + 1 end, 1, AccMap)
+    end, InitialCountsMap, TagList).
+
+%% @doc Merge UserCfgMap overrides over DefaultCfgMap and remove secret_key and debug_token entries from the resulting map.
+merge_configs(DefaultCfgMap, UserCfgMap) ->
+    Merged = maps:merge(DefaultCfgMap, UserCfgMap),
+    maps:without([secret_key, debug_token], Merged).
+
+%% @doc Sum all numeric values stored in NumericMap using direct map folding without intermediate list allocation, returning zero for an empty map.
+sum_map_values(NumericMap) ->
+    maps:fold(fun(_Key, Val, Acc) ->
+        Acc + Val
+    end, 0, NumericMap).
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -47,6 +72,11 @@ is_admin_session(_) ->
 			exerciseID:   "ch04-l01",
 			visibleCount: 4,
 			files:        map[string]string{"src/map_registry.erl": mapRegistrySolution},
+		},
+		{
+			exerciseID:   "ch04-l02",
+			visibleCount: 4,
+			files:        map[string]string{"src/map_stdlib.erl": mapStdlibSolution},
 		},
 	}
 
@@ -194,6 +224,101 @@ is_admin_session(_) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected maps_operations stage to fail for hardcoded login_count and role-only check, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l02 rejects maps:to_list/1 bypass and missing required maps stdlib calls via AST audit", func(t *testing.T) {
+		sessionID := "test-ch04-l02-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		toListBypass := map[string]string{
+			"src/map_stdlib.erl": `-module(map_stdlib).
+-export([safe_get_load/2, increment_tag_counts/2, merge_configs/2, sum_map_values/1]).
+
+safe_get_load(NodeMetricsMap, NodeAtom) ->
+    maps:get(NodeAtom, NodeMetricsMap, 0).
+
+increment_tag_counts(TagList, InitialCountsMap) ->
+    lists:foldl(fun(Tag, Acc) -> maps:update_with(Tag, fun(C) -> C + 1 end, 1, Acc) end, InitialCountsMap, TagList).
+
+merge_configs(DefaultCfgMap, UserCfgMap) ->
+    maps:without([secret_key, debug_token], maps:merge(DefaultCfgMap, UserCfgMap)).
+
+%% Bypass: allocates intermediate tuple list with maps:to_list/1 instead of maps:fold/3.
+sum_map_values(NumericMap) ->
+    lists:foldl(fun({_K, V}, Acc) -> Acc + V end, 0, maps:to_list(NumericMap)).
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l02", toListBypass)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when maps:to_list/1 is used instead of maps:fold/3, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_map_stdlib_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_map_stdlib_audit stage to fail on forbidden maps:to_list/1 and missing maps:fold/3, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l02 rejects inverted merge precedence and non-additive update_with bug", func(t *testing.T) {
+		sessionID := "test-ch04-l02-neg-edge"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		buggy := map[string]string{
+			"src/map_stdlib.erl": `-module(map_stdlib).
+-export([safe_get_load/2, increment_tag_counts/2, merge_configs/2, sum_map_values/1]).
+
+safe_get_load(NodeMetricsMap, NodeAtom) ->
+    maps:get(NodeAtom, NodeMetricsMap, 0).
+
+%% Bug: overwrites existing count back to 1 instead of C + 1.
+increment_tag_counts(TagList, InitialCountsMap) ->
+    lists:foldl(fun(Tag, Acc) -> maps:update_with(Tag, fun(_C) -> 1 end, 1, Acc) end, InitialCountsMap, TagList).
+
+%% Bug: inverted merge order lets DefaultCfgMap overwrite UserCfgMap overrides.
+merge_configs(DefaultCfgMap, UserCfgMap) ->
+    maps:without([secret_key, debug_token], maps:merge(UserCfgMap, DefaultCfgMap)).
+
+sum_map_values(NumericMap) ->
+    maps:fold(fun(_K, V, Acc) -> Acc + V end, 0, NumericMap).
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l02", buggy)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict for inverted merge precedence and reset counter bug, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "maps_stdlib_functions" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected maps_stdlib_functions stage to fail for merge precedence and update_with bugs, stages=%+v", report.Stages)
 		}
 	})
 }
