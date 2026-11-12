@@ -2726,6 +2726,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l04` (`VERIFIED 100% PASSED`, score=100, 3 stages in `1.37s`, `1.713s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l04 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `11.50s` / `11.594s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 159: Pedagogical Despoiling & Live Tri-Verification of Chapter 9 Lecture 5 (`ch09-l05`)
+- [x] **159.1: Remove Exact Solution Spoiling from Concept Guide, Add `quota_registry` PWE & 10/10 `@doc` Contracts (`ch09-l05`: `mnesia_ledger.erl`)**:
+  - Removed verbatim `#wallet{}` / `TransferFun` solution spoilers from `## Deep Concept Breakdown & Under the Hood` and replaced the incomplete `inventory_txn_store` PWE with a runnable, domain-disjoint Mnesia module: `quota_registry.erl` (`boot_registry/0`, `set_pool/3`, `grant_seat/1`, `read_pool/1`) demonstrating idempotent `{already_exists, ...}` table creation, record update syntax (`Pool#seat_pool{...}`), and transactional abort rollback.
+  - Upgraded `conceptMarkdown` (`ch09.ts`) to strict Spec 04 section order and structured `Input`/`Behavior`/`Examples` blocks with zero syntax spoilers.
+  - Added 10/10 `@doc` contracts across `starterCode`, `files[0].content`, `solutionCode`, `solutionFiles['src/mnesia_ledger.erl']`, and `ch09_verification_test.go`, converted `starterCode` stubs (`when Amount > 0`, `{error, not_implemented}.`, `{error, not_found}.`) to neutral un-spoiled `ok.` stubs (zero `-spec`), and made `visibleTestCases` `tc2` self-contained via explicit `setup_mnesia_table/0` and seed upserts.
+- [x] **159.2: Mandatory Live Tri-Verification & Compiler Suite (`ch09-l05`)**:
+  - **Parallel Worked Example (`quota_registry.erl`)**: Extracted from `ch09.ts`, compiled with `erlc.exe -Wall` (exit code 0, 0 warnings), and verified live idempotent startup, transactional seat increments, and quota abort rollback via escript (`PWE_CH09_L05_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe` exit code 0) and executed all 4 neutral stubs safely (`STARTER_CH09_L05 exports=true stubs={ok,ok,ok,ok}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `erlc.exe -Wall +debug_info` (exit code 0, 0 warnings), passed `bf_ast_verifier` (`record_def`, `mnesia:transaction/1`, `mnesia:read/2`, `mnesia:write/1`, `mnesia:abort/1`), and passed 2/2 visible tests + missing-account/not-found edge cases (`SOLUTION_CH09_L05_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l05` (`VERIFIED 100% PASSED`, score=100, 3 stages in `1.26s`, `1.601s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l05 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `10.34s` / `10.358s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 

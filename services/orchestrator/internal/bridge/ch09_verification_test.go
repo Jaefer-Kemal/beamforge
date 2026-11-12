@@ -267,6 +267,7 @@ get_subscribers(Topic) ->
 
 -record(wallet, {owner, balance}).
 
+%% @doc Start Mnesia and ensure the ram_copies wallet table exists and is ready.
 setup_mnesia_table() ->
     mnesia:start(),
     case mnesia:create_table(wallet, [
@@ -279,6 +280,7 @@ setup_mnesia_table() ->
     ok = mnesia:wait_for_tables([wallet], 2000),
     ok.
 
+%% @doc Write or update Owner's wallet Balance inside a Mnesia transaction.
 upsert_wallet(Owner, Balance) ->
     Tx = fun() ->
         mnesia:write(#wallet{owner = Owner, balance = Balance})
@@ -288,6 +290,7 @@ upsert_wallet(Owner, Balance) ->
         {aborted, Reason} -> {error, Reason}
     end.
 
+%% @doc Atomically transfer positive Amount from FromOwner to ToOwner with abort rollback.
 atomic_transfer(FromOwner, ToOwner, Amount) when Amount > 0 ->
     Tx = fun() ->
         FromBal = case mnesia:read(wallet, FromOwner) of
@@ -312,6 +315,7 @@ atomic_transfer(FromOwner, ToOwner, Amount) when Amount > 0 ->
         {aborted, Reason} -> {error, Reason}
     end.
 
+%% @doc Look up Owner's balance in Mnesia, returning {ok, Balance} or {error, not_found}.
 get_wallet_balance(Owner) ->
     Tx = fun() ->
         case mnesia:read(wallet, Owner) of

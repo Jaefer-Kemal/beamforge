@@ -1702,138 +1702,156 @@ get_subscribers(Topic) ->
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-ETS gives you nanosecond-speed single-operation in-memory lookups. **However, ETS has no multi-row ACID transactions.**
+ETS gives you nanosecond-speed single-operation off-heap lookups, **but ETS provides no multi-row ACID transactions**.
 
-Consider transferring $50 from Alice's wallet to Bob's wallet:
-1. In ETS, you call \`ets:update_counter\` to subtract $50 from Alice.
-2. The server crashes due to power outage, OOM, or hardware failure before step 2 executes.
-3. Bob never receives the $50, and Alice's money has permanently vanished!
-
-For financial ledgers, inventory balances, and replicated state machines, you need **multi-operation ACID transactions**. Erlang includes **Mnesia**, an ACID-compliant distributed DBMS embedded directly in the BEAM VM.
+If you debit Account A in one ETS operation and the worker crashes before crediting Account B in a second ETS operation, money vanishes permanently. Financial ledgers, quota systems, and replicated cluster configuration require all-or-nothing **ACID transactions** across multiple records. Erlang ships **Mnesia** directly inside OTP to deliver embedded ACID transactions with replication and optional disk persistence.
 
 > [!NOTE]
-> **Key Capabilities of Mnesia:**
-> - **Embedded in BEAM**: Zero network socket roundtrip; queries execute directly in VM memory.
-> - **Multi-Row ACID Transactions**: All operations inside \`mnesia:transaction(Fun)\` commit together or roll back completely on failure.
-> - **Hybrid Storage Modes**: Tables can be stored in RAM (\`ram_copies\`), on disk using DETS (\`disc_copies\`), or logged to disk (\`disc_only_copies\`).
-> - **Cluster Replication**: Tables replicate seamlessly across connected BEAM nodes.
+> **Mnesia Storage Modes:**
+> - **\`ram_copies\`**: Pure off-heap RAM (fastest; volatile on full cluster stop).
+> - **\`disc_copies\`**: RAM + disk write-ahead log (fast reads, crash-durable).
+> - **\`disc_only_copies\`**: DETS disk storage without RAM caching.
 
 ## Deep Concept Breakdown & Under the Hood
 
-### Record-Based Table Definitions
+### 1. Defining Record Schemas & Creating Tables
 
-Mnesia tables are defined from Erlang records:
+Every Mnesia table maps an Erlang \`-record(TabName, {KeyField, ...})\` whose first field is the primary key. Calling \`mnesia:start/0\` starts the local Mnesia application, \`mnesia:create_table/2\` registers the schema using \`record_info(fields, TabName)\` plus storage placement (\`{ram_copies, [node()]}\`), and \`mnesia:wait_for_tables/2\` blocks until tables are loaded and writable. If a table already exists from an earlier call, \`mnesia:create_table/2\` returns \`{aborted, {already_exists, TabName}}\`.
 
-\`\`\`erlang
--record(wallet, {owner, balance}).
+### 2. Inside \`mnesia:transaction/1\`: Locks & Transaction Journals
 
-setup_tables() ->
-    mnesia:start(),
-    mnesia:create_table(wallet, [
-        {attributes, record_info(fields, wallet)},
-        {ram_copies, [node()]}
-    ]),
-    mnesia:wait_for_tables([wallet], 2000).
-\`\`\`
+When you pass a zero-arity fun \`fun() -> ... end\` to \`mnesia:transaction/1\`:
+- Reads (\`mnesia:read/2\`) acquire shared read locks across the transaction.
+- Writes (\`mnesia:write/1\`) acquire exclusive write locks and buffer changes in a per-transaction memory log rather than mutating tables immediately.
+- On normal completion, Mnesia commits every buffered write atomically and returns \`{atomic, Value}\`.
 
-### Atomic Transactions (\`mnesia:transaction/1\`)
+### 3. Instant Rollback via \`mnesia:abort/1\`
 
-All reads and writes inside a transactional fun acquire row-level locks and buffer modifications in an in-memory transaction store:
-
-\`\`\`erlang
-TransferFun = fun() ->
-    case mnesia:read(wallet, FromOwner) of
-        [] -> mnesia:abort(account_not_found);
-        [#wallet{balance = FromBal}] when FromBal < Amount ->
-            mnesia:abort(insufficient_funds);
-        [#wallet{balance = FromBal}] ->
-            case mnesia:read(wallet, ToOwner) of
-                [] -> mnesia:abort(account_not_found);
-                [#wallet{balance = ToBal}] ->
-                    mnesia:write(#wallet{owner = FromOwner, balance = FromBal - Amount}),
-                    mnesia:write(#wallet{owner = ToOwner, balance = ToBal + Amount}),
-                    {FromBal - Amount, ToBal + Amount}
-            end
-    end
-end,
-case mnesia:transaction(TransferFun) of
-    {atomic, Result} -> {ok, Result};
-    {aborted, Reason} -> {error, Reason}
-end.
-\`\`\`
-
-### The Guarantee of \`mnesia:abort/1\`
-
-When \`mnesia:abort(Reason)\` is called (or if the transaction fun crashes with an exception):
-- **100% of writes performed in that transaction are discarded.**
-- No partial writes ever touch the underlying table!
-- All acquired locks are released immediately.
-
-### Parallel Worked Example: Inventory Reservation Store
-
-\`\`\`erlang
--module(inventory_txn_store).
--record(item, {sku, quantity}).
--export([init_store/0, reserve_item/2]).
-
-init_store() ->
-    mnesia:start(),
-    mnesia:create_table(item, [{attributes, record_info(fields, item)}]),
-    mnesia:wait_for_tables([item], 2000).
-
-reserve_item(Sku, Qty) ->
-    Txn = fun() ->
-        case mnesia:read(item, Sku) of
-            [] -> mnesia:abort(item_not_found);
-            [#item{quantity = Stock}] when Stock < Qty ->
-                mnesia:abort(out_of_stock);
-            [#item{quantity = Stock}] ->
-                mnesia:write(#item{sku = Sku, quantity = Stock - Qty}),
-                Stock - Qty
-        end
-    end,
-    case mnesia:transaction(Txn) of
-        {atomic, Remaining} -> {ok, Remaining};
-        {aborted, Reason} -> {error, Reason}
-    end.
-\`\`\`
+If validation fails mid-transaction (for instance, missing records or failed balance checks) or an exception is raised, calling \`mnesia:abort(Reason)\` immediately unwinds the transaction, discards 100% of buffered writes, releases all held locks, and returns \`{aborted, Reason}\` to the caller—leaving existing table rows untouched.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Official Mnesia Calls (mnesia)
+%% Official Mnesia Signatures (mnesia)
 mnesia:start() -> ok | {error, Reason}
 mnesia:create_table(Name, TabDef) -> {atomic, ok} | {aborted, Reason}
+  Types:
+    Name = atom()
+    TabDef = [{attributes, [atom()]} | {ram_copies, [node()]} | {disc_copies, [node()]}]
+
+mnesia:wait_for_tables(TabList, Timeout) -> ok | {timeout, BadTabList} | {error, Reason}
 mnesia:transaction(Fun) -> {atomic, Result} | {aborted, Reason}
-mnesia:read(Tab, Key) -> [record()]
+mnesia:read(Tab, Key) -> [Record :: tuple()]
 mnesia:write(Record) -> ok
 mnesia:abort(Reason) -> no_return()
 \`\`\`
 
+Consult the attached documentation cards below for lock behavior and return-type contracts.
+
+## Parallel Worked Example: Org Seat Quota Registry
+
+Consider a separate domain: an organization seat allocation registry (\`quota_registry\`) tracking active seats against a maximum seat limit using record \`#seat_pool{org, allocated, limit}\`:
+
+\`\`\`erlang
+-module(quota_registry).
+-export([boot_registry/0, set_pool/3, grant_seat/1, read_pool/1]).
+
+-record(seat_pool, {org, allocated, limit}).
+
+%% @doc Start Mnesia and ensure the ram_copies seat_pool table is ready.
+boot_registry() ->
+    ok = mnesia:start(),
+    case mnesia:create_table(seat_pool, [
+        {attributes, record_info(fields, seat_pool)},
+        {ram_copies, [node()]}
+    ]) of
+        {atomic, ok} -> ok;
+        {aborted, {already_exists, seat_pool}} -> ok
+    end,
+    mnesia:wait_for_tables([seat_pool], 2000).
+
+%% @doc Store or overwrite an organization seat pool atomically.
+set_pool(OrgId, Allocated, Limit) ->
+    Txn = fun() ->
+        mnesia:write(#seat_pool{org = OrgId, allocated = Allocated, limit = Limit})
+    end,
+    case mnesia:transaction(Txn) of
+        {atomic, ok} -> ok;
+        {aborted, Reason} -> {error, Reason}
+    end.
+
+%% @doc Attempt to increment allocated seats by 1 if capacity allows.
+grant_seat(OrgId) ->
+    Txn = fun() ->
+        case mnesia:read(seat_pool, OrgId) of
+            [] ->
+                mnesia:abort(unknown_org);
+            [#seat_pool{allocated = Used, limit = Cap}] when Used + 1 > Cap ->
+                mnesia:abort(quota_exceeded);
+            [#seat_pool{allocated = Used} = Pool] ->
+                NewUsed = Used + 1,
+                mnesia:write(Pool#seat_pool{allocated = NewUsed}),
+                NewUsed
+        end
+    end,
+    case mnesia:transaction(Txn) of
+        {atomic, NewUsed} -> {ok, NewUsed};
+        {aborted, Reason} -> {error, Reason}
+    end.
+
+%% @doc Read the current allocated and limit counts inside a transaction.
+read_pool(OrgId) ->
+    Txn = fun() ->
+        case mnesia:read(seat_pool, OrgId) of
+            [#seat_pool{allocated = Used, limit = Cap}] -> {ok, Used, Cap};
+            [] -> {error, unknown_org}
+        end
+    end,
+    case mnesia:transaction(Txn) of
+        {atomic, Reply} -> Reply;
+        {aborted, Reason} -> {error, Reason}
+    end.
+\`\`\`
+
+### What Mnesia Does at Runtime
+
+- **Idempotent Table Initialization (\`boot_registry/0\`)**: Matches both \`{atomic, ok}\` and \`{aborted, {already_exists, seat_pool}}\` before invoking \`mnesia:wait_for_tables/2\`, making repeated boot calls safe across tests and supervisor restarts.
+- **Record Mutation Syntax**: \`Pool#seat_pool{allocated = NewUsed}\` clones the record while preserving untouched fields (\`org\`, \`limit\`) before passing it to \`mnesia:write/1\`.
+- **Clean Abort Mapping**: When \`grant_seat/1\` detects missing organizations or exceeded limits, \`mnesia:abort/1\` rolls back the transaction and outer pattern matching converts \`{aborted, Reason}\` into a standard Erlang \`{error, Reason}\` tuple.
+
 ## Assignment Specification
 
-Implement module \`mnesia_ledger\` exporting:
-- Define record: \`-record(wallet, {owner, balance}).\`
-1. \`setup_mnesia_table/0 -> ok\`:
-   - Calls \`mnesia:start()\`.
-   - Creates table \`wallet\` with \`[{attributes, record_info(fields, wallet)}, {ram_copies, [node()]}]\` (handling \`{already_exists, wallet}\`).
-   - Waits for the table via \`mnesia:wait_for_tables([wallet], 2000)\` and returns \`ok\`.
-2. \`upsert_wallet(Owner, Balance) -> ok\`:
-   - Runs a transaction that calls \`mnesia:write(#wallet{owner = Owner, balance = Balance})\`.
-   - Returns \`ok\`.
-3. \`atomic_transfer(FromOwner, ToOwner, Amount) -> {ok, NewFrom, NewTo} | {error, Reason}\`:
-   - Enforces \`Amount > 0\`.
-   - Reads \`FromOwner\` and \`ToOwner\`. If either is missing, calls \`mnesia:abort(account_not_found)\`.
-   - If \`FromBal < Amount\`, calls \`mnesia:abort(insufficient_funds)\`.
-   - Writes updated balances for both accounts and returns \`{FromBal - Amount, ToBal + Amount}\`.
-   - Returns \`{ok, NewFrom, NewTo}\` on commit, or \`{error, Reason}\` on abort.
-4. \`get_wallet_balance(Owner) -> {ok, integer()} | {error, not_found}\`:
-   - Reads the record in a transaction and returns \`{ok, Balance}\` or \`{error, not_found}\`.
+Implement module \`src/mnesia_ledger.erl\` defining a \`wallet\` record with fields \`owner\` and \`balance\`, and exporting \`setup_mnesia_table/0\`, \`upsert_wallet/2\`, \`atomic_transfer/3\`, and \`get_wallet_balance/1\`.
+
+### \`setup_mnesia_table/0\`
+- **Input**: None.
+- **Behavior**: Starts Mnesia, idempotently creates the \`wallet\` table backed by \`ram_copies\` on \`node()\` with attributes derived from the \`wallet\` record definition, waits up to \`2000\` ms for table availability, and returns \`ok\`.
+- **Examples**:
+  - \`mnesia_ledger:setup_mnesia_table()\` returns \`ok\`.
+
+### \`upsert_wallet/2\`
+- **Input**: Account identifier \`Owner\`, integer balance \`Balance\`.
+- **Behavior**: Executes a Mnesia transaction writing a \`wallet\` record for \`Owner\` with \`Balance\`, returning \`ok\` upon commit (or \`{error, Reason}\` if aborted).
+- **Examples**:
+  - \`mnesia_ledger:upsert_wallet(alice, 100)\` returns \`ok\`.
+
+### \`atomic_transfer/3\`
+- **Input**: Source account \`FromOwner\`, destination account \`ToOwner\`, strictly positive transfer integer \`Amount\`.
+- **Behavior**: Inside a single Mnesia transaction, reads both accounts; aborts with \`account_not_found\` if either wallet is missing, or \`insufficient_funds\` if \`FromOwner\` has less than \`Amount\`. Otherwise updates both records atomically by subtracting \`Amount\` from \`FromOwner\` and adding \`Amount\` to \`ToOwner\`, returning \`{ok, NewFromBalance, NewToBalance}\` on commit or \`{error, Reason}\` on abort with zero balance modifications.
+- **Examples**:
+  - After seeding \`alice\` with \`100\` and \`bob\` with \`50\`, \`mnesia_ledger:atomic_transfer(alice, bob, 40)\` returns \`{ok, 60, 90}\`.
+  - Attempting \`mnesia_ledger:atomic_transfer(alice, bob, 500)\` returns \`{error, insufficient_funds}\` and leaves both balances unchanged.
+
+### \`get_wallet_balance/1\`
+- **Input**: Account identifier \`Owner\`.
+- **Behavior**: Reads \`Owner\`'s wallet inside a transaction and returns \`{ok, Balance}\` when present, or \`{error, not_found}\` when absent.
+- **Examples**:
+  - \`mnesia_ledger:get_wallet_balance(alice)\` returns \`{ok, 60}\`.
 
 ## Rules & Verification Constraints
-- Must define \`-record(wallet, {owner, balance}).\`
-- Must use \`mnesia:transaction/1\`, \`mnesia:read/2\`, \`mnesia:write/1\`, and \`mnesia:abort/1\`.
-- Overdraft attempts must abort and leave both account balances completely unchanged.
+
+- **Required Constructs**: \`bf_ast_verifier\` enforces a \`-record(...)\` definition (\`record_def\`) alongside remote calls \`mnesia:transaction/1\`, \`mnesia:read/2\`, \`mnesia:write/1\`, and \`mnesia:abort/1\`.
+- **Atomicity Guarantee**: Failed transfers (\`insufficient_funds\` or \`account_not_found\`) must abort cleanly and leave all wallet balances unaltered.
 `,
     otpDocCards: [
       {
@@ -1922,23 +1940,28 @@ Implement module \`mnesia_ledger\` exporting:
 
 -record(wallet, {owner, balance}).
 
+%% @doc Start Mnesia and ensure the ram_copies wallet table exists and is ready.
 setup_mnesia_table() ->
     ok.
 
+%% @doc Write or update Owner's wallet Balance inside a Mnesia transaction.
 upsert_wallet(Owner, Balance) ->
     ok.
 
-atomic_transfer(FromOwner, ToOwner, Amount) when Amount > 0 ->
-    {error, not_implemented}.
+%% @doc Atomically transfer positive Amount from FromOwner to ToOwner with abort rollback.
+atomic_transfer(FromOwner, ToOwner, Amount) ->
+    ok.
 
+%% @doc Look up Owner's balance in Mnesia, returning {ok, Balance} or {error, not_found}.
 get_wallet_balance(Owner) ->
-    {error, not_found}.
+    ok.
 `,
     solutionCode: `-module(mnesia_ledger).
 -export([setup_mnesia_table/0, upsert_wallet/2, atomic_transfer/3, get_wallet_balance/1]).
 
 -record(wallet, {owner, balance}).
 
+%% @doc Start Mnesia and ensure the ram_copies wallet table exists and is ready.
 setup_mnesia_table() ->
     mnesia:start(),
     case mnesia:create_table(wallet, [
@@ -1951,6 +1974,7 @@ setup_mnesia_table() ->
     ok = mnesia:wait_for_tables([wallet], 2000),
     ok.
 
+%% @doc Write or update Owner's wallet Balance inside a Mnesia transaction.
 upsert_wallet(Owner, Balance) ->
     Tx = fun() ->
         mnesia:write(#wallet{owner = Owner, balance = Balance})
@@ -1960,6 +1984,7 @@ upsert_wallet(Owner, Balance) ->
         {aborted, Reason} -> {error, Reason}
     end.
 
+%% @doc Atomically transfer positive Amount from FromOwner to ToOwner with abort rollback.
 atomic_transfer(FromOwner, ToOwner, Amount) when Amount > 0 ->
     Tx = fun() ->
         FromBal = case mnesia:read(wallet, FromOwner) of
@@ -1984,6 +2009,7 @@ atomic_transfer(FromOwner, ToOwner, Amount) when Amount > 0 ->
         {aborted, Reason} -> {error, Reason}
     end.
 
+%% @doc Look up Owner's balance in Mnesia, returning {ok, Balance} or {error, not_found}.
 get_wallet_balance(Owner) ->
     Tx = fun() ->
         case mnesia:read(wallet, Owner) of
@@ -2005,17 +2031,21 @@ get_wallet_balance(Owner) ->
 
 -record(wallet, {owner, balance}).
 
+%% @doc Start Mnesia and ensure the ram_copies wallet table exists and is ready.
 setup_mnesia_table() ->
     ok.
 
+%% @doc Write or update Owner's wallet Balance inside a Mnesia transaction.
 upsert_wallet(Owner, Balance) ->
     ok.
 
-atomic_transfer(FromOwner, ToOwner, Amount) when Amount > 0 ->
-    {error, not_implemented}.
+%% @doc Atomically transfer positive Amount from FromOwner to ToOwner with abort rollback.
+atomic_transfer(FromOwner, ToOwner, Amount) ->
+    ok.
 
+%% @doc Look up Owner's balance in Mnesia, returning {ok, Balance} or {error, not_found}.
 get_wallet_balance(Owner) ->
-    {error, not_found}.
+    ok.
 `,
       },
     ],
@@ -2025,6 +2055,7 @@ get_wallet_balance(Owner) ->
 
 -record(wallet, {owner, balance}).
 
+%% @doc Start Mnesia and ensure the ram_copies wallet table exists and is ready.
 setup_mnesia_table() ->
     mnesia:start(),
     case mnesia:create_table(wallet, [
@@ -2037,6 +2068,7 @@ setup_mnesia_table() ->
     ok = mnesia:wait_for_tables([wallet], 2000),
     ok.
 
+%% @doc Write or update Owner's wallet Balance inside a Mnesia transaction.
 upsert_wallet(Owner, Balance) ->
     Tx = fun() ->
         mnesia:write(#wallet{owner = Owner, balance = Balance})
@@ -2046,6 +2078,7 @@ upsert_wallet(Owner, Balance) ->
         {aborted, Reason} -> {error, Reason}
     end.
 
+%% @doc Atomically transfer positive Amount from FromOwner to ToOwner with abort rollback.
 atomic_transfer(FromOwner, ToOwner, Amount) when Amount > 0 ->
     Tx = fun() ->
         FromBal = case mnesia:read(wallet, FromOwner) of
@@ -2070,6 +2103,7 @@ atomic_transfer(FromOwner, ToOwner, Amount) when Amount > 0 ->
         {aborted, Reason} -> {error, Reason}
     end.
 
+%% @doc Look up Owner's balance in Mnesia, returning {ok, Balance} or {error, not_found}.
 get_wallet_balance(Owner) ->
     Tx = fun() ->
         case mnesia:read(wallet, Owner) of
@@ -2094,7 +2128,7 @@ get_wallet_balance(Owner) ->
       {
         id: 'tc2',
         title: 'Overdraft Rollback Invariant',
-        erlangCall: 'begin {error, insufficient_funds} = mnesia_ledger:atomic_transfer(alice, bob, 500), {mnesia_ledger:get_wallet_balance(alice), mnesia_ledger:get_wallet_balance(bob)} end',
+        erlangCall: 'begin ok = mnesia_ledger:setup_mnesia_table(), ok = mnesia_ledger:upsert_wallet(alice, 60), ok = mnesia_ledger:upsert_wallet(bob, 90), {error, insufficient_funds} = mnesia_ledger:atomic_transfer(alice, bob, 500), {mnesia_ledger:get_wallet_balance(alice), mnesia_ledger:get_wallet_balance(bob)} end',
         expectedOutput: '{{ok, 60}, {ok, 90}}',
         explanation: 'Verifies that aborting on insufficient funds rolls back all changes completely.'
       }
