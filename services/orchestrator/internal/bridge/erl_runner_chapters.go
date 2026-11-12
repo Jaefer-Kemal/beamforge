@@ -21,7 +21,7 @@ func (r *Runner) buildChapterRunScript(session *pool.Session, exerciseID string)
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try beam_intro:inspect_vm() of
     {vm_info, Rel, Sched, ProcLim, AtomLim} = Res1
-      when is_list(Rel), is_integer(Sched), is_integer(ProcLim), is_integer(AtomLim) ->
+      when is_list(Rel), length(Rel) > 0, is_integer(Sched), Sched > 0, is_integer(ProcLim), ProcLim > 0, is_integer(AtomLim), AtomLim > 0 ->
         #{call_str => <<"beam_intro:inspect_vm()">>,
           expected => <<"{vm_info, OtpRelease, Schedulers, ProcessLimit, AtomLimit}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res1]))),
@@ -4151,41 +4151,53 @@ func (r *Runner) buildChapterVerificationScript(session *pool.Session, exerciseI
 
 	// ── CHAPTER 1 ─────────────────────────────────────────────────────────────
 	case "ch01-l01":
-		return `
+		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(beam_intro) of
     {module, beam_intro} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"beam_intro.erl compiled cleanly">>};
+        Exports = beam_intro:module_info(exports),
+        case lists:member({inspect_vm, 0}, Exports) of
+            true ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"beam_intro.erl compiled cleanly and exported inspect_vm/0.">>};
+            false ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => <<"Missing required export: inspect_vm/0.">>}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-AstStage = try
-    BeamPath = code:which(beam_intro),
-    WsRoot = filename:dirname(filename:dirname(BeamPath)),
-    SrcPath = filename:join([WsRoot, "src", "beam_intro.erl"]),
-    {ok, BeamBin} = file:read_file(BeamPath),
-    case bf_ast_verifier:verify_rules(SrcPath, BeamBin, #{
+S1_Ast = try
+    SourceCandidates = [
+        filename:join(["%s", "src", "beam_intro.erl"]),
+        filename:join(["%s", "beam_intro.erl"])
+    ],
+    SourceFile = case [P || P <- SourceCandidates, filelib:is_regular(P)] of
+        [ValidSrc | _] -> ValidSrc;
+        [] -> hd(SourceCandidates)
+    end,
+    Rules = #{
         required_remote_calls => [{erlang, system_info, 1}]
-    }) of
+    },
+    case bf_ast_verifier:verify_rules(SourceFile, Rules) of
         {ok, _} ->
-            #{id => <<"vm_ast_rules">>, title => <<"AST Audit: erlang:system_info/1 Invocation">>, status => <<"passed">>, time_ms => 10, details => <<"Verified live call to erlang:system_info/1 in beam_intro.">>};
-        {error, AstErr} ->
-            #{id => <<"vm_ast_rules">>, title => <<"AST Audit: erlang:system_info/1 Invocation">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST rule violation: ~p", [AstErr]))}
+            #{id => <<"ast_rule_audit">>, title => <<"AST Analysis: Required BIF Telemetry Call Audit">>, status => <<"passed">>, time_ms => 10, details => <<"Verified direct call to erlang:system_info/1 via AST inspection.">>};
+        {error, [#{message := Msg} | _]} ->
+            #{id => <<"ast_rule_audit">>, title => <<"AST Analysis: Required BIF Telemetry Call Audit">>, status => <<"failed">>, time_ms => 10, details => Msg};
+        {error, Violations} ->
+            #{id => <<"ast_rule_audit">>, title => <<"AST Analysis: Required BIF Telemetry Call Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
     end
-catch CAst:RAst ->
-    #{id => <<"vm_ast_rules">>, title => <<"AST Audit: erlang:system_info/1 Invocation">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [CAst, RAst]))}
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_rule_audit">>, title => <<"AST Analysis: Required BIF Telemetry Call Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
 end,
-S1_Telemetry = try beam_intro:inspect_vm() of
+S2_Telemetry = try beam_intro:inspect_vm() of
     {vm_info, Rel, Sch, ProcLim, AtomLim}
-      when is_list(Rel), is_integer(Sch), is_integer(ProcLim), is_integer(AtomLim) ->
-        Msg1 = list_to_binary(io_lib:format("Queried live OTP ~s emulator info successfully (5-tuple format)", [Rel])),
-        #{id => <<"vm_introspection_contract">>, title => <<"BEAM Schedulers & Process Limits Telemetry">>, status => <<"passed">>, time_ms => 8, details => Msg1};
+      when is_list(Rel), length(Rel) > 0, is_integer(Sch), Sch > 0, is_integer(ProcLim), ProcLim > 0, is_integer(AtomLim), AtomLim > 0 ->
+        #{id => <<"vm_introspection_contract">>, title => <<"BEAM Schedulers & Process Limits Telemetry">>, status => <<"passed">>, time_ms => 8, details => list_to_binary(io_lib:format("Queried live OTP ~s emulator info (schedulers=~p, process_limit=~p, atom_limit=~p).", [Rel, Sch, ProcLim, AtomLim]))};
     Other1 ->
         #{id => <<"vm_introspection_contract">>, title => <<"BEAM Schedulers & Process Limits Telemetry">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Invalid tuple format: ~p", [Other1]))}
 catch C1:R1 ->
     #{id => <<"vm_introspection_contract">>, title => <<"BEAM Schedulers & Process Limits Telemetry">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
 end,
-Stages = [CompileStage, AstStage, S1_Telemetry]
-`, true
+Stages = [CompileStage, S1_Ast, S2_Telemetry]
+`, wsDir, wsDir), true
 
 	case "ch01-l02":
 		return `

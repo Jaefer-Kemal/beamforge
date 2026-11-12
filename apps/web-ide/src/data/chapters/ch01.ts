@@ -31,8 +31,10 @@ MaxProcs   = erlang:system_info(process_limit),
 OtpRel     = erlang:system_info(otp_release).
 \`\`\`
 
-> [!WARNING]
-> **Common Beginner Syntax Trap — The Period Terminator:** In Erlang, standalone expressions and function definitions **must terminate with a period (\`.\`)**. Forgetting the final period or placing one mid-function causes a compiler error such as \`syntax error before: ...\`. Comments start with \`%\` and run to the end of the line.
+> [!WARNING] Common Beginner Syntax Trap: The Period Terminator
+> In Erlang, standalone expressions and function definitions **must terminate with a period (\`.\`)**.
+> Forgetting the final period or placing it in the middle of a function will result in a compiler error such as \`syntax error before: ...\`.
+> Comments in Erlang start with a single percent symbol (\`%\`) and run to the end of the line.
 
 ## Parallel Worked Example
 
@@ -63,25 +65,28 @@ erlang:system_info(Item) -> Info
     Item = schedulers_online | process_limit | atom_limit | otp_release | term()
     Info = term()
 \`\`\`
-> \`erlang:system_info/1\` is a C-implemented Built-In Function (BIF) providing zero-overhead introspection into the host emulator.
+> **How to Read This Spec**: \`erlang:system_info/1\` is a C-implemented Built-In Function (BIF) taking one \`Item\` selector atom and returning the corresponding emulator property (\`Info\`) in $O(1)$ time. Open the attached **\`erlang:system_info/1\` Reference Card** below for official OTP documentation and ERTS C source links.
 
 ## Assignment Specification
 
-This is a **Guided Runnable Demo** (\`src/beam_intro.erl\` exporting \`inspect_vm/0\`). The starter module is pre-implemented and runnable:
+This is a **Guided Runnable Demo**. The module \`src/beam_intro.erl\` is pre-written and ready to execute:
 
-### \`inspect_vm()\`
-- **Input**: None (0 arguments).
-- **Behavior**: Queries the running Erlang runtime emulator via \`erlang:system_info/1\` for OTP release, online schedulers, process limit, and atom limit, prints a diagnostic summary line, and returns a 5-element tagged tuple starting with \`vm_info\`.
+1. Inspect \`-module(beam_intro).\` and \`-export([inspect_vm/0]).\` at the top of \`src/beam_intro.erl\`.
+2. Trace how each call to \`erlang:system_info/1\` queries live emulator telemetry before logging a diagnostic summary and returning the final tagged tuple.
+3. Click **Run** to execute the live probe against the BEAM engine, then click **Submit** to verify AST and runtime contracts.
+
+### \`beam_intro:inspect_vm/0\`
+- **Input**: None (0-arity function).
+- **Behavior**: Queries the live BEAM emulator for its OTP release string, online scheduler count, process limit, and atom table limit, prints a diagnostic summary to standard output, and returns a 5-element tagged telemetry tuple whose payload fields are a non-empty string (\`OtpRelease\`) followed by three positive integers (\`Schedulers\`, \`ProcessLimit\`, \`AtomLimit\`) in $O(1)$ time.
 - **Examples**:
-  - \`beam_intro:inspect_vm()\` returns a 5-tuple matching \`{vm_info, OtpRel, Schedulers, ProcLimit, AtomLimit}\`.
-
-Click **Run** to execute the live probe against the BEAM VM, or **Submit** to verify compilation, AST usage of \`erlang:system_info/1\`, and tuple structure.
+  - \`beam_intro:inspect_vm()\` returns \`{vm_info, OtpRelease, Schedulers, ProcessLimit, AtomLimit}\` (for example, \`{vm_info, "29", 8, 1048576, 1048576}\` depending on host hardware and OTP release).
 
 ## Rules & Verification Constraints
 
-- No code edits are required for this guided introductory demo (module must compile cleanly under \`erlc -Wall\`).
-- AST verification enforces calling \`erlang:system_info/1\`.
-- Runtime verification checks that \`beam_intro:inspect_vm/0\` returns a 5-tuple starting with \`vm_info\` whose release is a list and whose scheduler, process, and atom limits are integers.`,
+- No code edits are required for this guided introductory demo (the pre-written starter module passes 100% out of the box).
+- **Exports**: \`beam_intro\` must export \`inspect_vm/0\`.
+- **AST Rule**: Must call \`erlang:system_info/1\` directly (hardcoded telemetry tuples are rejected by the AST verifier).
+- **Runtime Contract**: \`beam_intro:inspect_vm/0\` must return a 5-tuple tagged with \`vm_info\` where \`OtpRelease\` is a non-empty list/string and \`Schedulers\`, \`ProcessLimit\`, and \`AtomLimit\` are positive integers.`,
     otpDocCards: [
       {
         functionName: 'system_info',
@@ -137,8 +142,8 @@ Click **Run** to execute the live probe against the BEAM VM, or **Submit** to ve
         content: `-module(beam_intro).
 -export([inspect_vm/0]).
 
-%% @doc Queries the live Erlang runtime emulator for OTP release, scheduler count,
-%% process limit, and atom limit, returning a 5-element vm_info diagnostic tuple.
+%% @doc Queries the live BEAM emulator for OTP release, online schedulers,
+%% process limit, and atom limit, returning a 5-element telemetry tuple.
 inspect_vm() ->
     OtpRel = erlang:system_info(otp_release),
     Schedulers = erlang:system_info(schedulers_online),
@@ -153,8 +158,8 @@ inspect_vm() ->
       'src/beam_intro.erl': `-module(beam_intro).
 -export([inspect_vm/0]).
 
-%% @doc Queries the live Erlang runtime emulator for OTP release, scheduler count,
-%% process limit, and atom limit, returning a 5-element vm_info diagnostic tuple.
+%% @doc Queries the live BEAM emulator for OTP release, online schedulers,
+%% process limit, and atom limit, returning a 5-element telemetry tuple.
 inspect_vm() ->
     OtpRel = erlang:system_info(otp_release),
     Schedulers = erlang:system_info(schedulers_online),
@@ -167,8 +172,8 @@ inspect_vm() ->
     starterCode: `-module(beam_intro).
 -export([inspect_vm/0]).
 
-%% @doc Queries the live Erlang runtime emulator for OTP release, scheduler count,
-%% process limit, and atom limit, returning a 5-element vm_info diagnostic tuple.
+%% @doc Queries the live BEAM emulator for OTP release, online schedulers,
+%% process limit, and atom limit, returning a 5-element telemetry tuple.
 inspect_vm() ->
     OtpRel = erlang:system_info(otp_release),
     Schedulers = erlang:system_info(schedulers_online),
@@ -180,8 +185,8 @@ inspect_vm() ->
     solutionCode: `-module(beam_intro).
 -export([inspect_vm/0]).
 
-%% @doc Queries the live Erlang runtime emulator for OTP release, scheduler count,
-%% process limit, and atom limit, returning a 5-element vm_info diagnostic tuple.
+%% @doc Queries the live BEAM emulator for OTP release, online schedulers,
+%% process limit, and atom limit, returning a 5-element telemetry tuple.
 inspect_vm() ->
     OtpRel = erlang:system_info(otp_release),
     Schedulers = erlang:system_info(schedulers_online),
