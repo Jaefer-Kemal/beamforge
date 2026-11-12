@@ -1676,26 +1676,62 @@ init:stop().
 	case "ch04-l07":
 		return `
 T1_Start = erlang:system_time(millisecond),
-T1_Res = try
-    Big = crypto:strong_rand_bytes(1024),
-    {ok, Token} = binary_unpinner:extract_token_safe(Big),
-    Slice = binary_unpinner:slice_packet_safe(Big, 32),
-    {ByteSz, RefcSz} = binary_unpinner:inspect_refc_ratio(Token),
-    case {byte_size(Token), byte_size(Slice), ByteSz, RefcSz} of
-        {16, 32, 16, 16} ->
-            #{call_str => <<"binary_unpinner:extract_token_safe + slice_packet_safe + inspect_refc_ratio">>,
-              expected => <<"{16, 32, 16, 16} (unpinned Refc = 16)">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("{~p, ~p, ~p, ~p}", [16, 32, ByteSz, RefcSz]))),
-              passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
-        Got1 ->
-            #{call_str => <<"binary_unpinner operations">>, expected => <<"{16, 32, 16, 16}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got1]))), passed => false, time_ms => 0}
-    end
+T1_Res = try binary_unpinner:extract_token_safe(<<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16, "REMAINDER_OF_LARGE_PACKET">>) of
+    {ok, <<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16>>} = R1 ->
+        #{call_str => <<"binary_unpinner:extract_token_safe(<<1..16, \"REMAINDER_OF_LARGE_PACKET\">>)">>,
+          expected => <<"{ok, <<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16>>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
+    Got1 ->
+        #{call_str => <<"binary_unpinner:extract_token_safe(<<1..16, \"REMAINDER_OF_LARGE_PACKET\">>)">>, expected => <<"{ok, <<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16>>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"binary_unpinner operations">>, expected => <<"{16, 32, 16, 16}">>,
+    #{call_str => <<"binary_unpinner:extract_token_safe(<<1..16, \"REMAINDER_OF_LARGE_PACKET\">>)">>, expected => <<"{ok, <<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16>>}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try binary_unpinner:extract_token_safe(<<1,2,3>>) of
+    {error, insufficient_data} = R2 ->
+        #{call_str => <<"binary_unpinner:extract_token_safe(<<1,2,3>>)">>,
+          expected => <<"{error, insufficient_data}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T2_Start};
+    Got2 ->
+        #{call_str => <<"binary_unpinner:extract_token_safe(<<1,2,3>>)">>, expected => <<"{error, insufficient_data}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got2]))), passed => false, time_ms => 0}
+catch C2:R2 ->
+    #{call_str => <<"binary_unpinner:extract_token_safe(<<1,2,3>>)">>, expected => <<"{error, insufficient_data}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try binary_unpinner:slice_packet_safe(<<"ABCDEFGHIJ">>, 4) of
+    <<"ABCD">> = R3 ->
+        #{call_str => <<"binary_unpinner:slice_packet_safe(<<\"ABCDEFGHIJ\">>, 4)">>,
+          expected => <<"<<\"ABCD\">>">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T3_Start};
+    Got3 ->
+        #{call_str => <<"binary_unpinner:slice_packet_safe(<<\"ABCDEFGHIJ\">>, 4)">>, expected => <<"<<\"ABCD\">>">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got3]))), passed => false, time_ms => 0}
+catch C3:R3 ->
+    #{call_str => <<"binary_unpinner:slice_packet_safe(<<\"ABCDEFGHIJ\">>, 4)">>, expected => <<"<<\"ABCD\">>">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+T4_Start = erlang:system_time(millisecond),
+T4_Res = try binary_unpinner:inspect_refc_ratio(binary:copy(<<"SMALL_HEAP_BIN">>)) of
+    {14, 14} = R4 ->
+        #{call_str => <<"binary_unpinner:inspect_refc_ratio(binary:copy(<<\"SMALL_HEAP_BIN\">>))">>,
+          expected => <<"{14, 14}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R4]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T4_Start};
+    Got4 ->
+        #{call_str => <<"binary_unpinner:inspect_refc_ratio(binary:copy(<<\"SMALL_HEAP_BIN\">>))">>, expected => <<"{14, 14}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got4]))), passed => false, time_ms => 0}
+catch C4:R4 ->
+    #{call_str => <<"binary_unpinner:inspect_refc_ratio(binary:copy(<<\"SMALL_HEAP_BIN\">>))">>, expected => <<"{14, 14}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -6661,28 +6697,132 @@ Stages = [CompileStage_M06, S_Ast_M06, S1_Scanner]
 		return fmt.Sprintf(`
 CompileStage_M07 = case code:ensure_loaded(binary_unpinner) of
     {module, binary_unpinner} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"binary_unpinner.erl compiled cleanly; extract_token_safe/1, slice_packet_safe/2, inspect_refc_ratio/1 exported">>};
+        Exports_M07 = binary_unpinner:module_info(exports),
+        Req_M07 = [{extract_token_safe, 1}, {slice_packet_safe, 2}, {inspect_refc_ratio, 1}],
+        Missing_M07 = [FA || FA <- Req_M07, not lists:member(FA, Exports_M07)],
+        case Missing_M07 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"binary_unpinner.erl compiled cleanly; extract_token_safe/1, slice_packet_safe/2, inspect_refc_ratio/1 exported">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_M07]))}
+        end;
     {error, E_M07} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_M07]))}
 end,
+S_Ast_M07 = try
+    SourceCandidates_M07 = [
+        filename:join(["%s", "src", "binary_unpinner.erl"]),
+        filename:join(["%s", "binary_unpinner.erl"])
+    ],
+    SourceFile_M07 = case [P || P <- SourceCandidates_M07, filelib:is_regular(P)] of
+        [ValidSrc_M07 | _] -> ValidSrc_M07;
+        [] -> hd(SourceCandidates_M07)
+    end,
+    Rules_M07 = #{
+        required_remote_calls => [{binary, copy, 1}, {binary, referenced_byte_size, 1}, {erlang, byte_size, 1}],
+        required_constructs => [bit_syntax, guards],
+        forbidden_remote_calls => [{erlang, binary_to_list, any}]
+    },
+    UnpinAstAudit_M07 = case epp:parse_file(SourceFile_M07, []) of
+        {ok, Forms_M07} ->
+            WalkUnpin_M07 = fun WalkU(Node, Pred) ->
+                case Pred(Node) of
+                    true -> true;
+                    false when is_tuple(Node) -> WalkU(tuple_to_list(Node), Pred);
+                    false when is_list(Node) -> lists:any(fun(El) -> WalkU(El, Pred) end, Node);
+                    false -> false
+                end
+            end,
+            TokClauses_M07 = lists:flatten([Clauses || {function, _, extract_token_safe, 1, Clauses} <- Forms_M07]),
+            SliceClauses_M07 = lists:flatten([Clauses || {function, _, slice_packet_safe, 2, Clauses} <- Forms_M07]),
+            RatioClauses_M07 = lists:flatten([Clauses || {function, _, inspect_refc_ratio, 1, Clauses} <- Forms_M07]),
+            HasTokCopy_M07 = WalkUnpin_M07(TokClauses_M07, fun
+                ({call, _, {remote, _, {atom, _, binary}, {atom, _, copy}}, [_]}) -> true;
+                (_) -> false
+            end),
+            HasSliceCopy_M07 = WalkUnpin_M07(SliceClauses_M07, fun
+                ({call, _, {remote, _, {atom, _, binary}, {atom, _, copy}}, [_]}) -> true;
+                (_) -> false
+            end),
+            HasSliceGuard_M07 = lists:any(fun({clause, _, _, Guards, _}) -> Guards =/= [] end, SliceClauses_M07),
+            HasRatioRefc_M07 = WalkUnpin_M07(RatioClauses_M07, fun
+                ({call, _, {remote, _, {atom, _, binary}, {atom, _, referenced_byte_size}}, [_]}) -> true;
+                (_) -> false
+            end),
+            HasRatioByteSize_M07 = WalkUnpin_M07(RatioClauses_M07, fun
+                ({call, _, {atom, _, byte_size}, [_]}) -> true;
+                ({call, _, {remote, _, {atom, _, erlang}, {atom, _, byte_size}}, [_]}) -> true;
+                (_) -> false
+            end),
+            case {HasTokCopy_M07, HasSliceCopy_M07, HasSliceGuard_M07, HasRatioRefc_M07, HasRatioByteSize_M07} of
+                {true, true, true, true, true} -> ok;
+                _ ->
+                    {error, iolist_to_binary(io_lib:format(
+                        "Expected binary:copy/1 in extract_token_safe/1 (~p) & slice_packet_safe/2 (~p), guard on slice_packet_safe/2 (~p), and referenced_byte_size/1 (~p) + byte_size/1 (~p) in inspect_refc_ratio/1.",
+                        [HasTokCopy_M07, HasSliceCopy_M07, HasSliceGuard_M07, HasRatioRefc_M07, HasRatioByteSize_M07]
+                    ))}
+            end;
+        {error, ParseErr_M07} ->
+            {error, iolist_to_binary(io_lib:format("Failed to inspect binary_unpinner AST: ~p", [ParseErr_M07]))}
+    end,
+    case {bf_ast_verifier:verify_rules(SourceFile_M07, <<>>, Rules_M07), UnpinAstAudit_M07} of
+        {{ok, _}, ok} ->
+            #{id => <<"ast_binary_unpinner_audit">>, title => <<"AST binary:copy/1 & Guard Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified binary:copy/1 on both slicers, binary:referenced_byte_size/1 + byte_size/1 in inspect_refc_ratio/1, guards, and no binary_to_list bypass.">>};
+        {{error, AstViolations_M07}, _} ->
+            FirstMsg_M07 = case AstViolations_M07 of
+                [#{message := M_M07} | _] -> M_M07;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_M07]))
+            end,
+            #{id => <<"ast_binary_unpinner_audit">>, title => <<"AST binary:copy/1 & Guard Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_M07, error => AstViolations_M07};
+        {_, {error, UnpinAuditMsg_M07}} ->
+            #{id => <<"ast_binary_unpinner_audit">>, title => <<"AST binary:copy/1 & Guard Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => UnpinAuditMsg_M07}
+    end
+catch Class_Ast_M07:Err_Ast_M07 ->
+    #{id => <<"ast_binary_unpinner_audit">>, title => <<"AST binary:copy/1 & Guard Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [Class_Ast_M07, Err_Ast_M07]))}
+end,
 S1_Unpin = try
     LargePacket = crypto:strong_rand_bytes(4096),
+    <<PinnedSub:128/binary, _/binary>> = LargePacket,
     {ok, SafeToken} = binary_unpinner:extract_token_safe(LargePacket),
-    SafeSlice = binary_unpinner:slice_packet_safe(LargePacket, 64),
+    SafeSlice = binary_unpinner:slice_packet_safe(LargePacket, 128),
+    ZeroSlice = binary_unpinner:slice_packet_safe(LargePacket, 0),
+    Exact16 = binary_unpinner:extract_token_safe(<<1:128>>),
     TooShort = binary_unpinner:extract_token_safe(<<"short">>),
-    {TokenByteSz, TokenRefcSz} = binary_unpinner:inspect_refc_ratio(SafeToken),
-    {SliceByteSz, SliceRefcSz} = binary_unpinner:inspect_refc_ratio(SafeSlice),
-    case {byte_size(SafeToken), byte_size(SafeSlice), TooShort, TokenByteSz, TokenRefcSz, SliceByteSz, SliceRefcSz} of
-        {16, 64, {error, insufficient_data}, 16, 16, 64, 64} ->
-            #{id => <<"procbin_subbinary_unpinning">>, title => <<"ProcBin Unpinning via binary:copy/1 & SubBinary Memory Safety">>, status => <<"passed">>, time_ms => 10, details => <<"binary:copy/1 confirmed: sub-binary severed from 4096-byte parent buffer (referenced_byte_size == 16)">>};
+    PinnedRatio = binary_unpinner:inspect_refc_ratio(PinnedSub),
+    TokenRatio = binary_unpinner:inspect_refc_ratio(SafeToken),
+    SliceRatio = binary_unpinner:inspect_refc_ratio(SafeSlice),
+    RealTokRefc = binary:referenced_byte_size(SafeToken),
+    RealSliceRefc = binary:referenced_byte_size(SafeSlice),
+    RealZeroRefc = binary:referenced_byte_size(ZeroSlice),
+    GuardNeg = try binary_unpinner:slice_packet_safe(<<"ABC">>, -1) of
+        BadNeg -> {unexpected_neg, BadNeg}
+    catch
+        error:function_clause -> ok;
+        Cg1:Rg1 -> {wrong_neg_err, Cg1, Rg1}
+    end,
+    GuardShort = try binary_unpinner:slice_packet_safe(<<"ABC">>, 10) of
+        BadShort -> {unexpected_short, BadShort}
+    catch
+        error:function_clause -> ok;
+        Cg2:Rg2 -> {wrong_short_err, Cg2, Rg2}
+    end,
+    GuardNonBin = try binary_unpinner:slice_packet_safe("ABC", 2) of
+        BadNonBin -> {unexpected_nonbin, BadNonBin}
+    catch
+        error:function_clause -> ok;
+        Cg3:Rg3 -> {wrong_nonbin_err, Cg3, Rg3}
+    end,
+    case {byte_size(SafeToken), byte_size(SafeSlice), ZeroSlice, Exact16, TooShort, PinnedRatio, TokenRatio, SliceRatio, RealTokRefc, RealSliceRefc, RealZeroRefc, GuardNeg, GuardShort, GuardNonBin} of
+        {16, 128, <<>>, {ok, <<1:128>>}, {error, insufficient_data}, {128, 4096}, {16, 16}, {128, 128}, 16, 128, 0, ok, ok, ok} ->
+            #{id => <<"procbin_subbinary_unpinning">>, title => <<"ProcBin Unpinning via binary:copy/1 & SubBinary Memory Safety">>, status => <<"passed">>, time_ms => 10, details => <<"binary:copy/1 confirmed: 128-byte sub-binary & 16-byte token severed from 4096-byte parent buffer (referenced_byte_size == 128/16/0 vs pinned {128,4096}), and bounds guards verified">>};
         Got_M07 ->
             #{id => <<"procbin_subbinary_unpinning">>, title => <<"ProcBin Unpinning via binary:copy/1 & SubBinary Memory Safety">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Unpin mismatch: ~p", [Got_M07]))}
     end
 catch Class_M07:Err_M07 ->
     #{id => <<"procbin_subbinary_unpinning">>, title => <<"ProcBin Unpinning via binary:copy/1 & SubBinary Memory Safety">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_M07, Err_M07]))}
 end,
-Stages = [CompileStage_M07, S1_Unpin]
-`), true
+Stages = [CompileStage_M07, S_Ast_M07, S1_Unpin]
+`, wsDir, wsDir), true
 
 	case "ch04-l08":
 		return fmt.Sprintf(`

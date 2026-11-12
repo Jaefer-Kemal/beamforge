@@ -1975,72 +1975,84 @@ OTP provides a diagnostic BIF:
 - \`byte_size(SubBin)\`: Returns the logical size of the slice (e.g. \`8\` bytes).
 - \`binary:referenced_byte_size(SubBin)\`: Returns the size of the underlying off-heap buffer pinned by this reference (e.g. \`50331648\` bytes)!
 
-## Parallel Worked Example: WAV Audio Chunk Extractor
+## Parallel Worked Example: WAL Compaction & Retention Detector
 
-The following module demonstrates safely extracting a 4-byte chunk identifier from a multi-megabyte audio file without pinning the parent recording:
+The following module inspects Write-Ahead Log (WAL) binary slices for hidden off-heap retention and selectively copies slices only when the backing allocation exceeds logical data length:
 
 \`\`\`erlang
--module(wav_header_parser).
--export([extract_format_chunk/1, inspect_memory_footprint/1]).
+-module(wal_compactor).
+-export([is_over_pinned/2, clone_if_bloated/1]).
 
-%% Extracts 4-byte chunk identifier from a multi-megabyte audio recording
-extract_format_chunk(RawWavBinary) ->
-    case RawWavBinary of
-        <<ChunkId:4/binary, _RemainingAudio/binary>> ->
-            %% Sever the sub-binary reference to free the parent recording buffer
-            SafeChunk = binary:copy(ChunkId),
-            {ok, SafeChunk};
-        _ ->
-            {error, invalid_wav_header}
+%% Phase 1: Compare the backing ProcBin buffer size against MaxFactor multiples of SliceBin's logical length.
+is_over_pinned(SliceBin, MaxFactor) when is_binary(SliceBin), is_integer(MaxFactor), MaxFactor >= 1 ->
+    binary:referenced_byte_size(SliceBin) > byte_size(SliceBin) * MaxFactor.
+
+%% Phase 2: Copy Slice only when referenced storage exceeds logical byte length, leaving compact heap binaries untouched.
+clone_if_bloated(Bin) when is_binary(Bin) ->
+    case binary:referenced_byte_size(Bin) > byte_size(Bin) of
+        true -> {compacted, binary:copy(Bin)};
+        false -> {already_compact, Bin}
     end.
-
-%% Returns logical size and pinned off-heap buffer size
-inspect_memory_footprint(Bin) ->
-    {byte_size(Bin), binary:referenced_byte_size(Bin)}.
 \`\`\`
+
+**What the BEAM is doing in each phase:**
+- **Phase 1 (Detecting Off-Heap Retention):** Both \`byte_size/1\` and \`binary:referenced_byte_size/1\` execute in $O(1)$ time by reading header fields: \`byte_size/1\` returns only the slice window length, while \`binary:referenced_byte_size/1\` inspects the shared off-heap \`ProcBin\` allocation holding the parent WAL buffer.
+- **Phase 2 (Selective Heap Isolation):** Calling \`binary:copy/1\` only when \`referenced_byte_size\` exceeds \`byte_size\` allocates a fresh compact binary holding just the needed bytes, dropping the atomic refcount on the large parent \`ProcBin\` so binary GC can reclaim it while avoiding unnecessary copies of already-compact binaries.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
+%% Official OTP Signatures (stdlib / binary & erlang BIFs)
 binary:copy(Subject) -> binary()
-binary:referenced_byte_size(Subject) -> non_neg_integer()
-byte_size(Bitstring) -> non_neg_integer()
+  Types:
+    Subject = binary()
+
+binary:referenced_byte_size(Binary) -> integer() >= 0
+  Types:
+    Binary = binary()
+
+erlang:byte_size(Bitstring) -> integer() >= 0
+  Types:
+    Bitstring = bitstring()
 \`\`\`
+
+In OTP docs, \`byte_size/1\` measures logical bytes visible in the term, whereas \`binary:referenced_byte_size/1\` reports the full byte capacity of the backing binary allocation currently kept alive by \`Binary\` (which equals \`byte_size(Binary)\` once isolated by \`binary:copy/1\`). See the attached **OTP Docs** reference cards for memory ownership and BIF contracts.
 
 ## Assignment Specification
 
-Implement safe memory slicing in \`src/binary_unpinner.erl\`.
+Implement safe sub-binary isolation and retention diagnostics in module \`binary_unpinner\` (\`src/binary_unpinner.erl\`), exporting \`extract_token_safe/1\`, \`slice_packet_safe/2\`, and \`inspect_refc_ratio/1\`.
 
 ### Functions to Implement
 
 #### \`extract_token_safe/1\`
 - **Input**:
   - \`LargePacket\`: a binary network buffer
-- **Behavior**: Extracts the first 16 bytes as a token and decouples it from the underlying off-heap refc binary using \`binary:copy/1\`, returning \`{ok, SafeToken}\`. If \`LargePacket\` contains fewer than 16 bytes, returns \`{error, insufficient_data}\`.
+- **Behavior**: Extracts the first 16 bytes into a standalone binary detached from any underlying off-heap parent buffer using \`binary:copy/1\`, returning \`{ok, SafeToken}\`. If \`LargePacket\` contains fewer than 16 bytes, returns \`{error, insufficient_data}\`.
 - **Examples**:
-  - \`extract_token_safe(<<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16, "REST">>)\` $\\rightarrow$
-    \`{ok, <<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16>>}\`
-  - \`extract_token_safe(<<1, 2, 3>>)\` $\\rightarrow$ \`{error, insufficient_data}\`
+  - \`binary_unpinner:extract_token_safe(<<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16, "REST">>)\` returns \`{ok, <<1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16>>}\`.
+  - \`binary_unpinner:extract_token_safe(<<1, 2, 3>>)\` returns \`{error, insufficient_data}\`.
 
 #### \`slice_packet_safe/2\`
 - **Input**:
   - \`Packet\`: binary buffer
-  - \`Length\`: non-negative integer byte count
-- **Behavior**: Extracts a prefix of \`Length\` bytes from \`Packet\` and returns a standalone, unpinned binary decoupled from any parent off-heap buffer. Guarded to ensure \`Packet\` is a binary, \`Length\` is an integer, and \`Packet\` contains at least \`Length\` bytes.
+  - \`Length\`: non-negative integer byte count (\`>= 0\`)
+- **Behavior**: Extracts a prefix of \`Length\` bytes from \`Packet\` and returns a standalone, unpinned binary copy detached from any parent off-heap buffer. Guarded so non-binary \`Packet\`, negative or non-integer \`Length\`, or packets shorter than \`Length\` bytes fail with \`function_clause\`.
 - **Examples**:
-  - \`slice_packet_safe(<<"ABCDEFGHIJ">>, 4)\` $\\rightarrow$ \`<<"ABCD">>\`
+  - \`binary_unpinner:slice_packet_safe(<<"ABCDEFGHIJ">>, 4)\` returns \`<<"ABCD">>\`.
+  - \`binary_unpinner:slice_packet_safe(<<"ABCDEFGHIJ">>, 0)\` returns \`<<>>\`.
 
 #### \`inspect_refc_ratio/1\`
 - **Input**:
   - \`Bin\`: a binary
-- **Behavior**: Queries and returns a 2-tuple \`{LogicalSize, ReferencedBufferSize}\` containing the logical byte size of \`Bin\` and the size of the underlying off-heap binary buffer pinned by its reference.
+- **Behavior**: Queries and returns a 2-tuple \`{LogicalSize, ReferencedBufferSize}\` recording the logical byte length of \`Bin\` and the byte size of the underlying binary allocation referenced by \`Bin\`.
 - **Examples**:
-  - \`inspect_refc_ratio(binary:copy(<<"TEST">>))\` $\\rightarrow$ \`{4, 4}\`
+  - \`binary_unpinner:inspect_refc_ratio(binary:copy(<<"TEST">>))\` returns \`{4, 4}\`.
 
 ## Rules & Verification Constraints
 
-- Must call \`binary:copy/1\` on extracted slices.
-- Must use \`binary:referenced_byte_size/1\`.`,
+- Must call \`binary:copy/1\` on extracted token and prefix slices to break sub-binary retention, without converting binaries via \`binary_to_list/1\`.
+- Must query both \`byte_size/1\` and \`binary:referenced_byte_size/1\` inside \`inspect_refc_ratio/1\`.
+- Guard \`slice_packet_safe/2\` with \`is_binary/1\`, \`is_integer/1\`, non-negative \`Length\` check, and \`byte_size/1\` length check.`,
     otpDocCards: [
       {
         functionName: 'binary:copy/1',
@@ -2059,6 +2071,15 @@ Implement safe memory slicing in \`src/binary_unpinner.erl\`.
         description: 'Returns the size in bytes of the underlying off-heap binary buffer referenced by Subject.',
         complexityNote: 'O(1) header inspection.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/binary.html#referenced_byte_size/1',
+      },
+      {
+        functionName: 'byte_size/1',
+        module: 'erlang',
+        signature: 'byte_size(Bitstring) -> integer() >= 0',
+        typesSpec: ['Bitstring = bitstring()'],
+        description: 'Guard-safe BIF returning the logical byte count of Bitstring.',
+        complexityNote: 'O(1) constant-time header read.',
+        officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#byte_size/1',
       },
     ],
     mentalModelCheck: {
@@ -2115,9 +2136,11 @@ Implement safe memory slicing in \`src/binary_unpinner.erl\`.
       },
     ],
     astRules: {
-      requiredCalls: ['binary:copy/1', 'binary:referenced_byte_size/1'],
+      requiredCalls: ['binary:copy/1', 'binary:referenced_byte_size/1', 'erlang:byte_size/1'],
+      requiredConstructs: ['bit_syntax', 'guards'],
+      forbiddenCalls: ['erlang:binary_to_list'],
     },
-    solutionExplanation: 'Demonstrates sub-binary unpinning via binary:copy/1 and memory diagnostic inspection using binary:referenced_byte_size/1.',
+    solutionExplanation: 'Demonstrates sub-binary unpinning via binary:copy/1, non-negative bounds guards, and memory diagnostic inspection using binary:referenced_byte_size/1.',
     files: [
       {
         name: 'binary_unpinner.erl',
@@ -2125,61 +2148,67 @@ Implement safe memory slicing in \`src/binary_unpinner.erl\`.
         content: `-module(binary_unpinner).
 -export([extract_token_safe/1, slice_packet_safe/2, inspect_refc_ratio/1]).
 
-%% @doc Safely extract the first 16 bytes of LargePacket without holding the refc binary pinned in memory.
+%% @doc Extract the first 16 bytes of LargePacket into an independent binary detached from any backing buffer, returning an ok pair or an insufficient-data error tuple when shorter than 16 bytes.
 extract_token_safe(_LargePacket) ->
-    {error, insufficient_data}.
+    ok.
 
-%% @doc Extract a prefix slice of Length bytes and detach it from the parent refc binary.
+%% @doc Guarded to verify Packet is a binary containing at least non-negative Length bytes, returning a detached standalone copy of the leading Length bytes.
 slice_packet_safe(_Packet, _Length) ->
-    <<>>.
+    ok.
 
-%% @doc Return {LogicalSize, ReferencedBufferSize} comparing byte_size to its underlying refc allocation.
+%% @doc Return a two-element tuple pairing the logical byte length of Bin with the byte capacity of its backing allocation.
 inspect_refc_ratio(_Bin) ->
-    {0, 0}.`,
+    ok.`,
       },
     ],
     solutionFiles: {
       'src/binary_unpinner.erl': `-module(binary_unpinner).
 -export([extract_token_safe/1, slice_packet_safe/2, inspect_refc_ratio/1]).
 
+%% @doc Extract the first 16 bytes of LargePacket into an independent binary detached from any backing buffer, returning an ok pair or an insufficient-data error tuple when shorter than 16 bytes.
 extract_token_safe(<<Token:16/binary, _Rest/binary>>) ->
     {ok, binary:copy(Token)};
 extract_token_safe(_) ->
     {error, insufficient_data}.
 
-slice_packet_safe(Packet, Length) when is_binary(Packet), is_integer(Length), byte_size(Packet) >= Length ->
+%% @doc Guarded to verify Packet is a binary containing at least non-negative Length bytes, returning a detached standalone copy of the leading Length bytes.
+slice_packet_safe(Packet, Length) when is_binary(Packet), is_integer(Length), Length >= 0, byte_size(Packet) >= Length ->
     <<Slice:Length/binary, _Rest/binary>> = Packet,
     binary:copy(Slice).
 
+%% @doc Return a two-element tuple pairing the logical byte length of Bin with the byte capacity of its backing allocation.
 inspect_refc_ratio(Bin) ->
     {byte_size(Bin), binary:referenced_byte_size(Bin)}.`,
     },
     starterCode: `-module(binary_unpinner).
 -export([extract_token_safe/1, slice_packet_safe/2, inspect_refc_ratio/1]).
 
-%% @doc Safely extract the first 16 bytes of LargePacket without holding the refc binary pinned in memory.
+%% @doc Extract the first 16 bytes of LargePacket into an independent binary detached from any backing buffer, returning an ok pair or an insufficient-data error tuple when shorter than 16 bytes.
 extract_token_safe(_LargePacket) ->
-    {error, insufficient_data}.
+    ok.
 
-%% @doc Extract a prefix slice of Length bytes and detach it from the parent refc binary.
+%% @doc Guarded to verify Packet is a binary containing at least non-negative Length bytes, returning a detached standalone copy of the leading Length bytes.
 slice_packet_safe(_Packet, _Length) ->
-    <<>>.
+    ok.
 
-%% @doc Return {LogicalSize, ReferencedBufferSize} comparing byte_size to its underlying refc allocation.
+%% @doc Return a two-element tuple pairing the logical byte length of Bin with the byte capacity of its backing allocation.
 inspect_refc_ratio(_Bin) ->
-    {0, 0}.`,
+    ok.`,
     solutionCode: `-module(binary_unpinner).
 -export([extract_token_safe/1, slice_packet_safe/2, inspect_refc_ratio/1]).
 
+%% @doc Extract the first 16 bytes of LargePacket into an independent binary detached from any backing buffer, returning an ok pair or an insufficient-data error tuple when shorter than 16 bytes.
 extract_token_safe(<<Token:16/binary, _Rest/binary>>) ->
     {ok, binary:copy(Token)};
 extract_token_safe(_) ->
     {error, insufficient_data}.
 
-slice_packet_safe(Packet, Length) when is_binary(Packet), is_integer(Length), byte_size(Packet) >= Length ->
+%% @doc Guarded to verify Packet is a binary containing at least non-negative Length bytes, returning a detached standalone copy of the leading Length bytes.
+slice_packet_safe(Packet, Length) when is_binary(Packet), is_integer(Length), Length >= 0, byte_size(Packet) >= Length ->
     <<Slice:Length/binary, _Rest/binary>> = Packet,
     binary:copy(Slice).
 
+%% @doc Return a two-element tuple pairing the logical byte length of Bin with the byte capacity of its backing allocation.
 inspect_refc_ratio(Bin) ->
     {byte_size(Bin), binary:referenced_byte_size(Bin)}.`,
   },

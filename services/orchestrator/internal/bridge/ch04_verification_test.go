@@ -156,6 +156,25 @@ xor_mask_payload(PayloadBin, MaskByte) ->
     << <<(B bxor MaskByte):8>> || <<B:8>> <= PayloadBin >>.
 `
 
+	binaryUnpinnerSolution := `-module(binary_unpinner).
+-export([extract_token_safe/1, slice_packet_safe/2, inspect_refc_ratio/1]).
+
+%% @doc Extract the first 16 bytes of LargePacket into an independent binary detached from any backing buffer, returning an ok pair or an insufficient-data error tuple when shorter than 16 bytes.
+extract_token_safe(<<Token:16/binary, _Rest/binary>>) ->
+    {ok, binary:copy(Token)};
+extract_token_safe(_) ->
+    {error, insufficient_data}.
+
+%% @doc Guarded to verify Packet is a binary containing at least non-negative Length bytes, returning a detached standalone copy of the leading Length bytes.
+slice_packet_safe(Packet, Length) when is_binary(Packet), is_integer(Length), Length >= 0, byte_size(Packet) >= Length ->
+    <<Slice:Length/binary, _Rest/binary>> = Packet,
+    binary:copy(Slice).
+
+%% @doc Return a two-element tuple pairing the logical byte length of Bin with the byte capacity of its backing allocation.
+inspect_refc_ratio(Bin) ->
+    {byte_size(Bin), binary:referenced_byte_size(Bin)}.
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -190,6 +209,11 @@ xor_mask_payload(PayloadBin, MaskByte) ->
 			exerciseID:   "ch04-l06",
 			visibleCount: 4,
 			files:        map[string]string{"src/binary_scanner.erl": binaryScannerSolution},
+		},
+		{
+			exerciseID:   "ch04-l07",
+			visibleCount: 4,
+			files:        map[string]string{"src/binary_unpinner.erl": binaryUnpinnerSolution},
 		},
 	}
 
@@ -821,6 +845,103 @@ xor_mask_payload(PayloadBin, MaskByte) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected binary_scanner_and_comprehension stage to fail on global split / missing trim_all bug, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l07 rejects binary_to_list bypass and missing referenced_byte_size/guard via AST audit", func(t *testing.T) {
+		sessionID := "test-ch04-l07-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		bypass := map[string]string{
+			"src/binary_unpinner.erl": `-module(binary_unpinner).
+-export([extract_token_safe/1, slice_packet_safe/2, inspect_refc_ratio/1]).
+
+%% Bypass: rebuilds slice through binary_to_list/list_to_binary instead of binary:copy/1.
+extract_token_safe(<<Token:16/binary, _Rest/binary>>) ->
+    {ok, list_to_binary(binary_to_list(Token))};
+extract_token_safe(_) ->
+    {error, insufficient_data}.
+
+%% Bypass: omits guard validation on slice_packet_safe/2.
+slice_packet_safe(Packet, Length) ->
+    <<Slice:Length/binary, _Rest/binary>> = Packet,
+    binary:copy(Slice).
+
+%% Bypass: fabricates referenced size instead of calling binary:referenced_byte_size/1.
+inspect_refc_ratio(Bin) ->
+    {byte_size(Bin), byte_size(Bin)}.
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l07", bypass)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when binary_to_list bypass or missing guard/referenced_byte_size occurs, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_binary_unpinner_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_binary_unpinner_audit stage to fail on binary_to_list / missing guard bypass, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l07 rejects un-copied sub-binary pinning leak and negative-length guard omission", func(t *testing.T) {
+		sessionID := "test-ch04-l07-neg-edge"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		leakBug := map[string]string{
+			"src/binary_unpinner.erl": `-module(binary_unpinner).
+-export([extract_token_safe/1, slice_packet_safe/2, inspect_refc_ratio/1]).
+
+extract_token_safe(<<Token:16/binary, _Rest/binary>>) ->
+    {ok, binary:copy(Token)};
+extract_token_safe(_) ->
+    {error, insufficient_data}.
+
+%% Bug: returns un-copied 128-byte sub-binary slice directly (pins full 4096-byte ProcBin!).
+slice_packet_safe(Packet, Length) when is_binary(Packet), is_integer(Length), Length >= 0, byte_size(Packet) >= Length ->
+    <<Slice:Length/binary, _Rest/binary>> = Packet,
+    _ = binary:copy(<<>>),
+    Slice.
+
+inspect_refc_ratio(Bin) ->
+    {byte_size(Bin), binary:referenced_byte_size(Bin)}.
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l07", leakBug)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when sub-binary stays pinned or negative Length bypasses guard, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "procbin_subbinary_unpinning" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected procbin_subbinary_unpinning stage to fail on sub-binary leak / negative length bug, stages=%+v", report.Stages)
 		}
 	})
 }
