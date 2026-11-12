@@ -345,12 +345,12 @@ T1_Res = try telecom_foundations:classify_packet({ipv4, "10.0.0.1", "10.0.0.2", 
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))),
           passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"telecom_foundations:classify_packet(...)">>,
+        #{call_str => <<"telecom_foundations:classify_packet({ipv4, \"10.0.0.1\", \"10.0.0.2\", [ping, 100]})">>,
           expected => <<"{ok, ipv4, \"10.0.0.1\", \"10.0.0.2\", ping}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"telecom_foundations:classify_packet(...)">>, expected => <<"{ok, ...}">>,
+    #{call_str => <<"telecom_foundations:classify_packet({ipv4, \"10.0.0.1\", \"10.0.0.2\", [ping, 100]})">>, expected => <<"{ok, ipv4, \"10.0.0.1\", \"10.0.0.2\", ping}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
@@ -360,12 +360,12 @@ T2_Res = try telecom_foundations:classify_packet({ipv4, "10.0.0.1", "10.0.0.2", 
           expected => <<"{error, empty_payload}">>, actual => <<"{error, empty_payload}">>, passed => true,
           time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"telecom_foundations:classify_packet(...)">>,
+        #{call_str => <<"telecom_foundations:classify_packet({ipv4, \"10.0.0.1\", \"10.0.0.2\", []})">>,
           expected => <<"{error, empty_payload}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
-    #{call_str => <<"telecom_foundations:classify_packet(...)">>, expected => <<"{error, empty_payload}">>,
+    #{call_str => <<"telecom_foundations:classify_packet({ipv4, \"10.0.0.1\", \"10.0.0.2\", []})">>, expected => <<"{error, empty_payload}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
@@ -379,7 +379,7 @@ T3_Res = try telecom_foundations:bill_call(60, standard) of
           expected => <<"{ok, 310}">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T3_Start}
 catch C3:R3 ->
-    #{call_str => <<"telecom_foundations:bill_call(...)">>, expected => <<"{ok, 310}">>,
+    #{call_str => <<"telecom_foundations:bill_call(60, standard)">>, expected => <<"{ok, 310}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 T4_Start = erlang:system_time(millisecond),
@@ -393,7 +393,7 @@ T4_Res = try telecom_foundations:bill_call(3600, internal) of
           expected => <<"{ok, 0}">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other4]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T4_Start}
 catch C4:R4 ->
-    #{call_str => <<"telecom_foundations:bill_call(...)">>, expected => <<"{ok, 0}">>,
+    #{call_str => <<"telecom_foundations:bill_call(3600, internal)">>, expected => <<"{ok, 0}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
@@ -4527,40 +4527,92 @@ Stages = [CompileStage, S1_Ast, S2_Router]
 `, wsDir, wsDir), true
 
 	case "ch01-l08":
-		return `
+		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(telecom_foundations) of
     {module, telecom_foundations} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"telecom_foundations.erl compiled cleanly">>};
+        Exports = telecom_foundations:module_info(exports),
+        Required = [{classify_packet, 1}, {bill_call, 2}, {bill_call, 3}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"telecom_foundations.erl compiled cleanly and exported classify_packet/1, bill_call/2, and bill_call/3.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Suite = try
+S1_Ast = try
+    SourceCandidates = [
+        filename:join(["%s", "src", "telecom_foundations.erl"]),
+        filename:join(["%s", "telecom_foundations.erl"])
+    ],
+    SourceFile = case [P || P <- SourceCandidates, filelib:is_regular(P)] of
+        [ValidSrc | _] -> ValidSrc;
+        [] -> hd(SourceCandidates)
+    end,
+    LocalRes = bf_ast_verifier:verify_rules(SourceFile, #{required_remote_calls => [{erlang, bill_call, 3}], forbidden_constructs => [if_expr]}),
+    RemoteRes = bf_ast_verifier:verify_rules(SourceFile, #{required_remote_calls => [{telecom_foundations, bill_call, 3}], forbidden_constructs => [if_expr]}),
+    AstOk = case {LocalRes, RemoteRes} of
+        {{ok, _}, _} -> true;
+        {_, {ok, _}} -> true;
+        _ -> false
+    end,
+    NoForwardRefs = case epp:parse_file(SourceFile, []) of
+        {ok, Forms} ->
+            HasFwd = (fun Walk(T) when is_tuple(T) ->
+                case element(1, T) of
+                    map -> true;
+                    bin when tuple_size(T) >= 3, element(3, T) =/= [] -> true;
+                    clause when tuple_size(T) >= 4, element(4, T) =/= [] -> true;
+                    _ -> Walk(tuple_to_list(T))
+                end;
+                Walk([H | Tail]) -> Walk(H) orelse Walk(Tail);
+                Walk(_) -> false
+            end)(Forms),
+            not HasFwd;
+        _ -> false
+    end,
+    case {AstOk, NoForwardRefs} of
+        {true, true} ->
+            #{id => <<"ast_delegation_and_forward_refs_audit">>, title => <<"AST Analysis: Arity Delegation & Zero Forward References">>, status => <<"passed">>, time_ms => 10, details => <<"Verified bill_call/2 -> bill_call/3 delegation and zero Maps, Binaries, if expressions, or when guards.">>};
+        {false, _} ->
+            #{id => <<"ast_delegation_and_forward_refs_audit">>, title => <<"AST Analysis: Arity Delegation & Zero Forward References">>, status => <<"failed">>, time_ms => 10, details => <<"Failed AST check: bill_call/2 must delegate to bill_call/3 without if expressions.">>};
+        {true, false} ->
+            #{id => <<"ast_delegation_and_forward_refs_audit">>, title => <<"AST Analysis: Arity Delegation & Zero Forward References">>, status => <<"failed">>, time_ms => 10, details => <<"Forbidden forward-reference syntax detected (Maps, non-empty Binaries, or when guards are banned in Chapter 1).">> }
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_delegation_and_forward_refs_audit">>, title => <<"AST Analysis: Arity Delegation & Zero Forward References">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_Suite = try
     P1 = telecom_foundations:classify_packet({ipv4, "10.0.0.1", "10.0.0.2", [ping, 100]}),
     P2 = telecom_foundations:classify_packet({ipv6, "fe80::1", "fe80::2", [data]}),
     P3 = telecom_foundations:classify_packet({ipv4, "10.0.0.1", "10.0.0.2", []}),
     P4 = telecom_foundations:classify_packet(bad_packet),
+    P5 = telecom_foundations:classify_packet({icmp, "10.0.0.1", "10.0.0.2", [ping]}),
     B1 = telecom_foundations:bill_call(60, standard),
     B2 = telecom_foundations:bill_call(100, premium, 25),
     B3 = telecom_foundations:bill_call(3600, internal),
     B4 = telecom_foundations:bill_call(60, unknown_plan),
-    case {P1, P2, P3, P4, B1, B2, B3, B4} of
+    case {P1, P2, P3, P4, P5, B1, B2, B3, B4} of
         {{ok, ipv4, "10.0.0.1", "10.0.0.2", ping},
          {ok, ipv6, "fe80::1", "fe80::2", data},
          {error, empty_payload},
+         {error, invalid_packet},
          {error, invalid_packet},
          {ok, 310},
          {ok, 325},
          {ok, 0},
          {error, unknown_plan}} ->
-            #{id => <<"telecom_foundations_engine">>, title => <<"Packet Classifier & CDR Billing Engine">>, status => <<"passed">>, time_ms => 8, details => <<"Full multi-clause packet classifier and CDR billing engine verified">>};
+            #{id => <<"telecom_foundations_engine">>, title => <<"Packet Classifier & CDR Billing Engine">>, status => <<"passed">>, time_ms => 8, details => <<"Full multi-clause packet classifier (including unsupported tag rejection) and CDR billing engine verified.">>};
         Got1 ->
             #{id => <<"telecom_foundations_engine">>, title => <<"Packet Classifier & CDR Billing Engine">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("CDR engine mismatch: ~p", [Got1]))}
     end
 catch C1:R1 ->
     #{id => <<"telecom_foundations_engine">>, title => <<"Packet Classifier & CDR Billing Engine">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
 end,
-Stages = [CompileStage, S1_Suite]
-`, true
+Stages = [CompileStage, S1_Ast, S2_Suite]
+`, wsDir, wsDir), true
 
 	// ── CHAPTER 2 ─────────────────────────────────────────────────────────────
 	case "ch02-l01":

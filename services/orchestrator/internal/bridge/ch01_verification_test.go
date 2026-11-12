@@ -137,6 +137,34 @@ verify_identical_pair(_) ->
     mismatch.
 `
 
+	telecomFoundationsSolution := `-module(telecom_foundations).
+-export([classify_packet/1, bill_call/2, bill_call/3]).
+
+%% @doc Validate a 4-element network packet and extract protocol, hosts, and leading payload item, or return empty_payload or invalid_packet errors.
+classify_packet({ipv4, SrcHost, DstHost, [FirstItem | _Rest]}) ->
+    {ok, ipv4, SrcHost, DstHost, FirstItem};
+classify_packet({ipv6, SrcHost, DstHost, [FirstItem | _Rest]}) ->
+    {ok, ipv6, SrcHost, DstHost, FirstItem};
+classify_packet({_Tag, _Src, _Dst, []}) ->
+    {error, empty_payload};
+classify_packet(_) ->
+    {error, invalid_packet}.
+
+%% @doc Delegate billing calculation for DurationSec and PlanType using the default 10-cent connection fee.
+bill_call(DurationSec, PlanType) ->
+    bill_call(DurationSec, PlanType, 10).
+
+%% @doc Compute total call cost in cents for DurationSec, PlanType, and ConnectionFeeCents, or return unknown_plan error for unsupported tiers.
+bill_call(DurationSec, standard, ConnectionFeeCents) ->
+    {ok, ConnectionFeeCents + (DurationSec * 5)};
+bill_call(DurationSec, premium, ConnectionFeeCents) ->
+    {ok, ConnectionFeeCents + (DurationSec * 3)};
+bill_call(_DurationSec, internal, _ConnectionFeeCents) ->
+    {ok, 0};
+bill_call(_DurationSec, _OtherPlan, _ConnectionFeeCents) ->
+    {error, unknown_plan}.
+`
+
 	tests := []struct {
 		name          string
 		exerciseID    string
@@ -198,6 +226,14 @@ verify_identical_pair(_) ->
 				"src/clause_router.erl": clauseRouterSolution,
 			},
 			visibleCount: 3,
+		},
+		{
+			name:       "ch01-l08 Telecom Foundations Problem Set",
+			exerciseID: "ch01-l08",
+			files: map[string]string{
+				"src/telecom_foundations.erl": telecomFoundationsSolution,
+			},
+			visibleCount: 4,
 		},
 	}
 
@@ -542,6 +578,63 @@ verify_identical_pair(_) ->
 		}
 		if !astFailed {
 			t.Errorf("Expected ast_clause_style_audit stage to fail for if_expr, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch01-l08 rejects non-delegating bill_call/2 and forward-ref when guard", func(t *testing.T) {
+		sessionID := "test-ch01-l08-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/telecom_foundations.erl": `-module(telecom_foundations).
+-export([classify_packet/1, bill_call/2, bill_call/3]).
+
+classify_packet({Proto, Src, Dst, [H | _]}) when Proto =:= ipv4; Proto =:= ipv6 ->
+    {ok, Proto, Src, Dst, H};
+classify_packet({_, _, _, []}) ->
+    {error, empty_payload};
+classify_packet(_) ->
+    {error, invalid_packet}.
+
+bill_call(DurationSec, standard) ->
+    {ok, 10 + DurationSec * 5};
+bill_call(DurationSec, PlanType) ->
+    bill_call(DurationSec, PlanType, 10).
+
+bill_call(DurationSec, standard, Fee) ->
+    {ok, Fee + DurationSec * 5};
+bill_call(DurationSec, premium, Fee) ->
+    {ok, Fee + DurationSec * 3};
+bill_call(_, internal, _) ->
+    {ok, 0};
+bill_call(_, _, _) ->
+    {error, unknown_plan}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch01-l08", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected telecom_foundations with forbidden when guard to fail AST verification, but got PASSED")
+		}
+
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_delegation_and_forward_refs_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_delegation_and_forward_refs_audit stage to fail for when guard, stages=%+v", report.Stages)
 		}
 	})
 }
