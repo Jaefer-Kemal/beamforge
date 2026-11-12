@@ -144,6 +144,35 @@ keep_valid_orders([_InvalidOrder | Rest], Acc) ->
     keep_valid_orders(Rest, Acc).
 `
 
+	tupleUpdaterSolution := `-module(tuple_updater).
+-export([update_product_price/3, partition_orders/2]).
+
+%% @doc Traverse Inventory with a tail-recursive accumulator and lists:reverse/1 to replace the price of the product tuple matching TargetId while preserving every other field and exact element order, returning Inventory unchanged if absent.
+update_product_price(Inventory, TargetId, NewPrice) ->
+    update_product_price(Inventory, TargetId, NewPrice, []).
+
+update_product_price([], _TargetId, _NewPrice, Acc) ->
+    lists:reverse(Acc);
+update_product_price([{product, Id, Name, _OldPrice, Stock} | Rest], TargetId, NewPrice, Acc)
+  when Id =:= TargetId ->
+    Updated = {product, Id, Name, NewPrice, Stock},
+    update_product_price(Rest, TargetId, NewPrice, [Updated | Acc]);
+update_product_price([OtherProd | Rest], TargetId, NewPrice, Acc) ->
+    update_product_price(Rest, TargetId, NewPrice, [OtherProd | Acc]).
+
+%% @doc Partition Orders in a single tail-recursive pass with dual accumulators and lists:reverse/1 into a 2-tuple containing orders meeting at least MinQty followed by all remaining orders in original relative order.
+partition_orders(Orders, MinQty) ->
+    partition_orders(Orders, MinQty, [], []).
+
+partition_orders([], _MinQty, ValidAcc, RejAcc) ->
+    {lists:reverse(ValidAcc), lists:reverse(RejAcc)};
+partition_orders([{order, _Id, Qty} = O | Rest], MinQty, ValidAcc, RejAcc)
+  when Qty >= MinQty ->
+    partition_orders(Rest, MinQty, [O | ValidAcc], RejAcc);
+partition_orders([O | Rest], MinQty, ValidAcc, RejAcc) ->
+    partition_orders(Rest, MinQty, ValidAcc, [O | RejAcc]).
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -178,6 +207,11 @@ keep_valid_orders([_InvalidOrder | Rest], Acc) ->
 			exerciseID:   "ch02-l06",
 			visibleCount: 2,
 			files:        map[string]string{"src/acc_filter.erl": accFilterSolution},
+		},
+		{
+			exerciseID:   "ch02-l07",
+			visibleCount: 3,
+			files:        map[string]string{"src/tuple_updater.erl": tupleUpdaterSolution},
 		},
 	}
 
@@ -836,6 +870,109 @@ keep_valid_orders(Orders) ->
 		}
 		if !astFailed {
 			t.Errorf("Expected ast_list_accumulator_audit stage to fail for list comprehension, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l07 rejects lists:keyreplace/4 and lists:partition/2 BIF shortcuts", func(t *testing.T) {
+		sessionID := "test-ch02-l07-neg-bif"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/tuple_updater.erl": `-module(tuple_updater).
+-export([update_product_price/3, partition_orders/2]).
+
+update_product_price(Inventory, TargetId, NewPrice) ->
+    case lists:keyfind(TargetId, 2, Inventory) of
+        {product, Id, Name, _Old, Stock} ->
+            lists:keyreplace(TargetId, 2, Inventory, {product, Id, Name, NewPrice, Stock});
+        false ->
+            Inventory
+    end.
+
+partition_orders(Orders, MinQty) ->
+    lists:partition(fun({order, _Id, Qty}) -> Qty >= MinQty end, Orders).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch02-l07", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected tuple_updater using lists:keyreplace/lists:partition to fail AST verification, but got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_tuple_updater_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_tuple_updater_audit stage to fail for lists:keyreplace/partition, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l07 rejects early-halt update dropping trailing or leading elements", func(t *testing.T) {
+		sessionID := "test-ch02-l07-neg-halt"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		buggy := map[string]string{
+			"src/tuple_updater.erl": `-module(tuple_updater).
+-export([update_product_price/3, partition_orders/2]).
+
+update_product_price(Inventory, TargetId, NewPrice) ->
+    update_product_price(Inventory, TargetId, NewPrice, []).
+
+update_product_price([], _TargetId, _NewPrice, Acc) ->
+    lists:reverse(Acc);
+update_product_price([{product, Id, Name, _OldPrice, Stock} | Rest], TargetId, NewPrice, _Acc)
+  when Id =:= TargetId ->
+    [{product, Id, Name, NewPrice, Stock} | Rest];
+update_product_price([OtherProd | Rest], TargetId, NewPrice, Acc) ->
+    update_product_price(Rest, TargetId, NewPrice, [OtherProd | Acc]).
+
+partition_orders(Orders, MinQty) ->
+    partition_orders(Orders, MinQty, [], []).
+
+partition_orders([], _MinQty, ValidAcc, RejAcc) ->
+    {lists:reverse(ValidAcc), lists:reverse(RejAcc)};
+partition_orders([{order, _Id, Qty} = O | Rest], MinQty, ValidAcc, RejAcc)
+  when Qty >= MinQty ->
+    partition_orders(Rest, MinQty, [O | ValidAcc], RejAcc);
+partition_orders([O | Rest], MinQty, ValidAcc, RejAcc) ->
+    partition_orders(Rest, MinQty, ValidAcc, [O | RejAcc]).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch02-l07", buggy)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected early-halt tuple_updater dropping prefix items to fail verification, but got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "tuple_update_and_partition" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected tuple_update_and_partition stage to fail for dropped prefix items, stages=%+v", report.Stages)
 		}
 	})
 }

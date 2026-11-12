@@ -1641,14 +1641,13 @@ To "modify" a record in an immutable list:
 5. At the base case (\`[]\`), call \`lists:reverse(Acc)\` to restore original list order.
 
 \`\`\`erlang
-update_entry([], _TargetKey, _NewVal, Acc) ->
+increment_counter([], _TargetKey, _Delta, Acc) ->
     lists:reverse(Acc);
-update_entry([{item, Key, Label, _OldVal} | Rest], TargetKey, NewVal, Acc)
-  when Key =:= TargetKey ->
-    UpdatedItem = {item, Key, Label, NewVal},
-    update_entry(Rest, TargetKey, NewVal, [UpdatedItem | Acc]);
-update_entry([OtherItem | Rest], TargetKey, NewVal, Acc) ->
-    update_entry(Rest, TargetKey, NewVal, [OtherItem | Acc]).
+increment_counter([{counter, Key, Count} | Rest], Key, Delta, Acc) ->
+    UpdatedCounter = {counter, Key, Count + Delta},
+    increment_counter(Rest, Key, Delta, [UpdatedCounter | Acc]);
+increment_counter([Other | Rest], TargetKey, Delta, Acc) ->
+    increment_counter(Rest, TargetKey, Delta, [Other | Acc]).
 \`\`\`
 
 ### 2. Dual-Accumulator Partitioning
@@ -1671,82 +1670,85 @@ partition_stream([{event, Id, error} | Rest], PassAcc, FailAcc) ->
 In a single, cache-friendly tail-recursive pass, both output lists are populated and reversed in constant stack memory.
 
 > [!warning] Common Beginner Syntax Trap: Halting Immediately on Update
-> A common beginner mistake is stopping the recursion as soon as the updated item is found (e.g. \`return [Updated | Rest]\`).
-> If you do this without accounting for the items already accumulated in \`Acc\`, all previous elements of your inventory list will be lost! Always carry the tail through to the base case.
+> A common beginner mistake is stopping the recursion as soon as the updated item is found (e.g. returning \`[Updated | Rest]\`).
+> If you do this without accounting for the items already accumulated in \`Acc\`, all preceding elements of your list will be lost! Always carry the accumulated prefix and remaining tail through to the base case.
 
 ## Parallel Worked Example
 
-Managing telecommunications SIP trunks and load-balancing traffic:
+Consider a logistics freight manifest processor applying regional fuel surcharges and separating express shipments:
 
 \`\`\`erlang
--module(sip_trunk_manager).
--export([adjust_trunk_codec/3, split_by_utilization/2]).
+-module(freight_dispatch).
+-export([apply_surcharge/3, separate_by_priority/1]).
 
-adjust_trunk_codec(Trunks, TargetId, NewCodec) ->
-    adjust_loop(Trunks, TargetId, NewCodec, []).
+%% 1. Apply an arithmetic surcharge to matching zone manifests while keeping list order intact
+apply_surcharge(Manifests, ZoneAtom, ExtraCents) ->
+    surcharge_loop(Manifests, ZoneAtom, ExtraCents, []).
 
-adjust_loop([], _TargetId, _NewCodec, Acc) ->
+surcharge_loop([], _Zone, _Extra, Acc) ->
     lists:reverse(Acc);
-adjust_loop([{trunk, Id, Host, Port, _OldCodec, MaxChannels} | Rest], TargetId, NewCodec, Acc)
-  when Id =:= TargetId ->
-    Updated = {trunk, Id, Host, Port, NewCodec, MaxChannels},
-    adjust_loop(Rest, TargetId, NewCodec, [Updated | Acc]);
-adjust_loop([OtherTrunk | Rest], TargetId, NewCodec, Acc) ->
-    adjust_loop(Rest, TargetId, NewCodec, [OtherTrunk | Acc]).
+surcharge_loop([{manifest, Ref, Zone, Cents} | Rest], Zone, ExtraCents, Acc) ->
+    Updated = {manifest, Ref, Zone, Cents + ExtraCents},
+    surcharge_loop(Rest, Zone, ExtraCents, [Updated | Acc]);
+surcharge_loop([Other | Rest], Zone, ExtraCents, Acc) ->
+    surcharge_loop(Rest, Zone, ExtraCents, [Other | Acc]).
 
-split_by_utilization(TrunkLoads, Threshold) ->
-    split_loop(TrunkLoads, Threshold, [], []).
+%% 2. Split a parcel list into {Express, Standard} in one pass with dual accumulators
+separate_by_priority(Parcels) ->
+    priority_loop(Parcels, [], []).
 
-split_loop([], _Threshold, HighAcc, NormalAcc) ->
-    {lists:reverse(HighAcc), lists:reverse(NormalAcc)};
-split_loop([{load, _Id, ActiveCalls} = Load | Rest], Threshold, HighAcc, NormalAcc)
-  when ActiveCalls > Threshold ->
-    split_loop(Rest, Threshold, [Load | HighAcc], NormalAcc);
-split_loop([Load | Rest], Threshold, HighAcc, NormalAcc) ->
-    split_loop(Rest, Threshold, HighAcc, [Load | NormalAcc]).
+priority_loop([], FastAcc, StdAcc) ->
+    {lists:reverse(FastAcc), lists:reverse(StdAcc)};
+priority_loop([{parcel, _Code, express} = Item | Rest], FastAcc, StdAcc) ->
+    priority_loop(Rest, [Item | FastAcc], StdAcc);
+priority_loop([Standard | Rest], FastAcc, StdAcc) ->
+    priority_loop(Rest, FastAcc, [Standard | StdAcc]).
 \`\`\`
+
+Notice how the BEAM executes this module:
+- \`apply_surcharge/3\` keeps non-matching prefix elements via \`[Other | Acc]\` and keeps trailing manifests by continuing on \`Rest\` after matching \`Zone\`, restoring sequence order once at \`[]\`.
+- \`separate_by_priority/1\` routes each element into \`FastAcc\` or \`StdAcc\` in $O(1)$ per step, reversing both accumulators once at the \`[]\` base case in a single $O(N)$ pass.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Multi-Accumulator Signature Pattern:
-Process(List, AccA, AccB) ->
-    case List of
-        [] -> {lists:reverse(AccA), lists:reverse(AccB)};
-        [H | T] when Condition(H) -> Process(T, [H | AccA], AccB);
-        [H | T] -> Process(T, AccA, [H | AccB])
-    end.
+%% OTP stdlib: lists:partition/2 (conceptual single-pass specification)
+lists:partition(Pred, List1) -> {Satisfying, NotSatisfying}
+  Types:
+    Pred = fun((T) -> boolean())
+    List1 = Satisfying = NotSatisfying = [T]
 \`\`\`
+> Note: In this lesson you implement the single-pass dual-accumulator mechanics manually using pure recursion and \`lists:reverse/1\`. See the Erlang Reference Card for full complexity details.
 
 ## Assignment Specification
 
 Implement tail-recursive immutable list manipulation functions in \`tuple_updater.erl\`:
 
-### \`update_product_price/3\`
+### 1. \`update_product_price(Inventory, TargetId, NewPrice)\`
 - **Input**:
-  - \`Inventory\` — A list of zero or more product tuples of the form \`{product, Id, Name, Price, Stock}\`, where \`Id\` is an integer, \`Name\` is a string, and \`Price\` and \`Stock\` are numbers.
+  - \`Inventory\` — A list of zero or more 5-element \`product\` tuples (each holding an integer \`Id\`, a string \`Name\`, a numeric \`Price\`, and a numeric \`Stock\`).
   - \`TargetId\` — An integer representing the unique product identifier to update.
   - \`NewPrice\` — A number representing the replacement price.
-- **Behavior**: Traverses the inventory list and replaces the price of the product whose identifier matches \`TargetId\` with \`NewPrice\`, retaining all other tuple fields (\`Id\`, \`Name\`, and \`Stock\`) and preserving the exact relative position of all products. If \`TargetId\` is not found, the original inventory list is returned unchanged. Must be strictly tail-recursive using an auxiliary accumulator and \`lists:reverse/1\` at the base case.
+- **Behavior**: Traverse \`Inventory\` in $O(N)$ time and $O(1)$ stack space using an accumulator and \`lists:reverse/1\`, replacing the price of the product whose ID equals \`TargetId\` with \`NewPrice\` while keeping its \`Id\`, \`Name\`, and \`Stock\` fields unchanged and preserving the exact relative positions of all preceding and trailing elements. If \`TargetId\` is not present, return the inventory list unchanged.
 - **Examples**:
   - \`tuple_updater:update_product_price([{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}], 2, 30)\` returns \`[{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 30, 5}]\`.
   - \`tuple_updater:update_product_price([{product, 1, "Keyboard", 50, 10}], 99, 100)\` returns \`[{product, 1, "Keyboard", 50, 10}]\`.
   - \`tuple_updater:update_product_price([], 1, 10)\` returns \`[]\`.
 
-### \`partition_orders/2\`
+### 2. \`partition_orders(Orders, MinQty)\`
 - **Input**:
-  - \`Orders\` — A list of zero or more 3-element tuples of the form \`{order, Id, Qty}\`, where \`Id\` is an integer and \`Qty\` is an integer order quantity.
+  - \`Orders\` — A list of zero or more 3-element \`order\` tuples (each holding an integer \`Id\` and an integer \`Qty\`).
   - \`MinQty\` — An integer specifying the minimum threshold for valid orders.
-- **Behavior**: Partitions the orders into a 2-tuple of lists \`{ValidOrders, RejectedOrders}\` in a single tail-recursive pass using dual accumulators. An order is valid if its quantity \`Qty\` is greater than or equal to \`MinQty\`; otherwise it is rejected. Both resulting lists must preserve the exact relative order of elements from the input. Returns \`{lists:reverse(ValidAcc), lists:reverse(RejectedAcc)}\` at the base case.
+- **Behavior**: Partition \`Orders\` in a single $O(N)$ tail-recursive pass using dual accumulators and \`lists:reverse/1\`, returning a 2-tuple whose first list contains all orders with \`Qty\` at least \`MinQty\` and whose second list contains all remaining orders, preserving original relative order in both output lists.
 - **Examples**:
   - \`tuple_updater:partition_orders([{order, 1, 10}, {order, 2, 2}, {order, 3, 5}, {order, 4, 1}], 5)\` returns \`{[{order, 1, 10}, {order, 3, 5}], [{order, 2, 2}, {order, 4, 1}]}\`.
   - \`tuple_updater:partition_orders([], 5)\` returns \`{[], []}\`.
 
 ## Rules & Verification Constraints
 
-- Must be tail-recursive (enforced by \`bf_ast_verifier\`).
-- Must call \`lists:reverse/1\` on accumulators.
-- Do not use \`lists:partition/2\` or \`lists:keyreplace/4\`.`,
+- Both functions must be tail-recursive using accumulators (enforced by \`bf_ast_verifier\`).
+- Must call \`lists:reverse/1\` at the base case rather than \`++\` inside recursive loops.
+- Do not use \`lists:partition/2\`, \`lists:keyreplace/4\`, \`lists:map/2\`, \`lists:filter/2\`, \`lists:foldl/3\`, \`lists:foldr/3\`, or list comprehensions.`,
     otpDocCards: [
       {
         functionName: 'partition_pattern',
@@ -1801,13 +1803,14 @@ Implement tail-recursive immutable list manipulation functions in \`tuple_update
         title: 'Dual-Accumulator Order Partitioning',
         erlangCall: 'tuple_updater:partition_orders([{order, 1, 10}, {order, 2, 2}, {order, 3, 5}, {order, 4, 1}], 5)',
         expectedOutput: '{[{order, 1, 10}, {order, 3, 5}], [{order, 2, 2}, {order, 4, 1}]}',
-        explanation: 'Splits orders into Valid (Qty >= 5) and Rejected (Qty < 5) preserving order.',
+        explanation: 'Partitions orders into minimum-quantity valid and rejected lists while preserving relative order.',
       },
     ],
     astRules: {
       requireTailRecursion: ['update_product_price/3', 'partition_orders/2'],
       requiredCalls: ['lists:reverse/1'],
-      forbiddenCalls: ['lists:partition/2', 'lists:keyreplace/4'],
+      forbiddenCalls: ['lists:partition/2', 'lists:keyreplace/4', 'lists:map', 'lists:filter', 'lists:foldl', 'lists:foldr'],
+      forbiddenConstructs: ['list_comprehension'],
     },
     solutionExplanation: 'Implements tail-recursive list updates and dual-accumulator partitioning with O(1) stack space.',
     files: [
@@ -1817,12 +1820,12 @@ Implement tail-recursive immutable list manipulation functions in \`tuple_update
         content: `-module(tuple_updater).
 -export([update_product_price/3, partition_orders/2]).
 
-%% @doc Update the price of a matching product in inventory while preserving order.
-update_product_price(Inventory, TargetId, NewPrice) ->
+%% @doc Traverse Inventory with a tail-recursive accumulator and lists:reverse/1 to replace the price of the product tuple matching TargetId while preserving every other field and exact element order, returning Inventory unchanged if absent.
+update_product_price(_Inventory, _TargetId, _NewPrice) ->
     ok.
 
-%% @doc Partition orders into valid and rejected lists based on minimum quantity.
-partition_orders(Orders, MinQty) ->
+%% @doc Partition Orders in a single tail-recursive pass with dual accumulators and lists:reverse/1 into a 2-tuple containing orders meeting at least MinQty followed by all remaining orders in original relative order.
+partition_orders(_Orders, _MinQty) ->
     ok.`,
       },
     ],
@@ -1830,6 +1833,7 @@ partition_orders(Orders, MinQty) ->
       'src/tuple_updater.erl': `-module(tuple_updater).
 -export([update_product_price/3, partition_orders/2]).
 
+%% @doc Traverse Inventory with a tail-recursive accumulator and lists:reverse/1 to replace the price of the product tuple matching TargetId while preserving every other field and exact element order, returning Inventory unchanged if absent.
 update_product_price(Inventory, TargetId, NewPrice) ->
     update_product_price(Inventory, TargetId, NewPrice, []).
 
@@ -1842,6 +1846,7 @@ update_product_price([{product, Id, Name, _OldPrice, Stock} | Rest], TargetId, N
 update_product_price([OtherProd | Rest], TargetId, NewPrice, Acc) ->
     update_product_price(Rest, TargetId, NewPrice, [OtherProd | Acc]).
 
+%% @doc Partition Orders in a single tail-recursive pass with dual accumulators and lists:reverse/1 into a 2-tuple containing orders meeting at least MinQty followed by all remaining orders in original relative order.
 partition_orders(Orders, MinQty) ->
     partition_orders(Orders, MinQty, [], []).
 
@@ -1856,16 +1861,17 @@ partition_orders([O | Rest], MinQty, ValidAcc, RejAcc) ->
     starterCode: `-module(tuple_updater).
 -export([update_product_price/3, partition_orders/2]).
 
-%% @doc Update the price of a matching product in inventory while preserving order.
-update_product_price(Inventory, TargetId, NewPrice) ->
+%% @doc Traverse Inventory with a tail-recursive accumulator and lists:reverse/1 to replace the price of the product tuple matching TargetId while preserving every other field and exact element order, returning Inventory unchanged if absent.
+update_product_price(_Inventory, _TargetId, _NewPrice) ->
     ok.
 
-%% @doc Partition orders into valid and rejected lists based on minimum quantity.
-partition_orders(Orders, MinQty) ->
+%% @doc Partition Orders in a single tail-recursive pass with dual accumulators and lists:reverse/1 into a 2-tuple containing orders meeting at least MinQty followed by all remaining orders in original relative order.
+partition_orders(_Orders, _MinQty) ->
     ok.`,
     solutionCode: `-module(tuple_updater).
 -export([update_product_price/3, partition_orders/2]).
 
+%% @doc Traverse Inventory with a tail-recursive accumulator and lists:reverse/1 to replace the price of the product tuple matching TargetId while preserving every other field and exact element order, returning Inventory unchanged if absent.
 update_product_price(Inventory, TargetId, NewPrice) ->
     update_product_price(Inventory, TargetId, NewPrice, []).
 
@@ -1878,6 +1884,7 @@ update_product_price([{product, Id, Name, _OldPrice, Stock} | Rest], TargetId, N
 update_product_price([OtherProd | Rest], TargetId, NewPrice, Acc) ->
     update_product_price(Rest, TargetId, NewPrice, [OtherProd | Acc]).
 
+%% @doc Partition Orders in a single tail-recursive pass with dual accumulators and lists:reverse/1 into a 2-tuple containing orders meeting at least MinQty followed by all remaining orders in original relative order.
 partition_orders(Orders, MinQty) ->
     partition_orders(Orders, MinQty, [], []).
 

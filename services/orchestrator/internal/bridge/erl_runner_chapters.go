@@ -768,26 +768,29 @@ T1_Res = try tuple_updater:update_product_price(Inv1, 2, 30) of
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"tuple_updater:update_product_price(Inventory, 2, 30)">>,
-          expected => <<"[{product, 1, ...}]">>,
+        #{call_str => <<"tuple_updater:update_product_price([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}], 2, 30)">>,
+          expected => <<"[{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 30, 5}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"tuple_updater:update_product_price(...)">>, expected => <<"[{product, ...}]">>,
+    #{call_str => <<"tuple_updater:update_product_price([{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 25, 5}], 2, 30)">>,
+      expected => <<"[{product, 1, \"Keyboard\", 50, 10}, {product, 2, \"Mouse\", 30, 5}]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try tuple_updater:update_product_price([{product, 1, "Keyboard", 50, 10}], 99, 100) of
     [{product, 1, "Keyboard", 50, 10}] = R2 ->
-        #{call_str => <<"tuple_updater:update_product_price(Inv, 99, 100)">>,
+        #{call_str => <<"tuple_updater:update_product_price([{product, 1, \"Keyboard\", 50, 10}], 99, 100)">>,
           expected => <<"[{product, 1, \"Keyboard\", 50, 10}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"tuple_updater:update_product_price(...)">>, expected => <<"[{product, 1, ...}]">>,
+        #{call_str => <<"tuple_updater:update_product_price([{product, 1, \"Keyboard\", 50, 10}], 99, 100)">>,
+          expected => <<"[{product, 1, \"Keyboard\", 50, 10}]">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
 catch C2:R2 ->
-    #{call_str => <<"tuple_updater:update_product_price(...)">>, expected => <<"[{product, 1, ...}]">>,
+    #{call_str => <<"tuple_updater:update_product_price([{product, 1, \"Keyboard\", 50, 10}], 99, 100)">>,
+      expected => <<"[{product, 1, \"Keyboard\", 50, 10}]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 
@@ -795,16 +798,17 @@ Orders = [{order, 1, 10}, {order, 2, 2}, {order, 3, 5}, {order, 4, 1}],
 T3_Start = erlang:system_time(millisecond),
 T3_Res = try tuple_updater:partition_orders(Orders, 5) of
     {[{order, 1, 10}, {order, 3, 5}], [{order, 2, 2}, {order, 4, 1}]} = R3 ->
-        #{call_str => <<"tuple_updater:partition_orders(Orders, 5)">>,
+        #{call_str => <<"tuple_updater:partition_orders([{order, 1, 10}, {order, 2, 2}, {order, 3, 5}, {order, 4, 1}], 5)">>,
           expected => <<"{[{order, 1, 10}, {order, 3, 5}], [{order, 2, 2}, {order, 4, 1}]}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T3_Start};
     Other3 ->
-        #{call_str => <<"tuple_updater:partition_orders(Orders, 5)">>,
-          expected => <<"{[Valid], [Rejected]}">>,
+        #{call_str => <<"tuple_updater:partition_orders([{order, 1, 10}, {order, 2, 2}, {order, 3, 5}, {order, 4, 1}], 5)">>,
+          expected => <<"{[{order, 1, 10}, {order, 3, 5}], [{order, 2, 2}, {order, 4, 1}]}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
 catch C3:R3 ->
-    #{call_str => <<"tuple_updater:partition_orders(...)">>, expected => <<"{...}">>,
+    #{call_str => <<"tuple_updater:partition_orders([{order, 1, 10}, {order, 2, 2}, {order, 3, 5}, {order, 4, 1}], 5)">>,
+      expected => <<"{[{order, 1, 10}, {order, 3, 5}], [{order, 2, 2}, {order, 4, 1}]}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res],
@@ -5143,36 +5147,93 @@ Stages = [CompileStage, S1_Ast, S2_Reverse]
 `, wsDir, wsDir), true
 
 	case "ch02-l07":
-		return `
+		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(tuple_updater) of
     {module, tuple_updater} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"tuple_updater.erl compiled cleanly">>};
+        Exports = tuple_updater:module_info(exports),
+        Required = [{update_product_price, 3}, {partition_orders, 2}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"tuple_updater.erl compiled cleanly and exported update_product_price/3 and partition_orders/2.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Updater = try
+S1_Ast = try
+    SourceCandidates = [
+        filename:join(["%s", "src", "tuple_updater.erl"]),
+        filename:join(["%s", "tuple_updater.erl"])
+    ],
+    SourceFile = case [P || P <- SourceCandidates, filelib:is_regular(P)] of
+        [ValidSrc | _] -> ValidSrc;
+        [] -> hd(SourceCandidates)
+    end,
+    Rules = #{
+        require_tail_recursion => [{update_product_price, 3}, {partition_orders, 2}],
+        required_remote_calls => [{lists, reverse, 1}],
+        forbidden_remote_calls => [{lists, partition, any}, {lists, keyreplace, any}, {lists, map, any}, {lists, filter, any}, {lists, foldl, any}, {lists, foldr, any}],
+        forbidden_constructs => [list_comprehension]
+    },
+    AstRes = bf_ast_verifier:verify_rules(SourceFile, Rules),
+    NoAppend = case epp:parse_file(SourceFile, []) of
+        {ok, Forms} ->
+            HasAppend = (fun Walk(T) when is_tuple(T) ->
+                case element(1, T) of
+                    op when tuple_size(T) >= 3, element(3, T) =:= '++' -> true;
+                    _ -> Walk(tuple_to_list(T))
+                end;
+                Walk([H | Tail]) -> Walk(H) orelse Walk(Tail);
+                Walk(_) -> false
+            end)(Forms),
+            not HasAppend;
+        _ -> false
+    end,
+    case {AstRes, NoAppend} of
+        {{ok, _}, true} ->
+            #{id => <<"ast_tuple_updater_audit">>, title => <<"AST Analysis: Tail Recursion, lists:reverse/1 & Zero BIF Shortcuts">>, status => <<"passed">>, time_ms => 12, details => <<"Verified tail-recursive accumulation, lists:reverse/1, and zero lists:partition/keyreplace/comprehensions/++.">>};
+        {{error, [#{message := Msg} | _]}, _} ->
+            #{id => <<"ast_tuple_updater_audit">>, title => <<"AST Analysis: Tail Recursion, lists:reverse/1 & Zero BIF Shortcuts">>, status => <<"failed">>, time_ms => 12, details => Msg};
+        {_, false} ->
+            #{id => <<"ast_tuple_updater_audit">>, title => <<"AST Analysis: Tail Recursion, lists:reverse/1 & Zero BIF Shortcuts">>, status => <<"failed">>, time_ms => 12, details => <<"Forbidden O(N^2) list append operator (++) detected; prepend onto accumulators and reverse once at base case.">>};
+        {{error, OtherErr}, _} ->
+            #{id => <<"ast_tuple_updater_audit">>, title => <<"AST Analysis: Tail Recursion, lists:reverse/1 & Zero BIF Shortcuts">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST Rule violation: ~p", [OtherErr]))}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_tuple_updater_audit">>, title => <<"AST Analysis: Tail Recursion, lists:reverse/1 & Zero BIF Shortcuts">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_Updater = try
     Inv = [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}],
+    Inv3 = [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}, {product, 3, "Cable", 15, 20}],
     U1 = tuple_updater:update_product_price(Inv, 2, 30),
+    U1b = tuple_updater:update_product_price(Inv3, 2, 30),
     U2 = tuple_updater:update_product_price(Inv, 99, 100),
     U3 = tuple_updater:update_product_price([], 1, 10),
-    Orders = [{order, 1, 10}, {order, 2, 2}, {order, 3, 5}, {order, 4, 1}],
+    Orders = [{order, 1, 10}, {order, 2, 2}, {order, 3, 5}, {order, 4, 4}],
     P1 = tuple_updater:partition_orders(Orders, 5),
     P2 = tuple_updater:partition_orders([], 5),
-    case {U1, U2, U3, P1, P2} of
+    BigOrders = [{order, N, N rem 6} || N <- lists:seq(1, 2000)],
+    ExpectedBig = {[{order, N, N rem 6} || N <- lists:seq(1, 2000), (N rem 6) >= 3], [{order, N, N rem 6} || N <- lists:seq(1, 2000), (N rem 6) < 3]},
+    P3 = tuple_updater:partition_orders(BigOrders, 3),
+    case {U1, U1b, U2, U3, P1, P2, P3 =:= ExpectedBig} of
         {[{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 30, 5}],
+         [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 30, 5}, {product, 3, "Cable", 15, 20}],
          [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}],
          [],
-         {[{order, 1, 10}, {order, 3, 5}], [{order, 2, 2}, {order, 4, 1}]},
-         {[], []}} ->
-            #{id => <<"tuple_update_and_partition">>, title => <<"Tail-Recursive Tuple Update & Dual-Accumulator Partitioning">>, status => <<"passed">>, time_ms => 10, details => <<"Tuple updating and dual-accumulator order partitioning verified">>};
+         {[{order, 1, 10}, {order, 3, 5}], [{order, 2, 2}, {order, 4, 4}]},
+         {[], []},
+         true} ->
+            #{id => <<"tuple_update_and_partition">>, title => <<"Tail-Recursive Tuple Update & Dual-Accumulator Partitioning">>, status => <<"passed">>, time_ms => 10, details => <<"Middle-element position preservation, MinQty inclusive boundary, and 2,000-order dual-accumulator pass verified.">>};
         Got1 ->
             #{id => <<"tuple_update_and_partition">>, title => <<"Tail-Recursive Tuple Update & Dual-Accumulator Partitioning">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
     end
 catch Class_Upd:Err_Upd ->
     #{id => <<"tuple_update_and_partition">>, title => <<"Tail-Recursive Tuple Update & Dual-Accumulator Partitioning">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_Upd, Err_Upd]))}
 end,
-Stages = [CompileStage, S1_Updater]
-`, true
+Stages = [CompileStage, S1_Ast, S2_Updater]
+`, wsDir, wsDir), true
 
 	case "ch02-l08":
 		return r.buildInventoryVerificationScript(wsDir), true
