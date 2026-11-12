@@ -74,6 +74,24 @@ swap_endpoints(Event) ->
     {call_event, Id, Callee, Caller, Duration}.
 `
 
+	listOpsSolution := `-module(list_ops).
+-export([prepend_item/2, swap_first_two/1, ascii_initial/1]).
+
+%% @doc Prepend Item onto the front of List in O(1) constant time without copying List.
+prepend_item(Item, List) ->
+    [Item | List].
+
+%% @doc Return a list with the first two elements swapped while keeping the remaining tail unchanged; fail cleanly if fewer than two elements exist.
+swap_first_two(List) ->
+    [First, Second | Rest] = List,
+    [Second, First | Rest].
+
+%% @doc Extract the integer codepoint of the first character in non-empty NameString as a tagged character-code 2-tuple; fail cleanly on empty input.
+ascii_initial(NameString) ->
+    [FirstCharCode | _Rest] = NameString,
+    {char_code, FirstCharCode}.
+`
+
 	tests := []struct {
 		name          string
 		exerciseID    string
@@ -109,6 +127,14 @@ swap_endpoints(Event) ->
 			exerciseID: "ch01-l04",
 			files: map[string]string{
 				"src/telecom_events.erl": telecomEventsSolution,
+			},
+			visibleCount: 3,
+		},
+		{
+			name:       "ch01-l05 Lists & Cons Cells",
+			exerciseID: "ch01-l05",
+			files: map[string]string{
+				"src/list_ops.erl": listOpsSolution,
 			},
 			visibleCount: 3,
 		},
@@ -308,6 +334,51 @@ swap_endpoints(Event) ->
 		}
 		if report.Verdict == "PASSED" {
 			t.Fatalf("Expected wildcard-tag extract_caller to fail verification, but got PASSED")
+		}
+	})
+
+	t.Run("ch01-l05 rejects forbidden lists:append/2 shortcut", func(t *testing.T) {
+		sessionID := "test-ch01-l05-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/list_ops.erl": `-module(list_ops).
+-export([prepend_item/2, swap_first_two/1, ascii_initial/1]).
+
+prepend_item(Item, List) ->
+    lists:append([Item], List).
+
+swap_first_two([First, Second | Rest]) ->
+    [Second, First | Rest].
+
+ascii_initial([FirstCharCode | _Rest]) ->
+    {char_code, FirstCharCode}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch01-l05", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected list_ops calling lists:append/2 to fail AST verification, but got PASSED")
+		}
+
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_cons_pattern_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_cons_pattern_audit stage to fail for lists:append/2, stages=%+v", report.Stages)
 		}
 	})
 }

@@ -980,7 +980,7 @@ You can extract multiple elements from the head of a list using pattern matching
 %% A is 10, B is 20, Tail is [30, 40]
 \`\`\`
 
-> [!warning] The Character List Mystery: Why [97, 98, 99] Prints as "abc"
+> [!WARNING] The Character List Mystery: Why [97, 98, 99] Prints as "abc"
 > Every beginner in Erlang encounters this baffling phenomenon in the shell:
 > \`\`\`erlang
 > 1> [97, 98, 99].
@@ -993,31 +993,26 @@ You can extract multiple elements from the head of a list using pattern matching
 
 ## Parallel Worked Example
 
-Consider a sensor telemetry ingestion pipeline that records events, inspects the leading pair of readings, and validates ASCII packet identifiers:
+Consider a framing buffer utility that atomically pushes pairs of priority tags onto a queue and computes 0-based alphabet offsets from ASCII packet headers:
 
 \`\`\`erlang
--module(telemetry_stream).
--export([record_reading/2, extract_lead_window/1, has_valid_prefix/1]).
+-module(packet_ring).
+-export([push_batch/3, inspect_ascii_offset/1]).
 
-%% Prepend a timestamped reading to the front of a historical sensor stream in O(1) time
-record_reading(Reading, History) ->
-    [Reading | History].
+%% Prepend two framed tags in O(1) cons steps without traversing Backlog
+push_batch(PrimaryTag, SecondaryTag, Backlog) ->
+    WithSecond = [SecondaryTag | Backlog],
+    [PrimaryTag | WithSecond].
 
-%% Destructure the two most recent samples and pack them into an inspection tuple
-extract_lead_window(Stream) ->
-    [Latest, Previous | OlderReadings] = Stream,
-    {window, Latest, Previous, OlderReadings}.
-
-%% Verify that a packet starts with ASCII byte $P (80)
-has_valid_prefix(PacketString) ->
-    [FirstByte | _Payload] = PacketString,
-    FirstByte =:= $P.
+%% Extract the head byte from an ASCII frame string and compute its offset from $A (65)
+inspect_ascii_offset(FrameChars) ->
+    [LeadCode | Remainder] = FrameChars,
+    {LeadCode - $A, Remainder}.
 \`\`\`
 
-Notice:
-- \`record_reading/2\` prepends in $O(1)$ zero-copy time using \`[Reading | History]\`.
-- \`extract_lead_window/1\` pattern matches multiple front elements \`[Latest, Previous | OlderReadings]\` without altering their order.
-- \`has_valid_prefix/1\` demonstrates that strings are lists of integer codepoints, comparing the leading byte against the character literal \`$P\`.
+Notice how the BEAM evaluates each operation:
+- \`push_batch/3\` builds two cons cells (\`[SecondaryTag | Backlog]\`, then \`[PrimaryTag | WithSecond]\`) in $O(1)$ time while sharing \`Backlog\` in memory.
+- \`inspect_ascii_offset/1\` pattern-matches the head integer codepoint \`LeadCode\` and tail list \`Remainder\` directly from a character string, performing arithmetic with character literal \`$A\`.
 
 ## Official Erlang Docs & Function Reference
 
@@ -1028,36 +1023,38 @@ Notice:
   Prepend: [New | List] -> O(1) time and memory.
   Concat:  List1 ++ List2 -> O(length(List1)) time and memory.
 \`\`\`
+> **How to Read This Spec**: Erlang lists are linked chains of 2-word cons cells, so pattern matching \`[H | T]\` and built-ins like \`erlang:hd/1\` / \`erlang:tl/1\` read the front cell pointers in $O(1)$ time. Open the attached **\`hd_and_tl\` Reference Card** below for official ERTS documentation and BIF source links.
 
 ## Assignment Specification
 
-In \`list_ops.erl\`, implement three fundamental list operations using pure pattern matching:
+In \`src/list_ops.erl\`, implement and export \`prepend_item/2\`, \`swap_first_two/1\`, and \`ascii_initial/1\` using pure list pattern matching and cons construction:
 
 1. \`prepend_item(Item, List)\`:
-   - **Input**: An arbitrary term \`Item\` and an existing list \`List\` (which may be empty \`[]\` or populated).
-   - **Behavior**: Return a newly constructed list with \`Item\` positioned as the first element in $O(1)$ constant time. Do not traverse or copy the tail list.
+   - **Input**: An arbitrary term \`Item\` and an existing list \`List\` (empty or populated).
+   - **Behavior**: Returns a new list with \`Item\` at the front in $O(1)$ constant time, sharing \`List\` cleanly without copying elements.
    - **Examples**:
      - \`list_ops:prepend_item(10, [20, 30])\` returns \`[10, 20, 30]\`.
      - \`list_ops:prepend_item(first, [])\` returns \`[first]\`.
 
 2. \`swap_first_two(List)\`:
-   - **Input**: A list containing at least two elements.
-   - **Behavior**: Extract the first two elements and return a newly constructed list where their positions are reversed, while preserving the exact order of all subsequent elements in the tail.
+   - **Input**: A proper list containing at least two elements.
+   - **Behavior**: Destructures the first two elements and returns a new list with their positions reversed in $O(1)$ time while preserving the remaining tail order unchanged; fails cleanly when given fewer than two elements.
    - **Examples**:
      - \`list_ops:swap_first_two([alpha, beta, gamma, delta])\` returns \`[beta, alpha, gamma, delta]\`.
      - \`list_ops:swap_first_two([1, 2])\` returns \`[2, 1]\`.
 
 3. \`ascii_initial(NameString)\`:
-   - **Input**: A non-empty double-quoted character string such as \`"Erlang"\` or \`"BEAM"\`.
-   - **Behavior**: Extract the integer codepoint of the string's first character and return it wrapped in a 2-element tuple tagged with the atom \`char_code\`.
+   - **Input**: A non-empty double-quoted character string (codepoint list).
+   - **Behavior**: Extracts the integer codepoint of the string's leading character in $O(1)$ time and returns it as a 2-tuple tagged with the atom \`char_code\`, failing cleanly on an empty string.
    - **Examples**:
-     - \`list_ops:ascii_initial("Erlang")\` returns \`{char_code, 69}\` (since \`$E\` evaluates to 69).
-     - \`list_ops:ascii_initial("BEAM")\` returns \`{char_code, 66}\` (since \`$B\` evaluates to 66).
+     - \`list_ops:ascii_initial("Erlang")\` returns \`{char_code, 69}\` (uppercase ASCII E has codepoint 69).
+     - \`list_ops:ascii_initial("BEAM")\` returns \`{char_code, 66}\` (uppercase ASCII B has codepoint 66).
 
 ## Rules & Verification Constraints
 
-- Do not use functions from the \`lists\` standard library—use pure pattern matching and the cons operator \`[H | T]\`.
-- Ensure all functions handle input lists without using mutable operations.`,
+- **Exports**: \`list_ops\` must export \`prepend_item/2\`, \`swap_first_two/1\`, and \`ascii_initial/1\`.
+- **No \`lists\` Library Helpers**: Do not call \`lists:append/2\`, \`lists:nth/2\`, \`lists:reverse/1\`, or \`lists:concat/1\` (enforced by AST verification)—use direct cons cells and pattern matching.
+- **Boundary & Compiler Cleanliness**: Compile with zero unused-variable warnings and reject under-length inputs (\`swap_first_two([one])\`, \`ascii_initial("")\`).`,
     otpDocCards: [
       {
         functionName: 'hd_and_tl',
@@ -1099,27 +1096,28 @@ In \`list_ops.erl\`, implement three fundamental list operations using pure patt
         title: 'Prepend Element to List',
         erlangCall: 'list_ops:prepend_item(10, [20, 30])',
         expectedOutput: '[10, 20, 30]',
-        explanation: 'Prepends 10 to front of list in O(1) time.',
+        explanation: 'Prepends 10 to the front of the list in O(1) constant time.',
       },
       {
         id: 'tc-ch01-05-b',
         title: 'Swap First Two List Elements',
         erlangCall: 'list_ops:swap_first_two([alpha, beta, gamma, delta])',
         expectedOutput: '[beta, alpha, gamma, delta]',
-        explanation: 'Destructures [A, B | Rest] and reconstructs [B, A | Rest].',
+        explanation: 'Exchanges the leading two list elements while preserving the remaining tail order.',
       },
       {
         id: 'tc-ch01-05-c',
         title: 'Extract Integer ASCII Codepoint',
         erlangCall: 'list_ops:ascii_initial("Erlang")',
         expectedOutput: '{char_code, 69}',
-        explanation: 'Destructures string head codepoint $E = 69.',
+        explanation: 'Reads the integer codepoint of the leading character in "Erlang" (69) into a tagged 2-tuple.',
       },
     ],
     astRules: {
       requiredCalls: [],
+      forbiddenCalls: ['lists:append/2', 'lists:nth/2', 'lists:reverse/1', 'lists:concat/1'],
     },
-    solutionExplanation: 'Utilizes cons operator [H | T] for O(1) prepending, front-element pattern destructuring, and string codepoint extraction.',
+    solutionExplanation: 'Uses cons cell construction for O(1) prepending, front-element pattern matching for element swapping, and head codepoint destructuring on Erlang character lists.',
     files: [
       {
         name: 'list_ops.erl',
@@ -1127,19 +1125,16 @@ In \`list_ops.erl\`, implement three fundamental list operations using pure patt
         content: `-module(list_ops).
 -export([prepend_item/2, swap_first_two/1, ascii_initial/1]).
 
-%% @doc Return a new list with Item placed at the front of List.
-%% Must execute in O(1) constant time without copying the tail list.
-prepend_item(Item, List) ->
+%% @doc Prepend Item onto the front of List in O(1) constant time without copying List.
+prepend_item(_Item, _List) ->
     ok.
 
-%% @doc Return a list where the first two elements are swapped.
-%% Assumes List contains at least 2 elements; preserves remaining tail order.
-swap_first_two(List) ->
+%% @doc Return a list with the first two elements swapped while keeping the remaining tail unchanged; fail cleanly if fewer than two elements exist.
+swap_first_two(_List) ->
     ok.
 
-%% @doc Return {char_code, Codepoint} for the first character in NameString.
-%% Leverages Erlang's representation of strings as lists of integer codepoints.
-ascii_initial(NameString) ->
+%% @doc Extract the integer codepoint of the first character in non-empty NameString as a tagged character-code 2-tuple; fail cleanly on empty input.
+ascii_initial(_NameString) ->
     ok.`,
       },
     ],
@@ -1147,13 +1142,16 @@ ascii_initial(NameString) ->
       'src/list_ops.erl': `-module(list_ops).
 -export([prepend_item/2, swap_first_two/1, ascii_initial/1]).
 
+%% @doc Prepend Item onto the front of List in O(1) constant time without copying List.
 prepend_item(Item, List) ->
     [Item | List].
 
+%% @doc Return a list with the first two elements swapped while keeping the remaining tail unchanged; fail cleanly if fewer than two elements exist.
 swap_first_two(List) ->
     [First, Second | Rest] = List,
     [Second, First | Rest].
 
+%% @doc Extract the integer codepoint of the first character in non-empty NameString as a tagged character-code 2-tuple; fail cleanly on empty input.
 ascii_initial(NameString) ->
     [FirstCharCode | _Rest] = NameString,
     {char_code, FirstCharCode}.`,
@@ -1161,30 +1159,30 @@ ascii_initial(NameString) ->
     starterCode: `-module(list_ops).
 -export([prepend_item/2, swap_first_two/1, ascii_initial/1]).
 
-%% @doc Return a new list with Item placed at the front of List.
-%% Must execute in O(1) constant time without copying the tail list.
-prepend_item(Item, List) ->
+%% @doc Prepend Item onto the front of List in O(1) constant time without copying List.
+prepend_item(_Item, _List) ->
     ok.
 
-%% @doc Return a list where the first two elements are swapped.
-%% Assumes List contains at least 2 elements; preserves remaining tail order.
-swap_first_two(List) ->
+%% @doc Return a list with the first two elements swapped while keeping the remaining tail unchanged; fail cleanly if fewer than two elements exist.
+swap_first_two(_List) ->
     ok.
 
-%% @doc Return {char_code, Codepoint} for the first character in NameString.
-%% Leverages Erlang's representation of strings as lists of integer codepoints.
-ascii_initial(NameString) ->
+%% @doc Extract the integer codepoint of the first character in non-empty NameString as a tagged character-code 2-tuple; fail cleanly on empty input.
+ascii_initial(_NameString) ->
     ok.`,
     solutionCode: `-module(list_ops).
 -export([prepend_item/2, swap_first_two/1, ascii_initial/1]).
 
+%% @doc Prepend Item onto the front of List in O(1) constant time without copying List.
 prepend_item(Item, List) ->
     [Item | List].
 
+%% @doc Return a list with the first two elements swapped while keeping the remaining tail unchanged; fail cleanly if fewer than two elements exist.
 swap_first_two(List) ->
     [First, Second | Rest] = List,
     [Second, First | Rest].
 
+%% @doc Extract the integer codepoint of the first character in non-empty NameString as a tagged character-code 2-tuple; fail cleanly on empty input.
 ascii_initial(NameString) ->
     [FirstCharCode | _Rest] = NameString,
     {char_code, FirstCharCode}.`,

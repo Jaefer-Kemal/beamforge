@@ -3087,6 +3087,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter1Verification` passed all 8 subtests in `15.17s` (`15.451s` total); `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` passed all 8 CH01 lessons including `ch01-l04 | 3/3 tests passed` (`22.53s` / `22.615s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 190: Spec 04 / Spec 08 Anti-Spoiler Rework, `lists` AST Hardening & Live Tri-Verification of Chapter 1 Lecture 5 (`ch01-l05`)
+- [x] **190.1: De-Spoil Parallel Clone (`telemetry_stream` -> `packet_ring`), Test Explanations & Sync Starter/Solution Contracts (`src/list_ops.erl`, `ch01-l05`)**:
+  - Updated `ch01-l05` ONLY in `apps/web-ide/src/data/chapters/ch01.ts` (`lines 983–1189`): standardized `> [!WARNING]` (`line 983`), replaced the 1:1 parallel clone `telemetry_stream` (`record_reading/2`, `extract_lead_window/1`, `has_valid_prefix/1`) with the domain-disjoint 2-function framing utility `packet_ring.erl` (`push_batch/3`, `inspect_ascii_offset/1` at `lines 994–1015`), added the Spec 04 §1.3 list manual reading note & `hd_and_tl` reference-card pointer (`line 1026`), removed `[A, B | Rest]` / `$E = 69` spoilers from `visibleTestCases` explanations (`lines 1106, 1113`), added `forbiddenCalls: ['lists:append/2', 'lists:nth/2', 'lists:reverse/1', 'lists:concat/1']` (`line 1118`), and synchronized `_`-prefixed `-Wall -Werror` starter stubs + plain-English `%% @doc` headers across all 4 code blocks (`lines 1121–1189`).
+  - Fixed `Run` catch `call_str` (`services/orchestrator/internal/bridge/erl_runner_chapters.go`, `lines 207–228`), hardened `Submit` (`case "ch01-l05"`, `lines 4333–4398`) with export verification, `bf_ast_verifier` `forbidden_remote_calls` enforcement (`ast_cons_pattern_audit`), and under-length rejection (`swap_first_two([only_one])`, `ascii_initial("")`), and restored `case "ch10-l03"` lines `8116–8132` from an accidental parallel-edit truncation in `d5dc320`.
+  - Expanded `services/orchestrator/internal/bridge/ch01_verification_test.go` (`lines 77–385`) to verify `ch01-l05` (`RunVerification` 3 stages `score=100` + `RunCode` 3/3 visible tests) plus negative AST rejection of `lists:append/2`.
+- [x] **190.2: Mandatory Live Tri-Verification & Compiler Suite (`ch01-l05`, Local Commit Only per Spec 08 §3.3)**:
+  - **Parallel Worked Example (`packet_ring.erl`)**: Extracted from `ch01.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified live on OTP 29 (`PWE_OK`).
+  - **Starter & Solution Pack (`list_ops.erl`)**: Verified starter & solution parity (`files[0].content === starterCode`, `solutionFiles['src/list_ops.erl'] === solutionCode`), compiled starter with `-Wall -Werror` (0 warnings) returning `{ok, ok, ok}`, compiled solution with `+debug_info -Wall -Werror`, passed `bf_ast_verifier`, and executed all 3 `visibleTestCases` + bounds (`SOL_ALL_VISIBLE_AND_AST_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter1Verification` passed all 10 subtests in `17.72s` (`17.750s` total); `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` passed all 8 CH01 lessons including `ch01-l05 | 3/3 tests passed` (`12.35s` / `12.484s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
+
 
 
 

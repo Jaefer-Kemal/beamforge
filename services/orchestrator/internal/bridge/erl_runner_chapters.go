@@ -205,11 +205,11 @@ T2_Res = try list_ops:swap_first_two([alpha, beta, gamma, delta]) of
           expected => <<"[beta, alpha, gamma, delta]">>, actual => <<"[beta, alpha, gamma, delta]">>, passed => true,
           time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"list_ops:swap_first_two(...)">>,
+        #{call_str => <<"list_ops:swap_first_two([alpha, beta, gamma, delta])">>,
           expected => <<"[beta, alpha, gamma, delta]">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
-    #{call_str => <<"list_ops:swap_first_two(...)">>, expected => <<"[beta, alpha, gamma, delta]">>,
+    #{call_str => <<"list_ops:swap_first_two([alpha, beta, gamma, delta])">>, expected => <<"[beta, alpha, gamma, delta]">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
@@ -223,7 +223,7 @@ T3_Res = try list_ops:ascii_initial("Erlang") of
           expected => <<"{char_code, 69}">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T3_Start}
 catch C3:R3 ->
-    #{call_str => <<"list_ops:ascii_initial(...)">>, expected => <<"{char_code, 69}">>,
+    #{call_str => <<"list_ops:ascii_initial(\"Erlang\")">>, expected => <<"{char_code, 69}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res],
@@ -4331,31 +4331,72 @@ Stages = [CompileStage, S1_Events]
 `, true
 
 	case "ch01-l05":
-		return `
+		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(list_ops) of
     {module, list_ops} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"list_ops.erl compiled cleanly">>};
+        Exports = list_ops:module_info(exports),
+        Required = [{prepend_item, 2}, {swap_first_two, 1}, {ascii_initial, 1}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"list_ops.erl compiled cleanly and exported prepend_item/2, swap_first_two/1, and ascii_initial/1.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Lists = try
+S1_Ast = try
+    SourceCandidates = [
+        filename:join(["%s", "src", "list_ops.erl"]),
+        filename:join(["%s", "list_ops.erl"])
+    ],
+    SourceFile = case [P || P <- SourceCandidates, filelib:is_regular(P)] of
+        [ValidSrc | _] -> ValidSrc;
+        [] -> hd(SourceCandidates)
+    end,
+    Rules = #{
+        forbidden_remote_calls => [{lists, append, 2}, {lists, nth, 2}, {lists, reverse, 1}, {lists, concat, 1}]
+    },
+    case bf_ast_verifier:verify_rules(SourceFile, Rules) of
+        {ok, _} ->
+            #{id => <<"ast_cons_pattern_audit">>, title => <<"AST Analysis: No lists Stdlib Shortcuts">>, status => <<"passed">>, time_ms => 10, details => <<"Verified zero disallowed lists helper calls via AST inspection.">>};
+        {error, [#{message := Msg} | _]} ->
+            #{id => <<"ast_cons_pattern_audit">>, title => <<"AST Analysis: No lists Stdlib Shortcuts">>, status => <<"failed">>, time_ms => 10, details => Msg};
+        {error, Violations} ->
+            #{id => <<"ast_cons_pattern_audit">>, title => <<"AST Analysis: No lists Stdlib Shortcuts">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_cons_pattern_audit">>, title => <<"AST Analysis: No lists Stdlib Shortcuts">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
+end,
+S2_Lists = try
     R1 = list_ops:prepend_item(10, [20, 30]),
     R2 = list_ops:prepend_item(first, []),
     R3 = list_ops:swap_first_two([alpha, beta, gamma, delta]),
     R4 = list_ops:swap_first_two([1, 2]),
     R5 = list_ops:ascii_initial("Erlang"),
     R6 = list_ops:ascii_initial("BEAM"),
-    case {R1, R2, R3, R4, R5, R6} of
-        {[10, 20, 30], [first], [beta, alpha, gamma, delta], [2, 1], {char_code, 69}, {char_code, 66}} ->
-            #{id => <<"list_head_tail_ops">>, title => <<"Cons Cell [H|T] Head/Tail & Codepoints">>, status => <<"passed">>, time_ms => 8, details => <<"Verified O(1) prepend, element swapping, and character codepoints">>};
+    ShortSwapRejected = try list_ops:swap_first_two([only_one]) of
+        _ -> false
+    catch
+        _:_ -> true
+    end,
+    EmptyStrRejected = try list_ops:ascii_initial("") of
+        _ -> false
+    catch
+        _:_ -> true
+    end,
+    case {R1, R2, R3, R4, R5, R6, ShortSwapRejected, EmptyStrRejected} of
+        {[10, 20, 30], [first], [beta, alpha, gamma, delta], [2, 1], {char_code, 69}, {char_code, 66}, true, true} ->
+            #{id => <<"list_head_tail_ops">>, title => <<"Cons Cell [H|T] Head/Tail & Codepoints">>, status => <<"passed">>, time_ms => 8, details => <<"Verified O(1) prepend, element swapping, character codepoints, and under-length rejection.">>};
         Got1 ->
             #{id => <<"list_head_tail_ops">>, title => <<"Cons Cell [H|T] Head/Tail & Codepoints">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("List ops mismatch: ~p", [Got1]))}
     end
 catch C1:Err1 ->
     #{id => <<"list_head_tail_ops">>, title => <<"Cons Cell [H|T] Head/Tail & Codepoints">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
 end,
-Stages = [CompileStage, S1_Lists]
-`, true
+Stages = [CompileStage, S1_Ast, S2_Lists]
+`, wsDir, wsDir), true
 
 	case "ch01-l06":
 		return `
@@ -8073,7 +8114,23 @@ CompileStage = case compile:file("%s/src/tcp_flow_worker.erl", [return_errors, {
         code:load_file(TargetModule),
         #{id => <<"compile">>, title => <<"Compile tcp_flow_worker.erl">>, status => <<"passed">>, time_ms => 20, details => <<"Compilation succeeded">>};
     Err ->
-        #{id => <<"compile">>, title => <<"Compile tcp_flow_worker.erl">>,
+        #{id => <<"compile">>, title => <<"Compile tcp_flow_worker.erl">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("~p", [Err]))}
+end,
+S1_Ast = case bf_ast_verifier:verify_rules("%s/src/tcp_flow_worker.erl", #{
+    required_calls => [{inet, setopts, 2}, {gen_tcp, send, 2}],
+    required_constructs => [record_def]
+}) of
+    {ok, _} ->
+        #{id => <<"ast_verification">>, title => <<"AST Analysis: Flow Control Calls & State Record">>, status => <<"passed">>, time_ms => 15, details => <<"Verified inet:setopts/2, gen_tcp:send/2, and #state record definition.">>};
+    {error, AstFailReason} ->
+        #{id => <<"ast_verification">>, title => <<"AST Analysis: Flow Control Calls & State Record">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST verification failed: ~p", [AstFailReason]))}
+end,
+S2_ActiveOnceBackpressure = try
+    catch tcp_flow_worker:stop_server(whereis(tcp_flow_worker)),
+    timer:sleep(20),
+    {ok, ListenPid, Port} = tcp_flow_worker:start_server(),
+    case bf_backpressure_tester:verify_active_once_backpressure(node(), Port, tcp_flow_worker, 50, 5) of
+        {ok, #{verdict := <<
     #{packets_processed := 1, bytes_processed := 11, closed := false} = tcp_flow_worker:get_stats(tcp_flow_worker),
     1 = tcp_flow_worker:get_processed_count(tcp_flow_worker),
     ok = gen_tcp:close(CSock3),
