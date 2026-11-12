@@ -947,10 +947,10 @@ T1_Res = try hof_predicates:all_in_stock([{product, 1, "A", 10, 5}, {product, 2,
         #{call_str => <<"hof_predicates:all_in_stock([{product, 1, \"A\", 10, 5}, {product, 2, \"B\", 20, 1}])">>,
           expected => <<"true">>, actual => <<"true">>, passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"hof_predicates:all_in_stock(...)">>, expected => <<"true">>,
+        #{call_str => <<"hof_predicates:all_in_stock([{product, 1, \"A\", 10, 5}, {product, 2, \"B\", 20, 1}])">>, expected => <<"true">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"hof_predicates:all_in_stock(...)">>, expected => <<"true">>,
+    #{call_str => <<"hof_predicates:all_in_stock([{product, 1, \"A\", 10, 5}, {product, 2, \"B\", 20, 1}])">>, expected => <<"true">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
@@ -959,22 +959,22 @@ T2_Res = try hof_predicates:all_in_stock([{product, 1, "A", 10, 5}, {product, 2,
         #{call_str => <<"hof_predicates:all_in_stock([{product, 1, \"A\", 10, 5}, {product, 2, \"B\", 20, 0}])">>,
           expected => <<"false">>, actual => <<"false">>, passed => true, time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"hof_predicates:all_in_stock(...)">>, expected => <<"false">>,
+        #{call_str => <<"hof_predicates:all_in_stock([{product, 1, \"A\", 10, 5}, {product, 2, \"B\", 20, 0}])">>, expected => <<"false">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
 catch C2:R2 ->
-    #{call_str => <<"hof_predicates:all_in_stock(...)">>, expected => <<"false">>,
+    #{call_str => <<"hof_predicates:all_in_stock([{product, 1, \"A\", 10, 5}, {product, 2, \"B\", 20, 0}])">>, expected => <<"false">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
 T3_Res = try hof_predicates:has_critical_error([{log, info, "boot"}, {log, critical, "disk full"}, {log, warn, "high mem"}]) of
     true ->
-        #{call_str => <<"hof_predicates:has_critical_error(...)">>,
+        #{call_str => <<"hof_predicates:has_critical_error([{log, info, \"boot\"}, {log, critical, \"disk full\"}, {log, warn, \"high mem\"}])">>,
           expected => <<"true">>, actual => <<"true">>, passed => true, time_ms => erlang:system_time(millisecond) - T3_Start};
     Other3 ->
-        #{call_str => <<"hof_predicates:has_critical_error(...)">>, expected => <<"true">>,
+        #{call_str => <<"hof_predicates:has_critical_error([{log, info, \"boot\"}, {log, critical, \"disk full\"}, {log, warn, \"high mem\"}])">>, expected => <<"true">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
 catch C3:R3 ->
-    #{call_str => <<"hof_predicates:has_critical_error(...)">>, expected => <<"true">>,
+    #{call_str => <<"hof_predicates:has_critical_error([{log, info, \"boot\"}, {log, critical, \"disk full\"}, {log, warn, \"high mem\"}])">>, expected => <<"true">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 T4_Start = erlang:system_time(millisecond),
@@ -985,11 +985,12 @@ T4_Res = try hof_predicates:split_orders_by_stock([{order, 1, 5}, {order, 2, 20}
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [R4]))), passed => true,
           time_ms => erlang:system_time(millisecond) - T4_Start};
     Other4 ->
-        #{call_str => <<"hof_predicates:split_orders_by_stock(...)">>,
+        #{call_str => <<"hof_predicates:split_orders_by_stock([{order, 1, 5}, {order, 2, 20}, {order, 3, 2}], 10)">>,
           expected => <<"{[{order, 1, 5}, {order, 3, 2}], [{order, 2, 20}]}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other4]))), passed => false, time_ms => 0}
 catch C4:R4 ->
-    #{call_str => <<"hof_predicates:split_orders_by_stock(...)">>, expected => <<"{...}">>,
+    #{call_str => <<"hof_predicates:split_orders_by_stock([{order, 1, 5}, {order, 2, 20}, {order, 3, 2}], 10)">>,
+      expected => <<"{[{order, 1, 5}, {order, 3, 2}], [{order, 2, 20}]}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
@@ -5416,32 +5417,68 @@ Stages = [CompileStage_H02, S_Ast_H02, S1_Transform]
 `, wsDir, wsDir), true
 
 	case "ch03-l03":
-		return `
+		return fmt.Sprintf(`
 CompileStage_H03 = case code:ensure_loaded(hof_predicates) of
     {module, hof_predicates} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"hof_predicates.erl compiled cleanly">>};
+        Exports_H03 = hof_predicates:module_info(exports),
+        Req_H03 = [{all_in_stock, 1}, {has_critical_error, 1}, {split_orders_by_stock, 2}],
+        Missing_H03 = [FA || FA <- Req_H03, not lists:member(FA, Exports_H03)],
+        case Missing_H03 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"hof_predicates.erl compiled cleanly and exported all_in_stock/1, has_critical_error/1, split_orders_by_stock/2.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_H03]))}
+        end;
     {error, E_H03} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_H03]))}
+end,
+S_Ast_H03 = try
+    SourceCandidates_H03 = [
+        filename:join(["%s", "src", "hof_predicates.erl"]),
+        filename:join(["%s", "hof_predicates.erl"])
+    ],
+    SourceFile_H03 = case [P || P <- SourceCandidates_H03, filelib:is_regular(P)] of
+        [ValidSrc_H03 | _] -> ValidSrc_H03;
+        [] -> hd(SourceCandidates_H03)
+    end,
+    Rules_H03 = #{
+        required_remote_calls => [{lists, all, 2}, {lists, any, 2}, {lists, partition, 2}],
+        forbidden_constructs => [list_comprehension, map_syntax, bit_syntax]
+    },
+    case bf_ast_verifier:verify_rules(SourceFile_H03, <<>>, Rules_H03) of
+        {ok, _} ->
+            #{id => <<"ast_hof_predicates_audit">>, title => <<"AST Predicate & Partition Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified lists:all/2, lists:any/2, lists:partition/2 calls and zero list comprehensions, maps, or binaries.">>};
+        {error, AstViolations_H03} ->
+            FirstMsg_H03 = case AstViolations_H03 of
+                [#{message := M_H03} | _] -> M_H03;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_H03]))
+            end,
+            #{id => <<"ast_hof_predicates_audit">>, title => <<"AST Predicate & Partition Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_H03, error => AstViolations_H03}
+    end
+catch Class_Ast_H03:Err_Ast_H03 ->
+    #{id => <<"ast_hof_predicates_audit">>, title => <<"AST Predicate & Partition Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [Class_Ast_H03, Err_Ast_H03]))}
 end,
 S1_Predicates = try
     AllOk = hof_predicates:all_in_stock([{product, 1, "P1", 10, 5}, {product, 2, "P2", 20, 2}]),
     AllEmpty = hof_predicates:all_in_stock([]),
     AllZero = hof_predicates:all_in_stock([{product, 1, "P1", 10, 0}]),
+    AllNeg = hof_predicates:all_in_stock([{product, 1, "P1", 10, 5}, {product, 2, "P2", 20, -1}]),
     HasCrit = hof_predicates:has_critical_error([{log, info, "ok"}, {log, critical, "oom"}]),
     HasNoCrit = hof_predicates:has_critical_error([{log, info, "ok"}, {log, warn, "slow"}]),
     HasCritEmpty = hof_predicates:has_critical_error([]),
-    {StdOrders, BulkOrders} = hof_predicates:split_orders_by_stock([{order, 1, 5}, {order, 2, 25}, {order, 3, 10}, {order, 4, 0}], 10),
-    case {AllOk, AllEmpty, AllZero, HasCrit, HasNoCrit, HasCritEmpty, StdOrders, BulkOrders} of
-        {true, true, false, true, false, false, [{order, 1, 5}, {order, 3, 10}], [{order, 2, 25}, {order, 4, 0}]} ->
-            #{id => <<"boolean_predicates">>, title => <<"lists:all, any & partition Invariants">>, status => <<"passed">>, time_ms => 10, details => <<"Short-circuit predicates, empty list edge cases, and single-pass partitioning verified">>};
+    {StdOrders, BulkOrders} = hof_predicates:split_orders_by_stock([{order, 1, 5}, {order, 2, 25}, {order, 3, 10}, {order, 4, 0}, {order, 5, -3}], 10),
+    {EmptyStd, EmptyBulk} = hof_predicates:split_orders_by_stock([], 10),
+    case {AllOk, AllEmpty, AllZero, AllNeg, HasCrit, HasNoCrit, HasCritEmpty, StdOrders, BulkOrders, EmptyStd, EmptyBulk} of
+        {true, true, false, false, true, false, false, [{order, 1, 5}, {order, 3, 10}], [{order, 2, 25}, {order, 4, 0}, {order, 5, -3}], [], []} ->
+            #{id => <<"boolean_predicates">>, title => <<"lists:all, any & partition Invariants">>, status => <<"passed">>, time_ms => 10, details => <<"Short-circuit predicates, empty list edge cases, negative-quantity bounds, and single-pass partitioning verified">>};
         Got_H03 ->
             #{id => <<"boolean_predicates">>, title => <<"lists:all, any & partition Invariants">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Predicates mismatch: ~p", [Got_H03]))}
     end
 catch Class_H03:Err_H03 ->
     #{id => <<"boolean_predicates">>, title => <<"lists:all, any & partition Invariants">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_H03, Err_H03]))}
 end,
-Stages = [CompileStage_H03, S1_Predicates]
-`, true
+Stages = [CompileStage_H03, S_Ast_H03, S1_Predicates]
+`, wsDir, wsDir), true
 
 	case "ch03-l04":
 		return `

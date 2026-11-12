@@ -60,6 +60,28 @@ sanitize_metrics(RawMetrics) ->
     end, RawMetrics).
 `
 
+	hofPredicatesSolution := `-module(hof_predicates).
+-export([all_in_stock/1, has_critical_error/1, split_orders_by_stock/2]).
+
+%% @doc Return true if every product tuple in Inventory has strictly positive stock (and true for an empty inventory), or false if any item is zero or negative.
+all_in_stock(Inventory) ->
+    lists:all(fun({product, _Id, _Name, _Price, Stock}) ->
+        Stock > 0
+    end, Inventory).
+
+%% @doc Return true if any log entry in Logs carries a critical severity atom, returning false otherwise or on an empty list.
+has_critical_error(Logs) ->
+    lists:any(fun({log, Level, _Msg}) ->
+        Level =:= critical
+    end, Logs).
+
+%% @doc Partition Orders in a single relative-order-preserving pass into a pair separating positive quantities up to the caller-supplied MaxSingleOrderQty limit from all remaining orders.
+split_orders_by_stock(Orders, MaxSingleOrderQty) ->
+    lists:partition(fun({order, _Id, Qty}) ->
+        Qty > 0 andalso Qty =< MaxSingleOrderQty
+    end, Orders).
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -74,6 +96,11 @@ sanitize_metrics(RawMetrics) ->
 			exerciseID:   "ch03-l02",
 			visibleCount: 3,
 			files:        map[string]string{"src/hof_transform.erl": hofTransformSolution},
+		},
+		{
+			exerciseID:   "ch03-l03",
+			visibleCount: 4,
+			files:        map[string]string{"src/hof_predicates.erl": hofPredicatesSolution},
 		},
 	}
 
@@ -325,6 +352,98 @@ sanitize_metrics(RawMetrics) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected map_filter_filtermap stage to fail for strict Value > 0 zero-dropping bug, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch03-l03 rejects list comprehension and manual recursion bypassing lists:all/any/partition via AST audit", func(t *testing.T) {
+		sessionID := "test-ch03-l03-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/hof_predicates.erl": `-module(hof_predicates).
+-export([all_in_stock/1, has_critical_error/1, split_orders_by_stock/2]).
+
+all_in_stock(Inventory) ->
+    [P || {product, _, _, _, Stock} = P <- Inventory, Stock =< 0] =:= [].
+
+has_critical_error(Logs) ->
+    [L || {log, critical, _} = L <- Logs] =/= [].
+
+split_orders_by_stock(Orders, MaxSingleOrderQty) ->
+    {[{order, Id, Qty} || {order, Id, Qty} <- Orders, Qty > 0, Qty =< MaxSingleOrderQty],
+     [{order, Id, Qty} || {order, Id, Qty} <- Orders, Qty =< 0 orelse Qty > MaxSingleOrderQty]}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch03-l03", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected list-comprehension bypass in ch03-l03 to fail AST audit, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_hof_predicates_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_hof_predicates_audit stage to fail for list comprehension bypass, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch03-l03 rejects non-positive order quantity leaking into StandardOrders", func(t *testing.T) {
+		sessionID := "test-ch03-l03-neg-nonpos"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		buggy := map[string]string{
+			"src/hof_predicates.erl": `-module(hof_predicates).
+-export([all_in_stock/1, has_critical_error/1, split_orders_by_stock/2]).
+
+all_in_stock(Inventory) ->
+    lists:all(fun({product, _Id, _Name, _Price, Stock}) -> Stock > 0 end, Inventory).
+
+has_critical_error(Logs) ->
+    lists:any(fun({log, Level, _Msg}) -> Level =:= critical end, Logs).
+
+%% Bug: omits Qty > 0 check so Qty = 0 and Qty = -3 land in StandardOrders.
+split_orders_by_stock(Orders, MaxSingleOrderQty) ->
+    lists:partition(fun({order, _Id, Qty}) ->
+        Qty =< MaxSingleOrderQty
+    end, Orders).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch03-l03", buggy)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected non-positive order leak in split_orders_by_stock to fail ch03-l03, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "boolean_predicates" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected boolean_predicates stage to fail for non-positive quantity leak, stages=%+v", report.Stages)
 		}
 	})
 }

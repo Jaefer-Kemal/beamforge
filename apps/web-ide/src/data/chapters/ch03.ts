@@ -726,34 +726,38 @@ Packets = [{pkt, 1, 64}, {pkt, 2, 1500}, {pkt, 3, 128}],
 
 Both resulting lists preserve the relative ordering of the original collection while scanning each element exactly once.
 
-## Parallel Worked Example: Cluster Node Health Telemetry
+## Parallel Worked Example
 
-The following module evaluates telemetry records from server cluster instances. Notice how \`lists:all/2\`, \`lists:any/2\`, and \`lists:partition/2\` express clean, declarative health assertions without custom recursive loops:
+Consider a freight dispatch system checking fleet readiness (combining universal and existential checks) and separating manifest items requiring hazmat handling:
 
 \`\`\`erlang
--module(cluster_monitor).
--export([all_nodes_online/1, any_node_throttled/2, segregate_by_memory/2]).
+-module(freight_manifest).
+-export([dispatch_cleared/2, split_hazmat_parcels/1]).
 
-%% @doc Verifies that every node in the cluster reports an online state.
-all_nodes_online(Nodes) ->
-    lists:all(fun({node, _Id, Status}) ->
-        Status =:= online
-    end, Nodes).
+%% ── Phase 1: Combined Universal & Existential Invariants (lists:all/2 + lists:any/2) ──
+%% Fleet clears only if every truck passed inspection and no route carries an active block.
+dispatch_cleared(Trucks, Routes) ->
+    AllInspected = lists:all(fun({truck, _Plate, Inspected}) ->
+        Inspected =:= true
+    end, Trucks),
+    AnyBlocked = lists:any(fun({route, _Code, HazardState}) ->
+        HazardState =:= blocked
+    end, Routes),
+    AllInspected andalso (not AnyBlocked).
 
-%% @doc Checks if at least one node latency exceeds the specified millisecond ceiling.
-any_node_throttled(Nodes, MaxLatencyMs) ->
-    lists:any(fun({node, _Id, _Status, LatencyMs}) ->
-        LatencyMs > MaxLatencyMs
-    end, Nodes).
-
-%% @doc Segregates nodes into standard memory usage vs oversized allocations in a single scan.
-segregate_by_memory(Nodes, MaxRamMb) ->
-    lists:partition(fun({node, _Id, _Status, _Latency, RamMb}) ->
-        RamMb > 0 andalso RamMb =< MaxRamMb
-    end, Nodes).
+%% ── Phase 2: Single-Pass Class Partitioning (lists:partition/2) ──────────────────────
+%% Segregates parcels matching hazmat/cold_chain handling rules in one traversal.
+split_hazmat_parcels(Parcels) ->
+    lists:partition(fun({parcel, _TrackId, Class}) ->
+        Class =:= hazmat orelse Class =:= cold_chain
+    end, Parcels).
 \`\`\`
 
-## Standard Library Function Reference
+How the BEAM executes these collection helpers:
+- **Phase 1 (\`dispatch_cleared/2\`)**: \`lists:all/2\` stops on the first non-inspected truck (returning \`true\` vacuously if \`Trucks\` is \`[]\`), and \`lists:any/2\` stops on the first \`blocked\` route (returning \`false\` if \`Routes\` is \`[]\`).
+- **Phase 2 (\`split_hazmat_parcels/1\`)**: Evaluates the predicate once per parcel, routing matches to the left bucket and non-matches to the right bucket while preserving original relative order in both output lists.
+
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 lists:all(Pred, List) -> boolean()
@@ -761,46 +765,43 @@ lists:any(Pred, List) -> boolean()
 lists:partition(Pred, List) -> {Satisfying, NotSatisfying}
 \`\`\`
 
+> How to read these signatures: \`Pred\` returns strictly \`true\` or \`false\`. \`all/2\` and \`any/2\` return a single \`boolean()\` with short-circuit termination, whereas \`partition/2\` traverses the full list once and returns a 2-tuple of lists in original relative order. Open the attached **Reference Cards** for \`lists:all/2\` and \`lists:partition/2\` documentation.
+
 ## Assignment Specification
 
 Implement three collection validation and segregation functions in \`src/hof_predicates.erl\`:
 
-### 1. \`all_in_stock/1\`
-- **Input**: A list of catalog records: \`[{product, Id, Name, Price, Stock}, ...]\`, where \`Stock\` is an integer count.
-- **Behavior**: Inspect the inventory list using \`lists:all/2\`. Return \`true\` if every product possesses available stock (strictly greater than zero). If any product has zero or negative stock, return \`false\`. An empty inventory list must return \`true\`.
+### 1. \`all_in_stock(Inventory)\`
+- **Input**: \`Inventory\` — A list of zero or more 5-element \`product\` tuples (carrying \`Id\`, \`Name\`, \`Price\`, and integer \`Stock\`).
+- **Behavior**: Evaluate all entries universally to determine whether every product has strictly positive stock (greater than zero). Return false if any product has zero or negative stock, and return true when \`Inventory\` is empty.
 - **Examples**:
-  \`\`\`erlang
-  hof_predicates:all_in_stock([{product, 1, "A", 10, 5}, {product, 2, "B", 20, 1}]) -> true
-  hof_predicates:all_in_stock([{product, 1, "A", 10, 5}, {product, 2, "B", 20, 0}]) -> false
-  hof_predicates:all_in_stock([]) -> true
-  \`\`\`
+  - \`hof_predicates:all_in_stock([{product, 1, "A", 10, 5}, {product, 2, "B", 20, 1}])\` returns \`true\`.
+  - \`hof_predicates:all_in_stock([{product, 1, "A", 10, 5}, {product, 2, "B", 20, 0}])\` returns \`false\`.
+  - \`hof_predicates:all_in_stock([])\` returns \`true\`.
 
-### 2. \`has_critical_error/1\`
-- **Input**: A list of log records: \`[{log, Level, Message}, ...]\`, where \`Level\` is an atom (such as \`info\`, \`warn\`, or \`critical\`) and \`Message\` is a string.
-- **Behavior**: Scan the collection using \`lists:any/2\`. Return \`true\` if at least one entry has a severity level matching the atom \`critical\`. Return \`false\` otherwise, including when the input list is empty.
+### 2. \`has_critical_error(Logs)\`
+- **Input**: \`Logs\` — A list of zero or more 3-element \`log\` tuples (carrying severity atom \`Level\` and string \`Message\`).
+- **Behavior**: Check existentially whether at least one entry records severity equal to the atom \`critical\`. Return false if no entry matches or when \`Logs\` is empty.
 - **Examples**:
-  \`\`\`erlang
-  hof_predicates:has_critical_error([{log, info, "boot"}, {log, critical, "disk full"}]) -> true
-  hof_predicates:has_critical_error([{log, info, "boot"}, {log, warn, "high load"}]) -> false
-  hof_predicates:has_critical_error([]) -> false
-  \`\`\`
+  - \`hof_predicates:has_critical_error([{log, info, "boot"}, {log, critical, "disk full"}])\` returns \`true\`.
+  - \`hof_predicates:has_critical_error([{log, info, "boot"}, {log, warn, "high load"}])\` returns \`false\`.
+  - \`hof_predicates:has_critical_error([])\` returns \`false\`.
 
-### 3. \`split_orders_by_stock/2\`
-- **Input**: A list of order entries \`[{order, Id, Quantity}, ...]\` and an integer limit \`MaxSingleOrderQty\`.
-- **Behavior**: Segregate incoming orders into standard and bulk buckets in a single traversal using \`lists:partition/2\`, returning a 2-tuple \`{StandardOrders, BulkOrders}\`.
-  - An order qualifies for \`StandardOrders\` if its requested quantity is strictly positive and does not exceed \`MaxSingleOrderQty\` (inclusive).
-  - All other orders (orders whose quantity strictly exceeds \`MaxSingleOrderQty\`, as well as entries with zero or non-positive quantities) belong in \`BulkOrders\`.
-  - Elements in both resulting lists must preserve their original relative order.
+### 3. \`split_orders_by_stock(Orders, MaxSingleOrderQty)\`
+- **Input**:
+  - \`Orders\` — A list of zero or more 3-element \`order\` tuples (carrying \`Id\` and integer \`Quantity\`).
+  - \`MaxSingleOrderQty\` — An integer upper bound for standard single orders.
+- **Behavior**: Divide \`Orders\` in a single traversal into a 2-tuple pairing standard orders first and bulk orders second:
+  - Standard orders contain entries whose requested \`Quantity\` is strictly positive and does not exceed \`MaxSingleOrderQty\` (inclusive).
+  - Bulk orders contain all remaining entries (both quantities strictly above \`MaxSingleOrderQty\` and zero or negative quantities).
+  - Both output lists preserve original relative element order.
 - **Examples**:
-  \`\`\`erlang
-  hof_predicates:split_orders_by_stock([{order, 1, 5}, {order, 2, 20}, {order, 3, 2}], 10)
-  %% => {[{order, 1, 5}, {order, 3, 2}], [{order, 2, 20}]}
-  \`\`\`
+  - \`hof_predicates:split_orders_by_stock([{order, 1, 5}, {order, 2, 20}, {order, 3, 2}], 10)\` returns \`{[{order, 1, 5}, {order, 3, 2}], [{order, 2, 20}]}\`.
 
-## Verification Constraints
+## Rules & Verification Constraints
 
-- You must employ \`lists:all/2\`, \`lists:any/2\`, and \`lists:partition/2\`.
-- Strictly no Maps (\`#{}\`) or Bit-Syntax Binaries (\`<<...>>\`). Pure tuples, lists, and numbers only.`,
+- \`bf_ast_verifier\` enforces required remote calls to \`lists:all/2\`, \`lists:any/2\`, and \`lists:partition/2\`, and forbids list comprehensions (\`[Expr || ...]\`), maps (\`#{}\`), and bit-syntax binaries (\`<<...>>\`).
+- Use tuples, atoms, strings, integers, booleans, and lists only.`,
     otpDocCards: [
       {
         functionName: 'lists:all/2',
@@ -876,6 +877,7 @@ Implement three collection validation and segregation functions in \`src/hof_pre
     ],
     astRules: {
       requiredCalls: ['lists:all/2', 'lists:any/2', 'lists:partition/2'],
+      forbiddenConstructs: ['list_comprehension', 'map_syntax', 'bit_syntax'],
     },
     solutionExplanation: 'Implements collection validation using lists:all/2 and lists:any/2 with short-circuiting, and single-pass order splitting via lists:partition/2.',
     files: [
@@ -885,15 +887,15 @@ Implement three collection validation and segregation functions in \`src/hof_pre
         content: `-module(hof_predicates).
 -export([all_in_stock/1, has_critical_error/1, split_orders_by_stock/2]).
 
-%% @doc Returns true if every catalog item possesses available stock.
+%% @doc Return true if every product tuple in Inventory has strictly positive stock (and true for an empty inventory), or false if any item is zero or negative.
 all_in_stock(_Inventory) ->
     ok.
 
-%% @doc Returns true if any log entry records a critical incident.
+%% @doc Return true if any log entry in Logs carries a critical severity atom, returning false otherwise or on an empty list.
 has_critical_error(_Logs) ->
     ok.
 
-%% @doc Partitions orders into standard and bulk batches based on quantity threshold.
+%% @doc Partition Orders in a single relative-order-preserving pass into a pair separating positive quantities up to the caller-supplied MaxSingleOrderQty limit from all remaining orders.
 split_orders_by_stock(_Orders, _MaxSingleOrderQty) ->
     ok.`,
       },
@@ -902,16 +904,19 @@ split_orders_by_stock(_Orders, _MaxSingleOrderQty) ->
       'src/hof_predicates.erl': `-module(hof_predicates).
 -export([all_in_stock/1, has_critical_error/1, split_orders_by_stock/2]).
 
+%% @doc Return true if every product tuple in Inventory has strictly positive stock (and true for an empty inventory), or false if any item is zero or negative.
 all_in_stock(Inventory) ->
     lists:all(fun({product, _Id, _Name, _Price, Stock}) ->
         Stock > 0
     end, Inventory).
 
+%% @doc Return true if any log entry in Logs carries a critical severity atom, returning false otherwise or on an empty list.
 has_critical_error(Logs) ->
     lists:any(fun({log, Level, _Msg}) ->
         Level =:= critical
     end, Logs).
 
+%% @doc Partition Orders in a single relative-order-preserving pass into a pair separating positive quantities up to the caller-supplied MaxSingleOrderQty limit from all remaining orders.
 split_orders_by_stock(Orders, MaxSingleOrderQty) ->
     lists:partition(fun({order, _Id, Qty}) ->
         Qty > 0 andalso Qty =< MaxSingleOrderQty
@@ -920,30 +925,33 @@ split_orders_by_stock(Orders, MaxSingleOrderQty) ->
     starterCode: `-module(hof_predicates).
 -export([all_in_stock/1, has_critical_error/1, split_orders_by_stock/2]).
 
-%% @doc Returns true if every catalog item possesses available stock.
+%% @doc Return true if every product tuple in Inventory has strictly positive stock (and true for an empty inventory), or false if any item is zero or negative.
 all_in_stock(_Inventory) ->
     ok.
 
-%% @doc Returns true if any log entry records a critical incident.
+%% @doc Return true if any log entry in Logs carries a critical severity atom, returning false otherwise or on an empty list.
 has_critical_error(_Logs) ->
     ok.
 
-%% @doc Partitions orders into standard and bulk batches based on quantity threshold.
+%% @doc Partition Orders in a single relative-order-preserving pass into a pair separating positive quantities up to the caller-supplied MaxSingleOrderQty limit from all remaining orders.
 split_orders_by_stock(_Orders, _MaxSingleOrderQty) ->
     ok.`,
     solutionCode: `-module(hof_predicates).
 -export([all_in_stock/1, has_critical_error/1, split_orders_by_stock/2]).
 
+%% @doc Return true if every product tuple in Inventory has strictly positive stock (and true for an empty inventory), or false if any item is zero or negative.
 all_in_stock(Inventory) ->
     lists:all(fun({product, _Id, _Name, _Price, Stock}) ->
         Stock > 0
     end, Inventory).
 
+%% @doc Return true if any log entry in Logs carries a critical severity atom, returning false otherwise or on an empty list.
 has_critical_error(Logs) ->
     lists:any(fun({log, Level, _Msg}) ->
         Level =:= critical
     end, Logs).
 
+%% @doc Partition Orders in a single relative-order-preserving pass into a pair separating positive quantities up to the caller-supplied MaxSingleOrderQty limit from all remaining orders.
 split_orders_by_stock(Orders, MaxSingleOrderQty) ->
     lists:partition(fun({order, _Id, Qty}) ->
         Qty > 0 andalso Qty =< MaxSingleOrderQty
