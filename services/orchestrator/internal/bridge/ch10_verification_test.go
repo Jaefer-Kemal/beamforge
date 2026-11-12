@@ -84,6 +84,7 @@ echo_loop(Socket, Count, Parent) ->
     encode_length_prefixed/1
 ]).
 
+%% @doc Return the canonical low-latency TCP socket options list when PacketMode is raw, line, 1, 2, or 4, or return an invalid_packet_mode error tuple for unsupported modes.
 -spec build_low_latency_opts(term()) -> [term()] | {error, invalid_packet_mode}.
 build_low_latency_opts(PacketMode) when PacketMode =:= raw;
                                         PacketMode =:= line;
@@ -94,6 +95,7 @@ build_low_latency_opts(PacketMode) when PacketMode =:= raw;
 build_low_latency_opts(_Other) ->
     {error, invalid_packet_mode}.
 
+%% @doc Normalize an incoming TCP socket lifecycle message into a tagged data tuple, a tagged disconnect tuple, or an unknown_event error tuple.
 -spec classify_socket_event(term()) ->
     {data, non_neg_integer(), binary()} |
     {disconnected, normal_eof | {socket_error, term()}} |
@@ -107,6 +109,7 @@ classify_socket_event({tcp_error, _Socket, Reason}) ->
 classify_socket_event(_Other) ->
     {error, unknown_event}.
 
+%% @doc Prepend an unsigned 32-bit big-endian byte length header onto PayloadBin and return the framed binary.
 -spec encode_length_prefixed(binary()) -> binary().
 encode_length_prefixed(PayloadBin) when is_binary(PayloadBin) ->
     <<(byte_size(PayloadBin)):32/big-unsigned-integer, PayloadBin/binary>>.

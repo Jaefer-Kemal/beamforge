@@ -582,11 +582,12 @@ Misconfiguring socket options is the hidden cause behind the two most frustratin
 
 By passing the correct socket options, you delegate framing and low-latency packet flushing directly to the BEAM's optimized C port driver!
 
-> [!abstract] Essential Socket Options Matrix
-> - **\`binary\`**: Delivers packets as compact, contiguous binaries (\`<<"...">>\`) instead of 16-byte-per-char linked lists (\`[104, 101, ...]\`).
+> [!IMPORTANT]
+> **Essential Socket Options Matrix:**
+> - **\`binary\`**: Delivers packets as compact, contiguous binaries instead of 16-byte-per-char linked lists.
 > - **\`{nodelay, true}\` (\`TCP_NODELAY\`)**: Disables Nagle's algorithm. Flushes small writes to the network interface immediately without a 40–200ms delay.
 > - **\`{reuseaddr, true}\` (\`SO_REUSEADDR\`)**: Allows the server to rebind the port immediately upon supervisor restart without waiting for OS \`TIME_WAIT\` sockets to expire.
-> - **\`{packet, 4}\`**: Instructs the C driver to automatically prepend a 4-byte big-endian length prefix on send, and buffer incoming chunks in C until the full payload arrives before delivering \`{tcp, Sock, Payload}\`!
+> - **\`{packet, 4}\`**: Instructs the C driver to automatically prepend a 4-byte big-endian length prefix on send, and buffer incoming chunks in C until the full payload arrives before delivering \`{tcp, Sock, Payload}\`.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -606,74 +607,93 @@ In active socket modes, the BEAM driver delivers three standardized message tupl
 2. **Clean Disconnect**: \`{tcp_closed, Socket}\` when the remote peer gracefully closes the connection (\`FIN\` handshake).
 3. **Network Error**: \`{tcp_error, Socket, Reason}\` on abrupt connection resets (\`econnreset\`) or timeouts.
 
-> [!warning] Production Networking Trap: Nagle's Algorithm & Delayed ACK Deadlock
+> [!WARNING]
+> **Production Networking Trap: Nagle's Algorithm & Delayed ACK Deadlock:**
 > In HTTP/1.1 or custom RPC, when a client sends a small command (e.g. \`PING\`), Nagle's algorithm may hold the packet waiting for more data. Meanwhile, the server's OS uses **Delayed ACK**, waiting up to 200ms to acknowledge the previous packet. Both operating systems wait on each other, causing an artificial **200ms latency spike**! In real-time servers, **always set \`{nodelay, true}\`**.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Official OTP Signature (kernel / inet)
+%% Official OTP Signatures (kernel / inet & erts / erlang)
 inet:setopts(Socket, Options) -> ok | {error, Reason}
   Types:
-    Options = [gen_tcp:listen_option()]
-    %% Options can include:
-    %%   binary,
-    %%   {packet, raw | line | 1 | 2 | 4},
-    %%   {active, once | true | false},
-    %%   {nodelay, boolean()},
-    %%   {reuseaddr, boolean()}
+    Socket = inet:socket()
+    Options = [inet:socket_setopt()]
+    %% Includes: binary, {packet, raw | line | 1 | 2 | 4},
+    %%           {active, once | true | false}, {nodelay, boolean()}, {reuseaddr, boolean()}
+
+erlang:byte_size(Bitstring) -> non_neg_integer()
+  Types:
+    Bitstring = bitstring()
 \`\`\`
 
-## Parallel Worked Example
+Consult the attached OTP documentation cards below for \`inet:setopts/2\` kernel flag behavior and \`gen_tcp:send/2\` wire delivery semantics.
 
-Here is a module creating low-latency socket options, classifying events, and manually encoding length-prefixed frames:
+## Parallel Worked Example: UDP Sensor Datagram Codec
+
+Consider a separate domain: a telemetry gateway normalizing **UDP** datagram socket options, socket event notifications, and 16-bit channel-tagged binary frames (\`sensor_udp_codec\`):
 
 \`\`\`erlang
--module(socket_configurator).
--export([get_chat_options/0, parse_event/1, wrap_frame/1]).
+-module(sensor_udp_codec).
+-export([datagram_opts/1, triage_link_msg/1, pack_sensor_record/2]).
 
-get_chat_options() ->
-    [binary, {packet, 4}, {active, once}, {nodelay, true}, {reuseaddr, true}].
+%% @doc Select UDP buffer options for burst or trickle telemetry profiles.
+datagram_opts(Mode) when Mode =:= burst; Mode =:= trickle ->
+    RecBuf = case Mode of burst -> 65536; trickle -> 8192 end,
+    [binary, {active, false}, {recbuf, RecBuf}];
+datagram_opts(_) ->
+    {error, unsupported_mode}.
 
-parse_event({tcp, _Sock, Data}) when is_binary(Data) ->
-    {ok, data, byte_size(Data), Data};
-parse_event({tcp_closed, _Sock}) ->
-    {ok, disconnected, normal};
-parse_event({tcp_error, _Sock, Reason}) ->
-    {ok, disconnected, {error, Reason}};
-parse_event(_Other) ->
-    {error, invalid_event}.
+%% @doc Classify datagram arrival and socket status tuples from inet/gen_udp.
+triage_link_msg({udp, _Sock, _Host, _Port, Datagram}) when is_binary(Datagram) ->
+    {datagram, byte_size(Datagram), Datagram};
+triage_link_msg({udp_passive, _Sock}) ->
+    {flow_notice, passive_threshold};
+triage_link_msg({udp_error, _Sock, Reason}) ->
+    {link_fault, Reason};
+triage_link_msg(_) ->
+    unrecognized.
 
-wrap_frame(PayloadBin) when is_binary(PayloadBin) ->
-    Len = byte_size(PayloadBin),
-    <<Len:32/big-unsigned-integer, PayloadBin/binary>>.
+%% @doc Pack a 16-bit big-endian payload length followed by ChannelId byte and sample binary.
+pack_sensor_record(ChannelId, SampleBin) when is_integer(ChannelId), is_binary(SampleBin) ->
+    BodySize = byte_size(SampleBin),
+    <<BodySize:16/big-unsigned-integer, ChannelId:8, SampleBin/binary>>.
 \`\`\`
+
+### What the BEAM Does Under the Hood
+- **Guard Disjunction Validation**: \`datagram_opts/1\` validates modes strictly using guard semicolons (\`;\`), rejecting any unrecognized atom before options ever reach the OS kernel driver.
+- **Bit Syntax Sizing**: \`pack_sensor_record/2\` reads exact heap/ProcBin byte lengths in $O(1)$ time via \`byte_size/1\` and packs an unsigned big-endian network header directly into a contiguous binary.
 
 ## Assignment Specification
 
-Implement module \`src/tcp_socket_opts.erl\` exporting three essential socket configuration and event classification functions:
+Implement module \`src/tcp_socket_opts.erl\` (\`-module(tcp_socket_opts).\`) exporting \`build_low_latency_opts/1\`, \`classify_socket_event/1\`, and \`encode_length_prefixed/1\`:
 
-1. **\`build_low_latency_opts(PacketMode)\`**:
-   - Validates that \`PacketMode\` is one of: \`raw\`, \`line\`, \`1\`, \`2\`, or \`4\`.
-   - Returns the canonical low-latency options list:
-     \`\`\`erlang
-     [binary, {packet, PacketMode}, {active, once}, {nodelay, true}, {reuseaddr, true}]
-     \`\`\`
-   - If \`PacketMode\` is invalid (e.g. \`udp\`, \`8\`, or \`invalid\`), returns \`{error, invalid_packet_mode}\`.
-2. **\`classify_socket_event(EventTuple)\`**:
-   - Matches \`{tcp, _Socket, DataBin}\` when \`is_binary(DataBin)\` $\\rightarrow$ returns \`{data, byte_size(DataBin), DataBin}\`.
-   - Matches \`{tcp_closed, _Socket}\` $\\rightarrow$ returns \`{disconnected, normal_eof}\`.
-   - Matches \`{tcp_error, _Socket, Reason}\` $\\rightarrow$ returns \`{disconnected, {socket_error, Reason}}\`.
-   - Any other term $\\rightarrow$ returns \`{error, unknown_event}\`.
-3. **\`encode_length_prefixed(PayloadBin)\`**:
-   - Manually constructs a \`{packet, 4}\` wire frame:
-     \`\`\`erlang
-     <<(byte_size(PayloadBin)):32/big-unsigned-integer, PayloadBin/binary>>
-     \`\`\`
+### \`build_low_latency_opts/1\`
+- **Input**: Any Erlang term \`PacketMode\` representing a candidate framing mode.
+- **Behavior**: Accepts exactly the five valid framing modes (\`raw\`, \`line\`, \`1\`, \`2\`, or \`4\`) via guard validation and returns the five-element low-latency socket option list enabling binary delivery, the validated packet mode, single-shot active mode, disabled Nagle buffering, and address reuse in canonical order. Rejects any other value with an \`invalid_packet_mode\` error tuple.
+- **Examples**:
+  - \`tcp_socket_opts:build_low_latency_opts(4)\` returns \`[binary,{packet,4},{active,once},{nodelay,true},{reuseaddr,true}]\`.
+  - \`tcp_socket_opts:build_low_latency_opts(udp_invalid)\` returns \`{error,invalid_packet_mode}\`.
+
+### \`classify_socket_event/1\`
+- **Input**: A BEAM active-socket mailbox message term \`EventTuple\`.
+- **Behavior**: Normalizes TCP socket notifications into uniform tagged tuples:
+  - TCP data events carrying a binary payload yield a 3-tuple pairing atom \`data\`, the payload byte length, and the binary payload.
+  - Graceful close notifications yield \`disconnected\` paired with \`normal_eof\`.
+  - Asynchronous socket error notifications yield \`disconnected\` paired with a tagged \`socket_error\` reason tuple.
+  - Any other term returns an \`unknown_event\` error tuple.
+- **Examples**:
+  - \`tcp_socket_opts:classify_socket_event({tcp, make_ref(), <<"XMPP_STANZA">>})\` returns \`{data,11,<<"XMPP_STANZA">>}\`.
+
+### \`encode_length_prefixed/1\`
+- **Input**: Binary payload \`PayloadBin\`.
+- **Behavior**: Constructs a contiguous wire binary consisting of the payload's byte size encoded as a 32-bit big-endian unsigned integer immediately followed by the raw payload bytes (including empty binaries).
+- **Examples**:
+  - \`tcp_socket_opts:encode_length_prefixed(<<"PING">>)\` returns \`<<0,0,0,4,80,73,78,71>>\`.
 
 ## Rules & Verification Constraints
-- Use binary syntax (\`<<...>>\`) and guard clauses (\`is_binary/1\`).
-- AST verifier checks required constructs: \`bit_syntax\` and \`guards\`.
+- **Guards & Bit Syntax**: Must validate packet modes, binary payloads, and frame construction using guard clauses (\`when\`, \`is_binary/1\`), binary bit syntax, and \`byte_size/1\`.
+- **AST Checks**: \`bf_ast_verifier\` enforces required remote call \`erlang:byte_size/1\` and required constructs \`bit_syntax\` and \`guards\`.
     `,
     otpDocCards: [
       {
@@ -711,35 +731,24 @@ Implement module \`src/tcp_socket_opts.erl\` exporting three essential socket co
     encode_length_prefixed/1
 ]).
 
-%% @doc Constructs a low-latency socket options list with verified packet mode.
-%% Valid PacketModes: raw, line, 1, 2, 4.
-%% Returns [binary, {packet, PacketMode}, {active, once}, {nodelay, true}, {reuseaddr, true}]
-%% or {error, invalid_packet_mode}.
+%% @doc Return the canonical low-latency TCP socket options list when PacketMode is raw, line, 1, 2, or 4, or return an invalid_packet_mode error tuple for unsupported modes.
 -spec build_low_latency_opts(term()) -> [term()] | {error, invalid_packet_mode}.
 build_low_latency_opts(_PacketMode) ->
-    %% % TODO: Validate PacketMode (raw, line, 1, 2, or 4).
-    %% % Return the canonical low-latency options list specified in the lesson guide,
-    %% % or {error, invalid_packet_mode} if unsupported.
     ignore.
 
-%% @doc Classifies incoming socket events into standardized internal tuples.
+%% @doc Normalize an incoming TCP socket lifecycle message into a tagged data tuple, a tagged disconnect tuple, or an unknown_event error tuple.
 -spec classify_socket_event(term()) ->
     {data, non_neg_integer(), binary()} |
     {disconnected, normal_eof | {socket_error, term()}} |
     {error, unknown_event}.
 classify_socket_event(_EventTuple) ->
-    %% % TODO: Pattern match on the active socket lifecycle events
-    %% % ({tcp, ...}, {tcp_closed, ...}, {tcp_error, ...}) and normalize them
-    %% % into the tagged result tuples defined in the lesson guide.
     ignore.
 
-%% @doc Manually encodes a 4-byte big-endian length prefix onto PayloadBin.
+%% @doc Prepend an unsigned 32-bit big-endian byte length header onto PayloadBin and return the framed binary.
 -spec encode_length_prefixed(binary()) -> binary().
 encode_length_prefixed(_PayloadBin) ->
-    %% % TODO: Using bit syntax, construct a frame containing PayloadBin
-    %% % preceded by its byte size encoded as a 4-byte big-endian integer.
     ignore.
-    `,
+`,
     solutionCode: `-module(tcp_socket_opts).
 
 -export([
@@ -748,6 +757,7 @@ encode_length_prefixed(_PayloadBin) ->
     encode_length_prefixed/1
 ]).
 
+%% @doc Return the canonical low-latency TCP socket options list when PacketMode is raw, line, 1, 2, or 4, or return an invalid_packet_mode error tuple for unsupported modes.
 -spec build_low_latency_opts(term()) -> [term()] | {error, invalid_packet_mode}.
 build_low_latency_opts(PacketMode) when PacketMode =:= raw;
                                         PacketMode =:= line;
@@ -758,6 +768,7 @@ build_low_latency_opts(PacketMode) when PacketMode =:= raw;
 build_low_latency_opts(_Other) ->
     {error, invalid_packet_mode}.
 
+%% @doc Normalize an incoming TCP socket lifecycle message into a tagged data tuple, a tagged disconnect tuple, or an unknown_event error tuple.
 -spec classify_socket_event(term()) ->
     {data, non_neg_integer(), binary()} |
     {disconnected, normal_eof | {socket_error, term()}} |
@@ -771,10 +782,11 @@ classify_socket_event({tcp_error, _Socket, Reason}) ->
 classify_socket_event(_Other) ->
     {error, unknown_event}.
 
+%% @doc Prepend an unsigned 32-bit big-endian byte length header onto PayloadBin and return the framed binary.
 -spec encode_length_prefixed(binary()) -> binary().
 encode_length_prefixed(PayloadBin) when is_binary(PayloadBin) ->
     <<(byte_size(PayloadBin)):32/big-unsigned-integer, PayloadBin/binary>>.
-    `,
+`,
         files: [
       {
         name: 'tcp_socket_opts.erl',
@@ -787,35 +799,24 @@ encode_length_prefixed(PayloadBin) when is_binary(PayloadBin) ->
     encode_length_prefixed/1
 ]).
 
-%% @doc Constructs a low-latency socket options list with verified packet mode.
-%% Valid PacketModes: raw, line, 1, 2, 4.
-%% Returns [binary, {packet, PacketMode}, {active, once}, {nodelay, true}, {reuseaddr, true}]
-%% or {error, invalid_packet_mode}.
+%% @doc Return the canonical low-latency TCP socket options list when PacketMode is raw, line, 1, 2, or 4, or return an invalid_packet_mode error tuple for unsupported modes.
 -spec build_low_latency_opts(term()) -> [term()] | {error, invalid_packet_mode}.
 build_low_latency_opts(_PacketMode) ->
-    %% % TODO: Validate PacketMode (raw, line, 1, 2, or 4).
-    %% % Return the canonical low-latency options list specified in the lesson guide,
-    %% % or {error, invalid_packet_mode} if unsupported.
     ignore.
 
-%% @doc Classifies incoming socket events into standardized internal tuples.
+%% @doc Normalize an incoming TCP socket lifecycle message into a tagged data tuple, a tagged disconnect tuple, or an unknown_event error tuple.
 -spec classify_socket_event(term()) ->
     {data, non_neg_integer(), binary()} |
     {disconnected, normal_eof | {socket_error, term()}} |
     {error, unknown_event}.
 classify_socket_event(_EventTuple) ->
-    %% % TODO: Pattern match on the active socket lifecycle events
-    %% % ({tcp, ...}, {tcp_closed, ...}, {tcp_error, ...}) and normalize them
-    %% % into the tagged result tuples defined in the lesson guide.
     ignore.
 
-%% @doc Manually encodes a 4-byte big-endian length prefix onto PayloadBin.
+%% @doc Prepend an unsigned 32-bit big-endian byte length header onto PayloadBin and return the framed binary.
 -spec encode_length_prefixed(binary()) -> binary().
 encode_length_prefixed(_PayloadBin) ->
-    %% % TODO: Using bit syntax, construct a frame containing PayloadBin
-    %% % preceded by its byte size encoded as a 4-byte big-endian integer.
     ignore.
-    `,
+`,
       },
     ],
     solutionFiles: {
@@ -827,6 +828,7 @@ encode_length_prefixed(_PayloadBin) ->
     encode_length_prefixed/1
 ]).
 
+%% @doc Return the canonical low-latency TCP socket options list when PacketMode is raw, line, 1, 2, or 4, or return an invalid_packet_mode error tuple for unsupported modes.
 -spec build_low_latency_opts(term()) -> [term()] | {error, invalid_packet_mode}.
 build_low_latency_opts(PacketMode) when PacketMode =:= raw;
                                         PacketMode =:= line;
@@ -837,6 +839,7 @@ build_low_latency_opts(PacketMode) when PacketMode =:= raw;
 build_low_latency_opts(_Other) ->
     {error, invalid_packet_mode}.
 
+%% @doc Normalize an incoming TCP socket lifecycle message into a tagged data tuple, a tagged disconnect tuple, or an unknown_event error tuple.
 -spec classify_socket_event(term()) ->
     {data, non_neg_integer(), binary()} |
     {disconnected, normal_eof | {socket_error, term()}} |
@@ -850,10 +853,11 @@ classify_socket_event({tcp_error, _Socket, Reason}) ->
 classify_socket_event(_Other) ->
     {error, unknown_event}.
 
+%% @doc Prepend an unsigned 32-bit big-endian byte length header onto PayloadBin and return the framed binary.
 -spec encode_length_prefixed(binary()) -> binary().
 encode_length_prefixed(PayloadBin) when is_binary(PayloadBin) ->
     <<(byte_size(PayloadBin)):32/big-unsigned-integer, PayloadBin/binary>>.
-    `,
+`,
     },
 solutionExplanation: `### Solution Breakdown: Low-Latency Socket Configuration
 1. **Guard-Based Validation**: \`build_low_latency_opts/1\` uses guard disjunctions (\`PacketMode =:= raw; PacketMode =:= 4; ...\`) to guarantee only valid packet modes are passed to the BEAM driver.

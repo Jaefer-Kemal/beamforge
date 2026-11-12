@@ -2787,6 +2787,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter10Verification/ch10-l01` (`VERIFIED 100% PASSED`, score=100, 3 stages in `2.08s`, `2.425s` package total); `TEST_CHAPTER=10 TestDynamicVisibleTestsCurriculum` (`ch10-l01 | 1/1 tests passed`, all 7 Ch. 10 lessons passed in `11.36s` / `11.380s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 164: Pedagogical Despoiling, AST Construct Enforcement & Live Tri-Verification of Chapter 10 Lecture 2 (`ch10-l02`)
+- [x] **164.1: Replace 1:1 `socket_configurator` Clone with Domain-Disjoint PWE (`sensor_udp_codec.erl`), De-Spoil Assignment & Starter Stubs, and Enforce `bit_syntax` + `guards` (`ch10-l02`: `tcp_socket_opts.erl`)**:
+  - Replaced the 1:1 copy-paste `socket_configurator` PWE in `apps/web-ide/src/data/chapters/ch10.ts` with a domain-disjoint runnable UDP telemetry module (`sensor_udp_codec.erl`: `datagram_opts/1`, `triage_link_msg/1`, `pack_sensor_record/2`), converted Obsidian callouts to GFM alerts, added `erlang:byte_size/1` signature & card pointer in `## Official Erlang Docs & Function Reference`, and rewrote `## Assignment Specification` to strict Spec 08 `Input`/`Behavior`/`Examples` layout with zero code spoilers.
+  - Replaced leaked literal option list / inline `%% % TODO ...` code-dictating body hints in `starterCode` and `files[0].content` (`src/tcp_socket_opts.erl`) with clean plain-English Spec 08 `@doc` contracts and neutral `ignore.` stubs, and synchronized matching `%% @doc` comments across `solutionCode`, `solutionFiles['src/tcp_socket_opts.erl']`, and `services/orchestrator/internal/bridge/ch10_verification_test.go`.
+  - Updated `services/orchestrator/internal/bridge/erl_runner_chapters.go` (`case "ch10-l02"` Submit `S1_Ast`) to pass `required_constructs => [bit_syntax, guards]` alongside `required_calls => [{erlang, byte_size, 1}]`, aligning `bf_ast_verifier` with `ch10.ts` `astRules`.
+- [x] **164.2: Mandatory Live Tri-Verification & Compiler Suite (`ch10-l02`)**:
+  - **Parallel Worked Example (`sensor_udp_codec.erl`)**: Extracted from `ch10.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified all functions live (`PWE_CH10_L02_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe -Wall`) and executed all stubs safely (`STARTER_CH10_L02 exports=true stubs={ignore,ignore,ignore}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` (`erlang:byte_size/1`, `bit_syntax`, `guards`), and passed 4/4 visible tests + hidden edge cases (`SOLUTION_CH10_L02_OK ast=passed visible=4/4`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter10Verification/ch10-l02` (`VERIFIED 100% PASSED`, score=100, 4 stages in `2.07s`, `2.414s` package total); `TEST_CHAPTER=10 TestDynamicVisibleTestsCurriculum` (`ch10-l02 | 4/4 tests passed`, all 7 Ch. 10 lessons passed in `10.72s` / `10.745s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 

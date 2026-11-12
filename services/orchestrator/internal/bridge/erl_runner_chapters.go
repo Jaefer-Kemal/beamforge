@@ -7892,7 +7892,8 @@ CompileStage = case compile:file("%s/src/tcp_socket_opts.erl", [return_errors, {
         #{id => <<"compile">>, title => <<"Compile tcp_socket_opts.erl">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("~p", [Err]))}
 end,
 S1_Ast = case bf_ast_verifier:verify_rules("%s/src/tcp_socket_opts.erl", #{
-    required_calls => [{erlang, byte_size, 1}]
+    required_calls => [{erlang, byte_size, 1}],
+    required_constructs => [bit_syntax, guards]
 }) of
     {ok, _} ->
         #{id => <<"ast_verification">>, title => <<"AST Analysis: Bit Syntax & Guards">>, status => <<"passed">>, time_ms => 15, details => <<"Verified required bit syntax and guard constructs.">>};
