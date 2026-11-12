@@ -4158,16 +4158,33 @@ CompileStage = case code:ensure_loaded(beam_intro) of
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
+AstStage = try
+    BeamPath = code:which(beam_intro),
+    WsRoot = filename:dirname(filename:dirname(BeamPath)),
+    SrcPath = filename:join([WsRoot, "src", "beam_intro.erl"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    case bf_ast_verifier:verify_rules(SrcPath, BeamBin, #{
+        required_remote_calls => [{erlang, system_info, 1}]
+    }) of
+        {ok, _} ->
+            #{id => <<"vm_ast_rules">>, title => <<"AST Audit: erlang:system_info/1 Invocation">>, status => <<"passed">>, time_ms => 10, details => <<"Verified live call to erlang:system_info/1 in beam_intro.">>};
+        {error, AstErr} ->
+            #{id => <<"vm_ast_rules">>, title => <<"AST Audit: erlang:system_info/1 Invocation">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST rule violation: ~p", [AstErr]))}
+    end
+catch CAst:RAst ->
+    #{id => <<"vm_ast_rules">>, title => <<"AST Audit: erlang:system_info/1 Invocation">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [CAst, RAst]))}
+end,
 S1_Telemetry = try beam_intro:inspect_vm() of
     {vm_info, Rel, Sch, ProcLim, AtomLim}
       when is_list(Rel), is_integer(Sch), is_integer(ProcLim), is_integer(AtomLim) ->
-        #{id => <<"vm_introspection_contract">>, title => <<"BEAM Schedulers & Process Limits Telemetry">>, status => <<"passed">>, time_ms => 8, details => <<"Queried live OTP 29 emulator info successfully (5-tuple format)">>};
+        Msg1 = list_to_binary(io_lib:format("Queried live OTP ~s emulator info successfully (5-tuple format)", [Rel])),
+        #{id => <<"vm_introspection_contract">>, title => <<"BEAM Schedulers & Process Limits Telemetry">>, status => <<"passed">>, time_ms => 8, details => Msg1};
     Other1 ->
         #{id => <<"vm_introspection_contract">>, title => <<"BEAM Schedulers & Process Limits Telemetry">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Invalid tuple format: ~p", [Other1]))}
 catch C1:R1 ->
     #{id => <<"vm_introspection_contract">>, title => <<"BEAM Schedulers & Process Limits Telemetry">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
 end,
-Stages = [CompileStage, S1_Telemetry]
+Stages = [CompileStage, AstStage, S1_Telemetry]
 `, true
 
 	case "ch01-l02":

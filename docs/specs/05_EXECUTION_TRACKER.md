@@ -3043,6 +3043,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Vercel Production (`dpl_CDjwu7tVmxBrdgJ7ifEHznx9Lgwm`)**: Deployed to `https://beamforge-eight.vercel.app` (`https://beamforge-jhjaykrlr-jaefer-kemals-projects.vercel.app`), `readyState: READY`, verified `HTTP/1.1 200 OK` on `/learn/ch12-capstone` via `vercel curl`.
   - **Render Production (`dep-dbqqigqfngtc738d487g` / `srv-dblioqjbc2fs73ed02qg`)**: Live at `https://beamforge-orchestrator.onrender.com` (`commit b5ffc0b`, `/health` HTTP 200 `otp_release: "29"`), and live `POST /api/v1/xmpp/chat` smoke test passed both `send` (`ok: true, delivered: true, time_ms: 5`) and `chaos_kill` (`ok: true, delivered: true, reg_preserved: true, router_restarted: true`).
 
+## Phase 186: Curriculum 4-Pillar Audit — Chapter 1 Lecture 1 (`ch01-l01`, `beam_intro`)
+- [x] **186.1: `ch01-l01` Spec, Alert & `@doc` Parity Remediation (`apps/web-ide/src/data/chapters/ch01.ts`)**:
+  - Standardized syntax trap callout to GFM `> [!WARNING]` (`line 34`).
+  - Restructured `## Assignment Specification` (`lines 68–79`) with explicit `### inspect_vm()` (`Input` / `Behavior` / `Examples`) and added `## Rules & Verification Constraints` (`lines 80–84`) documenting `erlc -Wall`, AST `erlang:system_info/1` enforcement, and 5-tuple runtime check.
+  - Synchronized identical `%% @doc` contract across `files[0].content` (`lines 137–149`), `solutionFiles['src/beam_intro.erl']` (`lines 153–165`), `starterCode` (`lines 167–179`), and `solutionCode` (`lines 180–192`), removing internal tuple-field identifiers from `@doc`.
+- [x] **186.2: AST Verification & Dynamic Telemetry String (`services/orchestrator/internal/bridge/erl_runner_chapters.go` & `ch01_verification_test.go`)**:
+  - Added `AstStage` (`vm_ast_rules`) invoking `bf_ast_verifier:verify_rules(SrcPath, BeamBin, #{required_remote_calls => [{erlang, system_info, 1}]})` and dynamic OTP release formatting in `S1_Telemetry` (`vm_introspection_contract`) inside `case "ch01-l01"` (`lines 4153–4188`).
+  - Added `services/orchestrator/internal/bridge/ch01_verification_test.go` (`lines 9–95`) covering `RunVerification` (3 stages, `PASSED`), `RunCode` (`tc-ch01-01`), and a negative AST test rejecting hardcoded `{vm_info, ...}` without `erlang:system_info/1` (`Verdict == "FAILED"`).
+- [x] **186.3: Live Tri-Verification & Toolchain Gates**:
+  - Verified `os_probe` PWE (`erlc -Wall -Werror`, live `{env_info, 4}`), `beam_intro` parity & `bf_ast_verifier` (`erlc +debug_info -Wall -Werror`, `{vm_info, "29", 4, 1048576, 1048576}`), `TestChapter1Verification` (`2/2` subtests `3.481s`), `TEST_CHAPTER=1 TestDynamicVisibleTestsCurriculum` (`8/8` Ch1 lessons `12.038s`), and Next.js `npx tsc --noEmit && npm run build` (`8/8` pages, exit `0`). Dedicated local commit only per Spec 08 §3 (no mid-chapter deployment).
+
 
 
 
