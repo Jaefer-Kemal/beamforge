@@ -175,6 +175,48 @@ inspect_refc_ratio(Bin) ->
     {byte_size(Bin), binary:referenced_byte_size(Bin)}.
 `
 
+	packetParserSolution := `-module(packet_parser).
+-export([parse_frame/1, parse_tlv_stream/1, encode_frame/1]).
+
+-record(tlv_frame, {
+    version :: non_neg_integer(),
+    type :: non_neg_integer(),
+    length :: non_neg_integer(),
+    payload :: binary()
+}).
+
+%% @doc Decode one complete TLV frame from Binary, returning an ok triple with an isolated payload binary and trailing bytes or an incomplete-frame error tuple when truncated.
+parse_frame(<<Version:4, Type:4, Length:16/big-unsigned-integer, Payload:Length/binary, Rest/binary>>) ->
+    Frame = #tlv_frame{
+        version = Version,
+        type = Type,
+        length = Length,
+        payload = binary:copy(Payload)
+    },
+    {ok, Frame, Rest};
+parse_frame(_) ->
+    {error, incomplete_frame}.
+
+%% @doc Tail-recursively decode consecutive TLV frames from StreamBinary in arrival order, returning parsed frames or a partial tuple holding isolated trailing remnant bytes.
+parse_tlv_stream(StreamBinary) ->
+    parse_tlv_loop(StreamBinary, []).
+
+parse_tlv_loop(<<>>, Acc) ->
+    {ok, lists:reverse(Acc)};
+parse_tlv_loop(Binary, Acc) ->
+    case parse_frame(Binary) of
+        {ok, Frame, Rest} ->
+            parse_tlv_loop(Rest, [Frame | Acc]);
+        {error, incomplete_frame} ->
+            {partial, lists:reverse(Acc), binary:copy(Binary)}
+    end.
+
+%% @doc Compute payload byte length and serialize Frame's version, type, length, and payload fields into a big-endian wire binary.
+encode_frame(#tlv_frame{version = Version, type = Type, payload = Payload}) ->
+    Len = byte_size(Payload),
+    <<Version:4, Type:4, Len:16/big-unsigned-integer, Payload/binary>>.
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -214,6 +256,11 @@ inspect_refc_ratio(Bin) ->
 			exerciseID:   "ch04-l07",
 			visibleCount: 4,
 			files:        map[string]string{"src/binary_unpinner.erl": binaryUnpinnerSolution},
+		},
+		{
+			exerciseID:   "ch04-l08",
+			visibleCount: 4,
+			files:        map[string]string{"src/packet_parser.erl": packetParserSolution},
 		},
 	}
 
@@ -942,6 +989,125 @@ inspect_refc_ratio(Bin) ->
 		}
 		if !funcFailed {
 			t.Errorf("Expected procbin_subbinary_unpinning stage to fail on sub-binary leak / negative length bug, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l08 rejects non-tail-recursive body recursion and missing byte_size via AST audit", func(t *testing.T) {
+		sessionID := "test-ch04-l08-neg-ast"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		bodyRec := map[string]string{
+			"src/packet_parser.erl": `-module(packet_parser).
+-export([parse_frame/1, parse_tlv_stream/1, encode_frame/1]).
+
+-record(tlv_frame, {version, type, length, payload}).
+
+parse_frame(<<Version:4, Type:4, Length:16/big-unsigned-integer, Payload:Length/binary, Rest/binary>>) ->
+    {ok, #tlv_frame{version = Version, type = Type, length = Length, payload = binary:copy(Payload)}, Rest};
+parse_frame(_) ->
+    {error, incomplete_frame}.
+
+%% Bypass: body-recursive cons [Frame | RestFrames] after recursive case instead of tail recursion.
+parse_tlv_stream(<<>>) ->
+    {ok, []};
+parse_tlv_stream(Binary) ->
+    case parse_frame(Binary) of
+        {ok, Frame, Rest} ->
+            case parse_tlv_stream(Rest) of
+                {ok, Frames} -> {ok, [Frame | Frames]};
+                {partial, Frames, Rem} -> {partial, [Frame | Frames], Rem}
+            end;
+        {error, incomplete_frame} ->
+            {partial, [], binary:copy(Binary)}
+    end.
+
+encode_frame(#tlv_frame{version = Version, type = Type, payload = Payload}) ->
+    Len = byte_size(Payload),
+    <<Version:4, Type:4, Len:16/big-unsigned-integer, Payload/binary>>.
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l08", bodyRec)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when parse_tlv_stream/1 uses body recursion, got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_packet_parser_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_packet_parser_audit stage to fail on body recursion bypass, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch04-l08 rejects pinned >64-byte trailing remnant leak and stale frame length field bug", func(t *testing.T) {
+		sessionID := "test-ch04-l08-neg-edge"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		buggy := map[string]string{
+			"src/packet_parser.erl": `-module(packet_parser).
+-export([parse_frame/1, parse_tlv_stream/1, encode_frame/1]).
+
+-record(tlv_frame, {version, type, length, payload}).
+
+parse_frame(<<Version:4, Type:4, Length:16/big-unsigned-integer, Payload:Length/binary, Rest/binary>>) ->
+    {ok, #tlv_frame{version = Version, type = Type, length = Length, payload = binary:copy(Payload)}, Rest};
+parse_frame(_) ->
+    {error, incomplete_frame}.
+
+parse_tlv_stream(StreamBinary) ->
+    parse_tlv_loop(StreamBinary, []).
+
+parse_tlv_loop(<<>>, Acc) ->
+    {ok, lists:reverse(Acc)};
+parse_tlv_loop(Binary, Acc) ->
+    case parse_frame(Binary) of
+        {ok, Frame, Rest} ->
+            parse_tlv_loop(Rest, [Frame | Acc]);
+        {error, incomplete_frame} ->
+            %% Bug 1: returns un-copied Binary remnant pinning the full backing ProcBin buffer.
+            {partial, lists:reverse(Acc), Binary}
+    end.
+
+%% Bug 2: trusts stale record length field instead of byte_size(Payload).
+encode_frame(#tlv_frame{version = Version, type = Type, length = Len, payload = Payload}) ->
+    _ = byte_size(Payload),
+    <<Version:4, Type:4, Len:16/big-unsigned-integer, Payload/binary>>.
+`,
+		}
+		report, err := runner.RunVerification(ctx, session, "ch04-l08", buggy)
+		if err != nil {
+			t.Fatalf("RunVerification failed unexpectedly: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected FAILED verdict when trailing fragment stays pinned or stale length is encoded, got PASSED")
+		}
+		funcFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "tlv_stream_parsing" && st.Status == "failed" {
+				funcFailed = true
+			}
+		}
+		if !funcFailed {
+			t.Errorf("Expected tlv_stream_parsing stage to fail on un-copied remnant / stale length bug, stages=%+v", report.Stages)
 		}
 	})
 }

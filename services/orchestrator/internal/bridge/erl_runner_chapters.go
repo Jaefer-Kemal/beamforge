@@ -1739,27 +1739,62 @@ init:stop().
 	case "ch04-l08":
 		return `
 T1_Start = erlang:system_time(millisecond),
-T1_Res = try
-    F1 = packet_parser:encode_frame({tlv_frame, 1, 2, 4, <<"PING">>}),
-    F2 = packet_parser:encode_frame({tlv_frame, 1, 3, 4, <<"PONG">>}),
-    Stream = <<F1/binary, F2/binary, 1:4, 4:4, 10:16/big, "PARTIAL">>,
-    ResStream = packet_parser:parse_tlv_stream(Stream),
-    case ResStream of
-        {partial, [{tlv_frame, 1, 2, 4, <<"PING">>}, {tlv_frame, 1, 3, 4, <<"PONG">>}], Trailing} ->
-            #{call_str => <<"packet_parser:encode_frame + parse_tlv_stream(Stream)">>,
-              expected => <<"{partial, [{tlv_frame, 1, 2, 4, <<\"PING\">>}, ...], ...}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("{partial, 2 frames, ~p bytes trailing}", [byte_size(Trailing)]))),
-              passed => byte_size(Trailing) =:= 10,
-              time_ms => erlang:system_time(millisecond) - T1_Start};
-        Got1 ->
-            #{call_str => <<"packet_parser operations">>, expected => <<"{partial, [...], ...}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got1]))), passed => false, time_ms => 0}
-    end
+T1_Res = try packet_parser:parse_frame(<<1:4, 2:4, 4:16/big, "PING", "REST">>) of
+    {ok, {tlv_frame, 1, 2, 4, <<"PING">>}, <<"REST">>} = R1 ->
+        #{call_str => <<"packet_parser:parse_frame(<<1:4, 2:4, 4:16/big, \"PING\", \"REST\">>)">>,
+          expected => <<"{ok, {tlv_frame, 1, 2, 4, <<\"PING\">>}, <<\"REST\">>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
+    Got1 ->
+        #{call_str => <<"packet_parser:parse_frame(<<1:4, 2:4, 4:16/big, \"PING\", \"REST\">>)">>, expected => <<"{ok, {tlv_frame, 1, 2, 4, <<\"PING\">>}, <<\"REST\">>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"packet_parser operations">>, expected => <<"{partial, ...}">>,
+    #{call_str => <<"packet_parser:parse_frame(<<1:4, 2:4, 4:16/big, \"PING\", \"REST\">>)">>, expected => <<"{ok, {tlv_frame, 1, 2, 4, <<\"PING\">>}, <<\"REST\">>}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try packet_parser:parse_tlv_stream(<<1:4, 2:4, 4:16/big, "PING", 1:4, 3:4, 4:16/big, "PONG">>) of
+    {ok, [{tlv_frame, 1, 2, 4, <<"PING">>}, {tlv_frame, 1, 3, 4, <<"PONG">>}]} = R2 ->
+        #{call_str => <<"packet_parser:parse_tlv_stream(<<1:4, 2:4, 4:16/big, \"PING\", 1:4, 3:4, 4:16/big, \"PONG\">>)">>,
+          expected => <<"{ok, [{tlv_frame, 1, 2, 4, <<\"PING\">>}, {tlv_frame, 1, 3, 4, <<\"PONG\">>}]}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T2_Start};
+    Got2 ->
+        #{call_str => <<"packet_parser:parse_tlv_stream(<<1:4, 2:4, 4:16/big, \"PING\", 1:4, 3:4, 4:16/big, \"PONG\">>)">>, expected => <<"{ok, [{tlv_frame, 1, 2, 4, <<\"PING\">>}, {tlv_frame, 1, 3, 4, <<\"PONG\">>}]}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got2]))), passed => false, time_ms => 0}
+catch C2:R2 ->
+    #{call_str => <<"packet_parser:parse_tlv_stream(<<1:4, 2:4, 4:16/big, \"PING\", 1:4, 3:4, 4:16/big, \"PONG\">>)">>, expected => <<"{ok, [{tlv_frame, 1, 2, 4, <<\"PING\">>}, {tlv_frame, 1, 3, 4, <<\"PONG\">>}]}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try packet_parser:parse_tlv_stream(<<1:4, 2:4, 4:16/big, "PING", 1:4, 3:4>>) of
+    {partial, [{tlv_frame, 1, 2, 4, <<"PING">>}], <<19>>} = R3 ->
+        #{call_str => <<"packet_parser:parse_tlv_stream(<<1:4, 2:4, 4:16/big, \"PING\", 1:4, 3:4>>)">>,
+          expected => <<"{partial, [{tlv_frame, 1, 2, 4, <<\"PING\">>}], <<19>>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T3_Start};
+    Got3 ->
+        #{call_str => <<"packet_parser:parse_tlv_stream(<<1:4, 2:4, 4:16/big, \"PING\", 1:4, 3:4>>)">>, expected => <<"{partial, [{tlv_frame, 1, 2, 4, <<\"PING\">>}], <<19>>}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got3]))), passed => false, time_ms => 0}
+catch C3:R3 ->
+    #{call_str => <<"packet_parser:parse_tlv_stream(<<1:4, 2:4, 4:16/big, \"PING\", 1:4, 3:4>>)">>, expected => <<"{partial, [{tlv_frame, 1, 2, 4, <<\"PING\">>}], <<19>>}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+T4_Start = erlang:system_time(millisecond),
+T4_Res = try packet_parser:encode_frame({tlv_frame, 1, 2, 4, <<"TEST">>}) of
+    <<18, 0, 4, "TEST">> = R4 ->
+        #{call_str => <<"packet_parser:encode_frame({tlv_frame, 1, 2, 4, <<\"TEST\">>})">>,
+          expected => <<"<<18, 0, 4, \"TEST\">>">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R4]))),
+          passed => true, time_ms => erlang:system_time(millisecond) - T4_Start};
+    Got4 ->
+        #{call_str => <<"packet_parser:encode_frame({tlv_frame, 1, 2, 4, <<\"TEST\">>})">>, expected => <<"<<18, 0, 4, \"TEST\">>">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Got4]))), passed => false, time_ms => 0}
+catch C4:R4 ->
+    #{call_str => <<"packet_parser:encode_frame({tlv_frame, 1, 2, 4, <<\"TEST\">>})">>, expected => <<"<<18, 0, 4, \"TEST\">>">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -6828,34 +6863,132 @@ Stages = [CompileStage_M07, S_Ast_M07, S1_Unpin]
 		return fmt.Sprintf(`
 CompileStage_M08 = case code:ensure_loaded(packet_parser) of
     {module, packet_parser} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"packet_parser.erl compiled cleanly; parse_frame/1, parse_tlv_stream/1, encode_frame/1 exported">>};
+        Exports_M08 = packet_parser:module_info(exports),
+        Req_M08 = [{parse_frame, 1}, {parse_tlv_stream, 1}, {encode_frame, 1}],
+        Missing_M08 = [FA || FA <- Req_M08, not lists:member(FA, Exports_M08)],
+        case Missing_M08 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"packet_parser.erl compiled cleanly; parse_frame/1, parse_tlv_stream/1, encode_frame/1 exported">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_M08]))}
+        end;
     {error, E_M08} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_M08]))}
+end,
+S_Ast_M08 = try
+    SourceCandidates_M08 = [
+        filename:join(["%s", "src", "packet_parser.erl"]),
+        filename:join(["%s", "packet_parser.erl"])
+    ],
+    SourceFile_M08 = case [P || P <- SourceCandidates_M08, filelib:is_regular(P)] of
+        [ValidSrc_M08 | _] -> ValidSrc_M08;
+        [] -> hd(SourceCandidates_M08)
+    end,
+    BeamBin_M08 = case code:which(packet_parser) of
+        BeamPath_M08 when is_list(BeamPath_M08) ->
+            case file:read_file(BeamPath_M08) of
+                {ok, B_M08} -> B_M08;
+                _ -> <<>>
+            end;
+        _ -> <<>>
+    end,
+    Rules_M08 = #{
+        required_constructs => [record_def, bit_syntax],
+        required_remote_calls => [{binary, copy, 1}, {erlang, byte_size, 1}],
+        require_tail_recursion => [{parse_tlv_stream, 1}]
+    },
+    TlvAstAudit_M08 = case epp:parse_file(SourceFile_M08, []) of
+        {ok, Forms_M08} ->
+            RecFields_M08 = [case RF of
+                {typed_record_field, BaseRF, _} when tuple_size(BaseRF) >= 3 -> element(3, element(3, BaseRF));
+                _ when tuple_size(RF) >= 3, element(1, RF) =:= record_field -> element(3, element(3, RF));
+                _ -> invalid
+            end || {attribute, _, record, {tlv_frame, Fields}} <- Forms_M08, RF <- Fields],
+            HasValidRecord_M08 = RecFields_M08 =:= [version, type, length, payload],
+            WalkTlv_M08 = fun WalkT(Node, Pred) ->
+                case Pred(Node) of
+                    true -> true;
+                    false when is_tuple(Node) -> WalkT(tuple_to_list(Node), Pred);
+                    false when is_list(Node) -> lists:any(fun(El) -> WalkT(El, Pred) end, Node);
+                    false -> false
+                end
+            end,
+            ParseFrameClauses_M08 = lists:flatten([Clauses || {function, _, parse_frame, 1, Clauses} <- Forms_M08]),
+            EncodeFrameClauses_M08 = lists:flatten([Clauses || {function, _, encode_frame, 1, Clauses} <- Forms_M08]),
+            HasFrameCopy_M08 = WalkTlv_M08(ParseFrameClauses_M08, fun
+                ({call, _, {remote, _, {atom, _, binary}, {atom, _, copy}}, [_]}) -> true;
+                (_) -> false
+            end),
+            HasEncodeByteSize_M08 = WalkTlv_M08(EncodeFrameClauses_M08, fun
+                ({call, _, {atom, _, byte_size}, [_]}) -> true;
+                ({call, _, {remote, _, {atom, _, erlang}, {atom, _, byte_size}}, [_]}) -> true;
+                (_) -> false
+            end),
+            case {HasValidRecord_M08, HasFrameCopy_M08, HasEncodeByteSize_M08} of
+                {true, true, true} -> ok;
+                _ ->
+                    {error, iolist_to_binary(io_lib:format(
+                        "Expected -record(tlv_frame, {version, type, length, payload}) (~p), binary:copy/1 in parse_frame/1 (~p), and byte_size/1 in encode_frame/1 (~p).",
+                        [HasValidRecord_M08, HasFrameCopy_M08, HasEncodeByteSize_M08]
+                    ))}
+            end;
+        {error, ParseErr_M08} ->
+            {error, iolist_to_binary(io_lib:format("Failed to inspect packet_parser AST: ~p", [ParseErr_M08]))}
+    end,
+    case {bf_ast_verifier:verify_rules(SourceFile_M08, BeamBin_M08, Rules_M08), TlvAstAudit_M08} of
+        {{ok, _}, ok} ->
+            #{id => <<"ast_packet_parser_audit">>, title => <<"AST Record, Bit Syntax, Tail Recursion & Copy Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 14, details => <<"Verified -record(tlv_frame), bit syntax, binary:copy/1, byte_size/1, and strict tail recursion on parse_tlv_stream/1.">>};
+        {{error, AstViolations_M08}, _} ->
+            FirstMsg_M08 = case AstViolations_M08 of
+                [#{message := M_M08} | _] -> M_M08;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_M08]))
+            end,
+            #{id => <<"ast_packet_parser_audit">>, title => <<"AST Record, Bit Syntax, Tail Recursion & Copy Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 14, details => FirstMsg_M08, error => AstViolations_M08};
+        {_, {error, TlvAuditMsg_M08}} ->
+            #{id => <<"ast_packet_parser_audit">>, title => <<"AST Record, Bit Syntax, Tail Recursion & Copy Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 14, details => TlvAuditMsg_M08}
+    end
+catch Class_Ast_M08:Err_Ast_M08 ->
+    #{id => <<"ast_packet_parser_audit">>, title => <<"AST Record, Bit Syntax, Tail Recursion & Copy Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [Class_Ast_M08, Err_Ast_M08]))}
 end,
 S1_Tlv = try
     F1 = packet_parser:encode_frame({tlv_frame, 1, 2, 4, <<"PING">>}),
     F2 = packet_parser:encode_frame({tlv_frame, 1, 3, 4, <<"PONG">>}),
     F3 = packet_parser:encode_frame({tlv_frame, 2, 7, 8, <<"TELEMETR">>}),
+    FEmpty = packet_parser:encode_frame({tlv_frame, 1, 0, 0, <<>>}),
+    FStaleLen = packet_parser:encode_frame({tlv_frame, 2, 5, 999, <<"HI">>}),
     StreamFull = <<F1/binary, F2/binary, F3/binary>>,
     StreamPartial = <<F1/binary, F2/binary, 1:4, 9:4, 10:16/big, "INCOMPLET">>,
+    BigPayload = crypto:strong_rand_bytes(128),
+    FBig = packet_parser:encode_frame({tlv_frame, 1, 7, 128, BigPayload}),
+    BigFrag = <<1:4, 9:4, 5000:16/big, (crypto:strong_rand_bytes(80))/binary>>,
+    BigStream = <<F1/binary, FBig/binary, BigFrag/binary>>,
     ResFull = packet_parser:parse_tlv_stream(StreamFull),
+    ResEmpty = packet_parser:parse_tlv_stream(<<>>),
     ResPartial = packet_parser:parse_tlv_stream(StreamPartial),
-    case {ResFull, ResPartial} of
-        {{ok, [{tlv_frame, 1, 2, 4, <<"PING">>},
+    ResBig = packet_parser:parse_tlv_stream(BigStream),
+    {ok, {tlv_frame, 1, 0, 0, <<>>}, <<"X">>} = packet_parser:parse_frame(<<FEmpty/binary, "X">>),
+    {error, incomplete_frame} = packet_parser:parse_frame(<<>>),
+    {error, incomplete_frame} = packet_parser:parse_frame(<<1:4, 2:4, 5:16/big, "AB">>),
+    {partial, [{tlv_frame, 1, 2, 4, <<"PING">>}, {tlv_frame, 1, 7, 128, BigDecPayload}], BigTrailing} = ResBig,
+    case {FStaleLen, ResFull, ResEmpty, ResPartial, BigDecPayload =:= BigPayload, binary:referenced_byte_size(BigDecPayload), BigTrailing =:= BigFrag, binary:referenced_byte_size(BigTrailing)} of
+        {<<37, 0, 2, "HI">>,
+         {ok, [{tlv_frame, 1, 2, 4, <<"PING">>},
                {tlv_frame, 1, 3, 4, <<"PONG">>},
                {tlv_frame, 2, 7, 8, <<"TELEMETR">>}]},
+         {ok, []},
          {partial, [{tlv_frame, 1, 2, 4, <<"PING">>},
                     {tlv_frame, 1, 3, 4, <<"PONG">>}],
-          Trailing}} when byte_size(Trailing) =:= 12 ->
-            #{id => <<"tlv_stream_parsing">>, title => <<"Binary Network Packet & Multi-Frame TLV Stream Parser">>, status => <<"passed">>, time_ms => 12, details => <<"All frames extracted in order with unpinned payloads and trailing partial bytes isolated">>};
+          Trailing},
+         true, 128, true, 83} when byte_size(Trailing) =:= 12 ->
+            #{id => <<"tlv_stream_parsing">>, title => <<"Binary Network Packet & Multi-Frame TLV Stream Parser">>, status => <<"passed">>, time_ms => 12, details => <<"All frames extracted in order with unpinned 128-byte payload (refc=128) & 83-byte trailing fragment (refc=83), empty/truncated edges, and byte_size encoding verified">>};
         Got_M08 ->
             #{id => <<"tlv_stream_parsing">>, title => <<"Binary Network Packet & Multi-Frame TLV Stream Parser">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("TLV mismatch: ~p", [Got_M08]))}
     end
 catch Class_M08:Err_M08 ->
     #{id => <<"tlv_stream_parsing">>, title => <<"Binary Network Packet & Multi-Frame TLV Stream Parser">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_M08, Err_M08]))}
 end,
-Stages = [CompileStage_M08, S1_Tlv]
-`), true
+Stages = [CompileStage_M08, S_Ast_M08, S1_Tlv]
+`, wsDir, wsDir), true
 
 	// ── CHAPTER 5 ─────────────────────────────────────────────────────────────
 	case "ch05-l01":

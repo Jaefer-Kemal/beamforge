@@ -2253,66 +2253,77 @@ When multiple frames arrive in a single binary stream:
 <<Frame1, Frame2, Frame3, PartialTrailingFragment>>
 \`\`\`
 
-The stream processor must iteratively call \`parse_frame/1\` in a tail-recursive accumulator loop:
-- If all bytes are cleanly consumed (\`<<>>\`), return \`{ok, [Frame1, Frame2, ...]}\` in their original sequence order.
-- If a trailing fragment remains that is too small to complete a header or payload, return \`{partial, ParsedFrames, binary:copy(TrailingBytes)}\` so the socket handler can buffer the fragment until subsequent network packets arrive!
+The stream processor must iteratively consume complete frames in a tail-recursive accumulator loop:
+- If all bytes are cleanly consumed, return \`{ok, ParsedFrames}\` in their original sequence order.
+- If a trailing fragment remains that is too short to complete a header or payload, return \`{partial, ParsedFrames, IsolatedTrailingBytes}\` with trailing bytes detached from the parent stream buffer so the socket handler can hold the fragment across packets without pinning large network buffers in RAM!
 
-## Parallel Worked Example: Telemetry Metric Stream Parser
+## Parallel Worked Example: Bit-Packed WAL Journal Reader & Writer
 
-The following module demonstrates multi-frame stream parsing with fragment preservation and payload unpinning in an industrial telemetry domain:
+The following module synthesizes records, bit-syntax wire packing, sub-binary isolation, and tail-recursive binary stream accumulation in a database Write-Ahead Log (WAL) domain:
 
 \`\`\`erlang
--module(telemetry_stream).
--export([parse_metric_item/1, parse_metric_stream/1]).
+-module(journal_batch).
+-export([pack_entry/1, drain_journal/1]).
 
--record(metric_item, {
-    channel_id   :: non_neg_integer(),
-    status_flag  :: non_neg_integer(),
-    data_len     :: non_neg_integer(),
-    readings     :: binary()
+-record(wal_entry, {
+    kind    = write :: atom(),
+    seq     = 0     :: non_neg_integer(),
+    payload = <<>>  :: binary()
 }).
 
-parse_metric_item(<<Chan:8, Stat:8, DLen:16/big, Readings:DLen/binary, Rest/binary>>) ->
-    Item = #metric_item{
-        channel_id = Chan,
-        status_flag = Stat,
-        data_len = DLen,
-        readings = binary:copy(Readings)
-    },
-    {ok, Item, Rest};
-parse_metric_item(_) ->
-    {error, incomplete_metric}.
+%% Phase 1: Map symbolic kind atom to 2-bit opcode, compute byte size, and pack compact big-endian frame.
+pack_entry(#wal_entry{kind = Kind, seq = Seq, payload = Payload}) ->
+    Op = case Kind of write -> 1; delete -> 2; _ -> 0 end,
+    Size = byte_size(Payload),
+    <<Op:2, Seq:14/big, Size:16/big, Payload/binary>>.
 
-parse_metric_stream(Stream) ->
-    metric_stream_loop(Stream, []).
+%% Phase 2: Tail-recursively decode complete entries directly in binary heads, counting skipped tombstones.
+drain_journal(WalBytes) ->
+    drain_loop(WalBytes, [], 0).
 
-metric_stream_loop(<<>>, Acc) ->
-    {ok, lists:reverse(Acc)};
-metric_stream_loop(Bytes, Acc) ->
-    case parse_metric_item(Bytes) of
-        {ok, Item, Rest} ->
-            metric_stream_loop(Rest, [Item | Acc]);
-        {error, incomplete_metric} ->
-            {partial, lists:reverse(Acc), binary:copy(Bytes)}
-    end.
+drain_loop(<<>>, Acc, Skipped) ->
+    #{entries => lists:reverse(Acc), skipped => Skipped, trailing => <<>>};
+drain_loop(<<2:2, _Seq:14/big, Size:16/big, _Body:Size/binary, Tail/binary>>, Acc, Skipped) ->
+    drain_loop(Tail, Acc, Skipped + 1);
+drain_loop(<<1:2, Seq:14/big, Size:16/big, Body:Size/binary, Tail/binary>>, Acc, Skipped) ->
+    Entry = #wal_entry{kind = write, seq = Seq, payload = binary:copy(Body)},
+    drain_loop(Tail, [Entry | Acc], Skipped);
+drain_loop(Trailing, Acc, Skipped) ->
+    #{entries => lists:reverse(Acc), skipped => Skipped, trailing => binary:copy(Trailing)}.
 \`\`\`
+
+**What the BEAM is doing in each phase:**
+- **Phase 1 (Record Destructuring & Wire Packing):** Pattern matching \`#wal_entry{...}\` extracts the typed fields in one record tuple read, computes \`byte_size(Payload)\` in $O(1)$ time, and packs arbitrary sub-byte widths (\`2\` + \`14\` = 16 bits plus 16-bit big-endian size) directly into contiguous wire bytes.
+- **Phase 2 (Tail-Recursive Framing & Buffer Isolation):** \`drain_loop/3\` walks forward through sub-binary windows in $O(1)$ stack space (\`call_last\`), prepends completed entries to \`Acc\`, and applies \`binary:copy/1\` to both stored payloads and any truncated \`Trailing\` remnant so old off-heap \`ProcBin\` WAL buffers can be immediately collected.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Record definition
+%% Record Declaration Syntax (Erlang Reference Manual)
 -record(RecordName, {Field1, Field2, ...}).
 
-%% Bit syntax segment matching
-<<Val:Size/TypeSpecifiers, Rest/binary>>
+%% Bit Syntax Dynamic Length Matching
+<<Field1:Width1, Len:Width2/big, Slice:Len/binary, Rest/binary>>
 
-%% Decoupling off-heap binaries
-binary:copy(BinarySlice)
+%% Official OTP Signatures (stdlib / binary, erlang, lists)
+binary:copy(Subject) -> binary()
+  Types:
+    Subject = binary()
+
+erlang:byte_size(Bitstring) -> integer() >= 0
+  Types:
+    Bitstring = bitstring()
+
+lists:reverse(List1) -> List2
+  Types:
+    List1 = List2 = [T]
 \`\`\`
+
+In OTP docs, \`lists:reverse/1\` restores FIFO arrival order in a fast C BIF after a tail-recursive parser prepends parsed elements to an accumulator list, while \`binary:copy/1\` isolates extracted binary payloads and trailing fragments from backing \`ProcBin\` buffers. See the attached **OTP Docs** reference cards for details.
 
 ## Assignment Specification
 
-Implement the complete TLV protocol engine in \`src/packet_parser.erl\`.
+Implement the complete TLV protocol engine in module \`packet_parser\` (\`src/packet_parser.erl\`), exporting \`parse_frame/1\`, \`parse_tlv_stream/1\`, and \`encode_frame/1\`.
 
 ### Record Schema: \`tlv_frame\`
 Declare a module-level record named \`tlv_frame\` with four fields in exact order:
@@ -2327,39 +2338,36 @@ Declare a module-level record named \`tlv_frame\` with four fields in exact orde
 - **Input**:
   - \`Binary\`: a binary stream
 - **Behavior**: Inspects \`Binary\` for a TLV frame containing a 4-bit unsigned version, 4-bit unsigned type, 16-bit big-endian unsigned length, followed by \`Length\` bytes of payload. If a complete frame is matched, returns \`{ok, Frame, Rest}\` where:
-  - \`Frame\` is a \`#tlv_frame\` record containing the extracted fields with \`payload\` decoupled using \`binary:copy/1\`.
+  - \`Frame\` is a \`#tlv_frame\` record containing the extracted fields with \`payload\` detached from the input buffer as a standalone binary copy.
   - \`Rest\` is the remaining unparsed binary bytes.
-  If the binary contains fewer than 3 bytes or the payload is incomplete, returns \`{error, incomplete_frame}\`.
+  If the binary contains fewer than 3 bytes or the payload is shorter than the declared header length, returns \`{error, incomplete_frame}\`.
 - **Examples**:
-  - \`parse_frame(<<1:4, 2:4, 4:16/big, "PING", "REST">>)\` $\\rightarrow$
-    \`{ok, {tlv_frame, 1, 2, 4, <<"PING">>}, <<"REST">>}\`
-  - \`parse_frame(<<1:4, 2:4>>)\` $\\rightarrow$ \`{error, incomplete_frame}\`
+  - \`packet_parser:parse_frame(<<1:4, 2:4, 4:16/big, "PING", "REST">>)\` returns \`{ok, {tlv_frame, 1, 2, 4, <<"PING">>}, <<"REST">>}\`.
+  - \`packet_parser:parse_frame(<<1:4, 2:4>>)\` returns \`{error, incomplete_frame}\`.
 
 #### \`parse_tlv_stream/1\`
 - **Input**:
   - \`StreamBinary\`: a binary stream containing zero or more concatenated TLV frames
-- **Behavior**: Processes \`StreamBinary\` in a strictly tail-recursive loop by iteratively calling \`parse_frame/1\` and accumulating parsed frames.
-  - When the stream is completely consumed without trailing fragments (\`<<>>\`), returns \`{ok, ParsedFrames}\` in their original arrival order.
-  - When the stream ends with an incomplete frame fragment, returns \`{partial, ParsedFrames, TrailingBytes}\` where \`TrailingBytes\` are unpinned using \`binary:copy/1\`.
+- **Behavior**: Processes \`StreamBinary\` via a strictly tail-recursive accumulator loop over parsed frames:
+  - When the stream is completely consumed with no leftover bytes, returns \`{ok, ParsedFrames}\` in their original arrival order.
+  - When the stream ends with an incomplete frame fragment, returns \`{partial, ParsedFrames, TrailingBytes}\` with \`TrailingBytes\` isolated from the backing stream buffer.
 - **Examples**:
-  - \`parse_tlv_stream(<<1:4, 2:4, 4:16/big, "PING", 1:4, 3:4, 4:16/big, "PONG">>)\` $\\rightarrow$
-    \`{ok, [{tlv_frame, 1, 2, 4, <<"PING">>}, {tlv_frame, 1, 3, 4, <<"PONG">>}]}\`
-  - \`parse_tlv_stream(<<1:4, 2:4, 4:16/big, "PING", 1:4, 3:4>>)\` $\\rightarrow$
-    \`{partial, [{tlv_frame, 1, 2, 4, <<"PING">>}], <<19>>}\`
+  - \`packet_parser:parse_tlv_stream(<<1:4, 2:4, 4:16/big, "PING", 1:4, 3:4, 4:16/big, "PONG">>)\` returns \`{ok, [{tlv_frame, 1, 2, 4, <<"PING">>}, {tlv_frame, 1, 3, 4, <<"PONG">>}]}\`.
+  - \`packet_parser:parse_tlv_stream(<<1:4, 2:4, 4:16/big, "PING", 1:4, 3:4>>)\` returns \`{partial, [{tlv_frame, 1, 2, 4, <<"PING">>}], <<19>>}\`.
 
 #### \`encode_frame/1\`
 - **Input**:
   - \`Frame\`: a \`#tlv_frame\` record
-- **Behavior**: Calculates the byte length of \`payload\` and serializes the record into its binary wire representation: 4-bit version, 4-bit type, 16-bit big-endian unsigned length, followed by the raw payload bytes.
+- **Behavior**: Computes the actual byte size of the record's \`payload\` binary (rather than trusting any stale \`length\` value) and serializes the record into its binary wire representation: 4-bit version, 4-bit type, 16-bit big-endian unsigned length, followed by the raw payload bytes.
 - **Examples**:
-  - \`encode_frame({tlv_frame, 1, 2, 4, <<"TEST">>})\` $\\rightarrow$ \`<<18, 0, 4, "TEST">>\`
+  - \`packet_parser:encode_frame({tlv_frame, 1, 2, 4, <<"TEST">>})\` returns \`<<18, 0, 4, "TEST">>\`.
 
 ## Rules & Verification Constraints
 
-- Must define \`-record(tlv_frame, {version, type, length, payload}).\` at module scope.
-- Must use Bit Syntax \`<<...>>\`.
-- Must call \`binary:copy/1\` on extracted payloads and partial stream remnants.
-- \`parse_tlv_stream/1\` must be strictly tail-recursive.`,
+- Must define the module-level record \`tlv_frame\` with the four ordered fields specified above.
+- Must construct and pattern-match TLV headers and dynamic payloads using bit syntax, computing frame byte length via \`byte_size/1\` inside \`encode_frame/1\`.
+- Must decouple extracted payloads and partial trailing remnants via \`binary:copy/1\` to prevent off-heap sub-binary pinning.
+- \`parse_tlv_stream/1\` and its helper loop must be strictly tail-recursive.`,
     otpDocCards: [
       {
         functionName: 'bit_syntax_pattern',
@@ -2369,6 +2377,24 @@ Declare a module-level record named \`tlv_frame\` with four fields in exact orde
         description: 'Single-instruction matching of network protocol frame headers and payloads.',
         complexityNote: 'Executed directly in BEAM parser loop with zero buffer copies.',
         officialUrl: 'https://www.erlang.org/doc/programming_examples/bit_syntax.html',
+      },
+      {
+        functionName: 'binary:copy/1',
+        module: 'binary',
+        signature: 'copy(Subject) -> binary()',
+        typesSpec: ['Subject = binary()', 'Returns standalone detached copy'],
+        description: 'Allocates an independent copy of a binary slice, releasing references to large off-heap ProcBin stream buffers.',
+        complexityNote: 'O(N) slice copy preventing multi-megabyte socket buffer leaks.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/binary.html#copy/1',
+      },
+      {
+        functionName: 'lists:reverse/1',
+        module: 'lists',
+        signature: 'reverse(List1) -> List2',
+        typesSpec: ['List1 = [term()]', 'List2 = [term()]'],
+        description: 'Reverses an accumulated list in optimized C after tail-recursive frame collection.',
+        complexityNote: 'O(N) BIF restoring original stream arrival order.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/lists.html#reverse/1',
       },
     ],
     mentalModelCheck: {
@@ -2426,7 +2452,7 @@ Declare a module-level record named \`tlv_frame\` with four fields in exact orde
     ],
     astRules: {
       requiredConstructs: ['record_def', 'bit_syntax'],
-      requiredCalls: ['binary:copy/1'],
+      requiredCalls: ['binary:copy/1', 'erlang:byte_size/1'],
       requireTailRecursion: ['parse_tlv_stream/1'],
     },
     solutionExplanation: 'Complete TLV binary protocol engine with bit syntax parsing, record construction, tail-recursive stream aggregation with fragment preservation, and encode_frame packing.',
@@ -2437,17 +2463,17 @@ Declare a module-level record named \`tlv_frame\` with four fields in exact orde
         content: `-module(packet_parser).
 -export([parse_frame/1, parse_tlv_stream/1, encode_frame/1]).
 
-%% @doc Parse a single TLV frame from binary input.
+%% @doc Decode one complete TLV frame from Binary, returning an ok triple with an isolated payload binary and trailing bytes or an incomplete-frame error tuple when truncated.
 parse_frame(_Binary) ->
-    {error, incomplete_frame}.
+    ok.
 
-%% @doc Parse a stream of concatenated TLV frames in tail-recursive loop.
+%% @doc Tail-recursively decode consecutive TLV frames from StreamBinary in arrival order, returning parsed frames or a partial tuple holding isolated trailing remnant bytes.
 parse_tlv_stream(_StreamBinary) ->
-    {ok, []}.
+    ok.
 
-%% @doc Encode a tlv_frame record into its binary wire representation.
+%% @doc Compute payload byte length and serialize Frame's version, type, length, and payload fields into a big-endian wire binary.
 encode_frame(_Frame) ->
-    <<>>.`,
+    ok.`,
       },
     ],
     solutionFiles: {
@@ -2461,6 +2487,7 @@ encode_frame(_Frame) ->
     payload :: binary()
 }).
 
+%% @doc Decode one complete TLV frame from Binary, returning an ok triple with an isolated payload binary and trailing bytes or an incomplete-frame error tuple when truncated.
 parse_frame(<<Version:4, Type:4, Length:16/big-unsigned-integer, Payload:Length/binary, Rest/binary>>) ->
     Frame = #tlv_frame{
         version = Version,
@@ -2472,6 +2499,7 @@ parse_frame(<<Version:4, Type:4, Length:16/big-unsigned-integer, Payload:Length/
 parse_frame(_) ->
     {error, incomplete_frame}.
 
+%% @doc Tail-recursively decode consecutive TLV frames from StreamBinary in arrival order, returning parsed frames or a partial tuple holding isolated trailing remnant bytes.
 parse_tlv_stream(StreamBinary) ->
     parse_tlv_loop(StreamBinary, []).
 
@@ -2485,6 +2513,7 @@ parse_tlv_loop(Binary, Acc) ->
             {partial, lists:reverse(Acc), binary:copy(Binary)}
     end.
 
+%% @doc Compute payload byte length and serialize Frame's version, type, length, and payload fields into a big-endian wire binary.
 encode_frame(#tlv_frame{version = Version, type = Type, payload = Payload}) ->
     Len = byte_size(Payload),
     <<Version:4, Type:4, Len:16/big-unsigned-integer, Payload/binary>>.`,
@@ -2492,17 +2521,17 @@ encode_frame(#tlv_frame{version = Version, type = Type, payload = Payload}) ->
     starterCode: `-module(packet_parser).
 -export([parse_frame/1, parse_tlv_stream/1, encode_frame/1]).
 
-%% @doc Parse a single TLV frame from binary input.
+%% @doc Decode one complete TLV frame from Binary, returning an ok triple with an isolated payload binary and trailing bytes or an incomplete-frame error tuple when truncated.
 parse_frame(_Binary) ->
-    {error, incomplete_frame}.
+    ok.
 
-%% @doc Parse a stream of concatenated TLV frames in tail-recursive loop.
+%% @doc Tail-recursively decode consecutive TLV frames from StreamBinary in arrival order, returning parsed frames or a partial tuple holding isolated trailing remnant bytes.
 parse_tlv_stream(_StreamBinary) ->
-    {ok, []}.
+    ok.
 
-%% @doc Encode a tlv_frame record into its binary wire representation.
+%% @doc Compute payload byte length and serialize Frame's version, type, length, and payload fields into a big-endian wire binary.
 encode_frame(_Frame) ->
-    <<>>.`,
+    ok.`,
     solutionCode: `-module(packet_parser).
 -export([parse_frame/1, parse_tlv_stream/1, encode_frame/1]).
 
@@ -2513,6 +2542,7 @@ encode_frame(_Frame) ->
     payload :: binary()
 }).
 
+%% @doc Decode one complete TLV frame from Binary, returning an ok triple with an isolated payload binary and trailing bytes or an incomplete-frame error tuple when truncated.
 parse_frame(<<Version:4, Type:4, Length:16/big-unsigned-integer, Payload:Length/binary, Rest/binary>>) ->
     Frame = #tlv_frame{
         version = Version,
@@ -2524,6 +2554,7 @@ parse_frame(<<Version:4, Type:4, Length:16/big-unsigned-integer, Payload:Length/
 parse_frame(_) ->
     {error, incomplete_frame}.
 
+%% @doc Tail-recursively decode consecutive TLV frames from StreamBinary in arrival order, returning parsed frames or a partial tuple holding isolated trailing remnant bytes.
 parse_tlv_stream(StreamBinary) ->
     parse_tlv_loop(StreamBinary, []).
 
@@ -2537,6 +2568,7 @@ parse_tlv_loop(Binary, Acc) ->
             {partial, lists:reverse(Acc), binary:copy(Binary)}
     end.
 
+%% @doc Compute payload byte length and serialize Frame's version, type, length, and payload fields into a big-endian wire binary.
 encode_frame(#tlv_frame{version = Version, type = Type, payload = Payload}) ->
     Len = byte_size(Payload),
     <<Version:4, Type:4, Len:16/big-unsigned-integer, Payload/binary>>.`,
