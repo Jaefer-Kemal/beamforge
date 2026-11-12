@@ -107,6 +107,28 @@ contains_item([_Other | Rest], Target) ->
     contains_item(Rest, Target).
 `
 
+	tcoCounterSolution := `-module(tco_counter).
+-export([sum_packets/1, count_packets/1]).
+
+%% @doc Compute the integer sum of all packet byte sizes in List via a strictly tail-recursive accumulator helper in constant O(1) stack space, returning 0 when empty.
+sum_packets(List) ->
+    sum_packets(List, 0).
+
+sum_packets([], Acc) ->
+    Acc;
+sum_packets([H | T], Acc) ->
+    sum_packets(T, Acc + H).
+
+%% @doc Count the total number of packet descriptor elements in List via a strictly tail-recursive accumulator helper in constant O(1) stack space, returning 0 when empty.
+count_packets(List) ->
+    count_packets(List, 0).
+
+count_packets([], Acc) ->
+    Acc;
+count_packets([_ | T], Acc) ->
+    count_packets(T, Acc + 1).
+`
+
 	tests := []struct {
 		exerciseID   string
 		visibleCount int
@@ -131,6 +153,11 @@ contains_item([_Other | Rest], Target) ->
 			exerciseID:   "ch02-l04",
 			visibleCount: 4,
 			files:        map[string]string{"src/recursive_search.erl": recursiveSearchSolution},
+		},
+		{
+			exerciseID:   "ch02-l05",
+			visibleCount: 2,
+			files:        map[string]string{"src/tco_counter.erl": tcoCounterSolution},
 		},
 	}
 
@@ -627,6 +654,85 @@ contains_item([_ | T], Target) -> contains_item(T, Target).
 		}
 		if !astFailed {
 			t.Errorf("Expected ast_pure_recursion_audit stage to fail for list comprehension, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l05 rejects body recursion (non-TCO) via AST audit", func(t *testing.T) {
+		sessionID := "test-ch02-l05-neg-body-rec"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		bodyRec := map[string]string{
+			"src/tco_counter.erl": `-module(tco_counter).
+-export([sum_packets/1, count_packets/1]).
+
+sum_packets([]) -> 0;
+sum_packets([H | T]) -> H + sum_packets(T).
+
+count_packets([]) -> 0;
+count_packets([_ | T]) -> 1 + count_packets(T).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch02-l05", bodyRec)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected body-recursive tco_counter to fail TCO AST audit, but got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "tail_recursion_ast_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected tail_recursion_ast_audit stage to fail for body recursion, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch02-l05 rejects auto-imported length/1 and lists:sum/1 shortcuts via AST audit", func(t *testing.T) {
+		sessionID := "test-ch02-l05-neg-bif"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/tco_counter.erl": `-module(tco_counter).
+-export([sum_packets/1, count_packets/1]).
+
+sum_packets(List) -> lists:sum(List).
+count_packets(List) -> length(List).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch02-l05", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected tco_counter using lists:sum/1 and length/1 to fail AST audit, but got PASSED")
+		}
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "tail_recursion_ast_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected tail_recursion_ast_audit stage to fail for lists:sum/length, stages=%+v", report.Stages)
 		}
 	})
 }

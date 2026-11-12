@@ -4979,7 +4979,15 @@ Stages = [CompileStage, S1_Ast, S2_Search]
 		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(tco_counter) of
     {module, tco_counter} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"tco_counter.erl compiled cleanly">>};
+        Exports = tco_counter:module_info(exports),
+        Required = [{sum_packets, 1}, {count_packets, 1}],
+        Missing = [FA || FA <- Required, not lists:member(FA, Exports)],
+        case Missing of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"tco_counter.erl compiled cleanly and exported sum_packets/1 and count_packets/1.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
@@ -4994,11 +5002,12 @@ S1_Ast = try
     end,
     Rules = #{
         require_tail_recursion => [{sum_packets, 1}, {count_packets, 1}],
-        forbidden_remote_calls => [{lists, sum, 1}, {erlang, length, 1}]
+        forbidden_remote_calls => [{lists, sum, 1}, {erlang, length, 1}, {lists, foldl, any}, {lists, foldr, any}],
+        forbidden_constructs => [list_comprehension]
     },
     case bf_ast_verifier:verify_rules(SourceFile, Rules) of
         {ok, _} ->
-            #{id => <<"tail_recursion_ast_audit">>, title => <<"Tail Call Optimization (TCO) & AST Verification">>, status => <<"passed">>, time_ms => 15, details => <<"Strict tail recursion verified via AST & BEAM bytecode inspection.">>};
+            #{id => <<"tail_recursion_ast_audit">>, title => <<"Tail Call Optimization (TCO) & AST Verification">>, status => <<"passed">>, time_ms => 15, details => <<"Strict tail recursion and zero forbidden BIFs/comprehensions verified via AST analysis.">>};
         {error, [#{message := Msg} | _]} ->
             #{id => <<"tail_recursion_ast_audit">>, title => <<"Tail Call Optimization (TCO) & AST Verification">>, status => <<"failed">>, time_ms => 15, details => Msg};
         {error, OtherErr} ->
@@ -5009,12 +5018,16 @@ catch C_Ast:R_Ast ->
 end,
 S2_Tco = try
     Sum = tco_counter:sum_packets([10, 20, 30, 40]),
+    SumEmpty = tco_counter:sum_packets([]),
+    SumSeq = tco_counter:sum_packets(lists:seq(1, 100)),
     Cnt = tco_counter:count_packets([1, 2, 3, 4, 5]),
-    case {Sum, Cnt} of
-        {100, 5} ->
-            #{id => <<"functional_contract">>, title => <<"Functional Accumulator Correctness">>, status => <<"passed">>, time_ms => 10, details => <<"Packet sum (100) and packet count (5) match functional specification">>};
+    CntEmpty = tco_counter:count_packets([]),
+    CntBig = tco_counter:count_packets(lists:duplicate(10000, pkt)),
+    case {Sum, SumEmpty, SumSeq, Cnt, CntEmpty, CntBig} of
+        {100, 0, 5050, 5, 0, 10000} ->
+            #{id => <<"functional_contract">>, title => <<"Functional Accumulator Correctness">>, status => <<"passed">>, time_ms => 10, details => <<"Empty, standard, sequence (5050), and 10,000-element O(1)-stack TCO batch checks passed.">>};
         Got1 ->
-            #{id => <<"functional_contract">>, title => <<"Functional Accumulator Correctness">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Functional mismatch: expected {100, 5}, got ~p", [Got1]))}
+            #{id => <<"functional_contract">>, title => <<"Functional Accumulator Correctness">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Functional mismatch: got ~p", [Got1]))}
     end
 catch C1:Err1 ->
     #{id => <<"functional_contract">>, title => <<"Functional Accumulator Correctness">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
