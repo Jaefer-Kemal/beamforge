@@ -7848,13 +7848,21 @@ CompileStage = case compile:file("%s/src/tcp_live_demo.erl", [return_errors, {ou
     Err ->
         #{id => <<"compile">>, title => <<"Compile tcp_live_demo.erl">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("~p", [Err]))}
 end,
-S1_Ast = case bf_ast_verifier:verify_rules("%s/src/tcp_live_demo.erl", #{
-    required_calls => [{gen_tcp, listen, 2}, {gen_tcp, accept, 2}, {gen_tcp, send, 2}, {gen_tcp, recv, 3}]
-}) of
-    {ok, _} ->
-        #{id => <<"ast_verification">>, title => <<"AST Analysis: gen_tcp socket primitives">>, status => <<"passed">>, time_ms => 15, details => <<"Required gen_tcp:listen, accept, send, and recv found.">>};
-    {error, AstFailReason} ->
-        #{id => <<"ast_verification">>, title => <<"AST Analysis: gen_tcp socket primitives">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST verification failed: ~p", [AstFailReason]))}
+S1_Ast = try
+    BeamPath = filename:join(["%s", "ebin", "tcp_live_demo.beam"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    case bf_ast_verifier:verify_rules("%s/src/tcp_live_demo.erl", BeamBin, #{
+        require_tail_recursion => [{echo_loop, 3}],
+        required_calls => [{gen_tcp, listen, 2}, {gen_tcp, accept, 2}, {gen_tcp, send, 2}, {gen_tcp, recv, 3}],
+        required_constructs => [receive_after]
+    }) of
+        {ok, _} ->
+            #{id => <<"ast_verification">>, title => <<"AST Analysis: gen_tcp socket primitives & echo_loop TCO">>, status => <<"passed">>, time_ms => 15, details => <<"Verified gen_tcp:listen/2, accept/2, send/2, recv/3, receive_after, and tail-recursive echo_loop/3.">>};
+        {error, AstFailReason} ->
+            #{id => <<"ast_verification">>, title => <<"AST Analysis: gen_tcp socket primitives & echo_loop TCO">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST verification failed: ~p", [AstFailReason]))}
+    end
+catch C1:R1 ->
+    #{id => <<"ast_verification">>, title => <<"AST Analysis: gen_tcp socket primitives & echo_loop TCO">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
 end,
 S2_DemoRun = try
     DemoRes = tcp_live_demo:run_demo(),
@@ -7870,7 +7878,7 @@ catch C:R ->
     #{id => <<"demo_execution">>, title => <<"Execute Live TCP Socket Lifecycle">>, status => <<"failed">>, time_ms => 45, details => list_to_binary(io_lib:format("Demo crashed: ~p:~p", [C, R]))}
 end,
 Stages = [CompileStage, S1_Ast, S2_DemoRun]
-`, wsDir, wsDir, wsDir), true
+`, wsDir, wsDir, wsDir, wsDir), true
 
 	case "ch10-l02":
 		return fmt.Sprintf(`

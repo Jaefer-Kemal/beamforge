@@ -2776,6 +2776,17 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l08` (`VERIFIED 100% PASSED`, score=100, 4 stages in `1.44s`, `1.784s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l08 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `11.16s` / `11.183s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 163: Pedagogical Audit, AST Fix & Live Tri-Verification of Chapter 10 Lecture 1 (`ch10-l01`)
+- [x] **163.1: Add PWE (`ping_probe_demo.erl`) & OTP Doc Types, Align `astRules` & TCO Grader (`ch10-l01`: `tcp_live_demo.erl`)**:
+  - Updated `conceptMarkdown` (`apps/web-ide/src/data/chapters/ch10.ts`) to replace Obsidian `> [!abstract]`/`> [!warning]` blocks with GFM alerts, add `Types:` blocks and `gen_tcp:recv/3` to `## Official Erlang Docs & Function Reference` (with card pointer), insert a proportionally simple, domain-disjoint runnable Parallel Worked Example (`ping_probe_demo.erl`), convert `## Assignment Specification` to structured `Input`/`Behavior`/`Examples` for `run_demo/0`, and document `echo_loop/3` TCO and `receive_after` in `## Rules & Verification Constraints`.
+  - Fixed `astRules.requiredCalls` in `ch10.ts` from `'gen_tcp:accept/1'` (uncalled) to `'gen_tcp:accept/2'`, added matching `%% @doc` above `run_demo/0` in `solutionCode`, `solutionFiles['src/tcp_live_demo.erl']`, and `services/orchestrator/internal/bridge/ch10_verification_test.go`, and updated `services/orchestrator/internal/bridge/erl_runner_chapters.go` (`case "ch10-l01"` Submit `S1_Ast`) to call `bf_ast_verifier:verify_rules/3` with `BeamBin`, enforcing `require_tail_recursion => [{echo_loop, 3}]`, `required_calls => [{gen_tcp, listen, 2}, {gen_tcp, accept, 2}, {gen_tcp, send, 2}, {gen_tcp, recv, 3}]`, and `required_constructs => [receive_after]`.
+- [x] **163.2: Mandatory Live Tri-Verification & Compiler Suite (`ch10-l01`)**:
+  - **Parallel Worked Example (`ping_probe_demo.erl`)**: Extracted from `ch10.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified live loopback health probe (`PWE_CH10_L01_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier:verify_rules/3`, and passed 1/1 visible test (`STARTER_CH10_L01_OK ast=passed visible=1/1`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier:verify_rules/3`, and passed 1/1 visible test (`SOLUTION_CH10_L01_OK ast=passed visible=1/1`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter10Verification/ch10-l01` (`VERIFIED 100% PASSED`, score=100, 3 stages in `2.08s`, `2.425s` package total); `TEST_CHAPTER=10 TestDynamicVisibleTestsCurriculum` (`ch10-l01 | 1/1 tests passed`, all 7 Ch. 10 lessons passed in `11.36s` / `11.380s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 

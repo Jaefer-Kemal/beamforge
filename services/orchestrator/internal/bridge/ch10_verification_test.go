@@ -21,6 +21,7 @@ func TestChapter10Verification(t *testing.T) {
 				"src/tcp_live_demo.erl": `-module(tcp_live_demo).
 -export([run_demo/0]).
 
+%% @doc Runs a full end-to-end TCP socket lifecycle demo on an ephemeral port.
 -spec run_demo() -> map().
 run_demo() ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],

@@ -44,10 +44,11 @@ In traditional multithreaded runtimes (Java, C++, Go, Python), handling 50,000 c
 
 In the **BEAM VM**, raw networking is treated as a first-class concurrency primitive. **Every connected TCP socket is mapped directly to a lightweight Erlang process**. When bytes arrive on the physical network card, the BEAM port driver translates the operating system's TCP segment into an Erlang message (\`{tcp, Socket, Data}\`) and delivers it straight to that process's private mailbox without shared locks!
 
-> [!abstract] The BEAM Raw TCP Socket Lifecycle
+> [!IMPORTANT]
+> **The BEAM Raw TCP Socket Lifecycle:**
 > 1. **\`gen_tcp:listen(0, Opts)\`**: Asks the OS kernel to bind an available port and creates a \`ListenSocket\` (the server's front door).
-> 2. **\`gen_tcp:accept(ListenSocket)\`**: Blocks the acceptor process until a client completes the 3-way TCP handshake (\`SYN\` $\\rightarrow$ \`SYN-ACK\` $\\rightarrow$ \`ACK\`), returning a dedicated \`ClientSocket\`.
-> 3. **Wire Traffic**: Incoming bytes bypass userland mutexes and arrive directly as binary messages in the controlling process's mailbox.
+> 2. **\`gen_tcp:accept(ListenSocket, Timeout)\`**: Blocks the acceptor process until a client completes the 3-way TCP handshake (\`SYN\` $\\rightarrow$ \`SYN-ACK\` $\\rightarrow$ \`ACK\`), returning a dedicated \`ClientSocket\`.
+> 3. **Wire Traffic**: Incoming bytes bypass userland mutexes and flow directly through the socket port driver to the controlling process.
 
 ## Deep Concept Breakdown & Under the Hood
 
@@ -61,8 +62,8 @@ A TCP connection is not a physical cable; it is a stateful contract maintained b
 
 ### 2. \`ListenSocket\` vs. \`ClientSocket\`
 In Erlang socket programming, the two socket descriptors have completely different responsibilities:
-- **\`ListenSocket\` (\`gen_tcp:listen/2\`)**: The listening socket is the welcoming front door of your server. It is bound to an IP address and port. Its sole job is to queue incoming connection requests. You **cannot** send or receive payload data over a \`ListenSocket\`!
-- **\`ClientSocket\` (\`gen_tcp:accept/1\`)**: Calling \`gen_tcp:accept/1\` suspends the acceptor process until a client completes the 3-way handshake. The operating system allocates a dedicated, full-duplex communication pipe (\`ClientSocket\`) specifically for that client, while \`ListenSocket\` remains free to welcome further connections.
+- **\`ListenSocket\` (\`gen_tcp:listen/2\`)**: The listening socket is the welcoming front door of your server. It is bound to an IP address and port. Its sole job is to queue incoming connection requests. You **cannot** send or receive payload data over a \`ListenSocket\`.
+- **\`ClientSocket\` (\`gen_tcp:accept/2\`)**: Calling \`gen_tcp:accept/2\` suspends the acceptor process until a client completes the 3-way handshake. The operating system allocates a dedicated, full-duplex communication pipe (\`ClientSocket\`) specifically for that client, while \`ListenSocket\` remains free to welcome further connections.
 
 ### 3. Ephemeral Port Binding: Why Port \`0\`?
 When calling \`gen_tcp:listen(Port, Options)\`, specifying port \`0\` asks the operating system kernel to allocate an unused **ephemeral port** (typically in the range 49152–65535). You then retrieve the actual bound port using:
@@ -71,13 +72,13 @@ When calling \`gen_tcp:listen(Port, Options)\`, specifying port \`0\` asks the o
 {ok, Port} = inet:port(ListenSocket).
 \`\`\`
 
-Passing port \`0\` is essential for parallel automated testing and dynamic microservices, preventing \`{error, eaddrinuse}\` port collision errors when multiple test suites run concurrently!
+Passing port \`0\` is essential for parallel automated testing and dynamic microservices, preventing \`{error, eaddrinuse}\` port collision errors when multiple test suites run concurrently.
 
 ### 4. Controlling Process of a Socket
 On the BEAM, every open socket is owned by an Erlang process known as the **controlling process**:
-- The process that calls \`gen_tcp:listen/2\` or \`gen_tcp:accept/1\` becomes the initial controlling process.
-- All incoming socket messages (\`{tcp, Socket, Data}\`, \`{tcp_closed, Socket}\`) are delivered **exclusively** to the controlling process's mailbox.
-- If the controlling process terminates, the BEAM VM automatically closes the underlying socket file descriptor!
+- The process that calls \`gen_tcp:listen/2\` or \`gen_tcp:accept/2\` becomes the initial controlling process.
+- In active modes, socket messages (\`{tcp, Socket, Data}\`, \`{tcp_closed, Socket}\`) are delivered **exclusively** to the controlling process's mailbox; in \`{active, false}\` passive mode, callers pull bytes explicitly with \`gen_tcp:recv/3\`.
+- If the controlling process terminates, the BEAM VM automatically closes the underlying socket file descriptor.
 
 ### 5. Inspecting Live Socket Telemetry: \`inet:getstat/2\`
 In production Erlang, you do not need external kernel probes to measure network throughput. You can query the OS kernel's socket counters directly from Erlang:
@@ -89,42 +90,91 @@ In production Erlang, you do not need external kernel probes to measure network 
 - \`recv_oct\` / \`send_oct\`: Total octets (bytes) received and sent over the wire.
 - \`recv_cnt\` / \`send_cnt\`: Total number of packets transferred through the socket driver.
 
-> [!warning] Production Networking Trap: Port Starvation & Lingering Sockets
-> Every open socket consumes an OS file descriptor. If your connection worker crashes or finishes without calling \`gen_tcp:close(Socket)\` in its cleanup path, the socket descriptor remains open in the OS kernel until garbage collection occurs. Under 10,000 connections/sec, your server will hit \`EMFILE (Too many open files)\` and crash! Always wrap socket workers in supervised OTP processes.
+> [!WARNING]
+> **Production Networking Trap: Port Starvation & Lingering Sockets:**
+> Every open socket consumes an OS file descriptor. If your connection worker crashes or finishes without calling \`gen_tcp:close(Socket)\` in its cleanup path, the socket descriptor remains open in the OS kernel until garbage collection occurs. Under 10,000 connections/sec, your server will hit \`EMFILE (Too many open files)\` and fail new connections. Always wrap socket workers in supervised OTP processes.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Official OTP Signature (kernel / gen_tcp & inet)
+%% Official OTP Signatures (kernel / gen_tcp & inet)
 gen_tcp:listen(Port, Options) -> {ok, ListenSocket} | {error, Reason}
-gen_tcp:accept(ListenSocket) -> {ok, ClientSocket} | {error, Reason}
-gen_tcp:accept(ListenSocket, Timeout) -> {ok, ClientSocket} | {error, Reason}
-gen_tcp:connect(Address, Port, Options) -> {ok, Socket} | {error, Reason}
+  Types:
+    Port = inet:port_number()
+    Options = [gen_tcp:listen_option()]
+    ListenSocket = gen_tcp:socket()
+
+gen_tcp:accept(ListenSocket, Timeout) -> {ok, Socket} | {error, Reason}
+  Types:
+    ListenSocket = Socket = gen_tcp:socket()
+    Timeout = timeout()
+
+gen_tcp:connect(Address, Port, Options, Timeout) -> {ok, Socket} | {error, Reason}
 gen_tcp:send(Socket, Packet) -> ok | {error, Reason}
+gen_tcp:recv(Socket, Length, Timeout) -> {ok, Packet} | {error, Reason}
 gen_tcp:close(Socket) -> ok
 inet:port(Socket) -> {ok, Port}
 inet:getstat(Socket, [StatOption]) -> {ok, [{StatOption, integer()}]}
 \`\`\`
 
+Consult the attached documentation cards below for \`gen_tcp:listen/2\` and \`gen_tcp:accept/2\` kernel behavior, plus the \`kernel\` module links in the references drawer.
+
+## Parallel Worked Example: Minimal Loopback Health Probe
+
+Consider a separate domain: a single-request health-check probe (\`ping_probe_demo\`) that opens an ephemeral loopback socket, reads a fixed 4-byte \`<<"PING">>\` frame in passive mode, replies \`<<"PONG">>\`, and confirms receipt via a bounded \`receive ... after\` timeout:
+
+\`\`\`erlang
+-module(ping_probe_demo).
+-export([run_probe/0]).
+
+%% @doc Bind an ephemeral port, send a single health probe over loopback, and return the bound port and echoed byte count.
+run_probe() ->
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {packet, raw}, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(ListenSock),
+    Caller = self(),
+    spawn(fun() -> serve_once(ListenSock, Caller) end),
+    {ok, ConnSock} = gen_tcp:connect("127.0.0.1", Port, [binary, {packet, raw}, {active, false}], 2000),
+    ok = gen_tcp:send(ConnSock, <<"PING">>),
+    {ok, <<"PONG">>} = gen_tcp:recv(ConnSock, 4, 2000),
+    ok = gen_tcp:close(ConnSock),
+    ok = gen_tcp:close(ListenSock),
+    receive
+        {served_bytes, ByteCount} -> {ok, Port, ByteCount}
+    after 2000 ->
+        {error, probe_timeout}
+    end.
+
+serve_once(ListenSock, Caller) ->
+    case gen_tcp:accept(ListenSock, 2000) of
+        {ok, PeerSock} ->
+            {ok, Payload} = gen_tcp:recv(PeerSock, 4, 2000),
+            ok = gen_tcp:send(PeerSock, <<"PONG">>),
+            ok = gen_tcp:close(PeerSock),
+            Caller ! {served_bytes, byte_size(Payload)};
+        {error, Reason} ->
+            Caller ! {probe_error, Reason}
+    end.
+\`\`\`
+
+### What ERTS Does at Runtime
+- **Concurrent Peer Handshake**: Spawning \`serve_once/2\` before calling \`gen_tcp:connect/4\` lets the BEAM scheduler run acceptor and client concurrently over the OS loopback interface without deadlocking on passive \`accept/2\`.
+- **Passive Backpressure**: Both sides pass \`{active, false}\`, so kernel TCP buffers only deliver data when \`gen_tcp:recv/3\` explicitly pulls bytes with a 2000ms timeout.
+
 ## Assignment Specification
 
-This is a **Guided Demonstration**. The module \`src/tcp_live_demo.erl\` executes a complete end-to-end TCP socket lifecycle simulation on loopback interface \`127.0.0.1\`:
-1. Binds a \`ListenSocket\` on ephemeral port \`0\`.
-2. Inspects the allocated OS port using \`inet:port/1\`.
-3. Spawns an acceptor process that accepts a real client connection via \`gen_tcp:accept/2\`.
-4. Connects a TCP client via \`gen_tcp:connect/4\` and exchanges 3 binary request/response frames:
-   - \`<<"SYN_FRAME\\r\\n">>\`
-   - \`<<"DATA_FRAME\\r\\n">>\`
-   - \`<<"FIN_FRAME\\r\\n">>\`
-5. Queries \`inet:getstat/2\` to inspect live byte and packet telemetry counters.
-6. Cleanly closes both sockets with \`gen_tcp:close/1\` and returns:
-   \`#{port => Port, frames_exchanged => 3, bytes_received => RecvBytes}\`.
+This is a **Guided Demonstration** implemented in \`src/tcp_live_demo.erl\` (\`-module(tcp_live_demo).\`). Inspect the pre-wired module in the editor and execute it to observe live loopback socket telemetry:
 
-Click **\`▷ Run\`** or **\`▶ Submit\`** to boot the live TCP server and observe real wire transmission in the terminal!
+### \`run_demo/0\`
+- **Input**: Zero arguments.
+- **Behavior**: Opens a passive raw binary listening socket on ephemeral port \`0\`, queries the assigned port via \`inet:port/1\`, spawns a background acceptor process calling \`gen_tcp:accept/2\` and tail-recursing in \`echo_loop/3\`, connects a loopback client to \`127.0.0.1\`, exchanges three CRLF-delimited test frames (\`SYN_FRAME\`, \`DATA_FRAME\`, \`FIN_FRAME\`) with \`+ACK:\` echoes, queries socket statistics via \`inet:getstat/2\`, closes both socket descriptors, and waits with a bounded timeout for the acceptor total before returning a summary map with \`port\`, \`frames_exchanged\`, and \`bytes_received\`.
+- **Examples**:
+  - \`maps:get(frames_exchanged, tcp_live_demo:run_demo())\` returns \`3\`.
+
+Click **\`▷ Run\`** or **\`▶ Submit\`** to boot the live TCP server and inspect wire transmission telemetry in the terminal.
 
 ## Rules & Verification Constraints
-- Verified by executing \`tcp_live_demo:run_demo/0\`.
-- AST verifier checks required calls: \`gen_tcp:listen/2\`, \`gen_tcp:accept/2\`, \`gen_tcp:send/2\`, and \`gen_tcp:recv/3\`.
+- **Live Execution**: Verified by calling \`tcp_live_demo:run_demo/0\` and confirming \`frames_exchanged\` equals \`3\`.
+- **AST & Bytecode Enforcements**: \`bf_ast_verifier\` enforces true tail recursion on \`echo_loop/3\`, required remote calls \`gen_tcp:listen/2\`, \`gen_tcp:accept/2\`, \`gen_tcp:send/2\`, and \`gen_tcp:recv/3\`, and at least one \`receive ... after\` timeout block.
     `,
     otpDocCards: [
       {
@@ -250,6 +300,7 @@ echo_loop(Socket, Count, Parent) ->
 
 -export([run_demo/0]).
 
+%% @doc Runs a full end-to-end TCP socket lifecycle demo on an ephemeral port.
 -spec run_demo() -> map().
 run_demo() ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],
@@ -400,6 +451,7 @@ echo_loop(Socket, Count, Parent) ->
 
 -export([run_demo/0]).
 
+%% @doc Runs a full end-to-end TCP socket lifecycle demo on an ephemeral port.
 -spec run_demo() -> map().
 run_demo() ->
     ListenOpts = [binary, {packet, raw}, {active, false}, {reuseaddr, true}],
@@ -467,7 +519,7 @@ solutionExplanation: `### How the TCP Socket Lifecycle Operates
     astRules: {
       requireTailRecursion: ['echo_loop/3'],
       forbiddenCalls: [],
-      requiredCalls: ['gen_tcp:listen/2', 'gen_tcp:accept/1', 'gen_tcp:send/2', 'gen_tcp:recv/3'],
+      requiredCalls: ['gen_tcp:listen/2', 'gen_tcp:accept/2', 'gen_tcp:send/2', 'gen_tcp:recv/3'],
       requiredConstructs: ['receive_after'],
     },
     references: [
