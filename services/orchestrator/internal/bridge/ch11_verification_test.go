@@ -339,157 +339,92 @@ transition_subscription(Current, _)                  -> Current.
 			exerciseID: "ch11-l05",
 			files: map[string]string{
 				"src/xmpp_xml_framer.erl": `-module(xmpp_xml_framer).
--export([new_buffer/0, feed_chunk/2, extract_attr/2, extract_attr/3, extract_tag_body/2, extract_frames/2]).
+-export([extract_frames/2]).
 
-new_buffer() ->
-    <<>>.
+%% @doc Append NewChunkBin to BufferBin, extract all complete stream header, self-closing, and paired XML stanza frames in FIFO order with binary:copy/1 unpinning, and return {FramesList, RemainingBufferBin}.
+-spec extract_frames(binary(), binary()) -> {[binary()], binary()}.
+extract_frames(BufferBin, NewChunkBin) ->
+    Combined = <<BufferBin/binary, NewChunkBin/binary>>,
+    extract_loop(Combined, []).
 
-feed_chunk(BufferBin, IncomingBin) when is_binary(BufferBin), is_binary(IncomingBin) ->
-    Combined = <<BufferBin/binary, IncomingBin/binary>>,
-    extract_events(Combined, []).
-
-extract_frames(BufferBin, IncomingBin) ->
-    feed_chunk(BufferBin, IncomingBin).
-
-extract_events(Bin, Acc) ->
-    CleanBin = trim_leading(Bin),
-    case CleanBin of
-        <<>> ->
+extract_loop(Bin, Acc) ->
+    Trimmed = trim_leading(Bin),
+    case byte_size(Trimmed) of
+        0 ->
             {lists:reverse(Acc), <<>>};
-        <<"</stream:stream>", Rest/binary>> ->
-            extract_events(Rest, [stream_close | Acc]);
-        <<"<stream:stream", _/binary>> ->
-            case binary:match(CleanBin, <<">">>) of
-                {Pos, 1} ->
-                    HeaderLen = Pos + 1,
-                    <<HeaderBin:HeaderLen/binary, Rest/binary>> = CleanBin,
-                    Domain = binary:copy(extract_attr(HeaderBin, <<"to">>, <<"localhost">>)),
-                    extract_events(Rest, [{stream_open, Domain} | Acc]);
-                nomatch ->
-                    {lists:reverse(Acc), binary:copy(CleanBin)}
-            end;
-        <<"<ping", _/binary>> ->
-            case binary:match(CleanBin, <<"/>">>) of
-                {Pos, 2} ->
-                    FrameLen = Pos + 2,
-                    <<FrameBin:FrameLen/binary, Rest/binary>> = CleanBin,
-                    Id = binary:copy(extract_attr(FrameBin, <<"id">>, <<"ping_1">>)),
-                    extract_events(Rest, [{ping, Id} | Acc]);
-                nomatch ->
-                    {lists:reverse(Acc), binary:copy(CleanBin)}
-            end;
-        <<"<auth", _/binary>> ->
-            extract_closed_tag(CleanBin, <<"</auth>">>, fun(FrameBin) ->
-                Mech = binary:copy(extract_attr(FrameBin, <<"mechanism">>, <<"PLAIN">>)),
-                Payload = binary:copy(extract_tag_body(FrameBin, <<"auth">>)),
-                {sasl_auth, Mech, Payload}
-            end, Acc);
-        <<"<iq", _/binary>> ->
-            extract_closed_tag(CleanBin, <<"</iq>">>, fun(FrameBin) ->
-                Id = binary:copy(extract_attr(FrameBin, <<"id">>, <<"bind_1">>)),
-                Res = binary:copy(extract_tag_body(FrameBin, <<"resource">>)),
-                {iq_bind, Id, Res}
-            end, Acc);
-        <<"<presence", _/binary>> ->
-            case binary:match(CleanBin, <<"/>">>) of
-                {Pos, 2} when Pos < 30 ->
-                    FrameLen = Pos + 2,
-                    <<FrameBin:FrameLen/binary, Rest/binary>> = CleanBin,
-                    Show = binary:copy(extract_attr(FrameBin, <<"show">>, <<"available">>)),
-                    extract_events(Rest, [{presence, Show, 0} | Acc]);
-                _ ->
-                    extract_closed_tag(CleanBin, <<"</presence>">>, fun(FrameBin) ->
-                        Show = binary:copy(extract_tag_body(FrameBin, <<"show">>)),
-                        PStr = extract_tag_body(FrameBin, <<"priority">>),
-                        P = case PStr of
-                            <<>> -> 0;
-                            _ ->
-                                try binary_to_integer(PStr)
-                                catch _:_ -> 0
-                                end
-                        end,
-                        {presence, Show, P}
-                    end, Acc)
-            end;
-        <<"<message", _/binary>> ->
-            extract_closed_tag(CleanBin, <<"</message>">>, fun(FrameBin) ->
-                Id = binary:copy(extract_attr(FrameBin, <<"id">>, <<"msg_1">>)),
-                To = binary:copy(extract_attr(FrameBin, <<"to">>, <<>>)),
-                Body = binary:copy(extract_tag_body(FrameBin, <<"body">>)),
-                {chat_message, Id, To, Body}
-            end, Acc);
-        Other ->
-            {lists:reverse(Acc), binary:copy(Other)}
-    end.
-
-extract_closed_tag(Bin, CloseTag, Fun, Acc) ->
-    CloseTagLen = byte_size(CloseTag),
-    case binary:match(Bin, CloseTag) of
-        {Pos, CloseTagLen} ->
-            TotalLen = Pos + CloseTagLen,
-            <<FrameBin:TotalLen/binary, Rest/binary>> = Bin,
-            Event = Fun(FrameBin),
-            extract_events(Rest, [Event | Acc]);
-        nomatch ->
-            {lists:reverse(Acc), binary:copy(Bin)}
-    end.
-
-extract_attr(Bin, AttrName) ->
-    extract_attr(Bin, AttrName, <<>>).
-
-extract_attr(Bin, AttrName, Default) ->
-    Key1 = <<AttrName/binary, "=\"">>,
-    Key2 = <<AttrName/binary, "='">>,
-    case find_attr_val(Bin, Key1, <<"\"">>) of
-        {ok, Val} -> Val;
-        nomatch ->
-            case find_attr_val(Bin, Key2, <<"'">>) of
-                {ok, Val} -> Val;
-                nomatch -> Default
+        _ ->
+            case try_extract_frame(Trimmed) of
+                {ok, Frame, Rest} ->
+                    extract_loop(Rest, [Frame | Acc]);
+                need_more ->
+                    {lists:reverse(Acc), binary:copy(Trimmed)}
             end
     end.
 
-find_attr_val(Bin, Pattern, Terminator) ->
-    case binary:match(Bin, Pattern) of
-        {Pos, Len} ->
-            Start = Pos + Len,
-            <<_:Start/binary, AfterPattern/binary>> = Bin,
-            case binary:match(AfterPattern, Terminator) of
-                {EndPos, _} ->
-                    <<Val:EndPos/binary, _/binary>> = AfterPattern,
-                    {ok, Val};
+trim_leading(<<32, Rest/binary>>) -> trim_leading(Rest);
+trim_leading(<<13, Rest/binary>>) -> trim_leading(Rest);
+trim_leading(<<10, Rest/binary>>) -> trim_leading(Rest);
+trim_leading(<<9, Rest/binary>>)  -> trim_leading(Rest);
+trim_leading(Bin) -> Bin.
+
+try_extract_frame(Bin) ->
+    case Bin of
+        <<"<stream:stream", _/binary>> ->
+            case binary:match(Bin, <<">">>) of
+                {GtPos, _} ->
+                    HeaderLen = GtPos + 1,
+                    Frame = binary:copy(binary:part(Bin, 0, HeaderLen)),
+                    Rest = binary:part(Bin, HeaderLen, byte_size(Bin) - HeaderLen),
+                    {ok, Frame, Rest};
                 nomatch ->
-                    nomatch
+                    need_more
             end;
+        <<"<", Rest/binary>> ->
+            case parse_tag_name(Rest, <<>>) of
+                {ok, TagName, _} ->
+                    try_extract_element(Bin, TagName);
+                need_more ->
+                    need_more
+            end;
+        _ ->
+            need_more
+    end.
+
+parse_tag_name(<<>>, _Acc) -> need_more;
+parse_tag_name(<<C, _/binary>>, Acc) when C =:= 32; C =:= $>; C =:= $/ ->
+    if
+        byte_size(Acc) > 0 -> {ok, Acc, C};
+        true -> need_more
+    end;
+parse_tag_name(<<C, Rest/binary>>, Acc) ->
+    parse_tag_name(Rest, <<Acc/binary, C>>).
+
+try_extract_element(Bin, TagName) ->
+    case binary:match(Bin, <<">">>) of
         nomatch ->
-            nomatch
+            need_more;
+        {FirstGt, _} ->
+            FirstTag = binary:part(Bin, 0, FirstGt + 1),
+            case binary:match(FirstTag, <<"/>">>) of
+                {_, _} ->
+                    %% Self-closing tag
+                    Frame = binary:copy(FirstTag),
+                    Rest = binary:part(Bin, FirstGt + 1, byte_size(Bin) - (FirstGt + 1)),
+                    {ok, Frame, Rest};
+                nomatch ->
+                    %% Paired tag: search for </TagName>
+                    CloseTag = <<"</", TagName/binary, ">">>,
+                    case binary:match(Bin, CloseTag) of
+                        {ClosePos, CloseLen} ->
+                            TotalLen = ClosePos + CloseLen,
+                            Frame = binary:copy(binary:part(Bin, 0, TotalLen)),
+                            Rest = binary:part(Bin, TotalLen, byte_size(Bin) - TotalLen),
+                            {ok, Frame, Rest};
+                        nomatch ->
+                            need_more
+                    end
+            end
     end.
-
-extract_tag_body(Bin, TagName) ->
-    OpenTag = <<"<", TagName/binary>>,
-    CloseTag = <<"</", TagName/binary, ">">>,
-    case binary:match(Bin, OpenTag) of
-        {OpenPos, _} ->
-            <<_:OpenPos/binary, FromOpen/binary>> = Bin,
-            case binary:match(FromOpen, <<">">>) of
-                {TagEnd, 1} ->
-                    ContentStart = TagEnd + 1,
-                    <<_:ContentStart/binary, BodyAndRest/binary>> = FromOpen,
-                    case binary:match(BodyAndRest, CloseTag) of
-                        {BodyLen, _} ->
-                            <<Body:BodyLen/binary, _/binary>> = BodyAndRest,
-                            Body;
-                        nomatch -> <<>>
-                    end;
-                nomatch -> <<>>
-            end;
-        nomatch -> <<>>
-    end.
-
-trim_leading(<<C, Rest/binary>>) when C =:= 32; C =:= 10; C =:= 13; C =:= 9 ->
-    trim_leading(Rest);
-trim_leading(Bin) ->
-    Bin.
 `,
 			},
 		},

@@ -1811,7 +1811,7 @@ transition_subscription(Current, _)                  -> Current.
     title: 'Incremental XML Stream Framing Over Fragmented TCP Sockets',
     difficulty: 'Advanced',
     xpReward: 100,
-        visualScene: 'tcp_xmpp_stream_framing',
+    visualScene: 'tcp_xmpp_stream_framing',
     mentalModelCheck: {
       question: 'Why MUST an incremental XML stream framer call binary:copy/1 when extracting attribute values or stanza bodies from a TCP buffer?',
       options: [
@@ -1849,6 +1849,7 @@ Why does that fail catastrophically?
 1. **The Stream is Never Closed**: An XML DOM parser expects \`</stream:stream>\` at the end of the document. If you feed it an open XMPP stream, it blocks forever waiting for EOF!
 2. **TCP Packet Fragmentation & Coalescing**: TCP delivers bytes in arbitrary chunks. A client may send an IQ stanza in 3 separate 10-byte packets, or bundle two chat messages into one TCP frame.
 
+> [!IMPORTANT]
 > **Incremental XML Stream Framing Pipeline:**
 > - **Chunk 1:** \`<<"<stream:stream to='host' ...>  <iq type=">>\` -> Emits \`<stream:stream>\` header, keeps incomplete \`<iq type=\` in buffer.
 > - **Chunk 2:** \`<<"'set' id='b1'><bind><resource>obs">>\` -> Accumulates in buffer.
@@ -1856,61 +1857,90 @@ Why does that fail catastrophically?
 
 ## Deep Concept Breakdown & Under the Hood
 
-### 1. Extracting the Opening Tag
-The opening stream tag is a special case: it has no closing \`</stream:stream>\`. It is simply the opening tag up to its first closing \`>\`:
-\`\`\`xml
-<stream:stream to='localhost' xmlns='jabber:client' ...>
-\`\`\`
-Once this header is extracted and emitted as a frame, all subsequent elements inside the stream are self-contained stanzas:
-- **Paired Tags**: \`<iq ...>...</iq>\`, \`<message ...>...</message>\`, \`<auth ...>...</auth>\`
-- **Self-Closing Tags**: \`<presence/>\`, \`<ping/>\`, \`<success .../>\`
+### 1. Opening Stream Header vs. Child Stanzas
+Unlike ordinary XML documents, the opening \`<stream:stream>\` element never closes until session teardown:
+- **Opening stream header**: terminates as soon as the first \`>\` closes its opening tag.
+- **Self-closing stanzas**: elements ending with \`/>\` inside their opening tag (such as \`<presence/>\` or \`<ping/>\`) complete immediately at \`/>\`.
+- **Paired stanzas**: elements whose opening tag closes with \`>\` must buffer bytes until the matching \`</TagName>\` closing delimiter arrives in full.
 
-### 2. State Loop & Memory Safety
-The framing function \`extract_frames/2\` takes \`(OldBufferBin, NewChunkBin)\`, concatenates them, iterates over all complete stanzas in the buffer, and returns:
-\`\`\`erlang
-{FramesList, CleanRemainingBuffer}
-\`\`\`
-Where \`CleanRemainingBuffer\` is copied via \`binary:copy/1\` so that stale 64KB socket buffers are not kept alive in the worker process heap.
+### 2. Tail-Recursive Buffer Consumption & Sub-Binary Unpinning
+Each incoming socket chunk is appended to any partial remainder, trimmed of leading ASCII whitespace (\`32\`, \`13\`, \`10\`, \`9\`), and scanned iteratively in FIFO order until the leading tag is incomplete. Copying both each emitted frame and the unparsed trailing slice with \`binary:copy/1\` detaches the long-lived connection process from large socket buffers.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Searching for tag boundaries in binaries:
+%% Official OTP Signatures (stdlib / binary)
 binary:match(Subject, Pattern) -> {Start, Length} | nomatch
 binary:part(Subject, Start, Length) -> binary()
 binary:copy(Subject) -> binary()
+  Types:
+    Subject = Pattern = binary()
+    Start = Length = non_neg_integer()
 \`\`\`
+
+Consult the attached OTP documentation cards below for \`binary:part/3\` constant-time slicing and \`binary:copy/1\` heap unpinning guarantees.
+
+## Parallel Worked Example: Bracketed Telemetry Packet Reassembler
+
+Consider a separate domain: a **Delimited Packet Reassembler** (\`bracket_msg_framer\`) that extracts complete \`[HDR]...\` or paired \`{CMD}...{/CMD}\` / standalone \`!PING\` style bracketed records from split TCP byte streams—looping tail-recursively over coalesced packets and detaching both extracted records and partial remainders with \`binary:copy/1\`:
+
+\`\`\`erlang
+-module(bracket_msg_framer).
+-export([slice_packets/2]).
+
+%% @doc Append Incoming bytes to Rem and extract all complete bracketed records plus unpinned Remainder.
+slice_packets(Rem, Incoming) ->
+    loop_slice(<<Rem/binary, Incoming/binary>>, []).
+
+loop_slice(Bin, Acc) ->
+    Trimmed = skip_ws(Bin),
+    case Trimmed of
+        <<>> ->
+            {lists:reverse(Acc), <<>>};
+        <<"!PING;", Rest/binary>> ->
+            loop_slice(Rest, [<<"!PING;">> | Acc]);
+        <<"[", _/binary>> ->
+            case binary:match(Trimmed, <<";">>) of
+                {Pos, Len} ->
+                    End = Pos + Len,
+                    Frame = binary:copy(binary:part(Trimmed, 0, End)),
+                    Rest = binary:part(Trimmed, End, byte_size(Trimmed) - End),
+                    loop_slice(Rest, [Frame | Acc]);
+                nomatch ->
+                    {lists:reverse(Acc), binary:copy(Trimmed)}
+            end;
+        _ ->
+            {lists:reverse(Acc), binary:copy(Trimmed)}
+    end.
+
+skip_ws(<<32, T/binary>>) -> skip_ws(T);
+skip_ws(<<10, T/binary>>) -> skip_ws(T);
+skip_ws(<<13, T/binary>>) -> skip_ws(T);
+skip_ws(<<9, T/binary>>)  -> skip_ws(T);
+skip_ws(Bin) -> Bin.
+\`\`\`
+
+### What ERTS Does at Runtime
+- **Accumulator FIFO Extraction**: Collecting matched slices onto \`Acc\` and calling \`lists:reverse/1\` at EOF builds frames in arrival order in $O(N)$ time with zero list appends.
+- **Bounded Refc Lifetime**: Calling \`binary:copy/1\` on incomplete trailing slices lets GC reclaim large kernel read buffers after every socket wake-up.
 
 ## Assignment Specification
 
-Implement the module \`xmpp_xml_framer\` in \`src/xmpp_xml_framer.erl\` with the following export:
+Implement \`xmpp_xml_framer\` in \`src/xmpp_xml_framer.erl\` exporting \`extract_frames/2\`.
 
-\`\`\`erlang
--module(xmpp_xml_framer).
--export([extract_frames/2]).
-\`\`\`
-
-### Function Specification:
-\`\`\`erlang
-extract_frames(BufferBin, NewChunkBin) -> {FramesList, RemainingBufferBin}
-\`\`\`
-- Concatenates \`BufferBin\` and \`NewChunkBin\`.
-- Trims leading whitespace.
-- If buffer begins with \`<stream:stream\`:
-  - Finds the closing \`>\` of the opening tag.
-  - Extracts the header as the first frame.
-  - Continues parsing the remainder for child stanzas.
-- For child stanzas:
-  - If buffer begins with a self-closing tag (e.g. \`<tag ... />\` or \`<tag/>\`): extracts it.
-  - If buffer begins with a paired tag (e.g. \`<auth ...>...</auth>\`, \`<iq ...>...</iq>\`, \`<message ...>...</message>\`, \`<presence ...>...</presence>\`): extracts up to the closing tag \`</tag>\`.
-  - If the closing tag has not arrived yet: stops and leaves the partial XML in \`RemainingBufferBin\`.
-- Returns all extracted frames in arrival order and \`binary:copy(RemainingBufferBin)\`.
+### \`extract_frames/2\`
+- **Input**: \`Binary BufferBin\` (partial remainder from prior reads), \`Binary NewChunkBin\` (newly arrived socket bytes).
+- **Behavior**: Appends \`NewChunkBin\` onto \`BufferBin\` and iteratively scans from left to right after trimming leading ASCII whitespace (space, CR, LF, tab):
+  - When the remaining binary starts with an opening \`<stream:stream\` tag, slices up through its closing \`>\` as an individual frame (or stops and buffers if \`>\` has not arrived yet).
+  - When the remaining binary starts with another XML element \`<Tag...\`, reads the element's tag name up to whitespace, \`/\`, or \`>\`; emits self-closing tags up to \`/>\` as a frame, or pairs matching \`</Tag>\` boundaries for non-self-closing elements.
+  - Stops whenever a frame or closing tag is still incomplete, copies every extracted frame and any non-empty remainder with \`binary:copy/1\` to prevent sub-binary retention, and returns \`{FramesList, RemainingBufferBin}\` with frames in strict FIFO arrival order (returning an empty binary when no bytes remain).
+- **Examples**:
+  - \`xmpp_xml_framer:extract_frames(<<>>, <<"<stream:stream to='localhost'> <iq type='get'">>)\` returns \`{[<<"<stream:stream to='localhost'>">>],<<"<iq type='get'">>}\`.
+  - \`xmpp_xml_framer:extract_frames(<<"<iq type='get'">>, <<" id='1'><ping/></iq><presence/>">>)\` returns \`{[<<"<iq type='get' id='1'><ping/></iq>">>,<<"<presence/>">>],<<>>}\`.
 
 ## Rules & Verification Constraints
-
-- Must return extracted frames in sequential FIFO order.
-- Must invoke \`binary:copy/1\` on the remaining buffer.
-- Must handle arbitrary TCP fragmentation and coalesced packets.`,
+- **Required Calls & Constructs**: \`bf_ast_verifier\` enforces calls to \`binary:match/2\` and \`binary:copy/1\` alongside binary syntax (\`bit_syntax\`).
+- **Stream Integrity**: Must preserve strict FIFO stanza order across arbitrary fragmentation and buffer coalescing without leaking parent binary references.`,
     otpDocCards: [
       {
         functionName: 'part',
@@ -1939,22 +1969,15 @@ extract_frames(BufferBin, NewChunkBin) -> {FramesList, RemainingBufferBin}
         githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/binary.erl',
       },
     ],
-        files: [
+    files: [
       {
         path: 'src/xmpp_xml_framer.erl',
         name: 'xmpp_xml_framer.erl',
         content: `-module(xmpp_xml_framer).
 -export([extract_frames/2]).
 
-%% @doc Extracts complete XML stanzas from a continuous TCP byte buffer.
-%% Returns {ExtractedFramesList, RemainingBufferBin}.
--spec extract_frames(binary(), binary()) -> {[binary()], binary()}.
-extract_frames(BufferBin, NewChunkBin) ->
-    %% % TODO: Implement incremental XML stream framer
-    %% 1. Combined = <<BufferBin/binary, NewChunkBin/binary>>
-    %% 2. Check for <stream:stream ...>
-    %% 3. Check for complete child stanzas (<iq>...</iq>, <presence/>, etc.)
-    %% 4. Use binary:copy/1 on remaining unparsed buffer
+%% @doc Append NewChunkBin to BufferBin, extract all complete stream header, self-closing, and paired XML stanza frames in FIFO order with binary:copy/1 unpinning, and return {FramesList, RemainingBufferBin}.
+extract_frames(_BufferBin, _NewChunkBin) ->
     {[], <<>>}.
 `,
       },
@@ -1963,6 +1986,7 @@ extract_frames(BufferBin, NewChunkBin) ->
       'src/xmpp_xml_framer.erl': `-module(xmpp_xml_framer).
 -export([extract_frames/2]).
 
+%% @doc Append NewChunkBin to BufferBin, extract all complete stream header, self-closing, and paired XML stanza frames in FIFO order with binary:copy/1 unpinning, and return {FramesList, RemainingBufferBin}.
 -spec extract_frames(binary(), binary()) -> {[binary()], binary()}.
 extract_frames(BufferBin, NewChunkBin) ->
     Combined = <<BufferBin/binary, NewChunkBin/binary>>,
@@ -2051,15 +2075,8 @@ try_extract_element(Bin, TagName) ->
     starterCode: `-module(xmpp_xml_framer).
 -export([extract_frames/2]).
 
-%% @doc Extracts complete XML stanzas from a continuous TCP byte buffer.
-%% Returns {ExtractedFramesList, RemainingBufferBin}.
--spec extract_frames(binary(), binary()) -> {[binary()], binary()}.
-extract_frames(BufferBin, NewChunkBin) ->
-    %% % TODO: Implement incremental XML stream framer
-    %% 1. Combined = <<BufferBin/binary, NewChunkBin/binary>>
-    %% 2. Check for <stream:stream ...>
-    %% 3. Check for complete child stanzas (<iq>...</iq>, <presence/>, etc.)
-    %% 4. Use binary:copy/1 on remaining unparsed buffer
+%% @doc Append NewChunkBin to BufferBin, extract all complete stream header, self-closing, and paired XML stanza frames in FIFO order with binary:copy/1 unpinning, and return {FramesList, RemainingBufferBin}.
+extract_frames(_BufferBin, _NewChunkBin) ->
     {[], <<>>}.
 `,
     visibleTestCases: [
@@ -2079,11 +2096,15 @@ extract_frames(BufferBin, NewChunkBin) ->
       },
     ],
     astRules: {
+      requireTailRecursion: [],
+      forbiddenCalls: [],
       requiredCalls: ['binary:copy/1', 'binary:match/2'],
+      requiredConstructs: ['bit_syntax'],
     },
     solutionCode: `-module(xmpp_xml_framer).
 -export([extract_frames/2]).
 
+%% @doc Append NewChunkBin to BufferBin, extract all complete stream header, self-closing, and paired XML stanza frames in FIFO order with binary:copy/1 unpinning, and return {FramesList, RemainingBufferBin}.
 -spec extract_frames(binary(), binary()) -> {[binary()], binary()}.
 extract_frames(BufferBin, NewChunkBin) ->
     Combined = <<BufferBin/binary, NewChunkBin/binary>>,

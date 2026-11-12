@@ -3583,27 +3583,26 @@ init:stop().
 		return `
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
-    Buf0 = xmpp_xml_framer:new_buffer(),
-    {Events1, Rem1} = xmpp_xml_framer:feed_chunk(Buf0, <<"<stream:stream to='localhost'><ping id='p1'/>">>),
-    Pass1 = (Events1 =:= [{stream_open, <<"localhost">>}, {ping, <<"p1">>}]) andalso (Rem1 =:= <<>>),
-    #{call_str => <<"feed_chunk(<<>>, <<\"<stream:stream to='localhost'><ping id='p1'/>\">>)">>,
-      expected => <<"{[{stream_open, <<\"localhost\">>}, {ping, <<\"p1\">>}], <<>>}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("~p", [{Events1, Rem1}]))),
-      passed => Pass1, time_ms => erlang:system_time(millisecond) - T1_Start}
+    Act1 = xmpp_xml_framer:extract_frames(<<>>, <<"<stream:stream to='localhost'> <iq type='get'">>),
+    Exp1 = {[<<"<stream:stream to='localhost'>">>], <<"<iq type='get'">>},
+    #{call_str => <<"xmpp_xml_framer:extract_frames(<<>>, <<\"<stream:stream to='localhost'> <iq type='get'\">>)">>,
+      expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp1]))),
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Act1]))),
+      passed => (Act1 =:= Exp1), time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"feed_chunk(...)">>, expected => <<"events">>,
+    #{call_str => <<"extract_frames(...)">>, expected => <<"header + partial iq">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try
-    {Events2, Rem2} = xmpp_xml_framer:feed_chunk(<<"<iq id='b1'>">>, <<"<resource>desktop</resource></iq><presence><show>away</show><priority>5</priority></presence>">>),
-    Pass2 = (Events2 =:= [{iq_bind, <<"b1">>, <<"desktop">>}, {presence, <<"away">>, 5}]) andalso (Rem2 =:= <<>>),
-    #{call_str => <<"feed_chunk(fragmented iq + presence)">>,
-      expected => <<"{[{iq_bind, <<\"b1\">>, <<\"desktop\">>}, {presence, <<\"away\">>, 5}], <<>>}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("~p", [{Events2, Rem2}]))),
-      passed => Pass2, time_ms => erlang:system_time(millisecond) - T2_Start}
+    Act2 = xmpp_xml_framer:extract_frames(<<"<iq type='get'">>, <<" id='1'><ping/></iq><presence/>">>),
+    Exp2 = {[<<"<iq type='get' id='1'><ping/></iq>">>, <<"<presence/>">>], <<>>},
+    #{call_str => <<"xmpp_xml_framer:extract_frames(<<\"<iq type='get'\">>, <<\" id='1'><ping/></iq><presence/>\">>)">>,
+      expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp2]))),
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Act2]))),
+      passed => (Act2 =:= Exp2), time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
-    #{call_str => <<"feed_chunk(...)">>, expected => <<"events">>,
+    #{call_str => <<"extract_frames(...)">>, expected => <<"completed iq + presence">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res],
@@ -8532,10 +8531,10 @@ Stages = [CompileStage, S1_Ast, S2_UnitErrorConditions, S3_UnitRosterFsm]
 		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(xmpp_xml_framer) of
     {module, xmpp_xml_framer} ->
-        Req = [{new_buffer, 0}, {feed_chunk, 2}, {extract_attr, 3}, {extract_tag_body, 2}],
+        Req = [{extract_frames, 2}],
         Exports = xmpp_xml_framer:module_info(exports),
         case [E || E <- Req, not lists:member(E, Exports)] of
-            [] -> #{id => <<"compile">>, title => <<"Compile xmpp_xml_framer.erl">>, status => <<"passed">>, time_ms => 12, details => <<"Compilation succeeded; all XML framer functions exported.">>};
+            [] -> #{id => <<"compile">>, title => <<"Compile xmpp_xml_framer.erl">>, status => <<"passed">>, time_ms => 12, details => <<"Compilation succeeded; extract_frames/2 exported.">>};
             Missing -> #{id => <<"compile">>, title => <<"Compile xmpp_xml_framer.erl">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
         end;
     {error, E} ->
@@ -8543,39 +8542,41 @@ CompileStage = case code:ensure_loaded(xmpp_xml_framer) of
 end,
 S1_Ast = try
     SrcPath = filename:join(["%s", "src", "xmpp_xml_framer.erl"]),
-    Rules = #{required_remote_calls => [{binary, copy, 1}, {binary, match, 2}]},
+    Rules = #{
+        required_calls => [{binary, copy, 1}, {binary, match, 2}],
+        required_constructs => [bit_syntax]
+    },
     case bf_ast_verifier:verify_rules(SrcPath, Rules) of
-        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Memory Safety binary:copy/1">>, status => <<"passed">>, time_ms => 15, details => <<"Verified binary:copy/1 unpins unparsed XML stream remainder buffers and extracted attributes.">>};
-        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Memory Safety binary:copy/1">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
+        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: binary:copy/1, binary:match/2 & Bit Syntax">>, status => <<"passed">>, time_ms => 15, details => <<"Verified binary:copy/1, binary:match/2, and bit_syntax stream slicing.">>};
+        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: binary:copy/1, binary:match/2 & Bit Syntax">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
     end
 catch CatchClass_L05_1:CatchReason_L05_1 ->
-    #{id => <<"ast_verification">>, title => <<"AST Analysis: Memory Safety binary:copy/1">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [CatchClass_L05_1, CatchReason_L05_1]))}
+    #{id => <<"ast_verification">>, title => <<"AST Analysis: binary:copy/1, binary:match/2 & Bit Syntax">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST check error: ~p:~p", [CatchClass_L05_1, CatchReason_L05_1]))}
 end,
 S2_UnitFragmentedStreamFraming = try
-    Buf0 = xmpp_xml_framer:new_buffer(),
-    {F1, Rem1} = xmpp_xml_framer:feed_chunk(Buf0, <<"<stream:str">>),
+    {F1, Rem1} = xmpp_xml_framer:extract_frames(<<>>, <<"<stream:str">>),
     Check1 = (F1 =:= []) andalso (Rem1 =:= <<"<stream:str">>),
-    {F2, Rem2} = xmpp_xml_framer:feed_chunk(Rem1, <<"eam to='localhost'> <auth mechanism='PLAIN'>xyz</auth>">>),
+    {F2, Rem2} = xmpp_xml_framer:extract_frames(Rem1, <<"eam to='localhost'> <auth mechanism='PLAIN'>xyz</auth>">>),
     ExpectedF2 = [
-        {stream_open, <<"localhost">>},
-        {sasl_auth, <<"PLAIN">>, <<"xyz">>}
+        <<"<stream:stream to='localhost'>">>,
+        <<"<auth mechanism='PLAIN'>xyz</auth>">>
     ],
     Check2 = (F2 =:= ExpectedF2) andalso (Rem2 =:= <<>>),
-    {F3, Rem3} = xmpp_xml_framer:feed_chunk(<<>>, <<"<iq id='b_1'><bind><resource>laptop</resource></bind></iq><presence><show>away</show><priority>10</priority></presence><ping id='p_42'/>">>),
+    {F3, Rem3} = xmpp_xml_framer:extract_frames(<<>>, <<"<iq id='b_1'><bind><resource>laptop</resource></bind></iq><presence/><ping id='p_42'/><message to='b'>hel">>),
     ExpectedF3 = [
-        {iq_bind, <<"b_1">>, <<"laptop">>},
-        {presence, <<"away">>, 10},
-        {ping, <<"p_42">>}
+        <<"<iq id='b_1'><bind><resource>laptop</resource></bind></iq>">>,
+        <<"<presence/>">>,
+        <<"<ping id='p_42'/>">>
     ],
-    Check3 = (F3 =:= ExpectedF3) andalso (Rem3 =:= <<>>),
-    {F4, Rem4} = xmpp_xml_framer:feed_chunk(<<>>, <<"</stream:stream>">>),
-    Check4 = (F4 =:= [stream_close]) andalso (Rem4 =:= <<>>),
+    Check3 = (F3 =:= ExpectedF3) andalso (Rem3 =:= <<"<message to='b'>hel">>),
+    {F4, Rem4} = xmpp_xml_framer:extract_frames(Rem3, <<"lo</message>   \r\n">>),
+    Check4 = (F4 =:= [<<"<message to='b'>hello</message>">>]) andalso (Rem4 =:= <<>>),
     case Check1 andalso Check2 andalso Check3 andalso Check4 of
-        true -> #{id => <<"unit_fragmented_stream_framing">>, title => <<"Unit Tests: Fragmented Chunks & 7 Event Tuples">>, status => <<"passed">>, time_ms => 25, details => <<"Stream open, SASL auth, IQ bind, presence with priority, ping, and stream close framed cleanly.">>};
-        false -> #{id => <<"unit_fragmented_stream_framing">>, title => <<"Unit Tests: Fragmented Chunks & 7 Event Tuples">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Framing assertion failed: ~p", [{F1, Rem1, F2, Rem2, F3, Rem3, F4, Rem4}]))}
+        true -> #{id => <<"unit_fragmented_stream_framing">>, title => <<"Unit Tests: Fragmented Chunks & Coalesced XML Frames">>, status => <<"passed">>, time_ms => 25, details => <<"Split stream header, paired tags, self-closing stanzas, and coalesced fragments framed in FIFO order.">>};
+        false -> #{id => <<"unit_fragmented_stream_framing">>, title => <<"Unit Tests: Fragmented Chunks & Coalesced XML Frames">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Framing assertion failed: ~p", [{F1, Rem1, F2, Rem2, F3, Rem3, F4, Rem4}]))}
     end
 catch CatchClass_L05_2:CatchReason_L05_2 ->
-    #{id => <<"unit_fragmented_stream_framing">>, title => <<"Unit Tests: Fragmented Chunks & 7 Event Tuples">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Framing test error: ~p:~p", [CatchClass_L05_2, CatchReason_L05_2]))}
+    #{id => <<"unit_fragmented_stream_framing">>, title => <<"Unit Tests: Fragmented Chunks & Coalesced XML Frames">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Framing test error: ~p:~p", [CatchClass_L05_2, CatchReason_L05_2]))}
 end,
 Stages = [CompileStage, S1_Ast, S2_UnitFragmentedStreamFraming]
 `, wsDir), true
