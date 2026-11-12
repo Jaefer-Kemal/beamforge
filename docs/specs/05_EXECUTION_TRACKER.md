@@ -3035,6 +3035,14 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go build ./...` exited `0`; `TestXmppChatHTTPEndpoint` (`3.17s` / `3.204s`), `TestChapter12Verification` + `TestRunXmppChatLiveCluster` (`25.11s` / `47.048s`), and `TEST_CHAPTER=12 TestDynamicVisibleTestsCurriculum` (`ch12-capstone | 6/6 tests passed` in `1.72s` / `1.741s`) all passed (`-count=1`).
   - `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 185: Production Deployment to Vercel & Render + Cloud Chaos Timing Fix
+- [x] **185.1: Cloud Shared-CPU Resilience Fix (`b5ffc0b`)**:
+  - Replaced fixed `35–45ms` post-kill sleeps with bounded polling (`WaitNewPid` up to 35×15ms & `WaitInbox` up to 20×15ms) across `services/orchestrator/internal/bridge/xmpp_chat_runner.go` (`lines 146–164`, `198`, `314–327`) and `services/orchestrator/internal/bridge/erl_runner_chapters.go` (`lines 4109–4115`, `9453–9459`, `9576–9582`), plus `timer:sleep(150)` in `ch12.ts` `tc-cap-6` (`line 1912`).
+  - Re-verified Go tests (`TestXmppChatHTTPEndpoint` `3.454s`, `TestChapter12Verification` + `TestRunXmppChatLiveCluster` `52.891s`, `TestDynamicVisibleTestsCurriculum` `2.724s`) and Next.js build (`8/8` pages, exit `0`) before push & deploy.
+- [x] **185.2: Live Vercel & Render Production Verification**:
+  - **Vercel Production (`dpl_CDjwu7tVmxBrdgJ7ifEHznx9Lgwm`)**: Deployed to `https://beamforge-eight.vercel.app` (`https://beamforge-jhjaykrlr-jaefer-kemals-projects.vercel.app`), `readyState: READY`, verified `HTTP/1.1 200 OK` on `/learn/ch12-capstone` via `vercel curl`.
+  - **Render Production (`dep-dbqqigqfngtc738d487g` / `srv-dblioqjbc2fs73ed02qg`)**: Live at `https://beamforge-orchestrator.onrender.com` (`commit b5ffc0b`, `/health` HTTP 200 `otp_release: "29"`), and live `POST /api/v1/xmpp/chat` smoke test passed both `send` (`ok: true, delivered: true, time_ms: 5`) and `chaos_kill` (`ok: true, delivered: true, reg_preserved: true, router_restarted: true`).
+
 
 
 
