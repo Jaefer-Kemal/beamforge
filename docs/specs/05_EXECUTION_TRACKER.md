@@ -2955,6 +2955,11 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter11Verification/ch11-l08` (`VERIFIED 100% PASSED`, score=100, 4 stages in `2.30s` / `2.662s` total); `TEST_CHAPTER=11 TestDynamicVisibleTestsCurriculum` (`ch11-l08 | 3/3 tests passed`, all 8 Ch. 11 lessons passed in `12.02s` / `12.073s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 178: Codify General Capstone Milestone Pedagogy & Anti-Spoiler Governance in Specs 04 & 08
+- [x] **178.1: Add General Milestone Synthesis & Anti-Spoiler Rules (`ch12-m1`–`ch12-m6`)**:
+  - Updated `docs/specs/04_PEDAGOGY_AND_LESSON_TEMPLATE.md` (`lines 28–36`): added the Capstones & Studio Milestones exception banning redundant standalone full Chapter 1–11 PWEs on milestones in favor of concise, domain-neutral Chunked Architectural / OTP Anatomy References alongside `Input`/`Behavior`/`Examples` wire-contract specs.
+  - Updated `docs/specs/08_PEDAGOGICAL_AUDIT_AND_ANTI_SPOILER_PROTOCOL.md` (`lines 77–82`): added **Pillar 5: Capstone Milestones Synthesis & Anti-Spoiler Rules** mandating (1) no redundant full PWEs on milestones, (2) zero copy-paste step-by-step code recipes in `conceptMarkdown`, (3) zero pre-solved starter code or `%% % TODO` hints in `CH12_STARTER_FILES` (clean `%% @doc` + `-Wall -Werror` neutral stubs), and (4) zero ASCII diagrams, double-escaped `\\n` strings, or repeated `mentalModelCheck` questions.
+
 
 
 

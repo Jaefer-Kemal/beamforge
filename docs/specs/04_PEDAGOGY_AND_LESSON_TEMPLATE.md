@@ -25,13 +25,13 @@ Every lesson's markdown guide MUST include these 5 sections:
    - Every example must be clearly understandable: divided into digestible sections or annotated with clear prose so the learner understands *what the BEAM is doing* at each phase.
    - **Proportional Simplicity**: Never overcomplicate or make parallel examples "over the top". Avoid bloated secondary domains or extraneous nested models; demonstrate the target BEAM/OTP pattern in the cleanest, most direct, and elegant manner possible.
    - **Example-Prose Parity**: Every Erlang construct or guard combination called out in explanatory bullets below a worked example MUST actually appear in that example's code block.
-   - For Capstones & complex Problem Sets, prioritize chunked architectural references or deeply explained modules that guide composition without spoiling the assignment's exact arity or endpoints.
+   - **Capstones & Studio Milestones Exception (No Full Tutorial PWEs)**: For multi-module Capstone Milestones (`ch12-m1`–`ch12-m6` and `ch12-capstone`), do **NOT** add full standalone Chapter 1–11 style Parallel Worked Examples that re-teach previously covered primitives and dilute synthesis. Instead, provide concise, annotated **Chunked Architectural / OTP Anatomy References** (short domain-neutral 3–8 line OTP contract snippets for non-obvious shapes such as generic `SupFlags`/`ChildSpec` or `gen_statem` return tuples, using distinct module names and values) paired with inter-module integration invariants—never copy-pasteable milestone code or ASCII diagrams.
 5. **`## Assignment Specification`** (for coding lessons & problem sets):
    - Exact module name and `-export([...])` list.
-   - Structured 3-part layout (`Input`, `Behavior`, `Examples`) for every function.
-   - Zero Erlang syntax or message tuple dictation in prompt prose.
+   - Structured 3-part layout (`Input`, `Behavior`, `Examples`) for every function (covering exact inter-module wire/tuple contracts on milestones without dictating function bodies).
+   - Zero Erlang syntax or implementation dictation in prompt prose.
 6. **`## Rules & Verification Constraints`**:
-   - Explicit bullet list of what the automated AST/Bytecode and EUnit checker will enforce (e.g., *"Must be tail-recursive"*, *"Do not use `lists:sum/1`"*).
+   - Explicit bullet list of what the automated AST/Bytecode, EUnit, and (for milestones) Chaos/Integration verifiers will enforce (e.g., *"Must be tail-recursive"*, *"Do not use `lists:sum/1`"*).
 
 ## 2. Right-Pane Starter Template, Visible Test Cases & Solution
 Every lesson object MUST provide:

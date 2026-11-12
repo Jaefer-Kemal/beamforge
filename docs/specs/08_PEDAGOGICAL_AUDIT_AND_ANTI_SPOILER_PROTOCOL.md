@@ -74,6 +74,13 @@ Every function in the `## Assignment Specification` must follow this exact 3-par
 ### Pillar 4: Concept Notes Variable Neutrality
 - General syntax explanations in `conceptMarkdown` must use neutral, generic variable names (e.g., `[A, B | Tail]` instead of `[First, Second | Rest]`).
 
+### Pillar 5: Capstone Milestones Synthesis & Anti-Spoiler Rules (`ch12-m1`–`ch12-m6`)
+When authoring or editing Capstone Studio milestones (where learners unify primitives already mastered in Chapters 1–11 across interconnected OTP modules):
+1. **No Redundant Full PWEs on Milestones**: Do **NOT** append standalone Chapter 1–11 style Parallel Worked Examples to milestone guides unless genuinely missing foundational syntax—milestones test architectural synthesis, not primitive re-drilling. Use concise, domain-neutral **Chunked OTP Anatomy References** (3–8 line generic callback/flag shapes with distinct module names and config values) only where an OTP behaviour contract needs quick structural clarity.
+2. **Zero Copy-Paste Step-by-Step Recipes**: Never turn `### Step-by-Step Assignment Task` into verbatim solution clauses, exact ETS/monitor call lines, exact supervisor flag values, or copy-pasteable binary construction expressions. Replace them with Spec 08 Pillar 2 (`Input` / `Behavior` / `Examples`) specifying exported functions and cross-module message/XML/tuple contracts.
+3. **Zero Pre-Solved Milestone Starter Code or Cross-Milestone Leaks**: Starter files (`CH12_STARTER_FILES`) must strip all `%% % TODO [Milestone ...]` algorithm walkthroughs, replace them with clean Spec 08 `%% @doc` interface contracts and underscore-prefixed neutral stubs that compile with `erlc.exe -Wall -Werror` (0 warnings), and never pre-solve functions assigned in that milestone or a subsequent milestone (e.g., never pre-solving `SupFlags` in M1 or `stop/0` before M6).
+4. **No ASCII Art, Escaped Newline Bugs, or Repeated Check Questions**: Never embed ASCII process/packet diagrams in milestone markdown (rely on `<BeamConceptVisualizer/>`), use clean template strings (no literal `\\n` inside double-quoted markdown strings), and ensure each milestone's `mentalModelCheck` tests a distinct architectural invariant without repeating an earlier milestone's question verbatim.
+
 ---
 
 ## 3. Workflow & Context Conservation Protocol
