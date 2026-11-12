@@ -2621,6 +2621,20 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter8Verification/ch08-l03` (`VERIFIED 100% PASSED`, score=100, 5 stages in `1.37s`) and `TEST_CHAPTER=8 TestDynamicVisibleTestsCurriculum` (`ch08-l03 | 3/3 tests passed`, all 7 Ch. 8 lessons passed in `12.57s`).
   - **Workspace Compilers**: `Select-String` confirmed `0` `-spec` declarations across `ch01`–`ch08`; `go build ./...`, `npx tsc --noEmit`, and `npm run build` (8/8 routes) all passed cleanly.
 
+## Phase 151: Pedagogical Despoiling & Live Tri-Verification of Chapter 8 Lecture 4 (`ch08-l04`)
+- [x] **151.1: Fix Broken Clone PWE & Eliminate Spoilers in Lecture 8.4 (`ch08-l04`: `dynamic_session_sup.erl` + `session_worker.erl`)**:
+  - Replaced the broken verbatim clone `dynamic_pool_sup` (which failed to compile due to exporting `add_worker/2` while defining `add_worker/3`, and cloned `dynamic_session_sup` line-for-line) with a genuinely runnable, domain-disjoint multi-file webhook example: `webhook_spool_sup.erl` (`start_link/1`, `dispatch_webhook/2`, `pool_telemetry/1`, `cancel_webhook/2`, `init/1`) paired with 11-line companion `webhook_task.erl` (`-behaviour(gen_server)`).
+  - Upgraded `conceptMarkdown` to full Spec 04 structure: added `## Deep Concept Breakdown & Under the Hood` and `## Official Erlang Docs & Function Reference` (documenting `start_child/2`, `count_children/1`, and `terminate_child/2`).
+  - De-spoiled Assignment Specification into clean `Input`, `Behavior`, and `Examples` blocks across `start_link/0`, `init/1`, `start_session/3`, `count_sessions/1`, and `terminate_session/2`, stripping verbatim Erlang call expressions from prose.
+  - Added 10/10 `@doc` contracts across `dynamic_session_sup.erl` (`starterCode`, `files[0].content`, `solutionCode`, `solutionFiles['src/dynamic_session_sup.erl']`) and clean `@doc` lines on read-only companion `session_worker.erl` (`files[1].content` and `solutionFiles['src/session_worker.erl']`), keeping neutral `ok.` starter stubs, zero in-body comments, and zero `-spec`.
+  - Hardened `visibleTestCases` (`tc1`–`tc3`) with deterministic `monitor(process, Sup)` + `'DOWN'` await cleanup to eliminate any sequential `{local, ?MODULE}` teardown race.
+- [x] **151.2: Mandatory Live Tri-Verification & Compiler Suite (`ch08-l04`)**:
+  - **Parallel Worked Example (`webhook_spool_sup.erl` + `webhook_task.erl`)**: Extracted from `ch08.ts`, compiled both cleanly with `erlc.exe -Wall` (exit code 0, 0 warnings), and verified live child spawning/counting/cancellation via escript (`PWE_L04_OK`).
+  - **Starter Pack (`starterCode === files[0].content` & `files[1] === solutionFiles[wkr]`)**: Compiled both modules (`erlc.exe` exit code 0), verified all 5 `dynamic_session_sup` exports present, and executed stubs cleanly (`STARTER_L04 exports=true stubs={ok,ok,ok,ok,ok}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled both modules cleanly with `erlc.exe -Wall +debug_info` (exit code 0, 0 warnings), passed `bf_ast_verifier` (`supervisor:start_link/3`, `start_child/2`, `count_children/1`, `terminate_child/2`), and passed `SOLUTION_L04_OK`.
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter8Verification/ch08-l04` (`VERIFIED 100% PASSED`, score=100, 4 stages in `1.37s`) and `TEST_CHAPTER=8 TestDynamicVisibleTestsCurriculum` (`ch08-l04 | 3/3 tests passed`, all 7 Ch. 8 lessons passed in `8.71s`).
+  - **Workspace Compilers**: `Select-String` confirmed `0` `-spec` declarations across `ch01`–`ch08`; `go build ./...`, `npx tsc --noEmit`, and `npm run build` (8/8 routes) all passed cleanly.
+
 
 
 

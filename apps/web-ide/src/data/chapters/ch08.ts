@@ -1082,94 +1082,173 @@ reverse_shutdown_order(StartupChildIdsList) when is_list(StartupChildIdsList) ->
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-Standard supervisors (\`one_for_one\`, \`rest_for_one\`) supervise a **static list of known children** declared at boot time.
+Standard supervisors (\`one_for_one\`, \`rest_for_one\`) manage a **static list of known children** declared at boot time.
 
-However, modern systems frequently require **dynamic process pools**:
-- A TCP server spawning a new worker process for every incoming connection.
-- An XMPP server creating a dedicated state machine for every logged-in user session.
-- A background job queue spawning workers on demand.
+However, production concurrency backends routinely require **dynamic process pools**:
+- A raw TCP listener spawning an isolated socket process for every incoming connection.
+- An XMPP cluster creating a dedicated session state machine for every logged-in user.
+- A background job orchestrator spawning ephemeral task workers on demand.
 
-For this pattern, OTP provides the **\`simple_one_for_one\`** supervisor strategy.
+For homogeneous dynamic pools, OTP provides the **\`simple_one_for_one\`** supervisor strategy.
+
+## Deep Concept Breakdown & Under the Hood
 
 ### How \`simple_one_for_one\` Works
 
-1. **Zero Children at Boot:** When \`dynamic_session_sup:start_link()\` runs, the supervisor starts with **zero** active children.
-2. **Single Child Spec Template:** The \`init/1\` callback returns a list containing **exactly one** child specification template.
-3. **Dynamic Spawning via \`supervisor:start_child/2\`:**
-   - The template defines the starting MFA: \`start => {session_worker, start_link, []}\`.
-   - When a caller invokes \`supervisor:start_child(SupRef, [SessionId, UserId])\`, the supervisor **appends** the arguments in the second parameter to the template's start MFA list!
-   - This dynamically executes: \`session_worker:start_link(SessionId, UserId)\`.
+1. **Zero Children at Boot**: Starting the supervisor boots it empty with zero running child processes.
+2. **Single Child Spec Template**: The \`init/1\` callback returns a child list containing **exactly one** template specification describing the shared worker blueprint.
+3. **Dynamic Argument Appending**:
+   - The template specifies a base MFA whose argument list holds any fixed defaults (typically empty).
+   - Calling \`supervisor:start_child(SupRef, RuntimeArgs)\` spawns a worker dynamically by **appending** \`RuntimeArgs\` onto the template's configured argument list and invoking \`apply(M, F, FixedArgs ++ RuntimeArgs)\`.
 
 ### Eliminating the Mixed Supervisor/Worker Anti-Pattern
 
 > [!warning] Production Supervision Trap: Overloading Supervisor init/1
-> A common beginner mistake is cramming both \`-behaviour(supervisor).\` and \`-behaviour(gen_server).\` into the same file by overloading \`init/1\`:
+> Cramming both \`-behaviour(supervisor).\` and \`-behaviour(gen_server).\` into a single file by overloading \`init/1\` clauses causes severe maintenance friction and breaks OTP release tooling:
 > \`\`\`erlang
-> %% ANTI-PATTERN: DO NOT DO THIS!
-> init([]) -> {ok, {SupFlags, [Template]}};  %% Supervisor callback
-> init({worker, SessionId}) -> {ok, State}.   %% Worker callback!
+> %% ANTI-PATTERN: Mixes lifecycle supervision with worker state
+> init([]) -> {ok, {SupFlags, [Template]}};
+> init({worker, SessionId}) -> {ok, State}.
 > \`\`\`
-> This causes severe cognitive friction, mixes lifecycle management with business state, and breaks OTP tooling.
-> **The Idiomatic OTP Architecture:**
-> - File 1: \`src/dynamic_session_sup.erl\` (\`-behaviour(supervisor).\`)
-> - File 2: \`src/session_worker.erl\` (\`-behaviour(gen_server).\`)
+> **Idiomatic Multi-File OTP Architecture**:
+> - Keep the supervisor coordinator in its own dedicated module (\`src/dynamic_session_sup.erl\`).
+> - Keep the stateful worker implementation in a separate companion module (\`src/session_worker.erl\`).
 
-Look at the second tab in your editor: \`session_worker.erl\` is already written as a clean, separate \`gen_server\` worker. Your job is to implement the supervisor \`dynamic_session_sup.erl\`!
+Inspect the read-only companion worker module \`src/session_worker.erl\` in your editor tabs—it already implements the \`gen_server\` session worker (\`start_link/2\` and \`get_info/1\`). Your responsibility is building the dynamic coordinator \`src/dynamic_session_sup.erl\`.
 
-### Parallel Worked Example
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
--module(dynamic_pool_sup).
--behaviour(supervisor).
--export([start_link/0, add_worker/2, count_active/1, remove_worker/2, init/1]).
-
-start_link() ->
-    supervisor:start_link(?MODULE, []).
-
-init([]) ->
-    SupFlags = #{
-        strategy => simple_one_for_one,
-        intensity => 10,
-        period => 5
-    },
-    ChildTemplate = #{
-        id => pool_worker,
-        start => {pool_worker, start_link, []},
-        restart => temporary,
-        shutdown => 2000,
-        type => worker,
-        modules => [pool_worker]
-    },
-    {ok, {SupFlags, [ChildTemplate]}}.
-
-add_worker(SupRef, TaskId, Priority) ->
-    supervisor:start_child(SupRef, [TaskId, Priority]).
-
-count_active(SupRef) ->
-    Counts = supervisor:count_children(SupRef),
-    case is_map(Counts) of
-        true  -> maps:get(active, Counts, 0);
-        false -> proplists:get_value(active, Counts, 0)
-    end.
-
-remove_worker(SupRef, ChildPid) ->
-    supervisor:terminate_child(SupRef, ChildPid).
+%% Official OTP Signatures (stdlib / supervisor)
+supervisor:start_child(SupRef, ChildSpec | [Arg]) -> {ok, Child} | {ok, Child, Info} | {error, Reason}
+supervisor:count_children(SupRef) -> PropListOrMap
+supervisor:terminate_child(SupRef, ChildPid) -> ok | {error, Reason}
+  Types:
+    SupRef = pid() | atom()
+    Arg = term()
+    Child = pid()
 \`\`\`
 
-### Your Mission
+Under \`simple_one_for_one\`, the second argument to \`supervisor:start_child/2\` MUST be a list of extra arguments appended to the template MFA, and \`supervisor:terminate_child/2\` requires the child's PID rather than a static atom ID. \`supervisor:count_children/1\` returns active process counts keyed by \`active\`, \`specs\`, \`supervisors\`, and \`workers\`. Consult the attached OTP Doc Cards below for the complete reference.
 
-Implement module \`dynamic_session_sup\` with \`-behaviour(supervisor).\` exporting:
-1. \`start_link/0 -> {ok, pid()}\`:
-   - Calls \`supervisor:start_link({local, ?MODULE}, ?MODULE, [])\`.
-2. \`init([]) -> {ok, {SupFlags, [ChildTemplate]}}\`:
-   - Returns \`SupFlags = #{strategy => simple_one_for_one, intensity => 10, period => 5}\`.
-   - Returns a single \`ChildTemplate\` with \`id => session_worker\`, \`start => {session_worker, start_link, []}\`, \`restart => temporary\`, \`shutdown => 2000\`, \`type => worker\`, \`modules => [session_worker]\`.
-3. \`start_session(SupRef, SessionId, UserId) -> {ok, pid()}\`:
-   - Invokes \`supervisor:start_child(SupRef, [SessionId, UserId])\`.
-4. \`count_sessions(SupRef) -> integer()\`:
-   - Invokes \`supervisor:count_children(SupRef)\` and extracts the active child count.
-5. \`terminate_session(SupRef, ChildPid) -> ok\`:
-   - Invokes \`supervisor:terminate_child(SupRef, ChildPid)\`.
+## Parallel Worked Example: Webhook Dispatch Pool
+
+Consider a multi-file webhook dispatcher combining a dynamic supervisor (\`webhook_spool_sup.erl\`) with a minimal standalone worker module (\`webhook_task.erl\`):
+
+\`\`\`erlang
+-module(webhook_spool_sup).
+-behaviour(supervisor).
+
+-export([start_link/1, dispatch_webhook/2, pool_telemetry/1, cancel_webhook/2, init/1]).
+
+%% @doc Start an unregistered dynamic webhook supervisor with a crash intensity limit.
+start_link(MaxIntensity) when is_integer(MaxIntensity), MaxIntensity > 0 ->
+    supervisor:start_link(?MODULE, MaxIntensity).
+
+%% @doc Configure simple_one_for_one with a single webhook_task worker template.
+init(MaxIntensity) ->
+    SupFlags = #{strategy => simple_one_for_one, intensity => MaxIntensity, period => 10},
+    WorkerSpec = #{
+        id => webhook_task,
+        start => {webhook_task, start_link, []},
+        restart => transient,
+        shutdown => 3000,
+        type => worker,
+        modules => [webhook_task]
+    },
+    {ok, {SupFlags, [WorkerSpec]}}.
+
+%% @doc Dynamically spawn a child by appending TargetUrl to the template start list.
+dispatch_webhook(SupPid, TargetUrl) ->
+    supervisor:start_child(SupPid, [TargetUrl]).
+
+%% @doc Return a telemetry map summarizing active and specification child counts.
+pool_telemetry(SupPid) ->
+    Counts = supervisor:count_children(SupPid),
+    {active, Active} = lists:keyfind(active, 1, Counts),
+    {specs, Specs} = lists:keyfind(specs, 1, Counts),
+    #{active_jobs => Active, templates => Specs}.
+
+%% @doc Terminate a running dynamic child process by its PID.
+cancel_webhook(SupPid, JobPid) ->
+    supervisor:terminate_child(SupPid, JobPid).
+\`\`\`
+
+Minimal companion \`gen_server\` worker executed dynamically by the template:
+
+\`\`\`erlang
+-module(webhook_task).
+-behaviour(gen_server).
+-export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+
+start_link(Url) -> gen_server:start_link(?MODULE, Url, []).
+init(Url) -> {ok, Url}.
+handle_call(_Req, _From, State) -> {reply, ok, State}.
+handle_cast(_Msg, State) -> {noreply, State}.
+handle_info(_Info, State) -> {noreply, State}.
+terminate(_Reason, _State) -> ok.
+code_change(_OldVsn, State, _Extra) -> {ok, State}.
+\`\`\`
+
+Key Erlang mechanics illustrated above:
+- **Template Argument Appending**: Because \`WorkerSpec\` defines zero fixed arguments in its template MFA, calling \`dispatch_webhook/2\` with a single-element argument list launches \`webhook_task:start_link(TargetUrl)\`.
+- **Proplist Telemetry Extraction**: \`supervisor:count_children/1\` returns tagged key-value tuples such as \`{active, Active}\`, which \`lists:keyfind/3\` extracts deterministically.
+- **Process Behaviour Isolation**: Each file implements exactly one OTP behaviour (\`supervisor\` vs. \`gen_server\`), keeping dynamic worker spawning completely decoupled from worker callback state.
+
+## Assignment Specification
+
+Implement \`src/dynamic_session_sup.erl\` as an OTP \`supervisor\` coordinating \`src/session_worker.erl\`:
+
+\`\`\`erlang
+-module(dynamic_session_sup).
+-behaviour(supervisor).
+
+-export([
+    start_link/0,
+    start_session/3,
+    count_sessions/1,
+    terminate_session/2,
+    init/1
+]).
+\`\`\`
+
+### Functional Requirements
+
+#### \`start_link/0\`
+- **Input**: None.
+- **Behavior**: Starts and links the dynamic session supervisor registered locally under its own module name using \`supervisor:start_link/3\`.
+- **Examples**:
+  - \`dynamic_session_sup:start_link()\` returns \`{ok, Pid}\`.
+
+#### \`init/1\`
+- **Input**: Empty initialization list \`[]\`.
+- **Behavior**: Returns OTP supervisor configuration using the \`simple_one_for_one\` strategy with a maximum restart intensity of \`10\` over a \`5\` second period, paired with a single worker child specification template referencing \`session_worker\`, invoking \`start_link\` with zero pre-bound arguments, configured for \`temporary\` restarts, a \`2000\` millisecond shutdown timeout, and \`worker\` node type.
+- **Examples**:
+  - \`dynamic_session_sup:init([])\` returns \`{ok, {SupFlags, [ChildTemplate]}}\`.
+
+#### \`start_session/3\`
+- **Input**: \`SupRef\` (supervisor PID or registered name), \`SessionId\` (binary or term), \`UserId\` (binary or term).
+- **Behavior**: Spawns a dynamic worker process by forwarding the session and user arguments as a 2-element list through \`supervisor:start_child/2\`.
+- **Examples**:
+  - \`dynamic_session_sup:start_session(Sup, <<"s1">>, <<"u1">>)\` returns \`{ok, WorkerPid}\`.
+
+#### \`count_sessions/1\`
+- **Input**: \`SupRef\` (supervisor PID or registered name).
+- **Behavior**: Queries child telemetry via \`supervisor:count_children/1\` and extracts the integer count of currently \`active\` child processes.
+- **Examples**:
+  - \`dynamic_session_sup:count_sessions(Sup)\` returns \`2\` (when two sessions are running).
+
+#### \`terminate_session/2\`
+- **Input**: \`SupRef\` (supervisor PID or registered name), \`ChildPid\` (running session worker PID).
+- **Behavior**: Commands the supervisor to terminate the target dynamic session worker via \`supervisor:terminate_child/2\`, returning \`ok\`.
+- **Examples**:
+  - \`dynamic_session_sup:terminate_session(Sup, WorkerPid)\` returns \`ok\`.
+
+## Rules & Verification Constraints
+
+- Must declare \`-behaviour(supervisor).\` and export \`start_link/0\`, \`start_session/3\`, \`count_sessions/1\`, \`terminate_session/2\`, and \`init/1\`.
+- Must invoke \`supervisor:start_link/3\`, \`supervisor:start_child/2\`, \`supervisor:count_children/1\`, and \`supervisor:terminate_child/2\`.
+- \`init/1\` must configure \`simple_one_for_one\` with exactly one \`temporary\` worker template targeting \`session_worker\`.
 `,
     mentalModelCheck: {
       question: 'Why does simple_one_for_one allow only ONE child specification template inside init/1?',
@@ -1237,18 +1316,23 @@ Implement module \`dynamic_session_sup\` with \`-behaviour(supervisor).\` export
     init/1
 ]).
 
+%% @doc Start and register the dynamic session supervisor locally under its module name.
 start_link() ->
     ok.
 
+%% @doc Configure dynamic supervision flags and the single companion session worker template specification.
 init([]) ->
     ok.
 
+%% @doc Dynamically spawn a monitored session worker process for the given session and user identifiers.
 start_session(SupRef, SessionId, UserId) ->
     ok.
 
+%% @doc Query the supervisor and return the integer count of currently active dynamic session processes.
 count_sessions(SupRef) ->
     ok.
 
+%% @doc Request the supervisor to terminate a specific running session worker child by its PID.
 terminate_session(SupRef, ChildPid) ->
     ok.
 `,
@@ -1263,9 +1347,11 @@ terminate_session(SupRef, ChildPid) ->
     init/1
 ]).
 
+%% @doc Start and register the dynamic session supervisor locally under its module name.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% @doc Configure dynamic supervision flags and the single companion session worker template specification.
 init([]) ->
     SupFlags = #{
         strategy => simple_one_for_one,
@@ -1282,9 +1368,11 @@ init([]) ->
     },
     {ok, {SupFlags, [ChildTemplate]}}.
 
+%% @doc Dynamically spawn a monitored session worker process for the given session and user identifiers.
 start_session(SupRef, SessionId, UserId) ->
     supervisor:start_child(SupRef, [SessionId, UserId]).
 
+%% @doc Query the supervisor and return the integer count of currently active dynamic session processes.
 count_sessions(SupRef) ->
     Counts = supervisor:count_children(SupRef),
     case is_map(Counts) of
@@ -1296,6 +1384,7 @@ count_sessions(SupRef) ->
             end
     end.
 
+%% @doc Request the supervisor to terminate a specific running session worker child by its PID.
 terminate_session(SupRef, ChildPid) ->
     supervisor:terminate_child(SupRef, ChildPid).
 `,
@@ -1316,18 +1405,23 @@ terminate_session(SupRef, ChildPid) ->
     init/1
 ]).
 
+%% @doc Start and register the dynamic session supervisor locally under its module name.
 start_link() ->
     ok.
 
+%% @doc Configure dynamic supervision flags and the single companion session worker template specification.
 init([]) ->
     ok.
 
+%% @doc Dynamically spawn a monitored session worker process for the given session and user identifiers.
 start_session(SupRef, SessionId, UserId) ->
     ok.
 
+%% @doc Query the supervisor and return the integer count of currently active dynamic session processes.
 count_sessions(SupRef) ->
     ok.
 
+%% @doc Request the supervisor to terminate a specific running session worker child by its PID.
 terminate_session(SupRef, ChildPid) ->
     ok.
 `,
@@ -1345,6 +1439,7 @@ terminate_session(SupRef, ChildPid) ->
     get_info/1
 ]).
 
+%% gen_server Callbacks
 -export([
     init/1,
     handle_call/3,
@@ -1354,29 +1449,37 @@ terminate_session(SupRef, ChildPid) ->
     code_change/3
 ]).
 
+%% @doc Start and link a session worker process for a session and user pair.
 start_link(SessionId, UserId) ->
     gen_server:start_link(?MODULE, {SessionId, UserId}, []).
 
+%% @doc Initialize the session state map with session and user identifiers.
 init({SessionId, UserId}) ->
     {ok, #{session_id => SessionId, user_id => UserId, active => true}}.
 
+%% @doc Query the session metadata map from a running worker process.
 get_info(Pid) ->
     gen_server:call(Pid, get_info).
 
+%% @doc Handle synchronous call requests.
 handle_call(get_info, _From, State) ->
     {reply, {ok, State}, State};
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band process messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up session resources on worker shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle state transformations during hot-code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -1394,9 +1497,11 @@ code_change(_OldVsn, State, _Extra) ->
     init/1
 ]).
 
+%% @doc Start and register the dynamic session supervisor locally under its module name.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% @doc Configure dynamic supervision flags and the single companion session worker template specification.
 init([]) ->
     SupFlags = #{
         strategy => simple_one_for_one,
@@ -1413,9 +1518,11 @@ init([]) ->
     },
     {ok, {SupFlags, [ChildTemplate]}}.
 
+%% @doc Dynamically spawn a monitored session worker process for the given session and user identifiers.
 start_session(SupRef, SessionId, UserId) ->
     supervisor:start_child(SupRef, [SessionId, UserId]).
 
+%% @doc Query the supervisor and return the integer count of currently active dynamic session processes.
 count_sessions(SupRef) ->
     Counts = supervisor:count_children(SupRef),
     case is_map(Counts) of
@@ -1427,6 +1534,7 @@ count_sessions(SupRef) ->
             end
     end.
 
+%% @doc Request the supervisor to terminate a specific running session worker child by its PID.
 terminate_session(SupRef, ChildPid) ->
     supervisor:terminate_child(SupRef, ChildPid).
 `,
@@ -1438,6 +1546,7 @@ terminate_session(SupRef, ChildPid) ->
     get_info/1
 ]).
 
+%% gen_server Callbacks
 -export([
     init/1,
     handle_call/3,
@@ -1447,29 +1556,37 @@ terminate_session(SupRef, ChildPid) ->
     code_change/3
 ]).
 
+%% @doc Start and link a session worker process for a session and user pair.
 start_link(SessionId, UserId) ->
     gen_server:start_link(?MODULE, {SessionId, UserId}, []).
 
+%% @doc Initialize the session state map with session and user identifiers.
 init({SessionId, UserId}) ->
     {ok, #{session_id => SessionId, user_id => UserId, active => true}}.
 
+%% @doc Query the session metadata map from a running worker process.
 get_info(Pid) ->
     gen_server:call(Pid, get_info).
 
+%% @doc Handle synchronous call requests.
 handle_call(get_info, _From, State) ->
     {reply, {ok, State}, State};
 handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
+%% @doc Handle asynchronous cast messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handle out-of-band process messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Clean up session resources on worker shutdown.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handle state transformations during hot-code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `,
@@ -1482,21 +1599,21 @@ code_change(_OldVsn, State, _Extra) ->
         id: 'tc1',
         title: 'Spawn and Count Dynamic Sessions',
         explanation: 'Starts dynamic_session_sup and spawns two sessions; verifies count is 2.',
-        erlangCall: 'begin {ok, Sup} = dynamic_session_sup:start_link(), {ok, _} = dynamic_session_sup:start_session(Sup, <<"s1">>, <<"u1">>), {ok, _} = dynamic_session_sup:start_session(Sup, <<"s2">>, <<"u2">>), C = dynamic_session_sup:count_sessions(Sup), unlink(Sup), exit(Sup, shutdown), C end',
+        erlangCall: 'begin {ok, Sup} = dynamic_session_sup:start_link(), {ok, _} = dynamic_session_sup:start_session(Sup, <<"s1">>, <<"u1">>), {ok, _} = dynamic_session_sup:start_session(Sup, <<"s2">>, <<"u2">>), C = dynamic_session_sup:count_sessions(Sup), M = monitor(process, Sup), unlink(Sup), exit(Sup, shutdown), receive {_, M, _, _, _} -> ok after 500 -> ok end, C end',
         expectedOutput: '2',
       },
       {
         id: 'tc2',
         title: 'Verify Separate Worker State',
         explanation: 'Queries companion session_worker:get_info to verify separate module state isolation.',
-        erlangCall: 'begin {ok, Sup} = dynamic_session_sup:start_link(), {ok, P} = dynamic_session_sup:start_session(Sup, <<"sess_99">>, <<"alice">>), {ok, Info} = session_worker:get_info(P), unlink(Sup), exit(Sup, shutdown), maps:get(user_id, Info) end',
+        erlangCall: 'begin {ok, Sup} = dynamic_session_sup:start_link(), {ok, P} = dynamic_session_sup:start_session(Sup, <<"sess_99">>, <<"alice">>), {ok, Info} = session_worker:get_info(P), M = monitor(process, Sup), unlink(Sup), exit(Sup, shutdown), receive {_, M, _, _, _} -> ok after 500 -> ok end, maps:get(user_id, Info) end',
         expectedOutput: '<<"alice">>',
       },
       {
         id: 'tc3',
         title: 'Terminate Dynamic Session',
         explanation: 'Terminates one child process and asserts session count decrements from 2 to 1.',
-        erlangCall: 'begin {ok, Sup} = dynamic_session_sup:start_link(), {ok, P1} = dynamic_session_sup:start_session(Sup, <<"s1">>, <<"u1">>), {ok, _P2} = dynamic_session_sup:start_session(Sup, <<"s2">>, <<"u2">>), ok = dynamic_session_sup:terminate_session(Sup, P1), C = dynamic_session_sup:count_sessions(Sup), unlink(Sup), exit(Sup, shutdown), C end',
+        erlangCall: 'begin {ok, Sup} = dynamic_session_sup:start_link(), {ok, P1} = dynamic_session_sup:start_session(Sup, <<"s1">>, <<"u1">>), {ok, _P2} = dynamic_session_sup:start_session(Sup, <<"s2">>, <<"u2">>), ok = dynamic_session_sup:terminate_session(Sup, P1), C = dynamic_session_sup:count_sessions(Sup), M = monitor(process, Sup), unlink(Sup), exit(Sup, shutdown), receive {_, M, _, _, _} -> ok after 500 -> ok end, C end',
         expectedOutput: '1',
       },
     ],
