@@ -828,13 +828,13 @@ T1_Res = try
     Mul3(15)
 of
     45 ->
-        #{call_str => <<"Mul3 = hof_basics:make_multiplier(3), Mul3(15)">>, expected => <<"45">>,
+        #{call_str => <<"begin Mul3 = hof_basics:make_multiplier(3), Mul3(15) end">>, expected => <<"45">>,
           actual => <<"45">>, passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"Mul3(15)">>, expected => <<"45">>,
+        #{call_str => <<"begin Mul3 = hof_basics:make_multiplier(3), Mul3(15) end">>, expected => <<"45">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"Mul3(15)">>, expected => <<"45">>,
+    #{call_str => <<"begin Mul3 = hof_basics:make_multiplier(3), Mul3(15) end">>, expected => <<"45">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
@@ -843,10 +843,10 @@ T2_Res = try hof_basics:apply_twice(fun(X) -> X + 10 end, 5) of
         #{call_str => <<"hof_basics:apply_twice(fun(X) -> X + 10 end, 5)">>, expected => <<"25">>,
           actual => <<"25">>, passed => true, time_ms => erlang:system_time(millisecond) - T2_Start};
     Other2 ->
-        #{call_str => <<"hof_basics:apply_twice(...)">>, expected => <<"25">>,
+        #{call_str => <<"hof_basics:apply_twice(fun(X) -> X + 10 end, 5)">>, expected => <<"25">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
 catch C2:R2 ->
-    #{call_str => <<"hof_basics:apply_twice(...)">>, expected => <<"25">>,
+    #{call_str => <<"hof_basics:apply_twice(fun(X) -> X + 10 end, 5)">>, expected => <<"25">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
@@ -855,13 +855,13 @@ T3_Res = try
     AbsRef(-99)
 of
     99 ->
-        #{call_str => <<"AbsRef = hof_basics:math_capture(), AbsRef(-99)">>, expected => <<"99">>,
+        #{call_str => <<"begin AbsRef = hof_basics:math_capture(), AbsRef(-99) end">>, expected => <<"99">>,
           actual => <<"99">>, passed => true, time_ms => erlang:system_time(millisecond) - T3_Start};
     Other3 ->
-        #{call_str => <<"AbsRef(-99)">>, expected => <<"99">>,
+        #{call_str => <<"begin AbsRef = hof_basics:math_capture(), AbsRef(-99) end">>, expected => <<"99">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
 catch C3:R3 ->
-    #{call_str => <<"AbsRef(-99)">>, expected => <<"99">>,
+    #{call_str => <<"begin AbsRef = hof_basics:math_capture(), AbsRef(-99) end">>, expected => <<"99">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 T4_Start = erlang:system_time(millisecond),
@@ -870,13 +870,13 @@ T4_Res = try
     Strategy(100)
 of
     80 ->
-        #{call_str => <<"Strategy = hof_basics:choose_pricing_strategy(vip), Strategy(100)">>, expected => <<"80">>,
+        #{call_str => <<"begin Strategy = hof_basics:choose_pricing_strategy(vip), Strategy(100) end">>, expected => <<"80">>,
           actual => <<"80">>, passed => true, time_ms => erlang:system_time(millisecond) - T4_Start};
     Other4 ->
-        #{call_str => <<"Strategy(100)">>, expected => <<"80">>,
+        #{call_str => <<"begin Strategy = hof_basics:choose_pricing_strategy(vip), Strategy(100) end">>, expected => <<"80">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other4]))), passed => false, time_ms => 0}
 catch C4:R4 ->
-    #{call_str => <<"Strategy(100)">>, expected => <<"80">>,
+    #{call_str => <<"begin Strategy = hof_basics:choose_pricing_strategy(vip), Strategy(100) end">>, expected => <<"80">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
@@ -5240,25 +5240,71 @@ Stages = [CompileStage, S1_Ast, S2_Updater]
 
 	// ── CHAPTER 3 ─────────────────────────────────────────────────────────────
 	case "ch03-l01":
-		return `
+		return fmt.Sprintf(`
 CompileStage_H01 = case code:ensure_loaded(hof_basics) of
     {module, hof_basics} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"hof_basics.erl compiled cleanly">>};
+        Exports_H01 = hof_basics:module_info(exports),
+        Req_H01 = [{make_multiplier, 1}, {apply_twice, 2}, {math_capture, 0}, {choose_pricing_strategy, 1}],
+        Missing_H01 = [FA || FA <- Req_H01, not lists:member(FA, Exports_H01)],
+        case Missing_H01 of
+            [] ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"hof_basics.erl compiled cleanly and exported all 4 higher-order functions.">>};
+            _ ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing_H01]))}
+        end;
     {error, E_H01} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_H01]))}
 end,
+S_Ast_H01 = try
+    SourceCandidates_H01 = [
+        filename:join(["%s", "src", "hof_basics.erl"]),
+        filename:join(["%s", "hof_basics.erl"])
+    ],
+    SourceFile_H01 = case [P || P <- SourceCandidates_H01, filelib:is_regular(P)] of
+        [ValidSrc_H01 | _] -> ValidSrc_H01;
+        [] -> hd(SourceCandidates_H01)
+    end,
+    Rules_H01 = #{
+        required_constructs => [fun_expr, remote_fun_capture, guards],
+        required_remote_calls => [{erlang, abs, 1}],
+        forbidden_constructs => [map_syntax, bit_syntax]
+    },
+    case bf_ast_verifier:verify_rules(SourceFile_H01, <<>>, Rules_H01) of
+        {ok, _} ->
+            #{id => <<"ast_hof_basics_audit">>, title => <<"AST Construct & Remote Capture Audit (bf_ast_verifier)">>, status => <<"passed">>, time_ms => 12, details => <<"Verified fun closures, remote fun erlang:abs/1 capture, guard clauses, and zero maps/binaries.">>};
+        {error, AstViolations_H01} ->
+            FirstMsg_H01 = case AstViolations_H01 of
+                [#{message := M_H01} | _] -> M_H01;
+                _ -> list_to_binary(io_lib:format("AST violations: ~p", [AstViolations_H01]))
+            end,
+            #{id => <<"ast_hof_basics_audit">>, title => <<"AST Construct & Remote Capture Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => FirstMsg_H01, error => AstViolations_H01}
+    end
+catch Class_Ast_H01:Err_Ast_H01 ->
+    #{id => <<"ast_hof_basics_audit">>, title => <<"AST Construct & Remote Capture Audit (bf_ast_verifier)">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("AST check crashed: ~p:~p", [Class_Ast_H01, Err_Ast_H01]))}
+end,
 S1_Closures = try
     Mul5 = hof_basics:make_multiplier(5),
+    Mul0 = hof_basics:make_multiplier(0),
+    MulNeg = hof_basics:make_multiplier(-3),
     R_Mul = Mul5(10),
+    R_Mul0 = Mul0(10),
+    R_MulNeg = MulNeg(7),
     R_Twice = hof_basics:apply_twice(fun(X) -> X * 3 end, 2),
     AbsRef = hof_basics:math_capture(),
     R_Abs = AbsRef(-42),
+    R_AbsPos = AbsRef(42),
+    CaptureInfoOk = (erlang:fun_info(AbsRef, type) =:= {type, external}) andalso
+                    (erlang:fun_info(AbsRef, module) =:= {module, erlang}) andalso
+                    (erlang:fun_info(AbsRef, name) =:= {name, abs}) andalso
+                    (erlang:fun_info(AbsRef, arity) =:= {arity, 1}),
     VipStrat = hof_basics:choose_pricing_strategy(vip),
     WholesaleStrat = hof_basics:choose_pricing_strategy(wholesale),
     StandardStrat = hof_basics:choose_pricing_strategy(regular),
-    case {R_Mul, R_Twice, R_Abs, VipStrat(100), WholesaleStrat(100), StandardStrat(100)} of
-        {50, 18, 42, 80, 70, 100} ->
-            #{id => <<"closures_and_captures">>, title => <<"First-Class Functions, Closures & Captures">>, status => <<"passed">>, time_ms => 8, details => <<"Lexical closures, abs/1 capture, and strategy patterns verified">>};
+    case {R_Mul, R_Mul0, R_MulNeg, R_Twice, R_Abs, R_AbsPos, CaptureInfoOk, VipStrat(100), VipStrat(15), WholesaleStrat(100), WholesaleStrat(15), StandardStrat(100), StandardStrat(15)} of
+        {50, 0, -21, 18, 42, 42, true, 80, 12, 70, 10, 100, 15} ->
+            #{id => <<"closures_and_captures">>, title => <<"First-Class Functions, Closures & Captures">>, status => <<"passed">>, time_ms => 8, details => <<"Lexical closures, external erlang:abs/1 capture, odd-integer truncation, and strategy patterns verified">>};
+        {_, _, _, _, _, _, false, _, _, _, _, _, _} ->
+            #{id => <<"closures_and_captures">>, title => <<"First-Class Functions, Closures & Captures">>, status => <<"failed">>, time_ms => 8, details => <<"math_capture/0 must return a direct external capture (fun erlang:abs/1), not a local wrapper fun.">>};
         Got_H01 ->
             #{id => <<"closures_and_captures">>, title => <<"First-Class Functions, Closures & Captures">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("HOF mismatch: ~p", [Got_H01]))}
     end
@@ -5266,23 +5312,33 @@ catch Class_H01:Err_H01 ->
     #{id => <<"closures_and_captures">>, title => <<"First-Class Functions, Closures & Captures">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_H01, Err_H01]))}
 end,
 S2_GuardCheck = try
-    GuardPassed = try
+    NonFunRejected = try
         hof_basics:apply_twice(not_a_function, 10),
         false
-    catch _:_ ->
-        true
+    catch error:function_clause ->
+        true;
+    _:_ ->
+        false
     end,
-    case GuardPassed of
-        true ->
-            #{id => <<"is_function_guard">>, title => <<"is_function/2 Guard Protection">>, status => <<"passed">>, time_ms => 5, details => <<"Verified apply_twice/2 guards against non-function arguments">>};
-        false ->
-            #{id => <<"is_function_guard">>, title => <<"is_function/2 Guard Protection">>, status => <<"failed">>, time_ms => 5, details => <<"apply_twice/2 did not guard with is_function(F, 1)">>}
+    WrongArityRejected = try
+        hof_basics:apply_twice(fun(A, B) -> A + B end, 10),
+        false
+    catch error:function_clause ->
+        true;
+    _:_ ->
+        false
+    end,
+    case {NonFunRejected, WrongArityRejected} of
+        {true, true} ->
+            #{id => <<"is_function_guard">>, title => <<"is_function/2 Guard Protection">>, status => <<"passed">>, time_ms => 5, details => <<"Verified apply_twice/2 rejects non-functions and wrong-arity funs at the function head with function_clause.">>};
+        _ ->
+            #{id => <<"is_function_guard">>, title => <<"is_function/2 Guard Protection">>, status => <<"failed">>, time_ms => 5, details => <<"apply_twice/2 must guard F with is_function(F, 1) so non-functions and wrong-arity funs raise function_clause before body evaluation.">>}
     end
 catch Class_H01b:Err_H01b ->
     #{id => <<"is_function_guard">>, title => <<"is_function/2 Guard Protection">>, status => <<"failed">>, time_ms => 5, details => list_to_binary(io_lib:format("Crash: ~p:~p", [Class_H01b, Err_H01b]))}
 end,
-Stages = [CompileStage_H01, S1_Closures, S2_GuardCheck]
-`, true
+Stages = [CompileStage_H01, S_Ast_H01, S1_Closures, S2_GuardCheck]
+`, wsDir, wsDir), true
 
 	case "ch03-l02":
 		return `

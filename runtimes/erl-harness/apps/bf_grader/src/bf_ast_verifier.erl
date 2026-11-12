@@ -428,23 +428,75 @@ scan_expr({'receive', _Line, Clauses, TimeoutExpr, AfterBody}, ForbiddenCalls, F
     {V2, R2, C2} = scan_expr(TimeoutExpr, ForbiddenCalls, ForbiddenConstructs, V1, R1, C1),
     scan_exprs(AfterBody, ForbiddenCalls, ForbiddenConstructs, V2, R2, C2);
 
-scan_expr({bin, _Line, Elements}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
+scan_expr({bin, Line, Elements}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
     CSet1 = case Elements of
         [] -> CSet;
         _ -> sets:add_element(bit_syntax, CSet)
     end,
-    scan_bin_elements(Elements, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet1);
+    VAcc1 = case Elements =/= [] andalso lists:member(bit_syntax, ForbiddenConstructs) of
+        true ->
+            Msg = iolist_to_binary(io_lib:format(
+                "Line ~p: Forbidden construct: bit syntax (<<...>>).",
+                [extract_line(Line)]
+            )),
+            [#{
+                rule => <<"forbidden_construct">>,
+                construct => <<"bit_syntax">>,
+                line => extract_line(Line),
+                message => Msg
+            } | VAcc];
+        false ->
+            VAcc
+    end,
+    scan_bin_elements(Elements, ForbiddenCalls, ForbiddenConstructs, VAcc1, RAcc, CSet1);
 
 scan_expr({map_field_exact, _Line, Key, Val}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
-    CSet1 = sets:add_element(map_exact_match, CSet),
+    CSet1 = sets:add_element(map_exact_match, sets:add_element(map_syntax, CSet)),
     {V1, R1, C1} = scan_expr(Key, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet1),
     scan_expr(Val, ForbiddenCalls, ForbiddenConstructs, V1, R1, C1);
 
-scan_expr({map, _Line, Fields}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
-    scan_exprs(Fields, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet);
+scan_expr({map, Line, Fields}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
+    CSet1 = sets:add_element(map_syntax, CSet),
+    VAcc1 = case lists:member(map_syntax, ForbiddenConstructs) of
+        true ->
+            Msg = iolist_to_binary(io_lib:format(
+                "Line ~p: Forbidden construct: map literal or pattern (#{}).",
+                [extract_line(Line)]
+            )),
+            [#{
+                rule => <<"forbidden_construct">>,
+                construct => <<"map_syntax">>,
+                line => extract_line(Line),
+                message => Msg
+            } | VAcc];
+        false ->
+            VAcc
+    end,
+    scan_exprs(Fields, ForbiddenCalls, ForbiddenConstructs, VAcc1, RAcc, CSet1);
+
+scan_expr({map, Line, Target, Fields}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
+    CSet1 = sets:add_element(map_syntax, CSet),
+    VAcc1 = case lists:member(map_syntax, ForbiddenConstructs) of
+        true ->
+            Msg = iolist_to_binary(io_lib:format(
+                "Line ~p: Forbidden construct: map update expression (#{}).",
+                [extract_line(Line)]
+            )),
+            [#{
+                rule => <<"forbidden_construct">>,
+                construct => <<"map_syntax">>,
+                line => extract_line(Line),
+                message => Msg
+            } | VAcc];
+        false ->
+            VAcc
+    end,
+    {V1, R1, C1} = scan_expr(Target, ForbiddenCalls, ForbiddenConstructs, VAcc1, RAcc, CSet1),
+    scan_exprs(Fields, ForbiddenCalls, ForbiddenConstructs, V1, R1, C1);
 
 scan_expr({map_field_assoc, _Line, Key, Val}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
-    {V1, R1, C1} = scan_expr(Key, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet),
+    CSet1 = sets:add_element(map_syntax, CSet),
+    {V1, R1, C1} = scan_expr(Key, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet1),
     scan_expr(Val, ForbiddenCalls, ForbiddenConstructs, V1, R1, C1);
 
 scan_expr({'case', _Line, Expr, Clauses}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
@@ -493,7 +545,15 @@ scan_expr({call, Line, {atom, _, LocalFun}, Args}, ForbiddenCalls, ForbiddenCons
     scan_exprs(Args, ForbiddenCalls, ForbiddenConstructs, NewVAcc, NewRAcc, CSet);
 
 scan_expr({'fun', _Line, {clauses, Clauses}}, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet) ->
-    scan_clauses(Clauses, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet);
+    CSet1 = sets:add_element(fun_expr, CSet),
+    scan_clauses(Clauses, ForbiddenCalls, ForbiddenConstructs, VAcc, RAcc, CSet1);
+
+scan_expr({'fun', _Line, {function, {atom, _, Mod}, {atom, _, Fun}, {integer, _, Arity}}}, _ForbiddenCalls, _ForbiddenConstructs, VAcc, RAcc, CSet) ->
+    CSet1 = sets:add_element(remote_fun_capture, sets:add_element(fun_capture, CSet)),
+    {VAcc, [{Mod, Fun, Arity} | RAcc], CSet1};
+
+scan_expr({'fun', _Line, {function, _Fun, _Arity}}, _ForbiddenCalls, _ForbiddenConstructs, VAcc, RAcc, CSet) ->
+    {VAcc, RAcc, sets:add_element(fun_capture, CSet)};
 
 scan_expr(_Other, _ForbiddenCalls, _ForbiddenConstructs, VAcc, RAcc, CSet) ->
     {VAcc, RAcc, CSet}.
@@ -582,6 +642,12 @@ construct_missing_message(case_expr) ->
     <<"Required construct missing: code must use case...of branching expressions.">>;
 construct_missing_message(if_expr) ->
     <<"Required construct missing: code must use if...end guard expressions.">>;
+construct_missing_message(fun_expr) ->
+    <<"Required construct missing: code must define anonymous fun expressions (fun(...) -> ... end).">>;
+construct_missing_message(fun_capture) ->
+    <<"Required construct missing: code must use first-class function capture syntax (fun Name/Arity or fun Mod:Name/Arity).">>;
+construct_missing_message(remote_fun_capture) ->
+    <<"Required construct missing: code must use remote function capture syntax (fun Mod:Name/Arity).">>;
 construct_missing_message(Other) ->
     iolist_to_binary(io_lib:format("Required construct missing: ~p", [Other])).
 

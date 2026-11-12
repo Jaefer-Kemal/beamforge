@@ -12,7 +12,7 @@ export const CHAPTER_3_LESSONS: LessonContent[] = [
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-In distributed systems, microservices, and asynchronous event-driven pipelines, hardcoding business logic inside rigid control flow leads to brittle, repetitive code. For example, an e-commerce platform needs different calculation engines for VIP users, wholesale bulk buyers, and retail customers; a payment processor needs configurable validation hooks before authorizing a charge.
+In distributed systems, microservices, and asynchronous event-driven pipelines, hardcoding business logic inside rigid control flow leads to brittle, repetitive code. For example, a logistics billing engine needs swappable rate calculators across priority, contract, and standard freight shipments; a payment gateway needs configurable validation hooks before authorizing a charge.
 
 In imperative languages, passing functions around often involves verbose interface declarations, function pointers, or anonymous delegates.
 
@@ -87,32 +87,33 @@ execute_unary_operation(_Invalid, _Arg) ->
 
 ## Parallel Worked Example
 
-Consider an audio digital signal processing (DSP) pipeline configuring gain and equalization profiles:
+Consider an industrial telemetry sensor pipeline calibrating raw readings and applying either a built-in rounding hook or a caller-supplied unary filter:
 
 \`\`\`erlang
--module(audio_filter).
--export([make_gain_stage/1, apply_stereo/3, get_trunc_ref/0, select_compression_profile/1]).
+-module(sensor_pipeline).
+-export([build_calibrator/2, apply_stage/2]).
 
-%% Factory returning a closure capturing GainDb:
-make_gain_stage(GainDb) ->
-    fun(Signal) -> Signal + GainDb end.
+%% ── Phase 1: Lexical Closure Factory & Mode Dispatch ───────────────────────
+%% Captures Bias on custom offsets or returns mode-specific transformation closures.
+build_calibrator(custom, Bias) when is_integer(Bias) ->
+    fun(RawReading) -> RawReading + Bias end;
+build_calibrator(kilo, _Unused) ->
+    fun(MilliUnits) -> MilliUnits div 1000 end;
+build_calibrator(_Default, _Unused) ->
+    fun(RawReading) -> RawReading end.
 
-%% Verifying unary function via guard and applying across channels:
-apply_stereo(ChannelFun, LeftSample, RightSample) when is_function(ChannelFun, 1) ->
-    {ChannelFun(LeftSample), ChannelFun(RightSample)}.
-
-%% Returning remote function capture:
-get_trunc_ref() ->
-    fun erlang:trunc/1.
-
-%% Choosing equalization strategy closure based on profile atom:
-select_compression_profile(voice) ->
-    fun(Db) -> Db - 6 end;
-select_compression_profile(concert) ->
-    fun(Db) -> Db - 18 end;
-select_compression_profile(bypass) ->
-    fun(Db) -> Db end.
+%% ── Phase 2: Guarded HOF Dispatch & Hot-Reload-Safe Remote Capture ─────────
+%% Applies a standard library capture directly or verifies custom unary hooks via guard.
+apply_stage(Sample, normalize) ->
+    RoundFun = fun erlang:round/1,
+    RoundFun(Sample);
+apply_stage(Sample, CustomHook) when is_function(CustomHook, 1) ->
+    CustomHook(Sample).
 \`\`\`
+
+How the BEAM executes both stages:
+- **Phase 1 (\`build_calibrator/2\`)**: Pattern matching on the first argument selects a transformation closure; for \`custom\`, \`Bias\` is stored in the closure's immutable heap environment vector so the returned function remains self-contained.
+- **Phase 2 (\`apply_stage/2\`)**: The \`normalize\` branch captures \`fun erlang:round/1\` through the export table (no extra wrapper frame), while the second clause checks the argument's closure header with \`is_function(CustomHook, 1)\` in $O(1)$ before invoking \`CustomHook(Sample)\`.
 
 ## Official Erlang Docs & Function Reference
 
@@ -129,39 +130,41 @@ is_function(Term) -> boolean()
 is_function(Term, Arity) -> boolean()
 \`\`\`
 
+> How to read these signatures: \`fun((...) -> term())\` denotes a callable function value accepting fixed arity arguments, and \`arity()\` is a non-negative integer checked in $O(1)$ against the closure header. Open the attached **Reference Cards** for full \`fun_expression\` and \`is_function/2\` documentation.
+
 ## Assignment Specification
 
 Implement four foundational higher-order functions in \`src/hof_basics.erl\`:
 
-### \`make_multiplier/1\`
+### 1. \`make_multiplier(Factor)\`
 - **Input**: \`Factor\` — An integer multiplier.
-- **Behavior**: Returns a unary anonymous closure (\`fun/1\`) that captures \`Factor\` from lexical scope. When the returned function is invoked with an integer argument \`X\`, it returns the product of \`X\` and \`Factor\`.
+- **Behavior**: Returns a single-argument anonymous function that captures \`Factor\` from lexical scope. When the returned function is called with an integer argument \`X\`, it returns \`X\` multiplied by \`Factor\`.
 - **Examples**:
   - \`Mul3 = hof_basics:make_multiplier(3), Mul3(15)\` returns \`45\`.
   - \`Mul0 = hof_basics:make_multiplier(0), Mul0(10)\` returns \`0\`.
 
-### \`apply_twice/2\`
+### 2. \`apply_twice(F, X)\`
 - **Input**:
-  - \`F\` — A unary function of arity 1.
+  - \`F\` — A unary function expecting 1 argument.
   - \`X\` — An initial value of any type compatible with \`F\`.
-- **Behavior**: Protects execution with a guard verifying that \`F\` is a function of arity 1 using \`is_function/2\`. Evaluates \`F\` on \`X\`, and then evaluates \`F\` again on the resulting value, producing the composed result.
+- **Behavior**: Protects execution with a function-head guard verifying that \`F\` is a 1-argument function so non-function terms or functions of any other arity fail immediately with a clause error instead of attempting invocation. For valid unary functions, evaluates \`F\` on \`X\` and applies \`F\` once more to the intermediate result.
 - **Examples**:
   - \`hof_basics:apply_twice(fun(N) -> N + 10 end, 5)\` returns \`25\`.
   - \`hof_basics:apply_twice(fun(N) -> N * 3 end, 2)\` returns \`18\`.
 
-### \`math_capture/0\`
-- **Input**: None (\`0\` arguments).
-- **Behavior**: Returns a first-class function reference capturing the standard library absolute value function from the \`erlang\` module (\`abs/1\`) using the remote function capture syntax.
+### 3. \`math_capture()\`
+- **Input**: None (0 arguments).
+- **Behavior**: Returns a direct external function capture referencing the standard library integer absolute value function (\`abs/1\` in the \`erlang\` module) without wrapping it inside a custom anonymous closure.
 - **Examples**:
   - \`AbsRef = hof_basics:math_capture(), AbsRef(-99)\` returns \`99\`.
   - \`AbsRef = hof_basics:math_capture(), AbsRef(42)\` returns \`42\`.
 
-### \`choose_pricing_strategy/1\`
-- **Input**: \`Tier\` — An atom representing the customer tier (\`vip\`, \`wholesale\`, or any other term).
-- **Behavior**: Implements a strategy selector returning a unary pricing closure based on the tier:
-  - If \`Tier\` is \`vip\`: returns a closure that applies a 20% discount (retaining 80% of integer \`Price\` using integer division \`div 100\`).
-  - If \`Tier\` is \`wholesale\`: returns a closure that applies a 30% discount (retaining 70% of integer \`Price\` using integer division \`div 100\`).
-  - For any other tier: returns an identity closure that returns \`Price\` unchanged.
+### 4. \`choose_pricing_strategy(Tier)\`
+- **Input**: \`Tier\` — A term representing the customer tier (handling atoms \`vip\`, \`wholesale\`, or any fallback term).
+- **Behavior**: Selects and returns a single-argument pricing function accepting an integer \`Price\` based on \`Tier\`:
+  - If \`Tier\` is \`vip\`: returns a function applying a 20% discount (computing 80% of \`Price\` via truncating integer division rounding toward zero).
+  - If \`Tier\` is \`wholesale\`: returns a function applying a 30% discount (computing 70% of \`Price\` via truncating integer division rounding toward zero).
+  - For any other tier: returns an identity function returning \`Price\` unchanged.
 - **Examples**:
   - \`Vip = hof_basics:choose_pricing_strategy(vip), Vip(100)\` returns \`80\`.
   - \`Wholesale = hof_basics:choose_pricing_strategy(wholesale), Wholesale(100)\` returns \`70\`.
@@ -169,6 +172,7 @@ Implement four foundational higher-order functions in \`src/hof_basics.erl\`:
 
 ## Rules & Verification Constraints
 
+- \`bf_ast_verifier\` enforces anonymous closures (\`fun_expr\`), a genuine remote function capture referencing \`erlang:abs/1\` (\`remote_fun_capture\`), and function-head guard protection (\`guards\`) on \`apply_twice/2\`.
 - All arithmetic must use integer operators (\`*\`, \`div\`).
 - Strictly no Maps (\`#{}\`) or Bit-Syntax Binaries (\`<<...>>\`). Use integers, atoms, tuples, and functions only.`,
     otpDocCards: [
@@ -245,9 +249,11 @@ Implement four foundational higher-order functions in \`src/hof_basics.erl\`:
       },
     ],
     astRules: {
-      requiredConstructs: ['fun_expr'],
+      requiredConstructs: ['fun_expr', 'remote_fun_capture', 'guards'],
+      requiredCalls: ['erlang:abs/1'],
+      forbiddenConstructs: ['map_syntax', 'bit_syntax'],
     },
-    solutionExplanation: 'Demonstrates anonymous closures capturing lexical variables, unary function guards with is_function/2, remote function capture, and strategy factory patterns.',
+    solutionExplanation: 'Demonstrates anonymous closures capturing lexical variables, unary function guards enforcing 1-arity callable arguments, direct remote export-table function capture, and strategy factory patterns.',
     files: [
       {
         name: 'hof_basics.erl',
@@ -255,20 +261,20 @@ Implement four foundational higher-order functions in \`src/hof_basics.erl\`:
         content: `-module(hof_basics).
 -export([make_multiplier/1, apply_twice/2, math_capture/0, choose_pricing_strategy/1]).
 
-%% @doc Return a closure that multiplies its input by Factor.
-make_multiplier(Factor) ->
+%% @doc Return a 1-argument closure multiplying its integer input by the caller-supplied Factor.
+make_multiplier(_Factor) ->
     ok.
 
-%% @doc Apply unary function F twice to initial value X, guarded by is_function/2.
-apply_twice(F, X) ->
+%% @doc Guard that the caller-supplied F expects exactly 1 argument (failing with a clause error otherwise) and apply F twice to X.
+apply_twice(_F, _X) ->
     ok.
 
-%% @doc Return a remote capture reference to the absolute value BIF.
+%% @doc Return a direct external function capture referencing the standard integer absolute value BIF without an anonymous wrapper.
 math_capture() ->
     ok.
 
-%% @doc Return pricing strategy closure based on customer tier atom.
-choose_pricing_strategy(Tier) ->
+%% @doc Return a 1-argument integer pricing closure implementing VIP (20% discount), wholesale (30% discount), or identity pricing for any other Tier.
+choose_pricing_strategy(_Tier) ->
     ok.`,
       },
     ],
@@ -276,15 +282,19 @@ choose_pricing_strategy(Tier) ->
       'src/hof_basics.erl': `-module(hof_basics).
 -export([make_multiplier/1, apply_twice/2, math_capture/0, choose_pricing_strategy/1]).
 
+%% @doc Return a 1-argument closure multiplying its integer input by the caller-supplied Factor.
 make_multiplier(Factor) ->
     fun(X) -> X * Factor end.
 
+%% @doc Guard that the caller-supplied F expects exactly 1 argument (failing with a clause error otherwise) and apply F twice to X.
 apply_twice(F, X) when is_function(F, 1) ->
     F(F(X)).
 
+%% @doc Return a direct external function capture referencing the standard integer absolute value BIF without an anonymous wrapper.
 math_capture() ->
     fun erlang:abs/1.
 
+%% @doc Return a 1-argument integer pricing closure implementing VIP (20% discount), wholesale (30% discount), or identity pricing for any other Tier.
 choose_pricing_strategy(vip) ->
     fun(Price) -> (Price * 80) div 100 end;
 choose_pricing_strategy(wholesale) ->
@@ -295,33 +305,37 @@ choose_pricing_strategy(_) ->
     starterCode: `-module(hof_basics).
 -export([make_multiplier/1, apply_twice/2, math_capture/0, choose_pricing_strategy/1]).
 
-%% @doc Return a closure that multiplies its input by Factor.
-make_multiplier(Factor) ->
+%% @doc Return a 1-argument closure multiplying its integer input by the caller-supplied Factor.
+make_multiplier(_Factor) ->
     ok.
 
-%% @doc Apply unary function F twice to initial value X, guarded by is_function/2.
-apply_twice(F, X) ->
+%% @doc Guard that the caller-supplied F expects exactly 1 argument (failing with a clause error otherwise) and apply F twice to X.
+apply_twice(_F, _X) ->
     ok.
 
-%% @doc Return a remote capture reference to the absolute value BIF.
+%% @doc Return a direct external function capture referencing the standard integer absolute value BIF without an anonymous wrapper.
 math_capture() ->
     ok.
 
-%% @doc Return pricing strategy closure based on customer tier atom.
-choose_pricing_strategy(Tier) ->
+%% @doc Return a 1-argument integer pricing closure implementing VIP (20% discount), wholesale (30% discount), or identity pricing for any other Tier.
+choose_pricing_strategy(_Tier) ->
     ok.`,
     solutionCode: `-module(hof_basics).
 -export([make_multiplier/1, apply_twice/2, math_capture/0, choose_pricing_strategy/1]).
 
+%% @doc Return a 1-argument closure multiplying its integer input by the caller-supplied Factor.
 make_multiplier(Factor) ->
     fun(X) -> X * Factor end.
 
+%% @doc Guard that the caller-supplied F expects exactly 1 argument (failing with a clause error otherwise) and apply F twice to X.
 apply_twice(F, X) when is_function(F, 1) ->
     F(F(X)).
 
+%% @doc Return a direct external function capture referencing the standard integer absolute value BIF without an anonymous wrapper.
 math_capture() ->
     fun erlang:abs/1.
 
+%% @doc Return a 1-argument integer pricing closure implementing VIP (20% discount), wholesale (30% discount), or identity pricing for any other Tier.
 choose_pricing_strategy(vip) ->
     fun(Price) -> (Price * 80) div 100 end;
 choose_pricing_strategy(wholesale) ->
