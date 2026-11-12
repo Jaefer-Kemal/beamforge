@@ -2714,6 +2714,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l03` (`VERIFIED 100% PASSED`, score=100, 3 stages in `1.45s`, `1.776s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l03 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `10.63s` / `10.651s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 158: Pedagogical Despoiling & Live Tri-Verification of Chapter 9 Lecture 4 (`ch09-l04`)
+- [x] **158.1: Replace Buggy Clone PWE, De-Spoil Spec & Add 10/10 `@doc` Contracts (`ch09-l04`: `cluster_pubsub_pg.erl`)**:
+  - Replaced the broken 1:1 `cluster_health` PWE clone (whose `ping_peer/1` crashed with `case_clause: false` on standalone undistributed nodes and duplicated `whereis(pg)` + `pg:get_members/1` fanout) with a genuinely disjoint, runnable Parallel Worked Example: `mesh_telemetry.erl` (`ensure_scope/0`, `register_collector/1`, `unregister_collector/1`, `sample_peer_queue/1`, `dispatch_sample/1`), using a named `pg` scope (`telemetry_scope`) and safe `rpc:call/5` error discrimination.
+  - Upgraded `conceptMarkdown` (`ch09.ts`) to strict Spec 04 section order and structured `Input`/`Behavior`/`Examples` blocks across all 8 exported functions with zero syntax spoilers; removed redundant double-message `{pubsub_msg, ...}` mailbox emission in `publish_to_topic/2`.
+  - Added 10/10 `@doc` contracts across `starterCode`, `files[0].content`, `solutionCode`, `solutionFiles['src/cluster_pubsub_pg.erl']`, and `ch09_verification_test.go`, and converted starter return leaks (`#{}.`, `{ok, ok}.`, `{published, 0}.`, `{ok, 0}.`, `[].`) to neutral `ok.` stubs (zero `-spec`).
+- [x] **158.2: Mandatory Live Tri-Verification & Compiler Suite (`ch09-l04`)**:
+  - **Parallel Worked Example (`mesh_telemetry.erl`)**: Extracted from `ch09.ts`, compiled with `erlc.exe -Wall` (exit code 0, 0 warnings), and verified live scoped pubsub + safe RPC (`node()` and `'fake@nonexistent'`) via escript (`PWE_CH09_L04_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe` exit code 0) and executed all 8 neutral stubs safely (`STARTER_CH09_L04 exports=true stubs={ok,ok,ok,ok,ok,ok,ok,ok}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `erlc.exe -Wall +debug_info` (exit code 0, 0 warnings), passed `bf_ast_verifier` (`rpc:call/5`, `pg:join/2`, `pg:get_members/1`, `pg:leave/2`), and passed 2/2 visible tests + RPC failure handling (`SOLUTION_CH09_L04_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l04` (`VERIFIED 100% PASSED`, score=100, 3 stages in `1.37s`, `1.713s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l04 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `11.50s` / `11.594s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 

@@ -1248,108 +1248,141 @@ verify_heir_survival_demo() ->
     xpReward: 100,
     conceptMarkdown: `## Why This Matters in Production
 
-Erlang's actor model was designed from day one for distributed computing. In Erlang, sending a message to a process on the same machine (\`Pid ! Message\`) uses the exact same syntax and semantics as sending a message to a process on a machine 5,000 miles away!
+Erlang's actor model was designed from day one for distributed systems: sending a message to a process PID on another machine uses the exact same \`Pid ! Msg\` primitive as messaging a local worker. Large BEAM clusters (chat servers, telecom switches, multiplayer rooms) rely on three built-in primitives:
 
-When building real-time global systems like WhatsApp, Discord, or multiplayer game servers:
-1. **Mesh Clustering**: Multiple BEAM instances automatically discover and connect to each other.
-2. **Magic Cookies**: Clusters enforce cryptographic authentication so unauthorized nodes cannot connect to the mesh.
-3. **Decentralized Pub/Sub with \`pg\`**: In OTP 23+, the \`pg\` module replaced legacy \`pg2\`. It maintains distributed topic groups across all connected nodes without a single point of failure or centralized master process!
+1. **Cluster Membership & Cookies**: Distributed BEAM nodes authenticate over EPMD/TCP/TLS using a shared secret magic cookie before forming a mesh network (\`node/0\`, \`nodes/0\`, \`is_alive/0\`).
+2. **Bounded Remote Calls (\`rpc:call/5\`)**: Executes an \`M:F(Args)\` call synchronously on a target node with a hard millisecond deadline, converting unreachable nodes or timeouts into explicit \`{badrpc, Reason}\` error values instead of hanging callers forever.
+3. **Decentralized Pub/Sub with \`pg\` (OTP 23+)**: Replaced legacy \`pg2\` to remove its single central bottleneck. \`pg\` runs monitor-backed process groups synced across every node in the cluster and automatically evicts crashed subscriber PIDs.
 
 > [!NOTE]
-> **Distributed Erlang Primitives:**
-> - **\`node/0\`**: Returns the name of the current BEAM node (e.g. \`app@node1.lan\`).
-> - **\`nodes/0\`**: Returns a list of all currently connected peer nodes in the cluster.
-> - **\`erlang:get_cookie/0\`**: Returns the secret cookie token securing the cluster.
-> - **\`rpc:call/5\`**: Executes a function on a remote node synchronously with a timeout.
+> **Standalone vs. Distributed VM Mode:** When a BEAM instance boots without \`-sname\` or \`-name\` (such as unit test sandboxes), \`is_alive()\` returns \`false\` and \`node()\` returns \`nonode@nohost\`. Both \`rpc:call/5\` and \`pg\` continue working transparently on the local node!
 
 ## Deep Concept Breakdown & Under the Hood
 
-### Node Naming and Magic Cookies
+### 1. Node Identity & Distributed Safety
 
-To enable distributed clustering, a BEAM node is started with either a short name or a fully qualified domain name:
-- Short name: \`erl -sname node_a -setcookie secret_cluster_key\`
-- Long name: \`erl -name app@10.0.0.1 -setcookie secret_cluster_key\`
+- **\`node/0\`**: Returns the local node atom (e.g. \`'api@10.0.1.4'\` or \`'nonode@nohost'\`).
+- **\`nodes/0\`**: Returns a list of currently connected remote peer node atoms (excluding \`node()\`).
+- **\`is_alive/0\`**: Returns \`true\` if Erlang distribution is active, \`false\` otherwise.
 
-When \`node_a\` connects to \`node_b\` (e.g. via \`net_adm:ping('node_b@host')\`), the Erlang Port Mapper Daemon (EPMD) negotiates a TLS or TCP handshake. The nodes exchange MD5 challenge digests derived from the magic cookie. If the cookies match, the nodes merge into a fully connected mesh!
+### 2. Defensive RPC Normalization
 
-### Location-Transparent Remote Procedure Calls (\`rpc:call/4,5\`)
+Calling \`rpc:call(TargetNode, Mod, Fun, Args, TimeoutMs)\` returns either the remote function's return term directly or \`{badrpc, Reason}\` (e.g., \`nodedown\` or \`timeout\`). Never match only on expected domain atoms like \`true\`—what if the remote function itself legitimately returns \`false\`? Pattern-matching \`{badrpc, Reason}\` first and wrapping everything else in \`{ok, Result}\` safely handles any valid return term.
 
-\`\`\`erlang
-rpc:call(TargetNode, Module, Function, Args, TimeoutMs) -> Result | {badrpc, Reason}
-\`\`\`
+### 3. Scopes & Groups in \`pg\`
 
-If \`TargetNode\` is unreachable or execution exceeds \`TimeoutMs\`, \`rpc:call\` returns \`{badrpc, nodedown}\` or \`{badrpc, timeout}\`. In production, always normalize \`{badrpc, Reason}\` to clean \`{error, {rpc_failed, Reason}}\` tuples.
-
-### Decentralized Process Groups with \`pg\` (OTP 23+)
-
-The \`pg\` module manages distributed process groups:
-- **\`pg:start_link/0\`**: Boots the default scope process.
-- **\`pg:join(Topic, Pid)\`**: Adds \`Pid\` to the group \`Topic\`. This membership is broadcast to all nodes.
-- **\`pg:get_members(Topic)\`**: Returns all live PIDs across the entire cluster subscribed to \`Topic\`.
-- **\`pg:leave(Topic, Pid)\`**: Unsubscribes \`Pid\` from \`Topic\`.
-- **Automatic Monitor Cleanup**: If any subscribed process crashes, \`pg\` automatically detects its demise via monitors and removes it from the group across all nodes!
-
-### Parallel Worked Example: Cluster Health Monitor
-
-\`\`\`erlang
--module(cluster_health).
--export([ping_peer/1, broadcast_heartbeat/2]).
-
-ping_peer(Node) ->
-    case rpc:call(Node, erlang, is_alive, [], 1000) of
-        true ->
-            {ok, alive};
-        {badrpc, Reason} ->
-            {error, {peer_down, Reason}}
-    end.
-
-broadcast_heartbeat(Topic, Payload) ->
-    case whereis(pg) of
-        undefined -> pg:start_link();
-        _ -> ok
-    end,
-    Members = pg:get_members(Topic),
-    [P ! {heartbeat, Topic, Payload} || P <- Members],
-    {sent, length(Members)}.
-\`\`\`
+\`pg\` supports both the default scope process (registered as \`pg\`, started via \`pg:start_link/0\`) and isolated custom scopes started via \`pg:start_link(ScopeAtom)\`. If a \`pg\` scope is already running, \`pg:start_link/0\` returns \`{error, {already_started, Pid}}\` rather than \`{ok, Pid}\`, so idempotent helpers must accept both shapes cleanly.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
 %% Official Distributed Calls (kernel / rpc & pg)
 rpc:call(Node, Module, Function, Args, Timeout) -> Res | {badrpc, Reason}
-pg:start_link() -> {ok, pid()} | {error, term()}
+  Types:
+    Node = node()
+    Module = Function = atom()
+    Args = [term()]
+    Timeout = timeout()
+    Res = Reason = term()
+
+pg:start_link() -> {ok, pid()} | {error, {already_started, pid()} | term()}
 pg:join(Group, PidOrPids) -> ok
 pg:leave(Group, PidOrPids) -> ok
 pg:get_members(Group) -> [pid()]
+  Types:
+    Group = term()
+    PidOrPids = pid() | [pid()]
 \`\`\`
+
+Refer to the attached documentation cards below for module links and complexity notes on group membership operations.
+
+## Parallel Worked Example: Scoped Run-Queue Mesh Telemetry
+
+Consider a separate domain: a node-scheduler monitor (\`mesh_telemetry\`) using an isolated named \`pg\` scope (\`telemetry_scope\`) and \`rpc:call/5\` to sample scheduler run-queue depth safely across both distributed and standalone nodes:
+
+\`\`\`erlang
+-module(mesh_telemetry).
+-export([ensure_scope/0, register_collector/1, unregister_collector/1, sample_peer_queue/1, dispatch_sample/1]).
+
+%% @doc Idempotently ensure the dedicated telemetry_scope pg process is running.
+ensure_scope() ->
+    case pg:start_link(telemetry_scope) of
+        {ok, _Pid} -> ok;
+        {error, {already_started, _Pid}} -> ok
+    end.
+
+%% @doc Subscribe CollectorPid to scheduler sample broadcasts under telemetry_scope.
+register_collector(CollectorPid) ->
+    ensure_scope(),
+    pg:join(telemetry_scope, collectors, CollectorPid).
+
+%% @doc Unsubscribe CollectorPid from telemetry_scope broadcasts.
+unregister_collector(CollectorPid) ->
+    ensure_scope(),
+    pg:leave(telemetry_scope, collectors, CollectorPid).
+
+%% @doc Query run-queue depth on PeerNode with a 1500 ms RPC deadline.
+sample_peer_queue(PeerNode) ->
+    case rpc:call(PeerNode, erlang, statistics, [run_queue], 1500) of
+        {badrpc, Reason} ->
+            {error, {unreachable, Reason}};
+        QueueDepth ->
+            {ok, QueueDepth}
+    end.
+
+%% @doc Forward a telemetry reading to all active collectors and return count.
+dispatch_sample(Value) ->
+    ensure_scope(),
+    Targets = pg:get_members(telemetry_scope, collectors),
+    lists:foreach(fun(Pid) -> Pid ! {telemetry_sample, Value} end, Targets),
+    {delivered, length(Targets)}.
+\`\`\`
+
+### What ERTS Does at Runtime
+
+- **Race-Safe Idempotent Boot (\`ensure_scope/0\`)**: Calling \`pg:start_link(telemetry_scope)\` directly and matching both \`{ok, _Pid}\` and \`{error, {already_started, _Pid}}\` avoids check-then-act races between \`whereis/1\` and process registration.
+- **Total Return Discrimination (\`sample_peer_queue/1\`)**: By matching \`{badrpc, Reason}\` explicitly before a catch-all \`QueueDepth\` branch, any valid Erlang value—even \`0\` or \`false\`—passes through wrapped as \`{ok, Value}\`.
+- **Isolated Scoped Fanout (\`dispatch_sample/1\`)**: \`pg:get_members(telemetry_scope, collectors)\` reads the lock-free ETS table owned by the \`telemetry_scope\` coordinator and fans out via \`lists:foreach/2\` without leaking into the default \`pg\` scope.
 
 ## Assignment Specification
 
-Implement module \`cluster_pubsub_pg\` exporting:
-1. \`cluster_node_info/0 -> map()\`:
-   - Returns \`#{self_node => node(), connected_peers => nodes(), alive => is_alive()}\`.
-2. \`safe_remote_call(TargetNode, Mod, Fun, Args) -> {ok, Result} | {error, {rpc_failed, Reason}}\`:
-   - Calls \`rpc:call(TargetNode, Mod, Fun, Args, 2000)\`.
-   - Normalizes \`{badrpc, Reason}\` into \`{error, {rpc_failed, Reason}}\`.
-   - Returns \`{ok, Result}\` on success.
-3. \`join_topic(Topic, Pid) -> ok\`:
-   - Ensures \`pg\` is started (\`case whereis(pg) of undefined -> pg:start_link(); _ -> ok end\`).
-   - Calls \`pg:join(Topic, Pid)\` and returns \`ok\`.
-4. \`publish_to_topic(Topic, Message) -> {published, integer()}\`:
-   - Fetches \`Members = pg:get_members(Topic)\`.
-   - Sends \`P ! {pubsub, Topic, Message}\` and \`P ! {pubsub_msg, Topic, Message}\` to each member.
-   - Returns \`{published, length(Members)}\`.
-5. \`leave_topic(Topic, Pid) -> ok\`:
-   - Calls \`pg:leave(Topic, Pid)\` and returns \`ok\`.
-6. Companion helpers:
-   - \`broadcast(Topic, Message)\`: Alias for \`publish_to_topic\` returning \`{ok, Count}\`.
-   - \`get_subscribers(Topic)\`: Returns \`pg:get_members(Topic)\`.
-   - \`init_pubsub()\`: Boots \`pg\` if not already running.
+Implement module \`src/cluster_pubsub_pg.erl\` exporting \`cluster_node_info/0\`, \`safe_remote_call/4\`, \`init_pubsub/0\`, \`join_topic/2\`, \`publish_to_topic/2\`, \`leave_topic/2\`, \`broadcast/2\`, and \`get_subscribers/1\`.
+
+### \`cluster_node_info/0\`
+- **Input**: None.
+- **Behavior**: Inspects the running BEAM node and returns a map with keys \`self_node\` (local node atom), \`connected_peers\` (list of connected peer nodes), and \`alive\` (boolean indicating whether distribution is active).
+- **Examples**:
+  - On a non-distributed test node, \`maps:get(alive, cluster_pubsub_pg:cluster_node_info())\` returns \`false\`.
+
+### \`safe_remote_call/4\`
+- **Input**: Node atom \`TargetNode\`, module \`Mod\`, function atom \`Fun\`, argument list \`Args\`.
+- **Behavior**: Executes the RPC synchronously against \`TargetNode\` with a \`2000\` ms timeout. Normalizes RPC failures into \`{error, {rpc_failed, Reason}}\`, and wraps any other result (including booleans) in \`{ok, Result}\`.
+- **Examples**:
+  - \`cluster_pubsub_pg:safe_remote_call(node(), erlang, is_alive, [])\` returns \`{ok, false}\` on an undistributed VM.
+  - Calling an unreachable node returns \`{error, {rpc_failed, nodedown}}\`.
+
+### \`init_pubsub/0\`
+- **Input**: None.
+- **Behavior**: Ensures the default OTP \`pg\` server process is running on the node (handling an already-started process cleanly) and returns \`ok\`.
+
+### \`join_topic/2\` and \`leave_topic/2\`
+- **Input**: Topic term \`Topic\`, subscriber \`Pid\`.
+- **Behavior**: Ensures \`pg\` is active, then adds (\`join_topic/2\`) or removes (\`leave_topic/2\`) \`Pid\` for group \`Topic\` in the default \`pg\` scope and returns \`ok\`.
+
+### \`publish_to_topic/2\` and \`broadcast/2\`
+- **Input**: Topic term \`Topic\`, arbitrary term \`Message\`.
+- **Behavior**: Ensures \`pg\` is active, queries current members of \`Topic\`, delivers a 3-element tuple tagged \`pubsub\` containing \`Topic\` and \`Message\` to every member PID, and returns \`{published, Count}\` from \`publish_to_topic/2\` (or \`{ok, Count}\` from \`broadcast/2\`).
+- **Examples**:
+  - With one subscribed process, \`cluster_pubsub_pg:publish_to_topic(<<"alerts">>, <<"cluster_overload">>)\` delivers \`{pubsub, <<"alerts">>, <<"cluster_overload">>}\` and returns \`{published, 1}\`.
+
+### \`get_subscribers/1\`
+- **Input**: Topic term \`Topic\`.
+- **Behavior**: Ensures \`pg\` is active and returns the list of live subscriber PIDs currently registered in \`Topic\`.
 
 ## Rules & Verification Constraints
-- Must use OTP 23+ \`pg\` primitives.
-- Must handle RPC failures cleanly with 2000ms timeout.
+
+- **Required Remote Calls**: \`bf_ast_verifier\` enforces \`rpc:call/5\`, \`pg:join/2\`, \`pg:leave/2\`, and \`pg:get_members/1\`.
+- **Timeout Safety**: \`safe_remote_call/4\` must enforce a \`2000\` ms timeout via \`rpc:call/5\` and never crash on falsy return values.
 `,
     otpDocCards: [
       {
@@ -1440,34 +1473,43 @@ Implement module \`cluster_pubsub_pg\` exporting:
 -export([cluster_node_info/0, safe_remote_call/4, join_topic/2, publish_to_topic/2, leave_topic/2]).
 -export([init_pubsub/0, broadcast/2, get_subscribers/1]).
 
+%% @doc Return a map summarizing local node identity, peer nodes, and distribution status.
 cluster_node_info() ->
-    #{}.
+    ok.
 
+%% @doc Execute an RPC against TargetNode with a 2000 ms timeout and normalized result tuple.
 safe_remote_call(TargetNode, Mod, Fun, Args) ->
-    {ok, ok}.
-
-join_topic(Topic, Pid) ->
     ok.
 
-publish_to_topic(Topic, Message) ->
-    {published, 0}.
-
-leave_topic(Topic, Pid) ->
-    ok.
-
+%% @doc Ensure the default pg process group server is started idempotently.
 init_pubsub() ->
     ok.
 
-broadcast(Topic, Message) ->
-    {ok, 0}.
+%% @doc Subscribe Pid to Topic in the default pg group.
+join_topic(Topic, Pid) ->
+    ok.
 
+%% @doc Deliver a pubsub tuple with Message to every subscriber of Topic and return count.
+publish_to_topic(Topic, Message) ->
+    ok.
+
+%% @doc Publish Message to Topic subscribers and return an ok-tagged delivery count.
+broadcast(Topic, Message) ->
+    ok.
+
+%% @doc Unsubscribe Pid from Topic in the default pg group.
+leave_topic(Topic, Pid) ->
+    ok.
+
+%% @doc Return the list of active subscriber PIDs currently registered on Topic.
 get_subscribers(Topic) ->
-    [].
+    ok.
 `,
     solutionCode: `-module(cluster_pubsub_pg).
 -export([cluster_node_info/0, safe_remote_call/4, join_topic/2, publish_to_topic/2, leave_topic/2]).
 -export([init_pubsub/0, broadcast/2, get_subscribers/1]).
 
+%% @doc Return a map summarizing local node identity, peer nodes, and distribution status.
 cluster_node_info() ->
     #{
         self_node => node(),
@@ -1475,6 +1517,7 @@ cluster_node_info() ->
         alive => is_alive()
     }.
 
+%% @doc Execute an RPC against TargetNode with a 2000 ms timeout and normalized result tuple.
 safe_remote_call(TargetNode, Mod, Fun, Args) ->
     case rpc:call(TargetNode, Mod, Fun, Args, 2000) of
         {badrpc, Reason} ->
@@ -1483,6 +1526,7 @@ safe_remote_call(TargetNode, Mod, Fun, Args) ->
             {ok, Result}
     end.
 
+%% @doc Ensure the default pg process group server is started idempotently.
 init_pubsub() ->
     case whereis(pg) of
         undefined ->
@@ -1494,27 +1538,29 @@ init_pubsub() ->
             ok
     end.
 
+%% @doc Subscribe Pid to Topic in the default pg group.
 join_topic(Topic, Pid) ->
     init_pubsub(),
     pg:join(Topic, Pid).
 
+%% @doc Deliver a pubsub tuple with Message to every subscriber of Topic and return count.
 publish_to_topic(Topic, Message) ->
     init_pubsub(),
     Members = pg:get_members(Topic),
-    [begin
-        P ! {pubsub, Topic, Message},
-        P ! {pubsub_msg, Topic, Message}
-     end || P <- Members],
+    [P ! {pubsub, Topic, Message} || P <- Members],
     {published, length(Members)}.
 
+%% @doc Publish Message to Topic subscribers and return an ok-tagged delivery count.
 broadcast(Topic, Message) ->
     {published, Count} = publish_to_topic(Topic, Message),
     {ok, Count}.
 
+%% @doc Unsubscribe Pid from Topic in the default pg group.
 leave_topic(Topic, Pid) ->
     init_pubsub(),
     pg:leave(Topic, Pid).
 
+%% @doc Return the list of active subscriber PIDs currently registered on Topic.
 get_subscribers(Topic) ->
     init_pubsub(),
     pg:get_members(Topic).
@@ -1527,29 +1573,37 @@ get_subscribers(Topic) ->
 -export([cluster_node_info/0, safe_remote_call/4, join_topic/2, publish_to_topic/2, leave_topic/2]).
 -export([init_pubsub/0, broadcast/2, get_subscribers/1]).
 
+%% @doc Return a map summarizing local node identity, peer nodes, and distribution status.
 cluster_node_info() ->
-    #{}.
+    ok.
 
+%% @doc Execute an RPC against TargetNode with a 2000 ms timeout and normalized result tuple.
 safe_remote_call(TargetNode, Mod, Fun, Args) ->
-    {ok, ok}.
-
-join_topic(Topic, Pid) ->
     ok.
 
-publish_to_topic(Topic, Message) ->
-    {published, 0}.
-
-leave_topic(Topic, Pid) ->
-    ok.
-
+%% @doc Ensure the default pg process group server is started idempotently.
 init_pubsub() ->
     ok.
 
-broadcast(Topic, Message) ->
-    {ok, 0}.
+%% @doc Subscribe Pid to Topic in the default pg group.
+join_topic(Topic, Pid) ->
+    ok.
 
+%% @doc Deliver a pubsub tuple with Message to every subscriber of Topic and return count.
+publish_to_topic(Topic, Message) ->
+    ok.
+
+%% @doc Publish Message to Topic subscribers and return an ok-tagged delivery count.
+broadcast(Topic, Message) ->
+    ok.
+
+%% @doc Unsubscribe Pid from Topic in the default pg group.
+leave_topic(Topic, Pid) ->
+    ok.
+
+%% @doc Return the list of active subscriber PIDs currently registered on Topic.
 get_subscribers(Topic) ->
-    [].
+    ok.
 `,
       },
     ],
@@ -1558,6 +1612,7 @@ get_subscribers(Topic) ->
 -export([cluster_node_info/0, safe_remote_call/4, join_topic/2, publish_to_topic/2, leave_topic/2]).
 -export([init_pubsub/0, broadcast/2, get_subscribers/1]).
 
+%% @doc Return a map summarizing local node identity, peer nodes, and distribution status.
 cluster_node_info() ->
     #{
         self_node => node(),
@@ -1565,6 +1620,7 @@ cluster_node_info() ->
         alive => is_alive()
     }.
 
+%% @doc Execute an RPC against TargetNode with a 2000 ms timeout and normalized result tuple.
 safe_remote_call(TargetNode, Mod, Fun, Args) ->
     case rpc:call(TargetNode, Mod, Fun, Args, 2000) of
         {badrpc, Reason} ->
@@ -1573,6 +1629,7 @@ safe_remote_call(TargetNode, Mod, Fun, Args) ->
             {ok, Result}
     end.
 
+%% @doc Ensure the default pg process group server is started idempotently.
 init_pubsub() ->
     case whereis(pg) of
         undefined ->
@@ -1584,27 +1641,29 @@ init_pubsub() ->
             ok
     end.
 
+%% @doc Subscribe Pid to Topic in the default pg group.
 join_topic(Topic, Pid) ->
     init_pubsub(),
     pg:join(Topic, Pid).
 
+%% @doc Deliver a pubsub tuple with Message to every subscriber of Topic and return count.
 publish_to_topic(Topic, Message) ->
     init_pubsub(),
     Members = pg:get_members(Topic),
-    [begin
-        P ! {pubsub, Topic, Message},
-        P ! {pubsub_msg, Topic, Message}
-     end || P <- Members],
+    [P ! {pubsub, Topic, Message} || P <- Members],
     {published, length(Members)}.
 
+%% @doc Publish Message to Topic subscribers and return an ok-tagged delivery count.
 broadcast(Topic, Message) ->
     {published, Count} = publish_to_topic(Topic, Message),
     {ok, Count}.
 
+%% @doc Unsubscribe Pid from Topic in the default pg group.
 leave_topic(Topic, Pid) ->
     init_pubsub(),
     pg:leave(Topic, Pid).
 
+%% @doc Return the list of active subscriber PIDs currently registered on Topic.
 get_subscribers(Topic) ->
     init_pubsub(),
     pg:get_members(Topic).

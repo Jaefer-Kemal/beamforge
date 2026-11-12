@@ -200,6 +200,7 @@ verify_heir_survival_demo() ->
 -export([cluster_node_info/0, safe_remote_call/4, join_topic/2, publish_to_topic/2, leave_topic/2]).
 -export([init_pubsub/0, broadcast/2, get_subscribers/1]).
 
+%% @doc Return a map summarizing local node identity, peer nodes, and distribution status.
 cluster_node_info() ->
     #{
         self_node => node(),
@@ -207,6 +208,7 @@ cluster_node_info() ->
         alive => is_alive()
     }.
 
+%% @doc Execute an RPC against TargetNode with a 2000 ms timeout and normalized result tuple.
 safe_remote_call(TargetNode, Mod, Fun, Args) ->
     case rpc:call(TargetNode, Mod, Fun, Args, 2000) of
         {badrpc, Reason} ->
@@ -215,6 +217,7 @@ safe_remote_call(TargetNode, Mod, Fun, Args) ->
             {ok, Result}
     end.
 
+%% @doc Ensure the default pg process group server is started idempotently.
 init_pubsub() ->
     case whereis(pg) of
         undefined ->
@@ -226,27 +229,29 @@ init_pubsub() ->
             ok
     end.
 
+%% @doc Subscribe Pid to Topic in the default pg group.
 join_topic(Topic, Pid) ->
     init_pubsub(),
     pg:join(Topic, Pid).
 
+%% @doc Deliver a pubsub tuple with Message to every subscriber of Topic and return count.
 publish_to_topic(Topic, Message) ->
     init_pubsub(),
     Members = pg:get_members(Topic),
-    [begin
-        P ! {pubsub, Topic, Message},
-        P ! {pubsub_msg, Topic, Message}
-     end || P <- Members],
+    [P ! {pubsub, Topic, Message} || P <- Members],
     {published, length(Members)}.
 
+%% @doc Publish Message to Topic subscribers and return an ok-tagged delivery count.
 broadcast(Topic, Message) ->
     {published, Count} = publish_to_topic(Topic, Message),
     {ok, Count}.
 
+%% @doc Unsubscribe Pid from Topic in the default pg group.
 leave_topic(Topic, Pid) ->
     init_pubsub(),
     pg:leave(Topic, Pid).
 
+%% @doc Return the list of active subscriber PIDs currently registered on Topic.
 get_subscribers(Topic) ->
     init_pubsub(),
     pg:get_members(Topic).
