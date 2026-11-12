@@ -295,6 +295,7 @@ build_chat_message(FromJid, ToJid, Id, BodyText) ->
 				"src/xmpp_error_and_roster.erl": `-module(xmpp_error_and_roster).
 -export([classify_error_condition/1, build_stanza_error/4, build_stream_not_authorized/0, transition_subscription/2]).
 
+%% @doc Map an RFC 6120 stanza error condition atom to its standardized {TypeBin, ElementBin} pair, defaulting unknown conditions to undefined-condition under cancel.
 -spec classify_error_condition(atom()) -> {binary(), binary()}.
 classify_error_condition(not_authorized)      -> {<<"auth">>, <<"not-authorized">>};
 classify_error_condition(forbidden)           -> {<<"auth">>, <<"forbidden">>};
@@ -304,15 +305,18 @@ classify_error_condition(bad_request)         -> {<<"modify">>, <<"bad-request">
 classify_error_condition(resource_constraint) -> {<<"wait">>, <<"resource-constraint">>};
 classify_error_condition(_)                   -> {<<"cancel">>, <<"undefined-condition">>}.
 
+%% @doc Build a structured RFC 6120 stanza error XML binary for StanzaTagBin with id, to, error type, and condition element scoped to xmpp-stanzas.
 -spec build_stanza_error(binary(), binary(), binary(), atom()) -> binary().
 build_stanza_error(StanzaTagBin, IdBin, ToJidBin, ConditionAtom) ->
     {TypeBin, ElementBin} = classify_error_condition(ConditionAtom),
     <<"<", StanzaTagBin/binary, " type='error' id='", IdBin/binary, "' to='", ToJidBin/binary, "'><error type='", TypeBin/binary, "'><", ElementBin/binary, " xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></", StanzaTagBin/binary, ">">>.
 
+%% @doc Return the RFC 6120 stream-level not-authorized error element wrapped in stream:error under the xmpp-streams namespace.
 -spec build_stream_not_authorized() -> binary().
 build_stream_not_authorized() ->
     <<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>.
 
+%% @doc Advance an RFC 6121 roster subscription state (none, to, from, or both) for an inbound or outbound subscription event, keeping Current on unrecognized transitions.
 -spec transition_subscription(atom(), atom()) -> atom().
 transition_subscription(none, outbound_subscribed)   -> to;
 transition_subscription(none, inbound_subscribed)    -> from;

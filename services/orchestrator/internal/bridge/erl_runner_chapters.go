@@ -3551,9 +3551,10 @@ end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try
     ErrXml = xmpp_error_and_roster:build_stanza_error(<<"message">>, <<"msg_1">>, <<"bob@localhost">>, item_not_found),
-    Pass2 = (binary:match(ErrXml, <<"type='error'">>) =/= nomatch) andalso (binary:match(ErrXml, <<"item-not-found">>) =/= nomatch),
-    #{call_str => <<"build_stanza_error(message, msg_1, bob, item_not_found)">>,
-      expected => <<"<message type='error'...><error type='cancel'><item-not-found.../></error></message>">>,
+    Exp2 = <<"<message type='error' id='msg_1' to='bob@localhost'><error type='cancel'><item-not-found xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></message>">>,
+    Pass2 = (ErrXml =:= Exp2),
+    #{call_str => <<"xmpp_error_and_roster:build_stanza_error(<<\"message\">>, <<\"msg_1\">>, <<\"bob@localhost\">>, item_not_found)">>,
+      expected => Exp2,
       actual => ErrXml,
       passed => Pass2, time_ms => erlang:system_time(millisecond) - T2_Start}
 catch CatchClass_R2:CatchReason_R2 ->
@@ -8476,13 +8477,13 @@ CompileStage = case code:ensure_loaded(xmpp_error_and_roster) of
 end,
 S1_Ast = try
     SrcPath = filename:join(["%s", "src", "xmpp_error_and_roster.erl"]),
-    Rules = #{},
+    Rules = #{required_constructs => [bit_syntax]},
     case bf_ast_verifier:verify_rules(SrcPath, Rules) of
-        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: RFC 6120/6121 Compliance">>, status => <<"passed">>, time_ms => 15, details => <<"AST analysis passed.">>};
-        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: RFC 6120/6121 Compliance">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
+        {ok, _} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Bit Syntax & RFC 6120/6121 Compliance">>, status => <<"passed">>, time_ms => 15, details => <<"Verified bit_syntax XML error formatting.">>};
+        {error, V} -> #{id => <<"ast_verification">>, title => <<"AST Analysis: Bit Syntax & RFC 6120/6121 Compliance">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [V]))}
     end
 catch CatchClass_L04_1:CatchReason_L04_1 ->
-    #{id => <<"ast_verification">>, title => <<"AST Analysis: RFC 6120/6121 Compliance">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST error: ~p:~p", [CatchClass_L04_1, CatchReason_L04_1]))}
+    #{id => <<"ast_verification">>, title => <<"AST Analysis: Bit Syntax & RFC 6120/6121 Compliance">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST error: ~p:~p", [CatchClass_L04_1, CatchReason_L04_1]))}
 end,
 S2_UnitErrorConditions = try
     Cond1 = xmpp_error_and_roster:classify_error_condition(not_authorized),

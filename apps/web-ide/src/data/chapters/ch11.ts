@@ -1499,36 +1499,126 @@ build_chat_message(FromJid, ToJid, Id, BodyText) ->
     },
     conceptMarkdown: `## Why This Matters in Production
 
-In production messaging backends, errors cannot be communicated via generic HTTP status codes. **RFC 6120 Section 8** defines a formal, structured error hierarchy containing specific error types and standardized XML condition elements.
+In production messaging backends, protocol errors cannot be communicated via generic HTTP numeric codes. **RFC 6120 Section 8** defines a formal, structured XML error taxonomy combining retry-semantics **error types** with standardized **condition elements** so client SDKs know immediately whether to re-authenticate, back off, fix malformed payloads, or abort.
 
-When a client transmits a stanza to a non-existent JID, attempts an unauthenticated request, or exceeds server rate limits, the server must formulate a standardized stanza-level or stream-level error response:
-1. **Error Types (RFC 6120 Section 8.3)**:
-   - \`auth\`: Authentication or authorization prerequisite failed.
-   - \`cancel\`: Irrecoverable error; client must not retry without altering the request.
-   - \`modify\`: Request was malformed; retry after updating payload parameters.
-   - \`wait\`: Transient load or lock condition; retry after a backoff interval.
+> [!IMPORTANT]
+> **RFC 6120 Error Types (Section 8.3):**
+> - **\`auth\`**: Authentication or authorization prerequisite failed (retry after supplying credentials).
+> - **\`cancel\`**: Irrecoverable failure; client must not retry the same stanza as-is.
+> - **\`modify\`**: Malformed or unacceptable parameters; retry only after rewriting the payload.
+> - **\`wait\`**: Transient overload or resource limit; retry after a backoff delay.
 
-2. **Standardized Condition Elements**:
-   - \`not-authorized\` (\`auth\`)
-   - \`forbidden\` (\`auth\`)
-   - \`item-not-found\` (\`cancel\`)
-   - \`bad-request\` (\`modify\`)
-   - \`resource-constraint\` (\`wait\`)
+Meanwhile, **RFC 6121 Section 3** models mutual contact visibility as a four-state finite state machine (\`none\`, \`to\`, \`from\`, \`both\`) rather than a single boolean flag—ensuring unidirectional follows never leak reciprocal online presence.
 
-In addition, **RFC 6121 Section 3** defines the mutual presence subscription state machine:
-- \`none\`: Neither party sees presence.
-- \`to\`: User sees contact's presence.
-- \`from\`: Contact sees user's presence.
-- \`both\`: Mutual presence subscription.
+## Deep Concept Breakdown & Under the Hood
+
+### 1. O(1) BEAM Jump-Table Dispatch on Condition Atoms
+When all function clauses match literal atoms (\`not_authorized\`, \`bad_request\`, etc.) in the same argument position, the BEAM compiler compiles them into a sorted binary-search or jump-table instruction (\`select_val\`). Dispatch takes constant $O(1)$ time with zero heap allocation regardless of how many RFC conditions are supported.
+
+### 2. Asymmetric vs. Mutual Presence States (RFC 6121)
+Subscription state tracks *who can see whom*:
+- \`none\`: Neither party sees the other's presence.
+- \`to\`: The user sees the contact's presence (outbound authorization granted).
+- \`from\`: The contact sees the user's presence (inbound authorization granted).
+- \`both\`: Mutual subscription in both directions.
+
+Every \`subscribed\` event adds one direction (\`none -> to\` or \`from -> both\` for outbound; \`none -> from\` or \`to -> both\` for inbound), and every \`unsubscribed\` event revokes only that direction while preserving the opposite grant when transitioning out of \`both\`.
+
+## Official Erlang Docs & Function Reference
+
+\`\`\`erlang
+%% Multi-Clause Atom Jump-Table & Bit Syntax Construction (stdlib / erts)
+%% Mapping error condition atoms in O(1):
+classify(Condition) -> {TypeBin, ConditionBin}
+  Types:
+    Condition = atom()
+    TypeBin = ConditionBin = binary()
+
+%% Zero-copy wire element formatting via bit syntax:
+<<Prefix/binary, Body/binary, Suffix/binary>> -> binary()
+\`\`\`
+
+Consult the attached RFC 6120 Section 8 reference card below for condition-to-type semantics.
+
+## Parallel Worked Example: Alert Policy Classifier & Node Quarantine FSM
+
+Consider a separate domain: an **Edge Telemetry Alert Classifier & Node Quarantine FSM** (\`policy_escalation_fsm\`) demonstrating O(1) multi-clause atom dispatch, wire frame assembly using binary syntax, and a 4-state transition table:
+
+\`\`\`erlang
+-module(policy_escalation_fsm).
+-export([severity_of/1, format_alert/3, next_health/2]).
+
+%% @doc Map infrastructure fault atoms to {SeverityBin, CodeBin} via BEAM jump-table matching.
+severity_of(disk_full)    -> {<<"crit">>, <<"disk-full">>};
+severity_of(auth_flood)   -> {<<"sec">>,  <<"auth-flood">>};
+severity_of(tls_expiring) -> {<<"warn">>, <<"tls-expiring">>};
+severity_of(_)            -> {<<"info">>, <<"unknown-signal">>}.
+
+%% @doc Assemble a pipe-framed alert record using binary interpolation syntax.
+format_alert(NodeId, Seq, SignalAtom) ->
+    {Sev, Code} = severity_of(SignalAtom),
+    <<"[", NodeId/binary, "#", Seq/binary, "|", Sev/binary, "]=", Code/binary>>.
+
+%% @doc Advance node quarantine state (healthy | watch | degraded | isolated) on operational events.
+next_health(healthy, spike_warn)       -> watch;
+next_health(healthy, hard_fault)       -> isolated;
+next_health(watch, hard_fault)         -> degraded;
+next_health(watch, clear_signal)       -> healthy;
+next_health(degraded, isolate_node)    -> isolated;
+next_health(degraded, clear_signal)    -> watch;
+next_health(isolated, admin_release)   -> watch;
+next_health(State, _Event)             -> State.
+\`\`\`
+
+### What ERTS Does at Runtime
+- **Jump-Table Clause Selection**: Each clause in \`severity_of/1\` matches a distinct atom constant, so ERTS emits \`select_val\` dispatch without sequential branch scanning.
+- **Bit-Syntax Frame Building**: \`format_alert/3\` computes total frame length once before copying \`NodeId\`, \`Seq\`, \`Sev\`, and \`Code\` into a single binary.
 
 ## Assignment Specification
 
-Implement module \`xmpp_error_and_roster.erl\`:
-1. \`classify_error_condition(ConditionAtom)\`: Returns \`{TypeBin, ConditionBin}\`.
-2. \`build_stanza_error(StanzaTagBin, IdBin, ToJidBin, ConditionAtom)\`: Synthesizes structured XML error stanza.
-3. \`build_stream_not_authorized()\`: Returns \`<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>\`.
-4. \`transition_subscription(Current, InboundAction)\`: Computes new subscription state (\`none\`, \`to\`, \`from\`, \`both\`).
-`,
+Implement \`xmpp_error_and_roster\` in \`src/xmpp_error_and_roster.erl\` exporting \`classify_error_condition/1\`, \`build_stanza_error/4\`, \`build_stream_not_authorized/0\`, and \`transition_subscription/2\`.
+
+### \`classify_error_condition/1\`
+- **Input**: Error condition atom \`ConditionAtom\`.
+- **Behavior**: Maps known RFC 6120 stanza error atoms to two-element binary pairs \`{TypeBin, ElementBin}\` as follows:
+  - \`not_authorized\` -> type \`<<"auth">>\`, element \`<<"not-authorized">>\`
+  - \`forbidden\` -> type \`<<"auth">>\`, element \`<<"forbidden">>\`
+  - \`item_not_found\` -> type \`<<"cancel">>\`, element \`<<"item-not-found">>\`
+  - \`service_unavailable\` -> type \`<<"cancel">>\`, element \`<<"service-unavailable">>\`
+  - \`bad_request\` -> type \`<<"modify">>\`, element \`<<"bad-request">>\`
+  - \`resource_constraint\` -> type \`<<"wait">>\`, element \`<<"resource-constraint">>\`
+  - Any unrecognized atom -> fallback type \`<<"cancel">>\`, element \`<<"undefined-condition">>\`
+- **Examples**:
+  - \`xmpp_error_and_roster:classify_error_condition(not_authorized)\` returns \`{<<"auth">>, <<"not-authorized">>}\`.
+  - \`xmpp_error_and_roster:classify_error_condition(item_not_found)\` returns \`{<<"cancel">>, <<"item-not-found">>}\`.
+
+### \`build_stanza_error/4\`
+- **Input**: \`Binary StanzaTagBin\` (e.g. \`<<"iq">>\` or \`<<"message">>\`), \`Binary IdBin\`, \`Binary ToJidBin\`, \`Atom ConditionAtom\`.
+- **Behavior**: Resolves the error type and condition element via \`classify_error_condition/1\` and formats an outer stanza element with single-quoted \`type='error'\`, \`id\`, and \`to\` attributes enclosing an \`<error type='...'>\` child element containing the self-closing condition element scoped under \`urn:ietf:params:xml:ns:xmpp-stanzas\`.
+- **Examples**:
+  - \`xmpp_error_and_roster:build_stanza_error(<<"message">>, <<"msg_1">>, <<"bob@localhost">>, item_not_found)\` returns \`<<"<message type='error' id='msg_1' to='bob@localhost'><error type='cancel'><item-not-found xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></message>">>\`.
+
+### \`build_stream_not_authorized/0\`
+- **Input**: Zero arguments.
+- **Behavior**: Returns the exact RFC 6120 stream-level \`not-authorized\` XML element wrapped in \`<stream:error>\` under the \`urn:ietf:params:xml:ns:xmpp-streams\` namespace using single quotes.
+- **Examples**:
+  - \`xmpp_error_and_roster:build_stream_not_authorized()\` returns \`<<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>\`.
+
+### \`transition_subscription/2\`
+- **Input**: Current state atom (\`none\`, \`to\`, \`from\`, or \`both\`) and event atom (\`outbound_subscribed\`, \`inbound_subscribed\`, \`outbound_unsubscribed\`, \`inbound_unsubscribed\`, or other).
+- **Behavior**: Computes the next RFC 6121 roster subscription state atom:
+  - From \`none\`: \`outbound_subscribed\` -> \`to\`, \`inbound_subscribed\` -> \`from\`.
+  - From \`to\`: \`inbound_subscribed\` -> \`both\`, \`outbound_unsubscribed\` -> \`none\`.
+  - From \`from\`: \`outbound_subscribed\` -> \`both\`, \`inbound_unsubscribed\` -> \`none\`.
+  - From \`both\`: \`outbound_unsubscribed\` -> \`from\`, \`inbound_unsubscribed\` -> \`to\`.
+  - Any other state/event pair preserves \`Current\` unchanged.
+- **Examples**:
+  - \`xmpp_error_and_roster:transition_subscription(none, outbound_subscribed)\` returns \`to\`.
+  - \`xmpp_error_and_roster:transition_subscription(to, inbound_subscribed)\` returns \`both\`.
+
+## Rules & Verification Constraints
+- **AST Checks**: \`bf_ast_verifier\` verifies binary construction (\`bit_syntax\`) in XML error formatting.
+- **RFC Wire Compliance**: Use single quotes \`'\` on all generated XML attributes and exact IETF namespaces (\`xmpp-stanzas\` / \`xmpp-streams\`).`,
     files: [
       {
         path: 'src/xmpp_error_and_roster.erl',
@@ -1536,46 +1626,21 @@ Implement module \`xmpp_error_and_roster.erl\`:
         content: `-module(xmpp_error_and_roster).
 -export([classify_error_condition/1, build_stanza_error/4, build_stream_not_authorized/0, transition_subscription/2]).
 
-%% % TODO: Classify RFC 6120 Stanza Error Condition
-%% Map condition atom to {TypeBin, ConditionBin}:
-%%   not_authorized      -> {<<"auth">>, <<"not-authorized">>}
-%%   forbidden           -> {<<"auth">>, <<"forbidden">>}
-%%   item_not_found      -> {<<"cancel">>, <<"item-not-found">>}
-%%   service_unavailable -> {<<"cancel">>, <<"service-unavailable">>}
-%%   bad_request         -> {<<"modify">>, <<"bad-request">>}
-%%   resource_constraint -> {<<"wait">>, <<"resource-constraint">>}
-%%   _                   -> {<<"cancel">>, <<"undefined-condition">>}
--spec classify_error_condition(atom()) -> {binary(), binary()}.
+%% @doc Map an RFC 6120 stanza error condition atom to its standardized {TypeBin, ElementBin} pair, defaulting unknown conditions to undefined-condition under cancel.
 classify_error_condition(_ConditionAtom) ->
-    {<<"cancel">>, <<"undefined-condition">>}.
+    ok.
 
-%% % TODO: Synthesize RFC 6120 Structured Stanza Error XML
-%% Return binary formatted as:
-%%   <StanzaTag type='error' id='Id' to='ToJid'><error type='Type'><Condition xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></StanzaTag>
--spec build_stanza_error(binary(), binary(), binary(), atom()) -> binary().
+%% @doc Build a structured RFC 6120 stanza error XML binary for StanzaTagBin with id, to, error type, and condition element scoped to xmpp-stanzas.
 build_stanza_error(_StanzaTagBin, _IdBin, _ToJidBin, _ConditionAtom) ->
     <<>>.
 
-%% % TODO: Synthesize RFC 6120 Stream Error <not-authorized/>
-%% Return <<" <stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>
--spec build_stream_not_authorized() -> binary().
+%% @doc Return the RFC 6120 stream-level not-authorized error element wrapped in stream:error under the xmpp-streams namespace.
 build_stream_not_authorized() ->
     <<>>.
 
-%% % TODO: RFC 6121 Roster Subscription State Machine
-%% Handle outbound and inbound events:
-%%   none + outbound_subscribed   -> to
-%%   none + inbound_subscribed    -> from
-%%   to   + inbound_subscribed    -> both
-%%   to   + outbound_unsubscribed -> none
-%%   from + outbound_subscribed   -> both
-%%   from + inbound_unsubscribed  -> none
-%%   both + outbound_unsubscribed -> from
-%%   both + inbound_unsubscribed  -> to
-%%   Any other combination       -> Current
--spec transition_subscription(atom(), atom()) -> atom().
-transition_subscription(Current, _Event) ->
-    Current.
+%% @doc Advance an RFC 6121 roster subscription state (none, to, from, or both) for an inbound or outbound subscription event, keeping Current on unrecognized transitions.
+transition_subscription(_Current, _Event) ->
+    ok.
 `,
       },
     ],
@@ -1583,6 +1648,7 @@ transition_subscription(Current, _Event) ->
       'src/xmpp_error_and_roster.erl': `-module(xmpp_error_and_roster).
 -export([classify_error_condition/1, build_stanza_error/4, build_stream_not_authorized/0, transition_subscription/2]).
 
+%% @doc Map an RFC 6120 stanza error condition atom to its standardized {TypeBin, ElementBin} pair, defaulting unknown conditions to undefined-condition under cancel.
 -spec classify_error_condition(atom()) -> {binary(), binary()}.
 classify_error_condition(not_authorized)      -> {<<"auth">>, <<"not-authorized">>};
 classify_error_condition(forbidden)           -> {<<"auth">>, <<"forbidden">>};
@@ -1592,15 +1658,18 @@ classify_error_condition(bad_request)         -> {<<"modify">>, <<"bad-request">
 classify_error_condition(resource_constraint) -> {<<"wait">>, <<"resource-constraint">>};
 classify_error_condition(_)                   -> {<<"cancel">>, <<"undefined-condition">>}.
 
+%% @doc Build a structured RFC 6120 stanza error XML binary for StanzaTagBin with id, to, error type, and condition element scoped to xmpp-stanzas.
 -spec build_stanza_error(binary(), binary(), binary(), atom()) -> binary().
 build_stanza_error(StanzaTagBin, IdBin, ToJidBin, ConditionAtom) ->
     {TypeBin, ElementBin} = classify_error_condition(ConditionAtom),
     <<"<", StanzaTagBin/binary, " type='error' id='", IdBin/binary, "' to='", ToJidBin/binary, "'><error type='", TypeBin/binary, "'><", ElementBin/binary, " xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></", StanzaTagBin/binary, ">">>.
 
+%% @doc Return the RFC 6120 stream-level not-authorized error element wrapped in stream:error under the xmpp-streams namespace.
 -spec build_stream_not_authorized() -> binary().
 build_stream_not_authorized() ->
     <<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>.
 
+%% @doc Advance an RFC 6121 roster subscription state (none, to, from, or both) for an inbound or outbound subscription event, keeping Current on unrecognized transitions.
 -spec transition_subscription(atom(), atom()) -> atom().
 transition_subscription(none, outbound_subscribed)   -> to;
 transition_subscription(none, inbound_subscribed)    -> from;
@@ -1620,50 +1689,26 @@ transition_subscription(Current, _)                  -> Current.
     starterCode: `-module(xmpp_error_and_roster).
 -export([classify_error_condition/1, build_stanza_error/4, build_stream_not_authorized/0, transition_subscription/2]).
 
-%% % TODO: Classify RFC 6120 Stanza Error Condition
-%% Map condition atom to {TypeBin, ConditionBin}:
-%%   not_authorized      -> {<<"auth">>, <<"not-authorized">>}
-%%   forbidden           -> {<<"auth">>, <<"forbidden">>}
-%%   item_not_found      -> {<<"cancel">>, <<"item-not-found">>}
-%%   service_unavailable -> {<<"cancel">>, <<"service-unavailable">>}
-%%   bad_request         -> {<<"modify">>, <<"bad-request">>}
-%%   resource_constraint -> {<<"wait">>, <<"resource-constraint">>}
-%%   _                   -> {<<"cancel">>, <<"undefined-condition">>}
--spec classify_error_condition(atom()) -> {binary(), binary()}.
+%% @doc Map an RFC 6120 stanza error condition atom to its standardized {TypeBin, ElementBin} pair, defaulting unknown conditions to undefined-condition under cancel.
 classify_error_condition(_ConditionAtom) ->
-    {<<"cancel">>, <<"undefined-condition">>}.
+    ok.
 
-%% % TODO: Synthesize RFC 6120 Structured Stanza Error XML
-%% Return binary formatted as:
-%%   <StanzaTag type='error' id='Id' to='ToJid'><error type='Type'><Condition xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></StanzaTag>
--spec build_stanza_error(binary(), binary(), binary(), atom()) -> binary().
+%% @doc Build a structured RFC 6120 stanza error XML binary for StanzaTagBin with id, to, error type, and condition element scoped to xmpp-stanzas.
 build_stanza_error(_StanzaTagBin, _IdBin, _ToJidBin, _ConditionAtom) ->
     <<>>.
 
-%% % TODO: Synthesize RFC 6120 Stream Error <not-authorized/>
-%% Return <<" <stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>
--spec build_stream_not_authorized() -> binary().
+%% @doc Return the RFC 6120 stream-level not-authorized error element wrapped in stream:error under the xmpp-streams namespace.
 build_stream_not_authorized() ->
     <<>>.
 
-%% % TODO: RFC 6121 Roster Subscription State Machine
-%% Handle outbound and inbound events:
-%%   none + outbound_subscribed   -> to
-%%   none + inbound_subscribed    -> from
-%%   to   + inbound_subscribed    -> both
-%%   to   + outbound_unsubscribed -> none
-%%   from + outbound_subscribed   -> both
-%%   from + inbound_unsubscribed  -> none
-%%   both + outbound_unsubscribed -> from
-%%   both + inbound_unsubscribed  -> to
-%%   Any other combination       -> Current
--spec transition_subscription(atom(), atom()) -> atom().
-transition_subscription(Current, _Event) ->
-    Current.
+%% @doc Advance an RFC 6121 roster subscription state (none, to, from, or both) for an inbound or outbound subscription event, keeping Current on unrecognized transitions.
+transition_subscription(_Current, _Event) ->
+    ok.
 `,
     solutionCode: `-module(xmpp_error_and_roster).
 -export([classify_error_condition/1, build_stanza_error/4, build_stream_not_authorized/0, transition_subscription/2]).
 
+%% @doc Map an RFC 6120 stanza error condition atom to its standardized {TypeBin, ElementBin} pair, defaulting unknown conditions to undefined-condition under cancel.
 -spec classify_error_condition(atom()) -> {binary(), binary()}.
 classify_error_condition(not_authorized)      -> {<<"auth">>, <<"not-authorized">>};
 classify_error_condition(forbidden)           -> {<<"auth">>, <<"forbidden">>};
@@ -1673,15 +1718,18 @@ classify_error_condition(bad_request)         -> {<<"modify">>, <<"bad-request">
 classify_error_condition(resource_constraint) -> {<<"wait">>, <<"resource-constraint">>};
 classify_error_condition(_)                   -> {<<"cancel">>, <<"undefined-condition">>}.
 
+%% @doc Build a structured RFC 6120 stanza error XML binary for StanzaTagBin with id, to, error type, and condition element scoped to xmpp-stanzas.
 -spec build_stanza_error(binary(), binary(), binary(), atom()) -> binary().
 build_stanza_error(StanzaTagBin, IdBin, ToJidBin, ConditionAtom) ->
     {TypeBin, ElementBin} = classify_error_condition(ConditionAtom),
     <<"<", StanzaTagBin/binary, " type='error' id='", IdBin/binary, "' to='", ToJidBin/binary, "'><error type='", TypeBin/binary, "'><", ElementBin/binary, " xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></", StanzaTagBin/binary, ">">>.
 
+%% @doc Return the RFC 6120 stream-level not-authorized error element wrapped in stream:error under the xmpp-streams namespace.
 -spec build_stream_not_authorized() -> binary().
 build_stream_not_authorized() ->
     <<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>.
 
+%% @doc Advance an RFC 6121 roster subscription state (none, to, from, or both) for an inbound or outbound subscription event, keeping Current on unrecognized transitions.
 -spec transition_subscription(atom(), atom()) -> atom().
 transition_subscription(none, outbound_subscribed)   -> to;
 transition_subscription(none, inbound_subscribed)    -> from;
@@ -1710,7 +1758,10 @@ transition_subscription(Current, _)                  -> Current.
       },
     ],
     astRules: {
-      requiredCalls: ['classify_error_condition/1'],
+      requireTailRecursion: [],
+      forbiddenCalls: [],
+      requiredCalls: [],
+      requiredConstructs: ['bit_syntax'],
     },
     visibleTestCases: [
       {
