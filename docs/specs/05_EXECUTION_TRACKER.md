@@ -2672,6 +2672,10 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled cleanly (`erlc.exe -Wall +debug_info` exit code 0, 0 warnings), passed `bf_ast_verifier` (`supervisor:start_link/3`, `supervisor:which_children/1`), and passed all 3 chaos scenarios (`SOLUTION_L07_OK ast=passed chaos=3/3`).
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; full `TestChapter8Verification` passed all 7/7 Chapter 8 lessons (`ch08-l01` through `ch08-l07`, score=100, `10.41s` / `10.438s` package total); `TEST_CHAPTER=8 TestDynamicVisibleTestsCurriculum` passed all 7/7 Chapter 8 lessons (`ch08-l07 | 3/3 tests passed`, `14.36s` / `14.418s` total).
   - **Workspace Compilers**: `Select-String` confirmed `SPEC_COUNT=0` across `ch01`–`ch08`; `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+- [x] **154.3: Batched Chapter 8 Production Vercel Deployment**:
+  - Pushed commits `cc7e31a..43fd059` (`ch08-l01` through `ch08-l07`, governance specs, and incident/test harnesses) to `origin/main`.
+  - Deployed Chapter 8 (`dpl_JJeBVhNWuKWGractSWezj8ePVoZR`, `readyState: READY`) to `https://beamforge-ej1azaaqt-jaefer-kemals-projects.vercel.app` aliased to `https://beamforge-eight.vercel.app`.
+  - Verified live HTTP 200 responses via `npx vercel curl` across all Chapter 8 routes: `/syllabus`, `/learn/ch08-l01`, `/learn/ch08-l02`, `/learn/ch08-l03`, `/learn/ch08-l04`, `/learn/ch08-l05`, `/learn/ch08-l06`, and `/learn/ch08-l07`.
 
 
 
