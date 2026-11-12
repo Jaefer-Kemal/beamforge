@@ -38,10 +38,10 @@ Every lesson object MUST provide:
 - **`starterFiles` & `starterCode`**: Ready-to-edit Erlang module template with `-module(...)`, `-export([...])`, strict 10/10 EDoc `%% @doc` comments, and clean function skeletons.
   - **Strict `@doc` Contract Precision**: Every `@doc` line must accurately distinguish caller-supplied inputs from computed values, state whether invalid inputs reject/fail vs. return an error value in plain English (zero syntax spoilers), and avoid opaque jargon without concrete domain context.
   - **No Pre-Solved Core Logic**: Skeletons must provide neutral minimal return stubs (e.g. `ok.`, `{noreply, State}`, `{keep_state, Data}`). Never pre-solve core state transitions, fast-fails, or event matching clauses that give away the assignment's central challenge.
-- **`visibleTestCases`**: Array of `{ id, title, erlangCall, expectedOutput, explanation }` displayed in the **`🧪 Test Cases`** drawer and executed when clicking **`▷ Run`**.
+- **`visibleTestCases`**: Array of `{ id, title, erlangCall, expectedOutput, explanation }` displayed in the **`🧪 Test Cases`** drawer and executed when clicking **`▷ Run`**. Every single visible test case MUST be executed dynamically and pass 100% against `solutionFiles` (never skipped, miscounted, or out of sync with the Go runner), while `starterFiles` compiles cleanly and executes stubs safely without crashing the compilation pipeline.
 - **`astRules`**: Structured rule spec passed to `bf_ast_verifier:verify_rules/3` when clicking **`▶ Submit`**:
   - `requireTailRecursion: string[]` (e.g., `["process_order/2", "calculate_order_total/2", "restock/2"]`)
   - `forbiddenCalls: string[]` (e.g., `["lists:map", "lists:foldl", "lists:sum"]`)
   - `requiredCalls: string[]`
   - `requiredConstructs: string[]`
-- **`solutionFiles` & `solutionExplanation`**: Complete, verified Erlang implementation that passes 100% of `Submit` checks, plus a step-by-step explanation shown when the learner clicks **`👁 Solution`**.
+- **`solutionFiles` & `solutionExplanation`**: Complete, verified Erlang implementation (verified via `erlc.exe -Wall` + live OTP execution alongside the lesson's Parallel Worked Example) that passes 100% of `Run` visible tests and `Submit` checks without modification, plus a step-by-step explanation shown when the learner clicks **`👁 Solution`**.

@@ -2583,6 +2583,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `go test -count=1 -v -run TestChapter8Verification/ch08-l01 ./internal/bridge`: Uncached Go orchestrator run 100% passed (`score=100`, 5 stages).
   - `npx tsc --noEmit` & `npm run build`: Passed cleanly with 0 errors across 8/8 routes.
 
+## Phase 148: Codify Mandatory Curriculum Live Tri-Verification & Remediation Rule in Specs & AGENTS.md
+- [x] **148.1: Codify Live Tri-Verification & Remediation Governance**:
+  - Updated `AGENTS.md` (Gate 2), `docs/specs/08_PEDAGOGICAL_AUDIT_AND_ANTI_SPOILER_PROTOCOL.md` (§3.2), and `docs/specs/04_PEDAGOGY_AND_LESSON_TEMPLATE.md` (§2) to mandate extracting and verifying all three Erlang artifacts directly from `apps/web-ide/src/data/chapters/chXX.ts` before completing any lecture:
+    1. **Parallel Worked Example (`conceptMarkdown`)**: Compiles with `erlc.exe -Wall` (0 warnings) and executes live on OTP without crashes.
+    2. **Starter Pack (`starterCode` & `files[0].content`)**: Identical parity, compiles cleanly (`erlc.exe`), exports required APIs, and executes stubs safely even when exercise assertions fail.
+    3. **Solution Pack (`solutionCode` & `solutionFiles`) + Full Test Coverage**: Identical parity, compiles with `erlc.exe -Wall` (0 warnings), passes `bf_ast_verifier` rules, executes and passes **100% of ALL `visibleTestCases`** in `chXX.ts` (`TestDynamicVisibleTestsCurriculum`) plus **100% of Go `Run` & `Submit` stages** (`TestChapterNVerification`).
+    4. **Remediation Mandate**: Immediately fix and re-verify any failing parallel example, starter compilation issue, failing/skipped visible test, or `chXX.ts` / Go runner mismatch before concluding.
+- [x] **148.2: Verified on `ch08-l01` (`apps/web-ide/src/data/chapters/ch08.ts`)**:
+  - `ingestion_sup.erl` (extracted Parallel Worked Example): Compiled with `erlc.exe -Wall` (exit code 0) and executed live `start_link(stdout, 4)`, `supervisor:which_children/1`, `is_valid_sink/1`, `throughput_metric/2`, and `init/1` cleanly.
+  - `TEST_CHAPTER=8 go test -count=1 -v -run TestDynamicVisibleTestsCurriculum ./internal/bridge`: Passed `ch08-l01` (`3/3 tests passed`) and all 7 Chapter 8 lessons (`10.98s`).
+  - `go build ./...`, `npx tsc --noEmit`, `npm run build`: Passed cleanly with 0 errors.
+
 
 
 

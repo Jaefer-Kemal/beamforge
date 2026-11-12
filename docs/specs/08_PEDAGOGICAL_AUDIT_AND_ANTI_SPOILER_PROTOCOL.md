@@ -83,10 +83,15 @@ To avoid wasting agent context and developer time during iterative curriculum re
 1. **Single-Lecture Context Shielding**:
    - The agent must read, audit, and edit **only one lecture at a time** from `apps/web-ide/src/data/chapters/chXX.ts`.
    - Never load an entire multi-thousand-line chapter file into memory at once.
-2. **Fast Local Verification (Per Lecture)**:
-   - For every modified lecture, verify locally:
-     - `npm --prefix apps/web-ide run build` (Next.js type checking & 8/8 routes)
-     - `go test` / `go build` (Go orchestrator verifier)
+2. **Fast Local Verification & Mandatory Live Tri-Verification (Per Lecture)**:
+   - For every modified lecture, extract and run all three code artifacts directly from `apps/web-ide/src/data/chapters/chXX.ts` in addition to Go/Next.js builds:
+     1. **Parallel Worked Example**: Extract from `conceptMarkdown`, compile with `erlc.exe -Wall` (0 errors/warnings), and execute its exported functions/processes live on OTP to verify the worked example truly works without needing changes.
+     2. **Starter Pack (`starterCode` & `files`)**: Assert `starterCode === files[0].content`, compile with `erlc.exe` (exit code `0`), load cleanly, and run stubs/test calls to prove the starter pack compiles cleanly and executes safely even when exercise assertions fail (on `guided_demo`, it must pass 100%; on `incident_triage`, the intentional bug compiles and fails verification cleanly).
+     3. **Solution Pack (`solutionCode` & `solutionFiles`) & Full Visible/Hidden Test Audit**: Assert `solutionCode` parity with `solutionFiles`, compile with `erlc.exe -Wall` (0 errors/warnings), verify `astRules` via `bf_ast_verifier:verify_rules/3`, and execute **100% of ALL `visibleTestCases`** plus **100% of Go orchestrator `Run` & `Submit` assertions** (`go test -count=1 -v -run TestChapterNVerification ./internal/bridge` and `TEST_CHAPTER=N go test -count=1 -v -run TestDynamicVisibleTestsCurriculum ./internal/bridge`).
+     4. **Immediate Remediation Rule**: If *any* parallel example fails, *any* starter pack fails compilation, or *any* visible test case fails or is not executed (e.g., count mismatch or `chXX.ts` / Go runner divergence), fix the broken module, test cases, or Go orchestrator script immediately and re-run verification before finishing the lecture.
+   - Standard workspace checks per lecture:
+     - `npm --prefix apps/web-ide run build` & `npx tsc --noEmit` (Next.js type checking & 8/8 routes)
+     - `go build ./...` & `go test` (Go orchestrator verifier)
    - Commit locally with a descriptive git message:
      `git commit -m "fix(curriculum): de-spoil ch01-l03 parallel examples, assignment specs, and starter code"`
 3. **Batched Production Deployment (Per Chapter)**:

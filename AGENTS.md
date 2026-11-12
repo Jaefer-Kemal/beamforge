@@ -19,6 +19,11 @@ Before creating or editing any code file, you MUST open and read the relevant sp
 - Every Erlang module must compile cleanly with `erlc.exe`.
 - Every Go package must compile cleanly with `go build`.
 - The Next.js frontend must pass `npx tsc --noEmit` and `npm run build` with zero errors.
+- **Mandatory Curriculum Live Tri-Verification (When Auditing/Authoring Any Lecture):** Before finishing a lecture, extract and verify all three live Erlang artifacts directly from `apps/web-ide/src/data/chapters/chXX.ts`:
+  1. **Parallel Worked Example (`conceptMarkdown`)**: Compiles with `erlc.exe -Wall` (0 warnings) and runs live on OTP cleanly without crashes.
+  2. **Starter Pack (`starterCode` & `files[0].content`)**: Matches identically, compiles with `erlc.exe` (exit code `0`), loads, and runs starter stubs safely even when assertions fail (or fails cleanly at runtime rather than crashing on syntax errors).
+  3. **Solution Pack (`solutionCode` & `solutionFiles`) + Full Test Coverage**: Matches identically, compiles with `erlc.exe -Wall` (0 warnings), passes `bf_ast_verifier` rules, executes **100% of ALL `visibleTestCases`** in `chXX.ts` (`len(runRes.VisibleTests) == len(lesson.VisibleTests)`), and passes **100% of Go `Run` & `Submit` stages** (`TestChapterNVerification` + `TestDynamicVisibleTestsCurriculum`).
+  - **Remediation Mandate**: If *any* parallel example fails to compile/run, *any* starter pack fails compilation, or *any* visible/hidden test is skipped, fails, or diverges from the Go runner, fix the lesson code, visible test cases, or Go runner immediately and re-verify before finishing.
 
 ### Gate 3: Post-Flight Spec Cross-Check Audit
 Before completing your response, you MUST re-open `docs/specs/05_EXECUTION_TRACKER.md` and the relevant spec file, cross-check every single requirement item by item, update `docs/specs/05_EXECUTION_TRACKER.md`, and output a **Cross-Check Verification Table** in your response proving:
