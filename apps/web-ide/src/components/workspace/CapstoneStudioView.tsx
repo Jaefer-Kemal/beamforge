@@ -330,9 +330,20 @@ export function CapstoneStudioView() {
   const activeFile = files.find((f) => f.path === activeFilePath) || files[0];
   const currentFilePath = activeFile?.path || activeMilestone.targetFile;
   const requiredUnlockKey = FILE_TO_MILESTONE_KEY[currentFilePath] || `ch12-m${activeMilestoneIndex + 1}`;
+  const isCapstoneMasterCompleted =
+    (completedLevelIds || []).includes('ch12-capstone') || (completedLevelIds || []).includes('ch12-m6');
   // Free immediate access if already solved, otherwise gated by Option B modal
-  const isCurrentFileSolved = (completedLevelIds || []).includes(requiredUnlockKey) || (completedLevelIds || []).includes('ch12-m6');
+  const isCurrentFileSolved = (completedLevelIds || []).includes(requiredUnlockKey) || isCapstoneMasterCompleted;
   const isCurrentFileUnlocked = isCurrentFileSolved || (unlockedSolutionLessonIds || []).includes(requiredUnlockKey);
+
+  // Build workspace file map for Live XMPP Chat execution
+  const workspaceFilesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    (files || []).forEach((f) => {
+      map[f.path] = f.content;
+    });
+    return map;
+  }, [files]);
 
   // Handle milestone stepper pill click -> switches editor to target file and left pane to that milestone
   const handleMilestoneClick = (index: number) => {
@@ -364,17 +375,26 @@ export function CapstoneStudioView() {
   };
 
   // Check stage passes for milestone pills
+  const isFullCapstoneStages = useMemo(
+    () => (verificationStages || []).some((s) => s.id.startsWith('milestone_')),
+    [verificationStages]
+  );
+
   const milestonePassStatus = useMemo(() => {
     const map: Record<number, boolean> = {};
-    const isMaster = (completedLevelIds || []).includes('ch12-m6');
     CH12_CAPSTONE_MILESTONES.forEach((_m, idx) => {
       const milestoneKey = `ch12-m${idx + 1}`;
-      const isSolvedInDb = isMaster || (completedLevelIds || []).includes(milestoneKey);
-      const stagePassed = verificationStages && verificationStages[idx]?.status === 'passed';
+      const aliasKey = idx < 5 ? `ch12-l0${idx + 1}` : 'ch12-capstone';
+      const isSolvedInDb =
+        isCapstoneMasterCompleted ||
+        (completedLevelIds || []).includes(milestoneKey) ||
+        (completedLevelIds || []).includes(aliasKey);
+      const stagePassed =
+        isFullCapstoneStages && verificationStages && verificationStages[idx]?.status === 'passed';
       map[idx] = Boolean(isSolvedInDb || stagePassed);
     });
     return map;
-  }, [verificationStages, completedLevelIds]);
+  }, [verificationStages, completedLevelIds, isCapstoneMasterCompleted, isFullCapstoneStages]);
 
   const passedCount = useMemo(() => {
     return Object.values(milestonePassStatus).filter(Boolean).length;
@@ -418,24 +438,36 @@ export function CapstoneStudioView() {
     }
   };
 
-  // Execute Submit
+  const targetExerciseId = MILESTONE_LESSON_IDS[activeMilestoneIndex] || 'ch12-capstone';
+
+  // Execute Submit for the active milestone (M1-M5 run per-milestone AST+unit checks; M6 runs full 6-stage Chaos suite)
   const handleSubmit = async () => {
     setIsDrawerOpen(true);
     setDrawerTab('stages');
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
       setMobileTab('results');
     }
-    await runVerificationSuite();
+    await runVerificationSuite(targetExerciseId);
   };
 
-  // Execute Run
+  // Execute full 6-stage E2E + Chaos verification explicitly from any milestone
+  const handleSubmitFullCapstone = async () => {
+    setIsDrawerOpen(true);
+    setDrawerTab('stages');
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setMobileTab('results');
+    }
+    await runVerificationSuite('ch12-capstone');
+  };
+
+  // Execute Run for the active milestone
   const handleRun = async () => {
     setIsDrawerOpen(true);
     setDrawerTab('terminal');
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
       setMobileTab('results');
     }
-    await runCode();
+    await runCode(false, targetExerciseId);
   };
 
   const handleCopySolution = () => {
@@ -446,12 +478,16 @@ export function CapstoneStudioView() {
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
+  // Keep latest handleSubmit in ref so Cmd/Ctrl+Enter submits the active milestone
+  const handleSubmitRef = useRef(handleSubmit);
+  handleSubmitRef.current = handleSubmit;
+
   // Keyboard shortcut Ctrl+Enter / Cmd+Enter to submit
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
-        handleSubmit();
+        handleSubmitRef.current();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -773,7 +809,9 @@ export function CapstoneStudioView() {
                   key={cf.path}
                   onClick={() => {
                     openFile(cf.path);
-                    setActiveMilestoneIndex(cf.milestoneIdx);
+                    if (!(cf.milestoneIdx === 0 && activeMilestoneIndex === 5)) {
+                      setActiveMilestoneIndex(cf.milestoneIdx);
+                    }
                   }}
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-medium whitespace-nowrap transition-all duration-200 cursor-pointer"
                   style={{
@@ -932,7 +970,7 @@ export function CapstoneStudioView() {
             id="submit-btn"
             onClick={handleSubmit}
             disabled={isVerifying || isRunning || !isBackendOnline}
-            title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to submit.' : 'Submit capstone milestones'}
+            title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to submit.' : activeMilestoneIndex < 5 ? `Verify Milestone ${activeMilestone.number} (${activeMilestone.targetFile})` : 'Submit full 6-milestone XMPP Capstone'}
             className={`btn-submit flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${isVerifying || isRunning || !isBackendOnline ? 'pointer-events-none' : ''}`}
           >
             {isVerifying ? (
@@ -942,7 +980,17 @@ export function CapstoneStudioView() {
             ) : (
               <ShieldCheck className="w-3.5 h-3.5" />
             )}
-            <span>{isVerifying ? 'Verifying 6 Milestones...' : !isBackendOnline ? 'Submit (Offline)' : 'Submit'}</span>
+            <span>
+              {isVerifying
+                ? activeMilestoneIndex < 5
+                  ? `Verifying M${activeMilestone.number}...`
+                  : 'Verifying 6 Milestones...'
+                : !isBackendOnline
+                ? 'Submit (Offline)'
+                : activeMilestoneIndex < 5
+                ? `Verify M${activeMilestone.number}`
+                : 'Submit Capstone'}
+            </span>
           </button>
 
           {/* Run & Simulate Button */}
@@ -1065,7 +1113,9 @@ export function CapstoneStudioView() {
                       : '1px solid transparent',
                   }}
                 >
-                  Verification ({passedCount}/{verificationStages.length || 6})
+                  <span>
+                    Verification ({passedCount}/6 Milestones)
+                  </span>
                 </button>
                 <button
                   onClick={() => setDrawerTab('terminal')}
@@ -1179,6 +1229,26 @@ export function CapstoneStudioView() {
               )}
               {drawerTab === 'stages' && (
                 <div className="space-y-2">
+                  <div className="flex items-center justify-between pb-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                      {isFullCapstoneStages ? '6-Stage E2E + Chaos Verification' : `Milestone ${activeMilestone.number} Stage Checks`}
+                    </span>
+                    {activeMilestoneIndex < 5 && isBackendOnline && (
+                      <button
+                        type="button"
+                        onClick={handleSubmitFullCapstone}
+                        disabled={isVerifying || isRunning}
+                        className="px-2 py-0.5 rounded-md text-[11px] font-bold border transition-colors cursor-pointer disabled:opacity-40"
+                        style={{
+                          background: isDark ? 'rgba(245, 158, 11, 0.14)' : 'rgba(245, 158, 11, 0.10)',
+                          borderColor: 'rgba(245, 158, 11, 0.35)',
+                          color: isDark ? '#FCD34D' : '#D97706',
+                        }}
+                      >
+                        Run Full 6/6 Capstone
+                      </button>
+                    )}
+                  </div>
                   {verificationStages.length > 0 ? (
                     verificationStages.map((stage) => {
                       const isPassed = stage.status === 'passed';
@@ -1314,7 +1384,10 @@ export function CapstoneStudioView() {
                   <LiveXmppChatSimulator
                     isDark={isDark}
                     milestoneStatus={milestonePassStatus}
-                    isMasterUnlocked={isCurrentFileSolved}
+                    isMasterUnlocked={isCapstoneMasterCompleted}
+                    workspaceFiles={workspaceFilesMap}
+                    solutionFiles={CH12_SOLUTION_FILES}
+                    isBackendOnline={isBackendOnline}
                   />
                 </div>
               )}
@@ -1489,23 +1562,40 @@ export function CapstoneStudioView() {
           )}
           {drawerTab === 'stages' && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between pb-1">
+              <div className="flex items-center justify-between gap-2 pb-1">
                 <span className="text-xs font-bold uppercase tracking-wider" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                  6-Stage OTP Capstone Verification
+                  {isFullCapstoneStages ? '6-Stage OTP Capstone Verification' : `Milestone ${activeMilestone.number} Verification`}
                 </span>
-                <span
-                  className="text-xs font-bold px-2 py-0.5 rounded-full"
-                  style={{
-                    background: passedCount === 6
-                      ? 'rgba(16,185,129,0.20)'
-                      : passedCount > 0
-                      ? 'rgba(245,158,11,0.20)'
-                      : 'rgba(239,68,68,0.20)',
-                    color: passedCount === 6 ? '#10B981' : passedCount > 0 ? '#F59E0B' : '#EF4444',
-                  }}
-                >
-                  {passedCount}/6 Milestones Passed
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {activeMilestoneIndex < 5 && isBackendOnline && (
+                    <button
+                      type="button"
+                      onClick={handleSubmitFullCapstone}
+                      disabled={isVerifying || isRunning}
+                      className="text-[10px] font-bold px-2 py-0.5 rounded-full border cursor-pointer disabled:opacity-40"
+                      style={{
+                        background: 'rgba(245,158,11,0.12)',
+                        borderColor: 'rgba(245,158,11,0.35)',
+                        color: isDark ? '#FCD34D' : '#D97706',
+                      }}
+                    >
+                      Run Full 6/6
+                    </button>
+                  )}
+                  <span
+                    className="text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={{
+                      background: passedCount === 6
+                        ? 'rgba(16,185,129,0.20)'
+                        : passedCount > 0
+                        ? 'rgba(245,158,11,0.20)'
+                        : 'rgba(239,68,68,0.20)',
+                      color: passedCount === 6 ? '#10B981' : passedCount > 0 ? '#F59E0B' : '#EF4444',
+                    }}
+                  >
+                    {passedCount}/6 Passed
+                  </span>
+                </div>
               </div>
               {verificationStages.length > 0 ? (
                 <div className="space-y-1.5">
@@ -1639,7 +1729,10 @@ export function CapstoneStudioView() {
               <LiveXmppChatSimulator
                 isDark={isDark}
                 milestoneStatus={milestonePassStatus}
-                isMasterUnlocked={isCurrentFileSolved}
+                isMasterUnlocked={isCapstoneMasterCompleted}
+                workspaceFiles={workspaceFilesMap}
+                solutionFiles={CH12_SOLUTION_FILES}
+                isBackendOnline={isBackendOnline}
               />
             </div>
           )}
@@ -1728,7 +1821,17 @@ export function CapstoneStudioView() {
             ) : (
               <ShieldCheck className="w-3.5 h-3.5" />
             )}
-            <span>{isVerifying ? 'Verifying...' : !isBackendOnline ? 'Submit (Offline)' : 'Submit'}</span>
+            <span>
+              {isVerifying
+                ? activeMilestoneIndex < 5
+                  ? `Verifying M${activeMilestone.number}...`
+                  : 'Verifying...'
+                : !isBackendOnline
+                ? 'Submit (Offline)'
+                : activeMilestoneIndex < 5
+                ? `Verify M${activeMilestone.number}`
+                : 'Submit Capstone'}
+            </span>
           </button>
         </div>
       </div>

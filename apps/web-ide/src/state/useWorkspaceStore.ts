@@ -1217,24 +1217,42 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         currentUser,
       } = get();
 
-      const level = getLevelById(levelId);
-      const lessonObj = getLessonById(levelId);
-      const isAlreadyCompleted = completedLevelIds.includes(levelId);
-      const isAlreadyCompletedWithXp = (completedWithXpLevelIds || []).includes(levelId);
+      const ch12MilestoneMatch = levelId.match(/^ch12-(?:l0([1-5])|m([1-5]))$/);
+      const ch12MilestoneNum = ch12MilestoneMatch ? Number(ch12MilestoneMatch[1] || ch12MilestoneMatch[2]) : null;
+      const canonicalLevelId = ch12MilestoneNum ? `ch12-m${ch12MilestoneNum}` : levelId;
+      const isCh12SubMilestone = ch12MilestoneNum !== null;
+
+      const level = getLevelById(canonicalLevelId) || getLevelById(levelId);
+      const lessonObj = getLessonById(canonicalLevelId) || getLessonById(levelId);
+      const isAlreadyCompleted =
+        completedLevelIds.includes(canonicalLevelId) || completedLevelIds.includes(levelId);
+      const isAlreadyCompletedWithXp =
+        (completedWithXpLevelIds || []).includes(canonicalLevelId) ||
+        (completedWithXpLevelIds || []).includes(levelId);
+      const isCapstoneFinal =
+        canonicalLevelId === 'ch12-capstone' || canonicalLevelId === 'ch12-m6' || canonicalLevelId === 'ch12-l06';
+      const anyCh12SolutionUnlocked = ['ch12-m1', 'ch12-m2', 'ch12-m3', 'ch12-m4', 'ch12-m5', 'ch12-m6', 'ch12-capstone'].some(
+        (k) => (unlockedSolutionLessonIds || []).includes(k)
+      );
       const isSolutionUnlocked =
+        (unlockedSolutionLessonIds || []).includes(canonicalLevelId) ||
         (unlockedSolutionLessonIds || []).includes(levelId) ||
-        (unlockedSolutionLessonIds || []).includes(activeExerciseId);
+        (isCapstoneFinal ? anyCh12SolutionUnlocked : (unlockedSolutionLessonIds || []).includes(activeExerciseId));
       const isTesterMode = devModeUnlockedAll;
 
-      // Determine XP reward: If completed previously with XP, 0 XP. If in tester mode or solution viewed, 0 XP.
-      // If completed previously in Tester Mode (with 0 XP) and now solved in normal mode without solution, award XP!
-      const rawReward = lessonObj?.xpReward || level?.xpReward || 100;
+      // Sub-milestones (ch12-m1..ch12-m5) track granular mastery (50 XP each max when clean); ch12-capstone awards the capstone reward.
+      const rawReward = isCh12SubMilestone ? 50 : (lessonObj?.xpReward || level?.xpReward || 100);
       const effectiveXpReward = isTesterMode || isSolutionUnlocked || isAlreadyCompletedWithXp ? 0 : rawReward;
 
-      const finalCompleted = isAlreadyCompleted ? [...completedLevelIds] : [...completedLevelIds, levelId];
+      const finalCompleted = isAlreadyCompleted ? [...completedLevelIds] : [...completedLevelIds, canonicalLevelId];
+      if (isCapstoneFinal) {
+        for (const mKey of ['ch12-m1', 'ch12-m2', 'ch12-m3', 'ch12-m4', 'ch12-m5', 'ch12-m6']) {
+          if (!finalCompleted.includes(mKey)) finalCompleted.push(mKey);
+        }
+      }
       const finalCompletedWithXp =
         effectiveXpReward > 0 && !isAlreadyCompletedWithXp
-          ? [...(completedWithXpLevelIds || []), levelId]
+          ? [...(completedWithXpLevelIds || []), canonicalLevelId]
           : [...(completedWithXpLevelIds || [])];
 
       const newXp = totalXp + effectiveXpReward;
@@ -1337,6 +1355,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       const newlyEarnedBadges = badgesAfter.filter((b) => !badgesBefore.some((prev) => prev.id === b.id));
 
       const isMilestoneType =
+        isCh12SubMilestone ||
         lessonObj?.lessonType === 'problem_set' ||
         lessonObj?.lessonType === 'incident_triage' ||
         lessonObj?.lessonType === 'capstone_studio' ||
@@ -1345,10 +1364,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       // Next Lesson calculation for post-submission "Proceed to Next Lesson" toast
       const currIdx = ALL_LESSONS_FLAT.findIndex((l) => l.id === levelId);
       const nextLesson = currIdx >= 0 && currIdx < ALL_LESSONS_FLAT.length - 1 ? ALL_LESSONS_FLAT[currIdx + 1] : null;
-      const isFinalCurriculumLesson = currIdx === ALL_LESSONS_FLAT.length - 1 || levelId === 'ch12-l06';
+      const isFinalCurriculumLesson =
+        currIdx === ALL_LESSONS_FLAT.length - 1 ||
+        canonicalLevelId === 'ch12-capstone' ||
+        canonicalLevelId === 'ch12-m6' ||
+        canonicalLevelId === 'ch12-l06';
 
       let toastPayload: SuccessToastData | null = null;
-      if (nextLesson && !isFinalCurriculumLesson) {
+      if (nextLesson && !isFinalCurriculumLesson && !isCh12SubMilestone) {
         const isNewChapter = nextLesson.chapterNumber !== (lessonObj?.chapterNumber || 1);
         toastPayload = {
           lessonId: levelId,

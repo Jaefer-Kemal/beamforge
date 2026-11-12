@@ -3009,6 +3009,20 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter12Verification` passed all 6 milestones (`ch12-l01`–`ch12-l05` + `ch12-capstone` with 6/6 stages in `17.20s` / `17.227s` total); `TEST_CHAPTER=12 TestDynamicVisibleTestsCurriculum` passed (`ch12-capstone | 6/6 tests passed` in `4.35s` / `4.399s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 183: Chapter 12 Studio Full-Stack Alignment — M1 `billing_sup` Removal, Per-Milestone Grading, & Live OTP XMPP Chat Cluster
+- [x] **183.1: Pedagogical & Metadata Alignment Across `ch12.ts`, `badges.ts`, and `useWorkspaceStore.ts`**:
+  - Removed redundant `billing_sup` Chunked Reference Architecture from `ch12-m1` (`apps/web-ide/src/data/chapters/ch12.ts`, `lines 164–166`) since learners already mastered `supervisor` prior to Capstone and `xmpp_sup` starter exports already frame `start_link/0`, `stop/0`, and `init/1`.
+  - Updated `CH12_CAPSTONE_MILESTONES[5]` (`m6-chaos`, `lines 68–77`) to align with live Stage 6 Chaos injection (`exit(whereis(xmpp_router), kill)` zero-loss recovery alongside `xmpp_session_registry` `rest_for_one` cascade).
+  - Aligned final lesson ID in `apps/web-ide/src/types/badges.ts` (`line 169`: `'ch12-capstone'`) and `apps/web-ide/src/state/useWorkspaceStore.ts` (`lines 1208–1265`, `1363–1370`): normalized `ch12-l01`..`ch12-l05` / `ch12-m1`..`ch12-m5` milestone completions cleanly into `ch12-m1`..`ch12-m5`, added `ch12-capstone` solution-unlock XP check across all milestone keys, and avoided spurious next-chapter toasts on intermediate milestone passes.
+- [x] **183.2: Per-Milestone Studio Grading (`CapstoneStudioView.tsx`) & Real OTP XMPP Chat Endpoint (`POST /api/v1/xmpp/chat`)**:
+  - Wired `MILESTONE_LESSON_IDS` (`ch12-l01`..`ch12-l05`, `ch12-capstone`) in `apps/web-ide/src/components/workspace/CapstoneStudioView.tsx` (`lines 332–466`, `968–980`, `1230–1250`, `1563–1595`) for per-milestone `Verify M{N}` / `Run` / `Cmd+Enter` plus explicit `Run Full 6/6 Capstone`, kept M6 sticky on `xmpp_sup.erl` tab selection, and fixed `isMasterUnlocked` gating to pass `isCapstoneMasterCompleted`.
+  - Reworked `apps/web-ide/src/components/workspace/LiveXmppChatSimulator.tsx` to eliminate all stale mock labels (`route_stanza/3`, `unregister_session/1`, `offline_store` map, 2 permanent workers under `xmpp_sup`, `xmpp_sup (Chaos)`) and execute real live chat, offline FIFO spool/drain, pre-auth `<not-authorized/>` injection guard, and live `exit(whereis(xmpp_router), kill)` recovery via `POST /api/v1/xmpp/chat`.
+  - Implemented `RunXmppChat` (`services/orchestrator/internal/bridge/xmpp_chat_runner.go`), `POST /api/v1/xmpp/chat` (`services/orchestrator/cmd/server/main.go`, `lines 225–279`), `ch12-m1`..`ch12-m6` runner aliases (`services/orchestrator/internal/bridge/erl_runner_chapters.go`), and end-to-end tests (`services/orchestrator/internal/bridge/xmpp_chat_test.go`).
+- [x] **183.3: Full-Stack Live Verification**:
+  - `node verify_ch12_full_stack.mjs` passed (`M1 billing_sup` absent, 0 `TODO`s / ASCII boxes, 0 stale simulator strings, all 5 starters & all 5 solutions compiled `-Wall -Werror`).
+  - `go build ./...` exited 0; `TestChapter12Verification` (all 6 milestones `15.44s`), `TestRunXmppChatLiveCluster` (all 7 scenarios `19.83s`), and `TEST_CHAPTER=12 TestDynamicVisibleTestsCurriculum` (`ch12-capstone | 6/6 tests passed` in `3.31s` / `3.331s`) all passed (`-count=1`).
+  - `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited with code 0.
+
 
 
 

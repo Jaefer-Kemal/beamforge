@@ -71,9 +71,9 @@ export const CH12_CAPSTONE_MILESTONES: CapstoneMilestone[] = [
     targetFile: 'src/xmpp_sup.erl',
     targetFunctions: ['start_link/0', 'stop/0', 'init/1'],
     description:
-      'Subject the 5-module cluster to dynamic fault injection. Verify that killing xmpp_session_registry triggers rest_for_one supervisor cascades, safely terminating and restarting xmpp_router while preserving tree stability.',
+      'Subject the integrated 5-module XMPP cluster to live Chaos Monkey fault injection: verify that killing xmpp_router (#2) restarts only the router while keeping xmpp_session_registry (#1) and active ETS sessions intact for zero-loss delivery, and killing xmpp_session_registry (#1) cascades under rest_for_one.',
     verificationHint:
-      'Boot xmpp_sup, inject an abnormal exit into xmpp_session_registry, and verify the supervisor restarts both registry and router with fresh PIDs.',
+      'Boot xmpp_sup, verify full 5-module routing, and inject exit(whereis(xmpp_router), kill) to confirm registry preservation and zero-loss message recovery (plus rest_for_one cascade when killing xmpp_session_registry).',
   },
 ];
 
@@ -161,42 +161,7 @@ supervisor:stop(SupRef) -> ok
   Types: SupRef = pid() | atom() | {global, term()} | {via, module(), term()} | {atom(), node()}
 \`\`\`
 
-Attach to local process registration with \`whereis/1\` when implementing \`stop/0\` so calling \`stop/0\` on an already-stopped supervisor returns \`ok\` instead of raising \`noproc\` *(see attached OTP \`supervisor\` card below)*.
-
----
-
-### Chunked Reference Architecture (Domain-Neutral OTP Anatomy)
-
-The generic \`billing_sup\` skeleton below shows how \`start_link/0\`, \`stop/0\`, and \`init/1\` fit together using OTP 29 map-based flags and child specifications (for a separate billing pipeline with different strategy and budget limits):
-
-\`\`\`erlang
--module(billing_sup).
--behaviour(supervisor).
--export([start_link/0, stop/0, init/1]).
-
-start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
-stop() ->
-    case whereis(?MODULE) of
-        undefined -> ok;
-        Pid -> supervisor:stop(Pid)
-    end.
-
-init([]) ->
-    SupFlags = #{strategy => one_for_all, intensity => 3, period => 30},
-    Children = [
-        #{
-            id => tax_rate_cache,
-            start => {tax_rate_cache, start_link, []},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [tax_rate_cache]
-        }
-    ],
-    {ok, {SupFlags, Children}}.
-\`\`\`
+Attach to local process registration with \`whereis/1\` when implementing \`stop/0\` so calling \`stop/0\` on an already-stopped supervisor returns \`ok\` instead of raising \`noproc\` *(see starter export stubs and the attached OTP \`supervisor\` card below)*.
 
 ---
 

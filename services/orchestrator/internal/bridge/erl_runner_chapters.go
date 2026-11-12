@@ -3723,7 +3723,7 @@ io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllRes
 init:stop().
 `, true
 
-	case "ch12-l01":
+	case "ch12-l01", "ch12-m1":
 		return `
 catch xmpp_sup:stop(),
 catch (case whereis(xmpp_sup) of undefined -> ok; SupP -> exit(SupP, kill) end),
@@ -3774,7 +3774,7 @@ io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllRes
 init:stop().
 `, true
 
-	case "ch12-l02":
+	case "ch12-l02", "ch12-m2":
 		return `
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
@@ -3820,7 +3820,7 @@ io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllRes
 init:stop().
 `, true
 
-	case "ch12-l03":
+	case "ch12-l03", "ch12-m3":
 		return `
 catch xmpp_session_registry:stop(),
 catch ets:delete(xmpp_sessions_tab),
@@ -3874,7 +3874,7 @@ io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllRes
 init:stop().
 `, true
 
-	case "ch12-l04":
+	case "ch12-l04", "ch12-m4":
 		return `
 catch xmpp_session_registry:stop(),
 catch ets:delete(xmpp_sessions_tab),
@@ -3928,7 +3928,7 @@ io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllRes
 init:stop().
 `, true
 
-	case "ch12-l05":
+	case "ch12-l05", "ch12-m5":
 		return `
 catch xmpp_router:stop(),
 catch xmpp_session_registry:stop(),
@@ -3984,7 +3984,7 @@ io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllRes
 init:stop().
 `, true
 
-	case "ch12-capstone", "ch12-l06", "xmpp_capstone":
+	case "ch12-capstone", "ch12-l06", "ch12-m6", "xmpp_capstone":
 		return `
 catch xmpp_router:stop(),
 catch xmpp_session_registry:stop(),
@@ -8730,7 +8730,7 @@ end,
 Stages = [CompileStage, S1_Ast, S2_UnitLifecycleAndRouting, S3_UnitPresenceBroadcast]
 `, wsDir, wsDir), true
 
-	case "ch12-l01":
+	case "ch12-l01", "ch12-m1":
 		return `
 catch xmpp_sup:stop(),
 catch (case whereis(xmpp_sup) of undefined -> ok; SupP -> exit(SupP, kill) end),
@@ -8851,7 +8851,7 @@ catch xmpp_sup:stop(),
 Stages = [S1, S2, S3, S4]
 `, true
 
-	case "ch12-l02":
+	case "ch12-l02", "ch12-m2":
 		return `
 S1 = try
     Exports = xmpp_stream_parser:module_info(exports),
@@ -8971,7 +8971,7 @@ end,
 Stages = [S1, S2, S3, S4]
 `, true
 
-	case "ch12-l03":
+	case "ch12-l03", "ch12-m3":
 		return `
 catch xmpp_session_registry:stop(),
 catch ets:delete(xmpp_sessions_tab),
@@ -9104,7 +9104,7 @@ catch ets:delete(xmpp_sessions_tab),
 Stages = [S1, S2, S3, S4]
 `, true
 
-	case "ch12-l04":
+	case "ch12-l04", "ch12-m4":
 		return `
 catch xmpp_session_registry:stop(),
 catch ets:delete(xmpp_sessions_tab),
@@ -9238,7 +9238,7 @@ catch ets:delete(xmpp_sessions_tab),
 Stages = [S1, S2, S3, S4]
 `, true
 
-	case "ch12-l05":
+	case "ch12-l05", "ch12-m5":
 		return `
 catch xmpp_router:stop(),
 catch xmpp_session_registry:stop(),
@@ -9368,7 +9368,7 @@ catch ets:delete(xmpp_sessions_tab),
 Stages = [S1, S2, S3, S4]
 `, true
 
-	case "ch12-capstone", "ch12-l06", "xmpp_capstone":
+	case "ch12-capstone", "ch12-l06", "ch12-m6", "xmpp_capstone":
 		return `
 catch xmpp_router:stop(),
 catch xmpp_session_registry:stop(),

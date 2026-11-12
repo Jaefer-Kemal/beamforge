@@ -166,7 +166,7 @@ export const CHAPTER_FINAL_LESSON_IDS: Record<number, string> = {
   9: 'ch09-l08',
   10: 'ch10-l07',
   11: 'ch11-l08',
-  12: 'ch12-m6',
+  12: 'ch12-capstone',
 };
 
 // Check if a badge is unlocked for a given user

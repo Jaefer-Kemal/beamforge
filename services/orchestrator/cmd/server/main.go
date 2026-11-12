@@ -224,6 +224,61 @@ func main() {
 		})
 	})
 
+	// 6. REST Live XMPP Capstone Chat & Chaos Endpoint
+	mux.HandleFunc("/api/v1/xmpp/chat", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			SessionID       string            `json:"session_id"`
+			Action          string            `json:"action"`
+			Message         string            `json:"message"`
+			MsgID           string            `json:"msg_id"`
+			BobOnline       bool              `json:"bob_online"`
+			OfflineMessages []string          `json:"offline_messages"`
+			Files           map[string]string `json:"files"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+			return
+		}
+
+		sessionID := req.SessionID
+		if sessionID == "" {
+			sessionID = fmt.Sprintf("xmpp-chat-%d", time.Now().UnixNano())
+		}
+
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+
+		resp, err := runner.RunXmppChat(ctx, session, bridge.XmppChatRequest{
+			Action:          req.Action,
+			Message:         req.Message,
+			MsgID:           req.MsgID,
+			BobOnline:       req.BobOnline,
+			OfflineMessages: req.OfflineMessages,
+			Files:           req.Files,
+		})
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": err.Error()})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
 	// CORS Wrapper
 	handler := enableCORS(mux)
 

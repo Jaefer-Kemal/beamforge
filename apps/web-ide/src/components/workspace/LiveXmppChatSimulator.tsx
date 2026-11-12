@@ -19,7 +19,9 @@ import {
   Server,
   Lock,
   Eye,
+  AlertTriangle,
 } from 'lucide-react';
+import { getOrchestratorHttpUrl } from '../../lib/orchestratorConfig';
 
 interface StanzaLog {
   id: string;
@@ -49,7 +51,7 @@ const INITIAL_STANZAS: StanzaLog[] = [
     timestamp: '10:14:02.102',
     direction: 'in',
     source: 'alice@beamforge.local',
-    xml: "<stream:stream to='beamforge.local' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'>",
+    xml: "<stream:stream to='beamforge.local'>",
     detail: 'Incremental XML stream initiation header',
     handledByModule: 'xmpp_stream_parser.erl (M2)',
   },
@@ -58,8 +60,8 @@ const INITIAL_STANZAS: StanzaLog[] = [
     timestamp: '10:14:02.115',
     direction: 'out',
     source: 'beamforge.local',
-    xml: "<stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>",
-    detail: 'Advertising supported SASL authentication mechanisms',
+    xml: "<stream:stream from='beamforge.local' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'><stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>",
+    detail: 'Advertising supported SASL PLAIN authentication mechanism',
     handledByModule: 'xmpp_c2s_statem.erl (M4)',
   },
   {
@@ -67,8 +69,8 @@ const INITIAL_STANZAS: StanzaLog[] = [
     timestamp: '10:14:02.138',
     direction: 'in',
     source: 'alice@beamforge.local',
-    xml: "<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>AGFsaWNlAHBhc3N3b3Jk</auth>",
-    detail: 'Base64 RFC 4616 SASL authentication credentials',
+    xml: "<auth mechanism='PLAIN'>alice</auth>",
+    detail: 'SASL PLAIN authentication token',
     handledByModule: 'xmpp_c2s_statem.erl (M4)',
   },
   {
@@ -85,7 +87,7 @@ const INITIAL_STANZAS: StanzaLog[] = [
     timestamp: '10:14:02.160',
     direction: 'in',
     source: 'alice@beamforge.local',
-    xml: "<iq type='set' id='bind-1'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><resource>web</resource></bind></iq>",
+    xml: "<iq id='bind-1'><resource>web</resource></iq>",
     detail: 'Resource binding request for alice@beamforge.local/web',
     handledByModule: 'xmpp_c2s_statem.erl (M4)',
   },
@@ -95,17 +97,8 @@ const INITIAL_STANZAS: StanzaLog[] = [
     direction: 'out',
     source: 'beamforge.local',
     xml: "<iq type='result' id='bind-1'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>alice@beamforge.local/web</jid></bind></iq>",
-    detail: 'Registration in ETS session registry with monitor/2 attached',
+    detail: 'Registered Full JID in public ETS table with unidirectional erlang:monitor/2',
     handledByModule: 'xmpp_session_registry.erl (M3)',
-  },
-  {
-    id: 'st-07',
-    timestamp: '10:14:02.180',
-    direction: 'in',
-    source: 'alice@beamforge.local/web',
-    xml: "<presence><priority>10</priority><show>chat</show><status>Online in BeamForge</status></presence>",
-    detail: 'Presence broadcast received with priority 10',
-    handledByModule: 'xmpp_router.erl (M5)',
   },
 ];
 
@@ -114,21 +107,11 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     id: 'msg-1',
     sender: 'alice',
     senderJid: 'alice@beamforge.local/web',
-    body: 'Hey Bob! The 6-milestone OTP XMPP server is live and routing stanzas!',
+    body: 'Cluster booted! Send a message below to route live stanzas through your 5 OTP modules.',
     timestamp: '10:14:05',
     status: 'delivered',
-    rawXml: `<message from="alice@beamforge.local/web" to="bob@beamforge.local/mobile" type="chat" id="m-101">\n  <body>Hey Bob! The 6-milestone OTP XMPP server is live and routing stanzas!</body>\n</message>`,
-    routedVia: 'xmpp_router:route/2 -> ETS PID <0.142.0>',
-  },
-  {
-    id: 'msg-2',
-    sender: 'bob',
-    senderJid: 'bob@beamforge.local/mobile',
-    body: 'Awesome Alice! Received your message over TCP socket via {active, once} flow control.',
-    timestamp: '10:14:07',
-    status: 'delivered',
-    rawXml: `<message from="bob@beamforge.local/mobile" to="alice@beamforge.local/web" type="chat" id="m-102">\n  <body>Awesome Alice! Received your message over TCP socket via {active, once} flow control.</body>\n</message>`,
-    routedVia: 'xmpp_router:route/2 -> ETS PID <0.138.0>',
+    rawXml: `<message from='alice@beamforge.local/web' to='bob@beamforge.local' id='m-101' type='chat'><body>Cluster booted!</body></message>`,
+    routedVia: 'xmpp_router:route_stanza/3 -> ETS lookup_by_jid/1',
   },
 ];
 
@@ -136,14 +119,52 @@ interface LiveXmppChatSimulatorProps {
   isDark: boolean;
   milestoneStatus?: Record<number, boolean>;
   isMasterUnlocked?: boolean;
+  workspaceFiles?: Record<string, string>;
+  solutionFiles?: Record<string, string>;
+  isBackendOnline?: boolean;
+}
+
+interface BackendChatResponse {
+  ok: boolean;
+  compile_ok?: boolean;
+  action?: string;
+  delivered?: boolean;
+  spooled_offline?: boolean;
+  offline_count?: number;
+  raw_xml?: string;
+  drained_xmls?: string[];
+  stanzas?: Array<{
+    direction: 'in' | 'out' | 'router';
+    source: string;
+    target?: string;
+    xml: string;
+    detail: string;
+    handled_by_module: string;
+  }>;
+  reg_before?: string;
+  reg_after?: string;
+  router_before?: string;
+  router_after?: string;
+  notice?: string;
+  routed_via?: string;
+  error?: string;
+  time_ms?: number;
+}
+
+function extractBodyFromXml(xml: string): string {
+  const match = xml.match(/<body>([\s\S]*?)<\/body>/);
+  if (!match) return xml;
+  return match[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 }
 
 export function LiveXmppChatSimulator({
   isDark,
   milestoneStatus,
   isMasterUnlocked = false,
+  workspaceFiles,
+  solutionFiles,
+  isBackendOnline = true,
 }: LiveXmppChatSimulatorProps) {
-  // Granular milestone activation resolution
   const m1Passed = Boolean(milestoneStatus?.[0] || isMasterUnlocked);
   const m2Passed = Boolean(milestoneStatus?.[1] || isMasterUnlocked);
   const m3Passed = Boolean(milestoneStatus?.[2] || isMasterUnlocked);
@@ -151,13 +172,9 @@ export function LiveXmppChatSimulator({
   const m5Passed = Boolean(milestoneStatus?.[4] || isMasterUnlocked);
   const m6Passed = Boolean(milestoneStatus?.[5] || isMasterUnlocked);
 
-  // Total verified count across all 6 milestones
   const passedTotalCount = [m1Passed, m2Passed, m3Passed, m4Passed, m5Passed, m6Passed].filter(Boolean).length;
-
-  // Strict dependency check: Port 5222 requires all 5 core modules (M1–M5) to prevent broken routing
   const isClusterBooted = m1Passed && m2Passed && m3Passed && m4Passed && m5Passed;
 
-  // Identify any missing core dependencies for transparent feedback
   const missingCoreDependencies: string[] = [];
   if (!m1Passed) missingCoreDependencies.push('M1 Supervisor');
   if (!m2Passed) missingCoreDependencies.push('M2 XML Framer');
@@ -170,9 +187,10 @@ export function LiveXmppChatSimulator({
   const [stanzas, setStanzas] = useState<StanzaLog[]>(INITIAL_STANZAS);
   const [inputVal, setInputVal] = useState('');
   const [isBobOnline, setIsBobOnline] = useState(true);
+  const [isSending, setIsSending] = useState(false);
   const [selectedStanzaXml, setSelectedStanzaXml] = useState<string | null>(null);
   const [subTab, setSubTab] = useState<'chat' | 'wire' | 'arch'>('chat');
-  const [activeChaosNotice, setActiveChaosNotice] = useState<string | null>(null);
+  const [activeNotice, setActiveNotice] = useState<{ text: string; isError?: boolean } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wireEndRef = useRef<HTMLDivElement>(null);
@@ -185,188 +203,232 @@ export function LiveXmppChatSimulator({
     }
   }, [messages, stanzas, subTab]);
 
-  const handleSendMessage = (textToSend?: string) => {
+  const getActiveFiles = (): Record<string, string> => {
+    if (previewGoldenModel && solutionFiles && Object.keys(solutionFiles).length > 0) {
+      return solutionFiles;
+    }
+    return workspaceFiles || solutionFiles || {};
+  };
+
+  const showNotice = (text: string, isError = false) => {
+    setActiveNotice({ text, isError });
+    setTimeout(() => setActiveNotice(null), 5000);
+  };
+
+  const appendBackendStanzas = (backendStanzas?: BackendChatResponse['stanzas']) => {
+    if (!backendStanzas || backendStanzas.length === 0) return;
+    const now = new Date().toTimeString().split(' ')[0];
+    const mapped: StanzaLog[] = backendStanzas.map((st, idx) => ({
+      id: `st-${Date.now()}-${idx}`,
+      timestamp: `${now}.${Math.floor(Math.random() * 900 + 100)}`,
+      direction: st.direction || 'out',
+      source: st.source || 'beamforge.local',
+      target: st.target,
+      xml: st.xml,
+      detail: st.detail,
+      handledByModule: st.handled_by_module,
+    }));
+    setStanzas((prev) => [...prev, ...mapped]);
+  };
+
+  const callBackendChat = async (payload: {
+    action: 'handshake' | 'send' | 'toggle_bob' | 'inject_preauth' | 'chaos_kill';
+    message?: string;
+    msg_id?: string;
+    bob_online?: boolean;
+    offline_messages?: string[];
+  }): Promise<BackendChatResponse | null> => {
+    if (!isBackendOnline) {
+      showNotice('Go Orchestrator backend (port 8080) is offline. Start orchestrator to route real XMPP frames.', true);
+      return null;
+    }
+    setIsSending(true);
+    try {
+      const res = await fetch(`${getOrchestratorHttpUrl()}/api/v1/xmpp/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: previewGoldenModel ? 'xmpp-preview-sol' : 'xmpp-capstone-workspace',
+          files: getActiveFiles(),
+          ...payload,
+        }),
+      });
+      const data: BackendChatResponse = await res.json();
+      if (!res.ok || !data.ok) {
+        const errText = data.error || `Backend responded HTTP ${res.status}`;
+        showNotice(errText, true);
+        return data;
+      }
+      return data;
+    } catch (err: any) {
+      showNotice(err?.message || 'Network error calling live XMPP OTP cluster', true);
+      return null;
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend ?? inputVal).trim();
-    if (!text) return;
+    if (!text || isSending) return;
 
-    const now = new Date();
-    const timeStr = now.toTimeString().split(' ')[0];
+    const now = new Date().toTimeString().split(' ')[0];
     const msgId = `m-${Date.now().toString().slice(-4)}`;
+    const spooledBodies = messages.filter((m) => m.status === 'spooled_offline').map((m) => m.body);
 
-    const xml = `<message from="alice@beamforge.local/web" to="bob@beamforge.local/mobile" type="chat" id="${msgId}">\n  <body>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</body>\n</message>`;
+    const data = await callBackendChat({
+      action: 'send',
+      message: text,
+      msg_id: msgId,
+      bob_online: isBobOnline,
+      offline_messages: isBobOnline ? [] : spooledBodies,
+    });
 
-    const status: ChatMessage['status'] = isBobOnline ? 'delivered' : 'spooled_offline';
-    const routeDetail = isBobOnline
-      ? 'xmpp_router:route/2 -> Target PID <0.142.0> found in ETS -> Dispatched'
-      : 'xmpp_router:route/2 -> Bob is unavailable -> Spooled into ETS offline_queue table';
+    if (!data || !data.ok) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: msgId,
+          sender: 'alice',
+          senderJid: 'alice@beamforge.local/web',
+          body: text,
+          timestamp: now,
+          status: 'rejected',
+          rawXml: `<error>${data?.error || 'Live OTP execution failed'}</error>`,
+          routedVia: 'Execution aborted — verify all 5 modules compile & implement M1-M5 contracts',
+        },
+      ]);
+      if (!textToSend) setInputVal('');
+      return;
+    }
 
+    appendBackendStanzas(data.stanzas);
+
+    const msgStatus: ChatMessage['status'] = data.spooled_offline ? 'spooled_offline' : 'delivered';
+    const rawXml = data.raw_xml || `<message id='${msgId}' to='bob@beamforge.local'><body>${text}</body></message>`;
     const newMsg: ChatMessage = {
       id: msgId,
       sender: 'alice',
       senderJid: 'alice@beamforge.local/web',
       body: text,
-      timestamp: timeStr,
-      status,
-      rawXml: xml,
-      routedVia: routeDetail,
+      timestamp: now,
+      status: msgStatus,
+      rawXml,
+      routedVia:
+        data.routed_via ||
+        (msgStatus === 'delivered'
+          ? 'xmpp_router:route_stanza/3 -> Bob delivered_inbox'
+          : 'xmpp_router:route_stanza/3 -> offline_store map'),
     };
-
     setMessages((prev) => [...prev, newMsg]);
-
-    // Append wire stanza
-    const newStanza: StanzaLog = {
-      id: `st-${Date.now()}`,
-      timestamp: `${timeStr}.${Math.floor(Math.random() * 900 + 100)}`,
-      direction: 'in',
-      source: 'alice@beamforge.local/web',
-      target: 'bob@beamforge.local/mobile',
-      xml,
-      detail: isBobOnline
-        ? 'Delivered directly to online session process'
-        : 'Buffered in offline queue table for delayed delivery upon reconnection',
-      handledByModule: isBobOnline ? 'xmpp_router.erl (M5)' : 'xmpp_router.erl offline queue (M5)',
-    };
-
-    setStanzas((prev) => [...prev, newStanza]);
     if (!textToSend) setInputVal('');
 
-    // If Bob is online, simulate an automated smart reply after a brief moment
-    if (isBobOnline && !textToSend?.startsWith('[Bob]')) {
-      setTimeout(() => {
-        const bobReplyId = `m-${(Date.now() + 1).toString().slice(-4)}`;
-        const replyText = text.toLowerCase().includes('help')
-          ? 'Check xmpp_router:route/2 logic and verify ETS session registration!'
-          : text.toLowerCase().includes('sup') || text.toLowerCase().includes('restart')
-          ? 'The rest_for_one supervisor ensures child workers restart cleanly with state intact.'
-          : `Ack: "${text.slice(0, 32)}${text.length > 32 ? '...' : ''}" received via RFC 6120 XML parser!`;
-
-        const replyXml = `<message from="bob@beamforge.local/mobile" to="alice@beamforge.local/web" type="chat" id="${bobReplyId}">\n  <body>${replyText}</body>\n</message>`;
-        const replyMsg: ChatMessage = {
+    if (data.delivered) {
+      const bobReplyId = `bob-${(Date.now() + 1).toString().slice(-4)}`;
+      const bobReplyText = `Delivered into live C2S delivered_inbox (${data.time_ms ?? 0}ms OTP round-trip).`;
+      setMessages((prev) => [
+        ...prev,
+        {
           id: bobReplyId,
           sender: 'bob',
           senderJid: 'bob@beamforge.local/mobile',
-          body: replyText,
+          body: bobReplyText,
           timestamp: new Date().toTimeString().split(' ')[0],
           status: 'delivered',
-          rawXml: replyXml,
-          routedVia: 'xmpp_router:route/2 -> Target PID <0.138.0> in ETS',
-        };
-        setMessages((prev) => [...prev, replyMsg]);
-
-        setStanzas((prev) => [
-          ...prev,
-          {
-            id: `st-${Date.now()}`,
-            timestamp: `${new Date().toTimeString().split(' ')[0]}.${Math.floor(Math.random() * 900 + 100)}`,
-            direction: 'out',
-            source: 'bob@beamforge.local/mobile',
-            target: 'alice@beamforge.local/web',
-            xml: replyXml,
-            detail: 'Direct reply routed across ETS session table',
-            handledByModule: 'xmpp_router.erl (M5)',
-          },
-        ]);
-      }, 700);
+          rawXml: rawXml,
+          routedVia: data.routed_via || 'xmpp_c2s_statem:get_session_info/1 (delivered_inbox)',
+        },
+      ]);
+    } else if (data.spooled_offline) {
+      showNotice(`Bob offline: spooled into xmpp_router offline_store map (${data.offline_count ?? 1} queued).`);
     }
   };
 
-  const handleToggleBobPresence = () => {
+  const handleToggleBobPresence = async () => {
+    if (isSending) return;
     const nextState = !isBobOnline;
+    const spooledBodies = messages.filter((m) => m.status === 'spooled_offline').map((m) => m.body);
+
+    const data = await callBackendChat({
+      action: 'toggle_bob',
+      bob_online: nextState,
+      offline_messages: nextState ? spooledBodies : [],
+    });
+
+    if (!data || !data.ok) return;
+
     setIsBobOnline(nextState);
+    appendBackendStanzas(data.stanzas);
 
-    const now = new Date().toTimeString().split(' ')[0];
-    const xml = nextState
-      ? "<presence from='bob@beamforge.local/mobile'><priority>5</priority><show>chat</show><status>Online via Mobile</status></presence>"
-      : "<presence from='bob@beamforge.local/mobile' type='unavailable'/>";
-
-    setStanzas((prev) => [
-      ...prev,
-      {
-        id: `st-${Date.now()}`,
-        timestamp: `${now}.${Math.floor(Math.random() * 900 + 100)}`,
-        direction: 'in',
-        source: 'bob@beamforge.local/mobile',
-        xml,
-        detail: nextState
-          ? 'Bob registered as available. Flushing any queued offline stanzas!'
-          : 'Bob went unavailable. xmpp_session_registry:unregister/1 removes session from ETS.',
-        handledByModule: nextState ? 'xmpp_router.erl (M5 offline flush)' : 'xmpp_session_registry.erl (M3)',
-      },
-    ]);
-
-    // If reconnecting Bob, deliver any spooled messages
     if (nextState) {
+      const drainedXmls = data.drained_xmls || [];
       setMessages((prev) =>
         prev.map((m) =>
           m.status === 'spooled_offline'
-            ? { ...m, status: 'delivered', routedVia: 'Flushed from offline_queue to newly connected Bob!' }
+            ? {
+                ...m,
+                status: 'delivered',
+                routedVia: 'Drained via xmpp_router:pop_offline_messages/1 on reconnect!',
+              }
             : m
         )
       );
-      setActiveChaosNotice('Bob reconnected! All offline queued stanzas have been flushed to Bob.');
-      setTimeout(() => setActiveChaosNotice(null), 4000);
+      if (drainedXmls.length > 0) {
+        const now = new Date().toTimeString().split(' ')[0];
+        const ackBodies = drainedXmls.map(extractBodyFromXml).join(', ');
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `drain-${Date.now()}`,
+            sender: 'bob',
+            senderJid: 'bob@beamforge.local/mobile',
+            body: `Reconnected & drained ${drainedXmls.length} offline stanza(s): ${ackBodies}`,
+            timestamp: now,
+            status: 'delivered',
+            rawXml: drainedXmls.join('\n'),
+            routedVia: 'xmpp_router:pop_offline_messages/1 -> delivered_inbox',
+          },
+        ]);
+      }
+      showNotice(data.notice || 'Bob reconnected! Offline FIFO queue drained via pop_offline_messages/1.');
     } else {
-      setActiveChaosNotice('Bob disconnected. Future messages to Bob will buffer in the ETS offline queue.');
-      setTimeout(() => setActiveChaosNotice(null), 4000);
+      showNotice(data.notice || 'Bob stopped: xmpp_session_registry:unregister_session/1 removed active session.');
     }
   };
 
-  const handleSimulateStanzaInjection = () => {
-    const now = new Date().toTimeString().split(' ')[0];
-    const injectionXml = "<message to='bob@beamforge.local'><script>malicious_payload()</script>&invalid_entity;</message>";
-
-    setStanzas((prev) => [
-      ...prev,
-      {
-        id: `st-${Date.now()}`,
-        timestamp: `${now}.${Math.floor(Math.random() * 900 + 100)}`,
-        direction: 'in',
-        source: 'unauthenticated_attacker',
-        xml: injectionXml,
-        detail: 'SECURITY ALERT: Pre-auth injection attempt detected! Sanitized & rejected by xmpp_stream_parser.',
-        handledByModule: 'xmpp_stream_parser.erl (M2 Security Guard)',
-      },
-      {
-        id: `st-${Date.now() + 1}`,
-        timestamp: `${now}.${Math.floor(Math.random() * 900 + 100)}`,
-        direction: 'out',
-        source: 'beamforge.local',
-        xml: "<stream:error><not-well-formed xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error></stream:stream>",
-        detail: 'Connection immediately closed following RFC 6120 Section 4.9.3 stream error contract.',
-        handledByModule: 'xmpp_c2s_statem.erl (M4 Error Recovery)',
-      },
-    ]);
-
-    setActiveChaosNotice('Security Guard Tripped: Pre-auth XML injection safely sanitized & connection dropped.');
-    setTimeout(() => setActiveChaosNotice(null), 4500);
+  const handleSimulateStanzaInjection = async () => {
+    if (isSending) return;
+    const data = await callBackendChat({ action: 'inject_preauth' });
+    if (!data || !data.ok) return;
+    appendBackendStanzas(data.stanzas);
+    showNotice(
+      data.notice || 'Pre-Auth Security Guard enforced live: xmpp_c2s_statem returned <not-authorized/>.'
+    );
   };
 
-  const handleSimulateChaosCrash = () => {
+  const handleSimulateChaosCrash = async () => {
+    if (isSending) return;
+    const data = await callBackendChat({ action: 'chaos_kill', bob_online: true });
+    if (!data || !data.ok) return;
+    appendBackendStanzas(data.stanzas);
     const now = new Date().toTimeString().split(' ')[0];
-    setStanzas((prev) => [
+    setMessages((prev) => [
       ...prev,
       {
-        id: `st-${Date.now()}`,
-        timestamp: `${now}.${Math.floor(Math.random() * 900 + 100)}`,
-        direction: 'router',
-        source: 'Chaos Monkey',
-        xml: "exit(whereis(xmpp_router), kill).",
-        detail: 'Simulated router crash signal: exit(kill) sent to registered process.',
-        handledByModule: 'test/xmpp_chaos_test.erl (Chaos Engine)',
-      },
-      {
-        id: `st-${Date.now() + 1}`,
-        timestamp: `${now}.${Math.floor(Math.random() * 900 + 100)}`,
-        direction: 'out',
-        source: 'xmpp_sup',
-        xml: "xmpp_sup: rest_for_one restart -> restarted xmpp_router, preserved ETS session table.",
-        detail: 'Supervisor recovered router in 2.4ms with ZERO session loss due to ETS heir architecture.',
-        handledByModule: 'xmpp_sup.erl (M1 Supervisor)',
+        id: `chaos-${Date.now()}`,
+        sender: 'bob',
+        senderJid: 'bob@beamforge.local/mobile',
+        body: `Chaos recovery verified live! Registry ${data.reg_before} survived; xmpp_router restarted (${data.router_before} -> ${data.router_after}).`,
+        timestamp: now,
+        status: 'delivered',
+        rawXml: data.raw_xml || '<message>Post-Chaos Zero-Loss Recovery Check</message>',
+        routedVia: data.routed_via || 'xmpp_sup (rest_for_one) zero-loss delivery',
       },
     ]);
-
-    setActiveChaosNotice('Chaos Attack Triage: xmpp_router crashed and was auto-restarted by xmpp_sup under rest_for_one!');
-    setTimeout(() => setActiveChaosNotice(null), 4500);
+    showNotice(
+      data.notice ||
+        'Chaos Attack Survived: xmpp_router restarted under rest_for_one with zero ETS session loss!'
+    );
   };
 
   const handleResetSimulator = () => {
@@ -374,7 +436,7 @@ export function LiveXmppChatSimulator({
     setStanzas(INITIAL_STANZAS);
     setIsBobOnline(true);
     setSelectedStanzaXml(null);
-    setActiveChaosNotice(null);
+    setActiveNotice(null);
   };
 
   const totalDelivered = messages.filter((m) => m.status === 'delivered').length;
@@ -410,12 +472,18 @@ export function LiveXmppChatSimulator({
             }`}
           >
             <Radio className={`w-3 h-3 ${isClusterBooted || previewGoldenModel ? 'animate-pulse' : ''}`} />
-            <span>{isClusterBooted || previewGoldenModel ? 'Port 5222 Live' : 'Port 5222 Standby'}</span>
+            <span>
+              {isSending
+                ? 'OTP Executing...'
+                : isClusterBooted || previewGoldenModel
+                ? 'OTP Cluster Live'
+                : 'OTP Cluster Standby'}
+            </span>
           </div>
 
           <div className="hidden lg:flex items-center gap-1.5 text-xs font-semibold" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
             <Layers className="w-3.5 h-3.5 text-purple-400" />
-            <span>BeamForge XMPP Core (6 Milestones Integrated)</span>
+            <span>BeamForge XMPP Core (Live OTP Execution)</span>
           </div>
         </div>
 
@@ -483,7 +551,7 @@ export function LiveXmppChatSimulator({
         >
           <div className="flex items-center gap-1.5">
             <Eye className="w-3.5 h-3.5" />
-            <span>Spec Sandbox Preview (Target RFC 6120 Specification)</span>
+            <span>Live Reference Preview (Executing Reference OTP Modules on Backend)</span>
           </div>
           <button
             onClick={() => setPreviewGoldenModel(false)}
@@ -494,22 +562,28 @@ export function LiveXmppChatSimulator({
         </div>
       )}
 
-      {/* ── Chaos Alert Toast (if active) ── */}
-      {activeChaosNotice && (
+      {/* ── Live Execution / Error Toast Banner ── */}
+      {activeNotice && (
         <div
           className="px-4 py-1.5 text-xs font-medium flex items-center gap-2 border-b animate-slide-down"
           style={{
-            background: isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.10)',
-            borderColor: 'rgba(245, 158, 11, 0.30)',
-            color: '#F59E0B',
+            background: activeNotice.isError
+              ? (isDark ? 'rgba(239, 68, 68, 0.18)' : 'rgba(239, 68, 68, 0.10)')
+              : (isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.10)'),
+            borderColor: activeNotice.isError ? 'rgba(239, 68, 68, 0.35)' : 'rgba(245, 158, 11, 0.30)',
+            color: activeNotice.isError ? '#F87171' : '#F59E0B',
           }}
         >
-          <Sparkles className="w-4 h-4 shrink-0 text-amber-500" />
-          <span className="flex-1">{activeChaosNotice}</span>
+          {activeNotice.isError ? (
+            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
+          ) : (
+            <Sparkles className="w-4 h-4 shrink-0 text-amber-500" />
+          )}
+          <span className="flex-1 select-text">{activeNotice.text}</span>
         </div>
       )}
 
-      {/* ── PROGRESSIVE MILESTONE GATING: If cluster is offline & not previewing ── */}
+      {/* ── PROGRESSIVE MILESTONE GATING ── */}
       {!isClusterBooted && !previewGoldenModel ? (
         <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 text-center overflow-y-auto">
           <div
@@ -527,14 +601,11 @@ export function LiveXmppChatSimulator({
               XMPP Cluster Standby
             </h3>
             <p className="text-xs mb-3 leading-relaxed" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-              Your server cluster requires all core OTP modules to boot. Solve and verify your components to start routing stanzas on Port 5222.
+              Solve and verify your 5 core OTP modules (M1–M5) to execute live XMPP stanzas directly on the BEAM.
             </p>
 
-            {/* Missing Dependencies Notice if learner solved out-of-order */}
             {missingCoreDependencies.length > 0 && passedTotalCount > 0 && (
-              <div
-                className="mb-3 px-3 py-1.5 rounded-xl border text-[11px] font-semibold text-amber-500 bg-amber-500/10 border-amber-500/25 flex items-center justify-center gap-1.5"
-              >
+              <div className="mb-3 px-3 py-1.5 rounded-xl border text-[11px] font-semibold text-amber-500 bg-amber-500/10 border-amber-500/25 flex items-center justify-center gap-1.5">
                 <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
                 <span>Waiting on: {missingCoreDependencies.join(', ')}</span>
               </div>
@@ -542,7 +613,6 @@ export function LiveXmppChatSimulator({
 
             {/* 6-Milestone Power-Up Assembly Rack */}
             <div className="space-y-1.5 mb-4 text-left text-xs font-mono">
-              {/* M1: Supervisor */}
               <div
                 className={`p-2 rounded-xl border flex items-center justify-between transition-colors ${
                   m1Passed
@@ -556,7 +626,7 @@ export function LiveXmppChatSimulator({
                     <span className="font-bold font-sans" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
                       M1: xmpp_sup
                     </span>
-                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">Root Supervisor</span>
+                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">rest_for_one Supervisor</span>
                   </div>
                 </div>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m1Passed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/10 text-slate-400'}`}>
@@ -564,7 +634,6 @@ export function LiveXmppChatSimulator({
                 </span>
               </div>
 
-              {/* M2: Stream Parser */}
               <div
                 className={`p-2 rounded-xl border flex items-center justify-between transition-colors ${
                   m2Passed
@@ -578,7 +647,7 @@ export function LiveXmppChatSimulator({
                     <span className="font-bold font-sans" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
                       M2: xmpp_stream_parser
                     </span>
-                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">XML Tokenizer</span>
+                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">XML Framer</span>
                   </div>
                 </div>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m2Passed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/10 text-slate-400'}`}>
@@ -586,7 +655,6 @@ export function LiveXmppChatSimulator({
                 </span>
               </div>
 
-              {/* M3: Session Registry */}
               <div
                 className={`p-2 rounded-xl border flex items-center justify-between transition-colors ${
                   m3Passed
@@ -600,7 +668,7 @@ export function LiveXmppChatSimulator({
                     <span className="font-bold font-sans" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
                       M3: xmpp_session_registry
                     </span>
-                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">ETS JID Table</span>
+                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">ETS + monitor/2</span>
                   </div>
                 </div>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m3Passed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/10 text-slate-400'}`}>
@@ -608,7 +676,6 @@ export function LiveXmppChatSimulator({
                 </span>
               </div>
 
-              {/* M4: C2S StateM */}
               <div
                 className={`p-2 rounded-xl border flex items-center justify-between transition-colors ${
                   m4Passed
@@ -622,15 +689,14 @@ export function LiveXmppChatSimulator({
                     <span className="font-bold font-sans" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
                       M4: xmpp_c2s_statem
                     </span>
-                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">SASL FSM</span>
+                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">C2S gen_statem</span>
                   </div>
                 </div>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m4Passed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/10 text-slate-400'}`}>
-                  {m4Passed ? 'AUTHENTICATED' : 'OFFLINE'}
+                  {m4Passed ? 'ESTABLISHED' : 'OFFLINE'}
                 </span>
               </div>
 
-              {/* M5: Router */}
               <div
                 className={`p-2 rounded-xl border flex items-center justify-between transition-colors ${
                   m5Passed
@@ -644,7 +710,7 @@ export function LiveXmppChatSimulator({
                     <span className="font-bold font-sans" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
                       M5: xmpp_router
                     </span>
-                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">Router & Queue</span>
+                    <span className="text-[10px] ml-1.5 text-slate-400 font-sans">Router & Offline Map</span>
                   </div>
                 </div>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m5Passed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/10 text-slate-400'}`}>
@@ -652,7 +718,6 @@ export function LiveXmppChatSimulator({
                 </span>
               </div>
 
-              {/* M6: Chaos Monkey Resilience Lab */}
               <div
                 className={`p-2 rounded-xl border flex items-center justify-between transition-colors ${
                   m6Passed
@@ -664,7 +729,7 @@ export function LiveXmppChatSimulator({
                   {m6Passed ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <Lock className="w-4 h-4 text-slate-400" />}
                   <div>
                     <span className="font-bold font-sans" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
-                      M6: xmpp_chaos_test
+                      M6: xmpp_sup (Chaos)
                     </span>
                     <span className="text-[10px] ml-1.5 text-slate-400 font-sans">Chaos Resilience</span>
                   </div>
@@ -675,7 +740,6 @@ export function LiveXmppChatSimulator({
               </div>
             </div>
 
-            {/* Spec Sandbox Preview Button */}
             <div
               className="pt-3 border-t flex flex-col sm:flex-row items-center justify-between gap-2"
               style={{ borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)' }}
@@ -687,7 +751,7 @@ export function LiveXmppChatSimulator({
                 onClick={() => setPreviewGoldenModel(true)}
                 className="text-xs font-bold text-amber-500 hover:text-amber-400 flex items-center gap-1 cursor-pointer transition-colors"
               >
-                <span>Preview Spec Sandbox</span>
+                <span>Preview Live Reference Cluster</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -703,7 +767,7 @@ export function LiveXmppChatSimulator({
                 className="flex-1 flex flex-col min-w-0 border-r"
                 style={{ borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)' }}
               >
-                {/* Alice Header with Mobile Bob Presence Switcher */}
+                {/* Alice Header */}
                 <div
                   className="px-3 sm:px-4 py-2 border-b flex items-center justify-between"
                   style={{
@@ -726,18 +790,18 @@ export function LiveXmppChatSimulator({
                   <div className="flex items-center gap-2">
                     <div className="hidden sm:flex items-center gap-1 text-[10px] font-medium text-emerald-400">
                       <UserCheck className="w-3 h-3" />
-                      <span>Available (Pri 10)</span>
+                      <span>Established (Pri 10)</span>
                     </div>
 
-                    {/* Mobile-Friendly Bob Presence Toggle */}
                     <button
                       onClick={handleToggleBobPresence}
-                      className={`md:hidden flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                      disabled={isSending}
+                      className={`md:hidden flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer disabled:opacity-50 ${
                         isBobOnline
                           ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
                           : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
                       }`}
-                      title="Toggle Bob's presence"
+                      title="Toggle Bob's C2S session online/offline"
                     >
                       {isBobOnline ? <UserCheck className="w-3 h-3" /> : <UserX className="w-3 h-3" />}
                       <span>Bob: {isBobOnline ? 'Online' : 'Offline'}</span>
@@ -749,6 +813,7 @@ export function LiveXmppChatSimulator({
                 <div className="p-3 overflow-y-auto space-y-2.5 flex-1 min-h-0">
                   {messages.map((msg) => {
                     const isAlice = msg.sender === 'alice';
+                    const isRejected = msg.status === 'rejected';
                     return (
                       <div
                         key={msg.id}
@@ -765,18 +830,19 @@ export function LiveXmppChatSimulator({
 
                         <div
                           className={`max-w-[85%] sm:max-w-[75%] p-3 rounded-2xl text-xs leading-relaxed shadow-sm transition-all ${
-                            isAlice
+                            isRejected
+                              ? 'bg-rose-900/60 text-rose-100 border border-rose-500/40'
+                              : isAlice
                               ? 'bg-blue-600 text-white rounded-br-xs'
                               : isDark
                               ? 'bg-slate-800 text-slate-100 rounded-bl-xs border border-white/10'
                               : 'bg-slate-100 text-slate-900 rounded-bl-xs border border-slate-200'
                           }`}
                         >
-                          <p>{msg.body}</p>
+                          <p className="select-text">{msg.body}</p>
 
-                          {/* Stanza Inspection Pill */}
                           <div className="mt-1.5 pt-1.5 border-t border-white/10 flex items-center justify-between text-[10px] opacity-85 font-mono">
-                            <span className="truncate max-w-[140px] sm:max-w-[180px]">{msg.routedVia}</span>
+                            <span className="truncate max-w-[140px] sm:max-w-[200px]">{msg.routedVia}</span>
                             <button
                               type="button"
                               onClick={() => setSelectedStanzaXml(msg.rawXml)}
@@ -792,9 +858,13 @@ export function LiveXmppChatSimulator({
                             <span className="text-emerald-500 flex items-center gap-0.5">
                               <CheckCircle2 className="w-3 h-3" /> Delivered
                             </span>
+                          ) : msg.status === 'rejected' ? (
+                            <span className="text-rose-400 flex items-center gap-0.5">
+                              <ShieldAlert className="w-3 h-3" /> Delivery Failed
+                            </span>
                           ) : (
                             <span className="text-amber-500 flex items-center gap-0.5">
-                              <ShieldAlert className="w-3 h-3" /> Spooled Offline in ETS
+                              <ShieldAlert className="w-3 h-3" /> Spooled in offline_store
                             </span>
                           )}
                         </div>
@@ -813,26 +883,28 @@ export function LiveXmppChatSimulator({
                   }}
                 >
                   <button
-                    onClick={() => handleSendMessage('OTP 29 processes handle 4,000 reductions per time slice!')}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 transition-colors border cursor-pointer"
+                    onClick={() => handleSendMessage('Hello Bob! Routing live over OTP 29.')}
+                    disabled={isSending}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 transition-colors border cursor-pointer disabled:opacity-50"
                     style={{
                       background: isDark ? 'rgba(255, 255, 255, 0.05)' : '#FFFFFF',
                       color: isDark ? '#E2E8F0' : '#334155',
                       borderColor: isDark ? 'rgba(255, 255, 255, 0.10)' : 'rgba(15, 23, 42, 0.10)',
                     }}
                   >
-                    Ask about OTP Reductions
+                    Send Live Message (M4/M5)
                   </button>
                   <button
                     onClick={handleSimulateStanzaInjection}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 transition-colors border text-rose-400 bg-rose-500/10 border-rose-500/25 cursor-pointer"
+                    disabled={isSending}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 transition-colors border text-rose-400 bg-rose-500/10 border-rose-500/25 cursor-pointer disabled:opacity-50"
                   >
-                    Test Stanza Injection (M2)
+                    Test Pre-Auth Injection (M4)
                   </button>
                   <button
                     onClick={handleSimulateChaosCrash}
-                    disabled={!m6Passed && !previewGoldenModel}
-                    title={!m6Passed && !previewGoldenModel ? 'Verify Milestone 6 (Chaos Monkey) to unlock live crash triage' : 'Simulate supervisor recovery'}
+                    disabled={(!m6Passed && !previewGoldenModel) || isSending}
+                    title={!m6Passed && !previewGoldenModel ? 'Verify Milestone 6 (Chaos Monkey) to unlock live crash triage' : 'Execute real exit(whereis(xmpp_router), kill) on OTP'}
                     className={`px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 transition-colors border cursor-pointer ${
                       m6Passed || previewGoldenModel
                         ? 'text-amber-400 bg-amber-500/10 border-amber-500/25 hover:bg-amber-500/20'
@@ -840,7 +912,7 @@ export function LiveXmppChatSimulator({
                     }`}
                   >
                     {!m6Passed && !previewGoldenModel ? <Lock className="w-3 h-3 inline mr-1" /> : null}
-                    <span>Crash Router with Chaos (M1)</span>
+                    <span>Kill xmpp_router Chaos (M6)</span>
                   </button>
                 </div>
 
@@ -860,8 +932,9 @@ export function LiveXmppChatSimulator({
                     type="text"
                     value={inputVal}
                     onChange={(e) => setInputVal(e.target.value)}
-                    placeholder="Type an RFC 6120 chat stanza to Bob..."
-                    className="flex-1 px-3 py-2 rounded-xl text-xs font-sans focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                    disabled={isSending}
+                    placeholder="Type a message to send through your live Erlang/OTP XMPP cluster..."
+                    className="flex-1 px-3 py-2 rounded-xl text-xs font-sans focus:outline-hidden focus:ring-1 focus:ring-blue-500 disabled:opacity-60"
                     style={{
                       background: isDark ? 'rgba(30, 41, 59, 0.60)' : 'rgba(241, 245, 249, 0.80)',
                       color: isDark ? '#F8FAFC' : '#0F172A',
@@ -870,7 +943,7 @@ export function LiveXmppChatSimulator({
                   />
                   <button
                     type="submit"
-                    disabled={!inputVal.trim()}
+                    disabled={!inputVal.trim() || isSending}
                     className="p-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                   >
                     <Send className="w-4 h-4" />
@@ -883,7 +956,6 @@ export function LiveXmppChatSimulator({
                 className="hidden md:flex w-80 flex-col flex-shrink-0"
                 style={{ background: isDark ? 'rgba(15, 23, 42, 0.40)' : 'rgba(248, 250, 252, 0.50)' }}
               >
-                {/* Bob Header & Presence Switcher */}
                 <div
                   className="px-4 py-2 border-b flex items-center justify-between"
                   style={{
@@ -904,15 +976,16 @@ export function LiveXmppChatSimulator({
                   </div>
                   <button
                     onClick={handleToggleBobPresence}
-                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                    disabled={isSending}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer disabled:opacity-50 ${
                       isBobOnline
                         ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
                         : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
                     }`}
-                    title="Toggle Bob's presence between Available and Unavailable"
+                    title="Toggle Bob's C2S session online/offline"
                   >
                     {isBobOnline ? <UserCheck className="w-3 h-3" /> : <UserX className="w-3 h-3" />}
-                    <span>{isBobOnline ? 'Online (Pri 5)' : 'Offline (Simulate Spool)'}</span>
+                    <span>{isBobOnline ? 'Online (Pri 10)' : 'Offline (Spool)'}</span>
                   </button>
                 </div>
 
@@ -937,7 +1010,7 @@ export function LiveXmppChatSimulator({
                       </span>
                     </div>
                     <p className="text-[11px] opacity-80" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
-                      Supervises registry, router, parser & acceptor pool in dependency order.
+                      Supervises xmpp_session_registry (#1) and xmpp_router (#2) as permanent workers.
                     </p>
                   </div>
 
@@ -955,7 +1028,7 @@ export function LiveXmppChatSimulator({
                       </span>
                     </div>
                     <p className="text-[11px] opacity-80" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
-                      Tokenizes incremental XML bytes and prevents sub-binary memory leaks.
+                      Frames fragmented XML chunks and unpins retained sub-binaries with binary:copy/1.
                     </p>
                   </div>
 
@@ -973,7 +1046,7 @@ export function LiveXmppChatSimulator({
                       </span>
                     </div>
                     <p className="text-[11px] opacity-80" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
-                      Stores active JID-to-PID maps and auto-cleans on &apos;DOWN&apos; signals.
+                      Stores active JID-to-PID rows in public ETS and prunes crashed sessions via &apos;DOWN&apos;.
                     </p>
                   </div>
 
@@ -987,11 +1060,11 @@ export function LiveXmppChatSimulator({
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-teal-400">M4: xmpp_c2s_statem</span>
                       <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-teal-500/10 text-teal-300">
-                        SASL FSM
+                        state_functions
                       </span>
                     </div>
                     <p className="text-[11px] opacity-80" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
-                      4-phase client connection FSM handling SASL PLAIN & resource binding.
+                      4-phase connection FSM enforcing SASL PLAIN, pre-auth guards, and delivered_inbox.
                     </p>
                   </div>
 
@@ -1005,11 +1078,11 @@ export function LiveXmppChatSimulator({
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-emerald-400">M5: xmpp_router</span>
                       <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-300">
-                        Direct + Offline
+                        route_stanza/3
                       </span>
                     </div>
                     <p className="text-[11px] opacity-80" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
-                      Delivered: <strong className="text-emerald-500">{totalDelivered}</strong> | Spooled: <strong className="text-amber-500">{totalSpooled}</strong>
+                      Delivered: <strong className="text-emerald-500">{totalDelivered}</strong> | Offline Map: <strong className="text-amber-500">{totalSpooled}</strong>
                     </p>
                   </div>
 
@@ -1021,13 +1094,13 @@ export function LiveXmppChatSimulator({
                     }}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-rose-400">M6: xmpp_chaos_test</span>
+                      <span className="font-bold text-rose-400">M6: xmpp_sup (Chaos)</span>
                       <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-500/10 text-rose-300">
                         Chaos Monkey
                       </span>
                     </div>
                     <p className="text-[11px] opacity-80" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
-                      Validates supervisor recovery under untrappable exit(kill) signals.
+                      Verifies zero-loss router restart under untrappable exit(whereis(xmpp_router), kill).
                     </p>
                   </div>
                 </div>
@@ -1041,111 +1114,63 @@ export function LiveXmppChatSimulator({
                 <span className="text-[10px] font-mono text-emerald-400">{passedTotalCount}/6 Live</span>
               </div>
 
-              <div
-                className="p-2.5 rounded-xl border text-xs space-y-1"
-                style={{
-                  background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
-                  borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
-                }}
-              >
+              <div className="p-2.5 rounded-xl border text-xs space-y-1" style={{ background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)' }}>
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-purple-400">M1: xmpp_sup</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-purple-500/10 text-purple-300">
-                    rest_for_one
-                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-purple-500/10 text-purple-300">rest_for_one</span>
                 </div>
                 <p className="text-[11px] opacity-80 leading-relaxed" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
-                  Supervises registry, router, parser & acceptor pool in dependency order.
+                  Supervises xmpp_session_registry (#1) and xmpp_router (#2) in dependency order.
                 </p>
               </div>
 
-              <div
-                className="p-2.5 rounded-xl border text-xs space-y-1"
-                style={{
-                  background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
-                  borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
-                }}
-              >
+              <div className="p-2.5 rounded-xl border text-xs space-y-1" style={{ background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)' }}>
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-blue-400">M2: xmpp_stream_parser</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-blue-500/10 text-blue-300">
-                    binary:copy/1
-                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-blue-500/10 text-blue-300">binary:copy/1</span>
                 </div>
                 <p className="text-[11px] opacity-80 leading-relaxed" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
-                  Tokenizes incremental XML bytes and prevents sub-binary memory leaks.
+                  Frames fragmented XML chunks and unpins retained sub-binaries with binary:copy/1.
                 </p>
               </div>
 
-              <div
-                className="p-2.5 rounded-xl border text-xs space-y-1"
-                style={{
-                  background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
-                  borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
-                }}
-              >
+              <div className="p-2.5 rounded-xl border text-xs space-y-1" style={{ background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)' }}>
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-amber-400">M3: xmpp_session_registry</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300">
-                    ETS + monitor/2
-                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300">ETS + monitor/2</span>
                 </div>
                 <p className="text-[11px] opacity-80 leading-relaxed" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
-                  Stores active JID-to-PID maps and auto-cleans on &apos;DOWN&apos; signals.
+                  Stores active JID-to-PID maps in public ETS and auto-cleans on &apos;DOWN&apos; signals.
                 </p>
               </div>
 
-              <div
-                className="p-2.5 rounded-xl border text-xs space-y-1"
-                style={{
-                  background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
-                  borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
-                }}
-              >
+              <div className="p-2.5 rounded-xl border text-xs space-y-1" style={{ background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)' }}>
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-teal-400">M4: xmpp_c2s_statem</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-teal-500/10 text-teal-300">
-                    SASL FSM
-                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-teal-500/10 text-teal-300">state_functions</span>
                 </div>
                 <p className="text-[11px] opacity-80 leading-relaxed" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
-                  4-phase client connection FSM handling SASL PLAIN & resource binding.
+                  4-phase client connection FSM handling SASL PLAIN, pre-auth guards, and resource binding.
                 </p>
               </div>
 
-              <div
-                className="p-2.5 rounded-xl border text-xs space-y-1"
-                style={{
-                  background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
-                  borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
-                }}
-              >
+              <div className="p-2.5 rounded-xl border text-xs space-y-1" style={{ background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)' }}>
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-emerald-400">M5: xmpp_router</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-300">
-                    Direct + Offline
-                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-300">route_stanza/3</span>
                 </div>
                 <p className="text-[11px] opacity-80 leading-relaxed" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
-                  Delivered: <strong className="text-emerald-500">{totalDelivered}</strong> | Spooled: <strong className="text-amber-500">{totalSpooled}</strong>
+                  Delivered: <strong className="text-emerald-500">{totalDelivered}</strong> | Offline Map: <strong className="text-amber-500">{totalSpooled}</strong>
                 </p>
               </div>
 
-              <div
-                className="p-2.5 rounded-xl border text-xs space-y-1"
-                style={{
-                  background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
-                  borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
-                }}
-              >
+              <div className="p-2.5 rounded-xl border text-xs space-y-1" style={{ background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)' }}>
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-rose-400">M6: xmpp_chaos_test</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-500/10 text-rose-300">
-                    Chaos Monkey
-                  </span>
+                  <span className="font-bold text-rose-400">M6: xmpp_sup (Chaos)</span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-500/10 text-rose-300">Chaos Monkey</span>
                 </div>
                 <p className="text-[11px] opacity-80 leading-relaxed" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
-                  Validates supervisor recovery under untrappable exit(kill) signals.
+                  Validates zero-loss supervisor recovery under untrappable exit(whereis(xmpp_router), kill).
                 </p>
               </div>
             </div>
@@ -1155,9 +1180,9 @@ export function LiveXmppChatSimulator({
               <div className="px-3 sm:px-4 py-2 border-b border-white/10 flex items-center justify-between text-[11px] text-slate-400">
                 <div className="flex items-center gap-2">
                   <Terminal className="w-3.5 h-3.5 text-purple-400" />
-                  <span>Raw TCP Stream Transcript (RFC 6120 Frame Wire)</span>
+                  <span>Live Erlang/OTP XMPP Wire Transcript</span>
                 </div>
-                <span className="hidden sm:inline">Port 5222 • UTF-8 XML</span>
+                <span className="hidden sm:inline">beamforge.local • UTF-8 XML</span>
               </div>
               <div className="flex-1 p-3 sm:p-4 overflow-y-auto space-y-3">
                 {stanzas.map((st) => (
@@ -1191,7 +1216,7 @@ export function LiveXmppChatSimulator({
                       </div>
                       <span className="text-[10px] text-amber-400 font-sans">{st.handledByModule}</span>
                     </div>
-                    <pre className="text-emerald-300 whitespace-pre-wrap font-mono text-[11px] leading-relaxed bg-black/40 p-2 rounded-lg border border-white/5 overflow-x-auto">
+                    <pre className="text-emerald-300 whitespace-pre-wrap font-mono text-[11px] leading-relaxed bg-black/40 p-2 rounded-lg border border-white/5 overflow-x-auto select-text">
                       {st.xml}
                     </pre>
                     <p className="text-[10px] text-slate-400 font-sans italic">{st.detail}</p>
@@ -1222,7 +1247,7 @@ export function LiveXmppChatSimulator({
             <div className="flex items-center justify-between border-b border-white/10 pb-2">
               <div className="flex items-center gap-2">
                 <Code2 className="w-4 h-4 text-purple-400" />
-                <span className="text-xs font-bold text-white">RFC 6120 XML Stanza Wire Frame</span>
+                <span className="text-xs font-bold text-white">XML Stanza Wire Frame</span>
               </div>
               <button
                 onClick={() => setSelectedStanzaXml(null)}
@@ -1231,12 +1256,12 @@ export function LiveXmppChatSimulator({
                 Close
               </button>
             </div>
-            <pre className="font-mono text-xs text-emerald-300 p-3 rounded-xl bg-black/60 border border-white/10 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+            <pre className="font-mono text-xs text-emerald-300 p-3 rounded-xl bg-black/60 border border-white/10 overflow-x-auto whitespace-pre-wrap leading-relaxed select-text">
               {selectedStanzaXml}
             </pre>
             <div className="text-[11px] text-slate-400 flex items-center justify-between">
               <span>Encoding: UTF-8</span>
-              <span>Framing: Incremental stream element</span>
+              <span>Framing: xmpp_stream_parser Incremental Buffer</span>
             </div>
           </div>
         </div>
