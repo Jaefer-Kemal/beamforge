@@ -809,103 +809,145 @@ delete_expired_tokens(CurrentTimestamp) ->
     visualScene: 'supervision_rest_for_one_ets_heir',
     conceptMarkdown: `## Why This Matters in Production
 
-Here is the single most dangerous architectural trap in Erlang caching:
-**An ETS table is bound to the lifetime of the process that created it.**
+Here is the single most dangerous architectural trap in Erlang caching: **an ETS table is bound to the lifetime of the process that created it**.
 
-If process \`A\` calls \`ets:new(cache_tab, [named_table])\`, and process \`A\` crashes 10 minutes later due to an unhandled exception or memory spike, the BEAM VM **instantly wipes \`cache_tab\` from off-heap RAM**! All cached database records, session states, and rate-limit counters vanish in zero milliseconds.
+If worker process \`A\` creates an in-memory cache via \`ets:new/2\` and crashes ten minutes later due to an unhandled exception, ERTS **immediately destroys the entire ETS table** and frees its off-heap memory. When the supervisor spawns replacement worker \`A'\`, it boots into an empty cache, triggering a thundering-herd **cache stampede** against your backend database.
 
-Even worse: when your supervisor restarts process \`A\` as process \`A'\`, process \`A'\` starts with an empty cache, causing a catastrophic **Cache Stampede (Thundering Herd)** on your database!
-
-To prevent this, OTP provides the **ETS Heir Protocol** (\`{heir, HeirPid, HeirData}\` and \`ets:give_away/3\`).
-
-> [!IMPORTANT]
-> **The ETS Heir Failover Handshake:**
-> 1. **Worker boots:** Creates table with \`{heir, HeirPid, HeirData}\`.
-> 2. **Worker crashes:** BEAM VM intercepts crash and atomically transfers ownership to Heir.
-> 3. **Heir receives:** \`{'ETS-TRANSFER', Tab, DeadPid, HeirData}\`. Table is completely preserved.
-> 4. **Supervisor restarts Worker:** Worker asks Heir for table. Heir calls \`ets:give_away(Tab, NewWorker, Data)\`.
-> 5. **NewWorker receives:** \`{'ETS-TRANSFER', Tab, HeirPid, Data}\`. Zero lost cached data!
+OTP solves this cleanly with the **ETS Heir Handshake**: designating a stable backup process at creation time (or via \`ets:setopts/2\`) to catch ownership on crashes and handing ownership back to the restarted worker via \`ets:give_away/3\`. Trace the 4-step handover flow in the interactive scene below.
 
 ## Deep Concept Breakdown & Under the Hood
 
-### Step 1: Declaring the Heir on Creation
+### 1. Registering an Heir on Creation or Dynamically
+
+You bind an heir either directly inside the options list of \`ets:new/2\`:
 
 \`\`\`erlang
-ets:new(my_cache, [set, public, named_table, {heir, HeirPid, keep_alive}])
+ets:new(my_cache, [set, public, named_table, {heir, BackupPid, keep_alive}])
 \`\`\`
 
-If \`HeirPid\` terminates before the table owner, the heir setting is automatically reset to \`none\`. You can dynamically update the heir using:
+or later on an active table using \`ets:setopts(Tab, {heir, BackupPid, HeirData})\`. If the designated heir terminates before the table owner, ERTS resets the table's heir setting to \`none\`.
+
+### 2. Zero-Copy Failover (\`'ETS-TRANSFER'\`)
+
+When the owning process dies for any reason, ERTS intercepts table teardown, atomically flips the C-level table owner pointer to \`BackupPid\`, keeps all rows untouched in off-heap memory, and delivers an asynchronous message to \`BackupPid\`'s mailbox:
 
 \`\`\`erlang
-ets:setopts(Tab, {heir, NewHeirPid, NewHeirData})
+{'ETS-TRANSFER', TableRef, DeadOwnerPid, HeirData}
 \`\`\`
 
-### Step 2: The Heir Transfer Message
+### 3. Restituting Ownership (\`ets:give_away/3\`)
 
-When the owning process dies, BEAM preserves the table in off-heap memory and delivers to the heir's mailbox:
-
-\`\`\`erlang
-{'ETS-TRANSFER', TableId, DeadOwnerPid, HeirData}
-\`\`\`
-
-### Step 3: Giving Away the Table (\`ets:give_away/3\`)
-
-When the restarted worker process is ready to resume ownership, the heir calls:
-
-\`\`\`erlang
-ets:give_away(Tab, NewOwnerPid, GiftData)
-\`\`\`
-
-The new owner process receives \`{'ETS-TRANSFER', Tab, HeirPid, GiftData}\` and immediately becomes the full legal owner of the table!
-
-### Parallel Worked Example: Resilient Session Vault
-
-\`\`\`erlang
--module(resilient_vault).
--export([create_vault/2, handover_vault/3]).
-
-create_vault(TableName, GuardianPid) ->
-    ets:new(TableName, [
-        set,
-        public,
-        named_table,
-        {heir, GuardianPid, vault_heir_tag}
-    ]).
-
-handover_vault(TableName, NewWorkerPid, Tag) ->
-    ets:give_away(TableName, NewWorkerPid, Tag).
-\`\`\`
+Once the supervisor restarts the cache worker, the worker notifies the guardian/heir, which calls \`ets:give_away(Tab, NewWorkerPid, GiftData)\`. That operation swaps ownership in $O(1)$ time with zero data copying and delivers \`{'ETS-TRANSFER', Tab, BackupPid, GiftData}\` to \`NewWorkerPid\`.
 
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% Official ETS Heir Calls (stdlib / ets)
+%% Official ETS Ownership & Heir Calls (stdlib / ets)
 ets:setopts(Tab, Opts) -> true
-  Opts = {heir, pid() | none, term()}
+  Types:
+    Tab = tid() | atom()
+    Opts = Opt | [Opt]
+    Opt = {heir, pid() | none, HeirData :: term()}
 
 ets:give_away(Tab, Pid, GiftData) -> true
   Types:
-    Tab = tab()
+    Tab = tid() | atom()
     Pid = pid()
     GiftData = term()
 \`\`\`
 
+Consult the attached documentation cards below for exact complexity notes and type details.
+
+## Parallel Worked Example: Dynamic Shard Backup Controller
+
+Consider a separate domain: a sharded memory store where a worker creates an *unnamed* ETS table handle (\`ShardTid\`) and dynamically attaches an heir via \`ets:setopts/2\`, allowing a backup controller to catch crashes, record recovery telemetry, and transfer ownership back upon a \`make_ref()\`-tagged takeover request:
+
+\`\`\`erlang
+-module(shard_backup_heir).
+-export([spawn_backup/0, attach_backup/2, return_shard/2, backup_loop/0]).
+
+%% @doc Spawn and link a stateless backup process that catches orphaned shards.
+spawn_backup() ->
+    spawn_link(?MODULE, backup_loop, []).
+
+%% @doc Dynamically register BackupPid as the heir for an existing shard table.
+attach_backup(ShardTid, BackupPid) ->
+    ets:setopts(ShardTid, {heir, BackupPid, shard_backup}),
+    ok.
+
+%% @doc Receive orphaned table transfers and hand shards back on takeover requests.
+backup_loop() ->
+    receive
+        {'ETS-TRANSFER', ShardTid, _OldOwner, shard_backup} ->
+            ets:insert(ShardTid, {recovered_at, erlang:monotonic_time()}),
+            backup_loop();
+        {takeover, ShardTid, NewOwner, Ref} ->
+            ets:give_away(ShardTid, NewOwner, ShardTid),
+            NewOwner ! {handoff_done, Ref},
+            backup_loop();
+        shutdown ->
+            ok
+    end.
+
+%% @doc Ask BackupPid to return ShardTid ownership to the caller and await receipt.
+return_shard(BackupPid, ShardTid) ->
+    Ref = make_ref(),
+    BackupPid ! {takeover, ShardTid, self(), Ref},
+    receive
+        {handoff_done, Ref} ->
+            receive
+                {'ETS-TRANSFER', ShardTid, BackupPid, ShardTid} -> ok
+            after 100 -> ok
+            end
+    after 1000 ->
+        {error, timeout}
+    end.
+\`\`\`
+
+### What ERTS Does at Runtime
+
+- **Dynamic Heir Binding (\`ets:setopts/2\`)**: \`attach_backup/2\` configures \`{heir, BackupPid, shard_backup}\` on an already allocated unnamed \`ShardTid\` handle without needing to pass the option at \`ets:new/2\` time.
+- **Orphan Capture (\`'ETS-TRANSFER'\`)**: If the shard worker crashes, \`backup_loop/0\` receives \`{'ETS-TRANSFER', ShardTid, _OldOwner, shard_backup}\` and can immediately mutate the still-intact table (writing \`recovered_at\`).
+- **Two-Step Confirmed Handover**: \`return_shard/2\` uses a unique \`make_ref()\` token to synchronize the \`ets:give_away/3\` call with \`backup_loop/0\`, then drains the resulting \`'ETS-TRANSFER'\` delivery before returning \`ok\`.
+
 ## Assignment Specification
 
-Implement module \`ets_heir_handshake\` exporting:
-1. \`create_resilient_table(TableNameAtom, HeirPid) -> TableNameAtom\`:
-   - Creates a named \`set\` table with \`[set, public, named_table, {heir, HeirPid, keep_alive}]\` and returns \`TableNameAtom\`.
-2. \`start_guardian() -> {ok, pid()}\`:
-   - Spawns a dedicated guardian process that runs \`guardian_loop/1\`.
-3. \`reclaim_table(GuardianPid, Tab) -> ok\` OR \`reclaim_table(Tab, NewOwnerPid) -> ok\`:
-   - If called with Guardian PID first: requests transfer and waits for \`{'ETS-TRANSFER', ...}\`.
-   - If called with Table first: calls \`ets:give_away(Tab, NewOwnerPid, reclaimed)\`.
-4. \`verify_heir_survival_demo() -> [tuple()]\`:
-   - Spawns an heir process and a temporary worker that calls \`create_resilient_table(demo_heir_tab, HeirPid)\`, inserts \`{session_1, active}\`, kills the worker with \`exit(kill)\`, waits for \`{'ETS-TRANSFER', demo_heir_tab, _, keep_alive}\` in the heir, and returns \`ets:lookup(demo_heir_tab, session_1)\` (\`[{session_1, active}]\`).
+Implement module \`src/ets_heir_handshake.erl\` exporting \`create_resilient_table/2\`, \`start_guardian/0\`, \`reclaim_table/2\`, \`guardian_loop/1\`, and \`verify_heir_survival_demo/0\`.
+
+### \`create_resilient_table/2\`
+- **Input**: Table name atom \`TableNameAtom\`, guardian process identifier \`HeirPid\`.
+- **Behavior**: Creates a named public \`set\` ETS table bound to \`TableNameAtom\` with \`HeirPid\` registered as heir under heirloom tag \`keep_alive\`. Returns \`TableNameAtom\`.
+- **Examples**:
+  - \`ets_heir_handshake:create_resilient_table(resilient_cache, GuardianPid)\` returns \`resilient_cache\`.
+
+### \`start_guardian/0\`
+- **Input**: None.
+- **Behavior**: Spawns and links a dedicated guardian process running \`guardian_loop/1\` initialized with an empty tracking map. Returns \`{ok, Pid}\`.
+- **Examples**:
+  - \`ets_heir_handshake:start_guardian()\` returns \`{ok, GuardianPid}\`.
+
+### \`guardian_loop/1\`
+- **Input**: Map \`HeldTables\` tracking tables currently under guardian custody.
+- **Behavior**: Receives ETS failover transfers and records the transferred table atom in Custody state; handles synchronous reclaim requests from a worker by invoking \`ets:give_away/3\` with heirloom data \`reclaimed\`, confirming reclamation back to the caller, and removing the table from custody; exits cleanly on \`stop\`.
+
+### \`reclaim_table/2\`
+- **Input**: Two clauses distinguished by argument guards:
+  1. \`GuardianPid\` (PID), \`Tab\` (table atom): sends a reclaim request to \`GuardianPid\` for \`Tab\`, waits up to 1000 ms for confirmation plus the \`'ETS-TRANSFER'\` delivery, and returns \`ok\` (or \`{error, timeout}\`).
+  2. \`Tab\` (table atom), \`NewOwnerPid\` (PID): immediately hands over ownership of \`Tab\` to \`NewOwnerPid\` with heirloom tag \`reclaimed\` and returns \`ok\`.
+- **Examples**:
+  - \`ets_heir_handshake:reclaim_table(GuardianPid, resilient_cache)\` returns \`ok\`.
+
+### \`verify_heir_survival_demo/0\`
+- **Input**: None.
+- **Behavior**: Demonstrates end-to-end table survival across an intentional worker crash using table \`demo_heir_tab\`: spawns an heir waiter and a worker that creates the resilient table, inserts \`{session_1, active}\`, and crashes via \`exit(kill)\`. Once the heir receives \`keep_alive\` table transfer, queries \`session_1\`, cleans up \`demo_heir_tab\`, and returns the lookup result list.
+- **Examples**:
+  - \`ets_heir_handshake:verify_heir_survival_demo()\` returns \`[{session_1, active}]\`.
 
 ## Rules & Verification Constraints
-- Table must be created with \`{heir, HeirPid, keep_alive}\`.
-- Must call \`ets:give_away/3\` during table restitution.
+
+- **Required Calls**: \`bf_ast_verifier\` enforces \`ets:new/2\` and \`ets:give_away/3\`.
+- **Heir Registration**: \`create_resilient_table/2\` must register \`{heir, HeirPid, keep_alive}\`.
+- **Zero Data Loss**: All entries written by a crashing creator process must remain intact in guardian custody and after reclamation.
 `,
     otpDocCards: [
       {
@@ -969,27 +1011,33 @@ Implement module \`ets_heir_handshake\` exporting:
 -export([create_resilient_table/2, reclaim_table/2, verify_heir_survival_demo/0]).
 -export([start_guardian/0, guardian_loop/1]).
 
+%% @doc Create a named public ETS set table with HeirPid configured as heir and return its name.
 create_resilient_table(TableNameAtom, HeirPid) ->
-    TableNameAtom.
+    ok.
 
+%% @doc Spawn and link a guardian process executing guardian_loop/1.
 start_guardian() ->
-    {ok, self()}.
+    ok.
 
+%% @doc Reclaim ownership of Tab from GuardianPid or hand Tab off directly to NewOwnerPid.
 reclaim_table(GuardianPid, Tab) when is_pid(GuardianPid) ->
     ok;
 reclaim_table(Tab, NewOwnerPid) when is_pid(NewOwnerPid) ->
     ok.
 
-guardian_loop(State) ->
+%% @doc Hold orphaned ETS tables upon transfer and give them away when workers reclaim them.
+guardian_loop(HeldTables) ->
     ok.
 
+%% @doc Simulate a worker crash after writing demo_heir_tab and return the surviving entries.
 verify_heir_survival_demo() ->
-    [].
+    ok.
 `,
     solutionCode: `-module(ets_heir_handshake).
 -export([create_resilient_table/2, reclaim_table/2, verify_heir_survival_demo/0]).
 -export([start_guardian/0, guardian_loop/1]).
 
+%% @doc Create a named public ETS set table with HeirPid configured as heir and return its name.
 create_resilient_table(TableNameAtom, HeirPid) ->
     ets:new(TableNameAtom, [
         set,
@@ -999,10 +1047,12 @@ create_resilient_table(TableNameAtom, HeirPid) ->
     ]),
     TableNameAtom.
 
+%% @doc Spawn and link a guardian process executing guardian_loop/1.
 start_guardian() ->
     Pid = spawn_link(?MODULE, guardian_loop, [#{}]),
     {ok, Pid}.
 
+%% @doc Reclaim ownership of Tab from GuardianPid or hand Tab off directly to NewOwnerPid.
 reclaim_table(GuardianPid, Tab) when is_pid(GuardianPid) ->
     GuardianPid ! {reclaim, Tab, self()},
     receive
@@ -1018,6 +1068,7 @@ reclaim_table(Tab, NewOwnerPid) when is_pid(NewOwnerPid) ->
     ets:give_away(Tab, NewOwnerPid, reclaimed),
     ok.
 
+%% @doc Hold orphaned ETS tables upon transfer and give them away when workers reclaim them.
 guardian_loop(HeldTables) ->
     receive
         {'ETS-TRANSFER', Tab, _DeadOwner, _Data} ->
@@ -1030,6 +1081,7 @@ guardian_loop(HeldTables) ->
             ok
     end.
 
+%% @doc Simulate a worker crash after writing demo_heir_tab and return the surviving entries.
 verify_heir_survival_demo() ->
     try ets:delete(demo_heir_tab) catch _:_ -> ok end,
     Parent = self(),
@@ -1063,22 +1115,27 @@ verify_heir_survival_demo() ->
 -export([create_resilient_table/2, reclaim_table/2, verify_heir_survival_demo/0]).
 -export([start_guardian/0, guardian_loop/1]).
 
+%% @doc Create a named public ETS set table with HeirPid configured as heir and return its name.
 create_resilient_table(TableNameAtom, HeirPid) ->
-    TableNameAtom.
+    ok.
 
+%% @doc Spawn and link a guardian process executing guardian_loop/1.
 start_guardian() ->
-    {ok, self()}.
+    ok.
 
+%% @doc Reclaim ownership of Tab from GuardianPid or hand Tab off directly to NewOwnerPid.
 reclaim_table(GuardianPid, Tab) when is_pid(GuardianPid) ->
     ok;
 reclaim_table(Tab, NewOwnerPid) when is_pid(NewOwnerPid) ->
     ok.
 
-guardian_loop(State) ->
+%% @doc Hold orphaned ETS tables upon transfer and give them away when workers reclaim them.
+guardian_loop(HeldTables) ->
     ok.
 
+%% @doc Simulate a worker crash after writing demo_heir_tab and return the surviving entries.
 verify_heir_survival_demo() ->
-    [].
+    ok.
 `,
       },
     ],
@@ -1087,6 +1144,7 @@ verify_heir_survival_demo() ->
 -export([create_resilient_table/2, reclaim_table/2, verify_heir_survival_demo/0]).
 -export([start_guardian/0, guardian_loop/1]).
 
+%% @doc Create a named public ETS set table with HeirPid configured as heir and return its name.
 create_resilient_table(TableNameAtom, HeirPid) ->
     ets:new(TableNameAtom, [
         set,
@@ -1096,10 +1154,12 @@ create_resilient_table(TableNameAtom, HeirPid) ->
     ]),
     TableNameAtom.
 
+%% @doc Spawn and link a guardian process executing guardian_loop/1.
 start_guardian() ->
     Pid = spawn_link(?MODULE, guardian_loop, [#{}]),
     {ok, Pid}.
 
+%% @doc Reclaim ownership of Tab from GuardianPid or hand Tab off directly to NewOwnerPid.
 reclaim_table(GuardianPid, Tab) when is_pid(GuardianPid) ->
     GuardianPid ! {reclaim, Tab, self()},
     receive
@@ -1115,6 +1175,7 @@ reclaim_table(Tab, NewOwnerPid) when is_pid(NewOwnerPid) ->
     ets:give_away(Tab, NewOwnerPid, reclaimed),
     ok.
 
+%% @doc Hold orphaned ETS tables upon transfer and give them away when workers reclaim them.
 guardian_loop(HeldTables) ->
     receive
         {'ETS-TRANSFER', Tab, _DeadOwner, _Data} ->
@@ -1127,6 +1188,7 @@ guardian_loop(HeldTables) ->
             ok
     end.
 
+%% @doc Simulate a worker crash after writing demo_heir_tab and return the surviving entries.
 verify_heir_survival_demo() ->
     try ets:delete(demo_heir_tab) catch _:_ -> ok end,
     Parent = self(),
@@ -1157,7 +1219,7 @@ verify_heir_survival_demo() ->
       {
         id: 'tc1',
         title: 'Heir Transfer Survival and Reclaim',
-        erlangCall: 'begin catch ets:delete(resilient_cache), {ok, Guardian} = ets_heir_handshake:start_guardian(), Creator = spawn(fun() -> Tab = ets_heir_handshake:create_resilient_table(resilient_cache, Guardian), ets:insert(Tab, {k1, <<"persistent_value">>}), timer:sleep(10), exit(intentional_crash) end), timer:sleep(50), Info = ets:info(resilient_cache), OwnerIsGuardian = (proplists:get_value(owner, Info) =:= Guardian), ok = ets_heir_handshake:reclaim_table(Guardian, resilient_cache), [{k1, Val}] = ets:lookup(resilient_cache, k1), Guardian ! stop, {OwnerIsGuardian, Val} end',
+        erlangCall: 'begin catch ets:delete(resilient_cache), {ok, Guardian} = ets_heir_handshake:start_guardian(), _Creator = spawn(fun() -> Tab = ets_heir_handshake:create_resilient_table(resilient_cache, Guardian), ets:insert(Tab, {k1, <<"persistent_value">>}), timer:sleep(10), exit(intentional_crash) end), timer:sleep(50), Info = ets:info(resilient_cache), OwnerIsGuardian = (proplists:get_value(owner, Info) =:= Guardian), ok = ets_heir_handshake:reclaim_table(Guardian, resilient_cache), [{k1, Val}] = ets:lookup(resilient_cache, k1), Guardian ! stop, catch ets:delete(resilient_cache), {OwnerIsGuardian, Val} end',
         expectedOutput: '{true, <<"persistent_value">>}',
         explanation: 'Verifies table ownership moves to guardian on crash and data is fully reclaimed.'
       },

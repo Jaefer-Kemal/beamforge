@@ -121,6 +121,7 @@ delete_expired_tokens(CurrentTimestamp) ->
 -export([create_resilient_table/2, reclaim_table/2, verify_heir_survival_demo/0]).
 -export([start_guardian/0, guardian_loop/1]).
 
+%% @doc Create a named public ETS set table with HeirPid configured as heir and return its name.
 create_resilient_table(TableNameAtom, HeirPid) ->
     ets:new(TableNameAtom, [
         set,
@@ -130,10 +131,12 @@ create_resilient_table(TableNameAtom, HeirPid) ->
     ]),
     TableNameAtom.
 
+%% @doc Spawn and link a guardian process executing guardian_loop/1.
 start_guardian() ->
     Pid = spawn_link(?MODULE, guardian_loop, [#{}]),
     {ok, Pid}.
 
+%% @doc Reclaim ownership of Tab from GuardianPid or hand Tab off directly to NewOwnerPid.
 reclaim_table(GuardianPid, Tab) when is_pid(GuardianPid) ->
     GuardianPid ! {reclaim, Tab, self()},
     receive
@@ -149,6 +152,7 @@ reclaim_table(Tab, NewOwnerPid) when is_pid(NewOwnerPid) ->
     ets:give_away(Tab, NewOwnerPid, reclaimed),
     ok.
 
+%% @doc Hold orphaned ETS tables upon transfer and give them away when workers reclaim them.
 guardian_loop(HeldTables) ->
     receive
         {'ETS-TRANSFER', Tab, _DeadOwner, _Data} ->
@@ -161,6 +165,7 @@ guardian_loop(HeldTables) ->
             ok
     end.
 
+%% @doc Simulate a worker crash after writing demo_heir_tab and return the surviving entries.
 verify_heir_survival_demo() ->
     Parent = self(),
     Heir = spawn(fun() ->

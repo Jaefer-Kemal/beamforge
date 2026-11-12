@@ -2702,6 +2702,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l02` (`VERIFIED 100% PASSED`, score=100, 5 stages in `1.10s`, `1.434s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l02 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `11.08s` / `11.101s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 157: Pedagogical Despoiling & Live Tri-Verification of Chapter 9 Lecture 3 (`ch09-l03`)
+- [x] **157.1: Replace Clone PWE, Eliminate Spoilers & Add 10/10 `@doc` Contracts (`ch09-l03`: `ets_heir_handshake.erl`)**:
+  - Replaced the 1:1 `resilient_vault` stub clone (which mirrored `create_resilient_table/2` verbatim without an actor loop or `setopts/2`) with a genuinely disjoint, runnable Parallel Worked Example: `shard_backup_heir.erl` (`spawn_backup/0`, `attach_backup/2`, `return_shard/2`, `backup_loop/0`), illustrating unnamed `ShardTid` tables, dynamic `ets:setopts/2` heir binding, `'ETS-TRANSFER'` failover capture, and `make_ref()`-correlated `ets:give_away/3` takeover.
+  - Upgraded `conceptMarkdown` (`ch09.ts`) to strict Spec 04 section order and structured `Input`/`Behavior`/`Examples` blocks across all 5 exported functions (`create_resilient_table/2`, `start_guardian/0`, `guardian_loop/1`, `reclaim_table/2`, `verify_heir_survival_demo/0`) with zero syntax spoilers.
+  - Added 10/10 `@doc` contracts across `starterCode`, `files[0].content`, `solutionCode`, `solutionFiles['src/ets_heir_handshake.erl']`, and `ch09_verification_test.go`, converted starter return leaks (`TableNameAtom.`, `{ok, self()}.`, `[].`) to neutral `ok.` stubs (zero `-spec`), and added cleanup (`catch ets:delete(resilient_cache)`) to `visibleTestCases` `tc1`.
+- [x] **157.2: Mandatory Live Tri-Verification & Compiler Suite (`ch09-l03`)**:
+  - **Parallel Worked Example (`shard_backup_heir.erl`)**: Extracted from `ch09.ts`, compiled with `erlc.exe -Wall` (exit code 0, 0 warnings), and verified live crash failover + return via escript (`PWE_CH09_L03_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly (`erlc.exe` exit code 0) and executed all neutral stubs safely (`STARTER_CH09_L03 exports=true stubs={ok,ok,ok,ok,ok,ok}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `erlc.exe -Wall +debug_info` (exit code 0, 0 warnings), passed `bf_ast_verifier` (`ets:new/2`, `ets:give_away/3`), and passed 2/2 visible tests (`SOLUTION_CH09_L03_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l03` (`VERIFIED 100% PASSED`, score=100, 3 stages in `1.45s`, `1.776s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l03 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `10.63s` / `10.651s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 
