@@ -2531,56 +2531,122 @@ run_unit_tests() ->
       incidentId: 'INC-105',
       severity: 'CRITICAL',
       serviceName: 'ets-session-cache',
-      symptom: 'Every time a malformed request crashes the session_cache worker, all 250,000 logged-in users are simultaneously logged out and forced to re-authenticate!',
-      rootCauseHint: 'create_session_table/1 calls ets:new(incident_sessions_tab, [set, public, named_table]) without a {heir, HeirPid, keep_alive} option, and transfer_to_restarted_worker/2 fails to call ets:give_away/3.',
-      fixObjective: 'Add {heir, HeirPid, keep_alive} to ets:new/2 in create_session_table/1 and implement ets:give_away(Tab, NewWorkerPid, keep_alive) in transfer_to_restarted_worker/2.'
+      symptom: 'Whenever a malformed request crashes the session cache worker, all 250,000 active sessions vanish simultaneously and every user is forced to re-authenticate.',
+      rootCauseHint: 'src/incident_ets_wipeout.erl allocates the session table without designating an heir guardian process, and its table-transfer helper returns ok without transferring table ownership.',
+      fixObjective: 'Configure the session table created in create_session_table/1 to transfer ownership with tag keep_alive to HeirPid on owner exit, and complete ownership restitution inside transfer_to_restarted_worker/3.'
     },
-    conceptMarkdown: `## Production Incident Post-Mortem
+    conceptMarkdown: `## Why This Matters in Production
 
-At 14:22 UTC, an unhandled binary parsing exception crashed our authentication cache worker (\`session_manager\`). Although the OTP supervisor instantly restarted the worker in **1.8 milliseconds**, over **250,000 active sessions vanished from memory**. Customers worldwide were logged out mid-checkout, generating an avalanche of customer support tickets!
+At 14:22 UTC, an unhandled binary parsing exception crashed our authentication session cache worker. Although the OTP supervisor restarted a replacement worker in **1.8 milliseconds**, all **250,000 active user sessions vanished from RAM**, triggering an instant global logout storm.
 
-## Under the Hood: ETS Table Ownership Semantics
+In the BEAM VM, an ETS table is **strictly tied to the lifetime of its owner process**—not its supervisor or node. Unless a table designates a living heir process before the owner exits, ERTS destroys the table and reclaims its off-heap memory the microsecond the worker dies. Trace the recovery handshake in the visual scene below.
 
-In the BEAM VM, an ETS table does NOT belong to the node or the supervisor — it is strictly owned by the **creating process**:
+## Deep Concept Breakdown & Under the Hood
 
-1. When a process calls \`ets:new(Name, Options)\`, that process becomes the sole **owner**.
-2. If the owner process dies, the BEAM VM automatically deletes the table from off-heap RAM and frees all allocated memory.
-3. If an OTP supervisor restarts the worker, the new worker receives a completely **empty** brand-new ETS table!
+### 1. Owner Termination vs. Designated Heir Survival
+
+When a process calls \`ets:new(Name, Options)\`, ERTS records that PID as the table owner:
+- Without an heir option, any normal or abnormal exit of the owner immediately deletes the table.
+- With an heir option pairing a guardian \`HeirPid\` and an arbitrary term tag \`HeirData\`, ERTS atomically swaps ownership in off-heap C memory to \`HeirPid\` upon owner death and enqueues \`{'ETS-TRANSFER', Tab, FormerOwnerPid, HeirData}\` in \`HeirPid\`'s mailbox.
+
+### 2. Returning Ownership to a Restarted Worker
+
+After the supervisor spawns a fresh worker process, the heir hands custody back in $O(1)$ time with zero row copying by calling \`ets:give_away/3\`. ERTS transfers ownership to \`NewWorkerPid\` and delivers \`{'ETS-TRANSFER', Tab, HeirPid, GiftData}\` to the new owner's mailbox so it owns the table going forward.
+
+## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
-%% BUGGY CODE: No heir specified!
-create_session_table(HeirPid) ->
-    %% Missing {heir, HeirPid, keep_alive}!
-    %% When caller dies, this table is destroyed instantly!
-    ets:new(incident_sessions_tab, [set, public, named_table]).
+%% Official ETS Ownership & Failover Calls (stdlib / ets)
+ets:new(Name, Options) -> tid() | atom()
+  Types:
+    Name = atom()
+    Options = [set | public | {read_concurrency, boolean()} | {heir, pid() | none, HeirData :: term()}]
+
+ets:give_away(Tab, Pid, GiftData) -> true
+  Types:
+    Tab = tid() | atom()
+    Pid = pid()
+    GiftData = term()
 \`\`\`
 
-## The Production Pattern: The ETS Heir Handshake
+Consult the attached documentation card below for \`ets:give_away/3\` transfer semantics and complexity.
 
-To achieve zero-downtime, zero-loss crash resilience for in-memory state:
+## Parallel Worked Example: Resilient Ring-Buffer Metrics Cache
 
-1. **Designate an Heir**: An upstream guardian process is designated as the table's heir via **\`{heir, HeirPid, keep_alive}\`**:
-   \`\`\`erlang
-   ets:new(incident_sessions_tab, [
-       set,
-       public,
-       named_table,
-       {read_concurrency, true},
-       {heir, HeirPid, keep_alive}
-   ]).
-   \`\`\`
-2. **Automatic Handover on Crash**: When the cache worker terminates, the BEAM runtime preserves the ETS table in off-heap RAM and reassigns ownership to \`HeirPid\`. The heir receives a special message in its mailbox:
-   \`\`\`erlang
-   {'ETS-TRANSFER', TableId, FormerOwnerPid, keep_alive}
-   \`\`\`
-3. **Restitution via \`ets:give_away/3\`**: When the supervisor restarts the cache worker, the heir transfers the preserved ETS table back to the new worker PID:
-   \`\`\`erlang
-   transfer_to_restarted_worker(TableId, NewWorkerPid, GiftData) ->
-       ets:give_away(TableId, NewWorkerPid, GiftData).
-   \`\`\`
-All 250,000 user sessions survive the crash with zero data loss!
+Consider a separate domain: an \`ordered_set\` metrics ring-buffer cache (\`metrics_ring_heir\`) whose worker registers a collector process as heir with tag \`ring_backup\` and hands ownership to a replacement collector upon restart:
+
+\`\`\`erlang
+-module(metrics_ring_heir).
+-export([open_ring/1, handoff_ring/3, run_collector/0]).
+
+%% @doc Create a public ordered_set ring table backed by CollectorHeir.
+open_ring(CollectorHeir) ->
+    ets:new(metrics_ring, [
+        ordered_set,
+        public,
+        {write_concurrency, true},
+        {heir, CollectorHeir, ring_backup}
+    ]).
+
+%% @doc Transfer ownership of RingTab to NextWorkerPid with a handoff tag.
+handoff_ring(RingTab, NextWorkerPid, Tag) ->
+    ets:give_away(RingTab, NextWorkerPid, Tag),
+    ok.
+
+%% @doc Minimal heir actor receiving failover ownership and executing handoff.
+run_collector() ->
+    receive
+        {'ETS-TRANSFER', RingTab, _CrashedPid, ring_backup} ->
+            receive
+                {handover_to, NewPid, AckPid} ->
+                    ok = handoff_ring(RingTab, NewPid, handoff_ok),
+                    AckPid ! ring_restored
+            end;
+        stop ->
+            ok
+    end.
+\`\`\`
+
+### What ERTS Does at Runtime
+
+- **Heir Protection at Creation**: \`open_ring/1\` passes \`{heir, CollectorHeir, ring_backup}\` inside \`ets:new/2\`; if the creating worker dies after inserting metrics, ERTS skips table deletion and sends \`{'ETS-TRANSFER', RingTab, CrashedPid, ring_backup}\` to \`CollectorHeir\`.
+- **Zero-Copy Handover**: \`handoff_ring/3\` calls \`ets:give_away(RingTab, NextWorkerPid, Tag)\`, flipping ownership directly inside ERTS so \`NextWorkerPid\` inherits all accumulated metrics without rebuilding or copying rows.
+
+## Assignment Specification
+
+Repair the two production defects inside \`src/incident_ets_wipeout.erl\` without modifying the pre-wired session helpers or test harness functions (\`store_session/3\`, \`put_session/3\`, \`fetch_session/2\`, \`get_session/2\`, \`transfer_to_restarted_worker/2\`, \`audit_table_heir/0\`, \`test_heir_handover/0\`).
+
+### \`create_session_table/1\`
+- **Input**: Guardian process identifier \`HeirPid\`.
+- **Behavior**: Allocates the public \`set\` ETS table \`incident_sessions_tab\` with concurrent reads enabled, and binds \`HeirPid\` as the table's heir using heirloom tag \`keep_alive\`. Returns the allocated table identifier.
+- **Examples**:
+  - \`incident_ets_wipeout:audit_table_heir()\` confirms the table's registered heir equals the spawned guardian PID and returns \`{ok, heir_configured}\`.
+
+### \`transfer_to_restarted_worker/3\`
+- **Input**: Table identifier \`Tab\`, restarted worker PID \`NewWorkerPid\`, transfer tag term \`GiftData\`.
+- **Behavior**: Transfers legal ownership of \`Tab\` from the current owner (the heir) to \`NewWorkerPid\` with \`GiftData\` using OTP's zero-copy table giveaway primitive, returning \`ok\`. Notice that \`transfer_to_restarted_worker/2\` delegates directly to this 3-arity function with default tag \`keep_alive\`.
+- **Examples**:
+  - \`incident_ets_wipeout:test_heir_handover()\` inserts 3 sessions, crashes the creator worker, catches the failover transfer in the heir, transfers custody via \`transfer_to_restarted_worker/3\`, verifies all 3 sessions remain readable by the new worker, and returns \`{ok, 3, survived}\`.
+
+## Rules & Verification Constraints
+
+- **Required Primitives**: \`ets:new/2\` must register \`{heir, HeirPid, keep_alive}\` and \`transfer_to_restarted_worker/3\` must call \`ets:give_away/3\`.
+- **Zero-Loss Failover**: Crashing the table creator mid-session must preserve 100% of stored entries across heir capture and worker restitution.
 `,
     otpDocCards: [
+      {
+        functionName: 'new',
+        module: 'ets',
+        signature: 'ets:new(Name, Options) -> tid() | atom()',
+        typesSpec: [
+          'Name = atom()',
+          'Options = [set | public | {read_concurrency, boolean()} | {heir, pid() | none, term()}]'
+        ],
+        description: 'Creates a new ETS table owned by the calling process, optionally designating an heir process to adopt the table if the owner terminates.',
+        complexityNote: 'O(1) table allocation in ERTS off-heap memory.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/ets.html#new/2',
+        githubSourceUrl: 'https://github.com/erlang/otp/blob/master/lib/stdlib/src/ets.erl'
+      },
       {
         functionName: 'give_away',
         module: 'ets',
@@ -2608,6 +2674,9 @@ All 250,000 user sessions survive the crash with zero data loss!
         explanation: 'Stores 3 sessions, crashes worker; heir receives table, gives away to new worker, and confirms all 3 sessions survived.'
       }
     ],
+    astRules: {
+      requiredCalls: ['ets:new/2', 'ets:give_away/3']
+    },
     mentalModelCheck: {
       question: 'When an owning worker crashes, what message does the designated heir process receive in its mailbox from ERTS?',
       options: [
@@ -2642,31 +2711,39 @@ All 250,000 user sessions survive the crash with zero data loss!
 -export([transfer_to_restarted_worker/2, transfer_to_restarted_worker/3]).
 -export([audit_table_heir/0, test_heir_handover/0]).
 
+%% @doc Create the public ETS session cache table and designate HeirPid as its failover heir.
 create_session_table(_HeirPid) ->
     ets:new(incident_sessions_tab, [set, public, {read_concurrency, true}]).
 
+%% @doc Insert or update a timestamped user session record in Tab.
 store_session(Tab, SessionId, UserId) ->
     ets:insert(Tab, {SessionId, UserId, os:system_time(millisecond)}),
     ok.
 
+%% @doc Alias delegating session insertion to store_session/3.
 put_session(Tab, SessionId, UserId) ->
     store_session(Tab, SessionId, UserId).
 
+%% @doc Look up UserId for SessionId in Tab, returning {ok, UserId} or {error, not_found}.
 fetch_session(Tab, SessionId) ->
     case ets:lookup(Tab, SessionId) of
         [{SessionId, UserId, _Time}] -> {ok, UserId};
         [] -> {error, not_found}
     end.
 
+%% @doc Alias delegating session lookup to fetch_session/2.
 get_session(Tab, SessionId) ->
     fetch_session(Tab, SessionId).
 
+%% @doc Transfer ownership of Tab to NewWorkerPid with default keep_alive gift data.
 transfer_to_restarted_worker(Tab, NewWorkerPid) ->
     transfer_to_restarted_worker(Tab, NewWorkerPid, keep_alive).
 
+%% @doc Transfer ownership of Tab to NewWorkerPid attaching GiftData and return ok.
 transfer_to_restarted_worker(_Tab, _NewWorkerPid, _GiftData) ->
     ok.
 
+%% @doc Verify that create_session_table/1 attaches the supplied guardian PID as heir.
 audit_table_heir() ->
     HeirPid = spawn(fun() -> receive stop -> ok end end),
     Tab = create_session_table(HeirPid),
@@ -2678,6 +2755,7 @@ audit_table_heir() ->
         _ -> {error, {bad_heir, HeirInfo}}
     end.
 
+%% @doc Run an end-to-end crash simulation verifying session survival across heir handover.
 test_heir_handover() ->
     Parent = self(),
     Heir = spawn(fun() ->
@@ -2688,8 +2766,10 @@ test_heir_handover() ->
                     {give_to, NewWorker} ->
                         transfer_to_restarted_worker(Tab, NewWorker, restored),
                         Parent ! giveaway_done
+                after 500 ->
+                    ets:delete(Tab)
                 end
-        after 1000 ->
+        after 300 ->
             Parent ! {error, heir_timeout}
         end
     end),
@@ -2703,23 +2783,35 @@ test_heir_handover() ->
     end),
     Tab = receive {worker_ready, RecvTab} -> RecvTab end,
     Worker ! die,
-    receive {heir_got_table, Tab} -> ok end,
-    NewWorker = spawn(fun() ->
-        receive
-            {'ETS-TRANSFER', NTab, _Heir, restored} ->
-                {ok, U1} = fetch_session(NTab, <<"sess_1">>),
-                {ok, U2} = fetch_session(NTab, <<"sess_2">>),
-                {ok, U3} = fetch_session(NTab, <<"sess_3">>),
-                Parent ! {new_worker_verified, [U1, U2, U3]},
-                ets:delete(NTab)
-        end
-    end),
-    Heir ! {give_to, NewWorker},
-    receive giveaway_done -> ok end,
     receive
-        {new_worker_verified, [101, 102, 103]} -> {ok, 3, survived}
-    after 1000 ->
-        {error, survival_test_failed}
+        {heir_got_table, Tab} ->
+            NewWorker = spawn(fun() ->
+                receive
+                    {'ETS-TRANSFER', NTab, _Heir, restored} ->
+                        {ok, U1} = fetch_session(NTab, <<"sess_1">>),
+                        {ok, U2} = fetch_session(NTab, <<"sess_2">>),
+                        {ok, U3} = fetch_session(NTab, <<"sess_3">>),
+                        Parent ! {new_worker_verified, [U1, U2, U3]},
+                        ets:delete(NTab)
+                after 500 ->
+                    ok
+                end
+            end),
+            Heir ! {give_to, NewWorker},
+            receive
+                giveaway_done ->
+                    receive
+                        {new_worker_verified, [101, 102, 103]} -> {ok, 3, survived}
+                    after 500 ->
+                        {error, survival_test_failed}
+                    end
+            after 500 ->
+                {error, survival_test_failed}
+            end;
+        {error, heir_timeout} ->
+            {error, heir_timeout}
+    after 500 ->
+        {error, heir_timeout}
     end.
 `,
     solutionCode: `-module(incident_ets_wipeout).
@@ -2727,6 +2819,7 @@ test_heir_handover() ->
 -export([transfer_to_restarted_worker/2, transfer_to_restarted_worker/3]).
 -export([audit_table_heir/0, test_heir_handover/0]).
 
+%% @doc Create the public ETS session cache table and designate HeirPid as its failover heir.
 create_session_table(HeirPid) ->
     ets:new(incident_sessions_tab, [
         set,
@@ -2735,29 +2828,36 @@ create_session_table(HeirPid) ->
         {heir, HeirPid, keep_alive}
     ]).
 
+%% @doc Insert or update a timestamped user session record in Tab.
 store_session(Tab, SessionId, UserId) ->
     ets:insert(Tab, {SessionId, UserId, os:system_time(millisecond)}),
     ok.
 
+%% @doc Alias delegating session insertion to store_session/3.
 put_session(Tab, SessionId, UserId) ->
     store_session(Tab, SessionId, UserId).
 
+%% @doc Look up UserId for SessionId in Tab, returning {ok, UserId} or {error, not_found}.
 fetch_session(Tab, SessionId) ->
     case ets:lookup(Tab, SessionId) of
         [{SessionId, UserId, _Time}] -> {ok, UserId};
         [] -> {error, not_found}
     end.
 
+%% @doc Alias delegating session lookup to fetch_session/2.
 get_session(Tab, SessionId) ->
     fetch_session(Tab, SessionId).
 
+%% @doc Transfer ownership of Tab to NewWorkerPid with default keep_alive gift data.
 transfer_to_restarted_worker(Tab, NewWorkerPid) ->
     transfer_to_restarted_worker(Tab, NewWorkerPid, keep_alive).
 
+%% @doc Transfer ownership of Tab to NewWorkerPid attaching GiftData and return ok.
 transfer_to_restarted_worker(Tab, NewWorkerPid, GiftData) ->
     ets:give_away(Tab, NewWorkerPid, GiftData),
     ok.
 
+%% @doc Verify that create_session_table/1 attaches the supplied guardian PID as heir.
 audit_table_heir() ->
     HeirPid = spawn(fun() -> receive stop -> ok end end),
     Tab = create_session_table(HeirPid),
@@ -2769,6 +2869,7 @@ audit_table_heir() ->
         _ -> {error, {bad_heir, HeirInfo}}
     end.
 
+%% @doc Run an end-to-end crash simulation verifying session survival across heir handover.
 test_heir_handover() ->
     Parent = self(),
     Heir = spawn(fun() ->
@@ -2779,8 +2880,10 @@ test_heir_handover() ->
                     {give_to, NewWorker} ->
                         transfer_to_restarted_worker(Tab, NewWorker, restored),
                         Parent ! giveaway_done
+                after 500 ->
+                    ets:delete(Tab)
                 end
-        after 1000 ->
+        after 300 ->
             Parent ! {error, heir_timeout}
         end
     end),
@@ -2794,23 +2897,35 @@ test_heir_handover() ->
     end),
     Tab = receive {worker_ready, RecvTab} -> RecvTab end,
     Worker ! die,
-    receive {heir_got_table, Tab} -> ok end,
-    NewWorker = spawn(fun() ->
-        receive
-            {'ETS-TRANSFER', NTab, _Heir, restored} ->
-                {ok, U1} = fetch_session(NTab, <<"sess_1">>),
-                {ok, U2} = fetch_session(NTab, <<"sess_2">>),
-                {ok, U3} = fetch_session(NTab, <<"sess_3">>),
-                Parent ! {new_worker_verified, [U1, U2, U3]},
-                ets:delete(NTab)
-        end
-    end),
-    Heir ! {give_to, NewWorker},
-    receive giveaway_done -> ok end,
     receive
-        {new_worker_verified, [101, 102, 103]} -> {ok, 3, survived}
-    after 1000 ->
-        {error, survival_test_failed}
+        {heir_got_table, Tab} ->
+            NewWorker = spawn(fun() ->
+                receive
+                    {'ETS-TRANSFER', NTab, _Heir, restored} ->
+                        {ok, U1} = fetch_session(NTab, <<"sess_1">>),
+                        {ok, U2} = fetch_session(NTab, <<"sess_2">>),
+                        {ok, U3} = fetch_session(NTab, <<"sess_3">>),
+                        Parent ! {new_worker_verified, [U1, U2, U3]},
+                        ets:delete(NTab)
+                after 500 ->
+                    ok
+                end
+            end),
+            Heir ! {give_to, NewWorker},
+            receive
+                giveaway_done ->
+                    receive
+                        {new_worker_verified, [101, 102, 103]} -> {ok, 3, survived}
+                    after 500 ->
+                        {error, survival_test_failed}
+                    end
+            after 500 ->
+                {error, survival_test_failed}
+            end;
+        {error, heir_timeout} ->
+            {error, heir_timeout}
+    after 500 ->
+        {error, heir_timeout}
     end.
 `,
     files: [
@@ -2822,31 +2937,39 @@ test_heir_handover() ->
 -export([transfer_to_restarted_worker/2, transfer_to_restarted_worker/3]).
 -export([audit_table_heir/0, test_heir_handover/0]).
 
+%% @doc Create the public ETS session cache table and designate HeirPid as its failover heir.
 create_session_table(_HeirPid) ->
     ets:new(incident_sessions_tab, [set, public, {read_concurrency, true}]).
 
+%% @doc Insert or update a timestamped user session record in Tab.
 store_session(Tab, SessionId, UserId) ->
     ets:insert(Tab, {SessionId, UserId, os:system_time(millisecond)}),
     ok.
 
+%% @doc Alias delegating session insertion to store_session/3.
 put_session(Tab, SessionId, UserId) ->
     store_session(Tab, SessionId, UserId).
 
+%% @doc Look up UserId for SessionId in Tab, returning {ok, UserId} or {error, not_found}.
 fetch_session(Tab, SessionId) ->
     case ets:lookup(Tab, SessionId) of
         [{SessionId, UserId, _Time}] -> {ok, UserId};
         [] -> {error, not_found}
     end.
 
+%% @doc Alias delegating session lookup to fetch_session/2.
 get_session(Tab, SessionId) ->
     fetch_session(Tab, SessionId).
 
+%% @doc Transfer ownership of Tab to NewWorkerPid with default keep_alive gift data.
 transfer_to_restarted_worker(Tab, NewWorkerPid) ->
     transfer_to_restarted_worker(Tab, NewWorkerPid, keep_alive).
 
+%% @doc Transfer ownership of Tab to NewWorkerPid attaching GiftData and return ok.
 transfer_to_restarted_worker(_Tab, _NewWorkerPid, _GiftData) ->
     ok.
 
+%% @doc Verify that create_session_table/1 attaches the supplied guardian PID as heir.
 audit_table_heir() ->
     HeirPid = spawn(fun() -> receive stop -> ok end end),
     Tab = create_session_table(HeirPid),
@@ -2858,6 +2981,7 @@ audit_table_heir() ->
         _ -> {error, {bad_heir, HeirInfo}}
     end.
 
+%% @doc Run an end-to-end crash simulation verifying session survival across heir handover.
 test_heir_handover() ->
     Parent = self(),
     Heir = spawn(fun() ->
@@ -2868,8 +2992,10 @@ test_heir_handover() ->
                     {give_to, NewWorker} ->
                         transfer_to_restarted_worker(Tab, NewWorker, restored),
                         Parent ! giveaway_done
+                after 500 ->
+                    ets:delete(Tab)
                 end
-        after 1000 ->
+        after 300 ->
             Parent ! {error, heir_timeout}
         end
     end),
@@ -2883,23 +3009,35 @@ test_heir_handover() ->
     end),
     Tab = receive {worker_ready, RecvTab} -> RecvTab end,
     Worker ! die,
-    receive {heir_got_table, Tab} -> ok end,
-    NewWorker = spawn(fun() ->
-        receive
-            {'ETS-TRANSFER', NTab, _Heir, restored} ->
-                {ok, U1} = fetch_session(NTab, <<"sess_1">>),
-                {ok, U2} = fetch_session(NTab, <<"sess_2">>),
-                {ok, U3} = fetch_session(NTab, <<"sess_3">>),
-                Parent ! {new_worker_verified, [U1, U2, U3]},
-                ets:delete(NTab)
-        end
-    end),
-    Heir ! {give_to, NewWorker},
-    receive giveaway_done -> ok end,
     receive
-        {new_worker_verified, [101, 102, 103]} -> {ok, 3, survived}
-    after 1000 ->
-        {error, survival_test_failed}
+        {heir_got_table, Tab} ->
+            NewWorker = spawn(fun() ->
+                receive
+                    {'ETS-TRANSFER', NTab, _Heir, restored} ->
+                        {ok, U1} = fetch_session(NTab, <<"sess_1">>),
+                        {ok, U2} = fetch_session(NTab, <<"sess_2">>),
+                        {ok, U3} = fetch_session(NTab, <<"sess_3">>),
+                        Parent ! {new_worker_verified, [U1, U2, U3]},
+                        ets:delete(NTab)
+                after 500 ->
+                    ok
+                end
+            end),
+            Heir ! {give_to, NewWorker},
+            receive
+                giveaway_done ->
+                    receive
+                        {new_worker_verified, [101, 102, 103]} -> {ok, 3, survived}
+                    after 500 ->
+                        {error, survival_test_failed}
+                    end
+            after 500 ->
+                {error, survival_test_failed}
+            end;
+        {error, heir_timeout} ->
+            {error, heir_timeout}
+    after 500 ->
+        {error, heir_timeout}
     end.
 `,
       },
@@ -2910,6 +3048,7 @@ test_heir_handover() ->
 -export([transfer_to_restarted_worker/2, transfer_to_restarted_worker/3]).
 -export([audit_table_heir/0, test_heir_handover/0]).
 
+%% @doc Create the public ETS session cache table and designate HeirPid as its failover heir.
 create_session_table(HeirPid) ->
     ets:new(incident_sessions_tab, [
         set,
@@ -2918,29 +3057,36 @@ create_session_table(HeirPid) ->
         {heir, HeirPid, keep_alive}
     ]).
 
+%% @doc Insert or update a timestamped user session record in Tab.
 store_session(Tab, SessionId, UserId) ->
     ets:insert(Tab, {SessionId, UserId, os:system_time(millisecond)}),
     ok.
 
+%% @doc Alias delegating session insertion to store_session/3.
 put_session(Tab, SessionId, UserId) ->
     store_session(Tab, SessionId, UserId).
 
+%% @doc Look up UserId for SessionId in Tab, returning {ok, UserId} or {error, not_found}.
 fetch_session(Tab, SessionId) ->
     case ets:lookup(Tab, SessionId) of
         [{SessionId, UserId, _Time}] -> {ok, UserId};
         [] -> {error, not_found}
     end.
 
+%% @doc Alias delegating session lookup to fetch_session/2.
 get_session(Tab, SessionId) ->
     fetch_session(Tab, SessionId).
 
+%% @doc Transfer ownership of Tab to NewWorkerPid with default keep_alive gift data.
 transfer_to_restarted_worker(Tab, NewWorkerPid) ->
     transfer_to_restarted_worker(Tab, NewWorkerPid, keep_alive).
 
+%% @doc Transfer ownership of Tab to NewWorkerPid attaching GiftData and return ok.
 transfer_to_restarted_worker(Tab, NewWorkerPid, GiftData) ->
     ets:give_away(Tab, NewWorkerPid, GiftData),
     ok.
 
+%% @doc Verify that create_session_table/1 attaches the supplied guardian PID as heir.
 audit_table_heir() ->
     HeirPid = spawn(fun() -> receive stop -> ok end end),
     Tab = create_session_table(HeirPid),
@@ -2952,6 +3098,7 @@ audit_table_heir() ->
         _ -> {error, {bad_heir, HeirInfo}}
     end.
 
+%% @doc Run an end-to-end crash simulation verifying session survival across heir handover.
 test_heir_handover() ->
     Parent = self(),
     Heir = spawn(fun() ->
@@ -2962,8 +3109,10 @@ test_heir_handover() ->
                     {give_to, NewWorker} ->
                         transfer_to_restarted_worker(Tab, NewWorker, restored),
                         Parent ! giveaway_done
+                after 500 ->
+                    ets:delete(Tab)
                 end
-        after 1000 ->
+        after 300 ->
             Parent ! {error, heir_timeout}
         end
     end),
@@ -2977,23 +3126,35 @@ test_heir_handover() ->
     end),
     Tab = receive {worker_ready, RecvTab} -> RecvTab end,
     Worker ! die,
-    receive {heir_got_table, Tab} -> ok end,
-    NewWorker = spawn(fun() ->
-        receive
-            {'ETS-TRANSFER', NTab, _Heir, restored} ->
-                {ok, U1} = fetch_session(NTab, <<"sess_1">>),
-                {ok, U2} = fetch_session(NTab, <<"sess_2">>),
-                {ok, U3} = fetch_session(NTab, <<"sess_3">>),
-                Parent ! {new_worker_verified, [U1, U2, U3]},
-                ets:delete(NTab)
-        end
-    end),
-    Heir ! {give_to, NewWorker},
-    receive giveaway_done -> ok end,
     receive
-        {new_worker_verified, [101, 102, 103]} -> {ok, 3, survived}
-    after 1000 ->
-        {error, survival_test_failed}
+        {heir_got_table, Tab} ->
+            NewWorker = spawn(fun() ->
+                receive
+                    {'ETS-TRANSFER', NTab, _Heir, restored} ->
+                        {ok, U1} = fetch_session(NTab, <<"sess_1">>),
+                        {ok, U2} = fetch_session(NTab, <<"sess_2">>),
+                        {ok, U3} = fetch_session(NTab, <<"sess_3">>),
+                        Parent ! {new_worker_verified, [U1, U2, U3]},
+                        ets:delete(NTab)
+                after 500 ->
+                    ok
+                end
+            end),
+            Heir ! {give_to, NewWorker},
+            receive
+                giveaway_done ->
+                    receive
+                        {new_worker_verified, [101, 102, 103]} -> {ok, 3, survived}
+                    after 500 ->
+                        {error, survival_test_failed}
+                    end
+            after 500 ->
+                {error, survival_test_failed}
+            end;
+        {error, heir_timeout} ->
+            {error, heir_timeout}
+    after 500 ->
+        {error, heir_timeout}
     end.
 `,
     },

@@ -396,6 +396,7 @@ run_unit_tests() ->
 -export([transfer_to_restarted_worker/2, transfer_to_restarted_worker/3]).
 -export([audit_table_heir/0, test_heir_handover/0]).
 
+%% @doc Create the public ETS session cache table and designate HeirPid as its failover heir.
 create_session_table(HeirPid) ->
     ets:new(incident_sessions_tab, [
         set,
@@ -404,29 +405,36 @@ create_session_table(HeirPid) ->
         {heir, HeirPid, keep_alive}
     ]).
 
+%% @doc Insert or update a timestamped user session record in Tab.
 store_session(Tab, SessionId, UserId) ->
     ets:insert(Tab, {SessionId, UserId, os:system_time(millisecond)}),
     ok.
 
+%% @doc Alias delegating session insertion to store_session/3.
 put_session(Tab, SessionId, UserId) ->
     store_session(Tab, SessionId, UserId).
 
+%% @doc Look up UserId for SessionId in Tab, returning {ok, UserId} or {error, not_found}.
 fetch_session(Tab, SessionId) ->
     case ets:lookup(Tab, SessionId) of
         [{SessionId, UserId, _Time}] -> {ok, UserId};
         [] -> {error, not_found}
     end.
 
+%% @doc Alias delegating session lookup to fetch_session/2.
 get_session(Tab, SessionId) ->
     fetch_session(Tab, SessionId).
 
+%% @doc Transfer ownership of Tab to NewWorkerPid with default keep_alive gift data.
 transfer_to_restarted_worker(Tab, NewWorkerPid) ->
     transfer_to_restarted_worker(Tab, NewWorkerPid, keep_alive).
 
+%% @doc Transfer ownership of Tab to NewWorkerPid attaching GiftData and return ok.
 transfer_to_restarted_worker(Tab, NewWorkerPid, GiftData) ->
     ets:give_away(Tab, NewWorkerPid, GiftData),
     ok.
 
+%% @doc Verify that create_session_table/1 attaches the supplied guardian PID as heir.
 audit_table_heir() ->
     HeirPid = spawn(fun() -> receive stop -> ok end end),
     Tab = create_session_table(HeirPid),
@@ -438,6 +446,7 @@ audit_table_heir() ->
         _ -> {error, {bad_heir, HeirInfo}}
     end.
 
+%% @doc Run an end-to-end crash simulation verifying session survival across heir handover.
 test_heir_handover() ->
     Parent = self(),
     Heir = spawn(fun() ->
@@ -448,8 +457,10 @@ test_heir_handover() ->
                     {give_to, NewWorker} ->
                         transfer_to_restarted_worker(Tab, NewWorker, restored),
                         Parent ! giveaway_done
+                after 500 ->
+                    ets:delete(Tab)
                 end
-        after 1000 ->
+        after 300 ->
             Parent ! {error, heir_timeout}
         end
     end),
@@ -463,23 +474,35 @@ test_heir_handover() ->
     end),
     Tab = receive {worker_ready, RecvTab} -> RecvTab end,
     Worker ! die,
-    receive {heir_got_table, Tab} -> ok end,
-    NewWorker = spawn(fun() ->
-        receive
-            {'ETS-TRANSFER', NTab, _Heir, restored} ->
-                {ok, U1} = fetch_session(NTab, <<"sess_1">>),
-                {ok, U2} = fetch_session(NTab, <<"sess_2">>),
-                {ok, U3} = fetch_session(NTab, <<"sess_3">>),
-                Parent ! {new_worker_verified, [U1, U2, U3]},
-                ets:delete(NTab)
-        end
-    end),
-    Heir ! {give_to, NewWorker},
-    receive giveaway_done -> ok end,
     receive
-        {new_worker_verified, [101, 102, 103]} -> {ok, 3, survived}
-    after 1000 ->
-        {error, survival_test_failed}
+        {heir_got_table, Tab} ->
+            NewWorker = spawn(fun() ->
+                receive
+                    {'ETS-TRANSFER', NTab, _Heir, restored} ->
+                        {ok, U1} = fetch_session(NTab, <<"sess_1">>),
+                        {ok, U2} = fetch_session(NTab, <<"sess_2">>),
+                        {ok, U3} = fetch_session(NTab, <<"sess_3">>),
+                        Parent ! {new_worker_verified, [U1, U2, U3]},
+                        ets:delete(NTab)
+                after 500 ->
+                    ok
+                end
+            end),
+            Heir ! {give_to, NewWorker},
+            receive
+                giveaway_done ->
+                    receive
+                        {new_worker_verified, [101, 102, 103]} -> {ok, 3, survived}
+                    after 500 ->
+                        {error, survival_test_failed}
+                    end
+            after 500 ->
+                {error, survival_test_failed}
+            end;
+        {error, heir_timeout} ->
+            {error, heir_timeout}
+    after 500 ->
+        {error, heir_timeout}
     end.
 `,
 			},

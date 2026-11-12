@@ -2751,6 +2751,18 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l06` (`VERIFIED 100% PASSED`, score=100, 3 stages in `1.68s`, `2.057s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l06 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `10.68s` / `10.707s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 161: Pedagogical Despoiling & Live Tri-Verification of Chapter 9 Lecture 7 (`ch09-l07`)
+- [x] **161.1: De-Spoil `incident_ets_wipeout` Triage Guide, Replace Broken `named_table` Info & Deadlock, Add `astRules`, `@doc` Contracts & `Run` Dual-Test Runner (`ch09-l07`)**:
+  - Removed verbatim solution spoilers (`{heir, HeirPid, keep_alive}`, `ets:give_away(...)`) from `incidentAlert` and `conceptMarkdown` (`apps/web-ide/src/data/chapters/ch09.ts`), corrected the factual `named_table` mismatch, upgraded `conceptMarkdown` to strict Spec 04 structure (`## Why This Matters in Production`, `## Deep Concept Breakdown & Under the Hood`, `## Official Erlang Docs & Function Reference` with `ets:new/2` + `ets:give_away/3` cards, domain-disjoint runnable PWE `metrics_ring_heir.erl`, structured `Input`/`Behavior`/`Examples` `## Assignment Specification`, and `## Rules & Verification Constraints`), and added `astRules: { requiredCalls: ['ets:new/2', 'ets:give_away/3'] }`.
+  - Added `%% @doc` contracts across all 9 exported functions in `starterCode`, `files[0].content`, `solutionCode`, `solutionFiles['src/incident_ets_wipeout.erl']`, and `services/orchestrator/internal/bridge/ch09_verification_test.go`, and fixed `test_heir_handover/0` infinite hang on starter stubs using bounded `after 300` / `after 500` `{error, heir_timeout}` timeouts.
+  - Updated `buildIncidentRunScript` (`case "ch09-l07"` in `services/orchestrator/internal/bridge/erl_runner_incidents.go`) so `Run` executes both `audit_table_heir()` and `test_heir_handover()` matching `visibleTestCases`.
+- [x] **161.2: Mandatory Live Tri-Verification & Compiler Suite (`ch09-l07`)**:
+  - **Parallel Worked Example (`metrics_ring_heir.erl`)**: Extracted from `ch09.ts`, compiled cleanly with `erlc.exe -Wall`, and verified live ETS heir failover (`PWE_CH09_L07_OK`).
+  - **Starter Pack (`starterCode === files[0].content`)**: Compiled cleanly and executed safely without deadlock (`STARTER_CH09_L07 exports=true audit={error,{bad_heir,none}} handover={error,heir_timeout}`).
+  - **Solution Pack (`solutionCode === solutionFiles`)**: Compiled with `erlc.exe -Wall +debug_info`, passed `bf_ast_verifier`, and passed 2/2 visible tests (`SOLUTION_CH09_L07_OK ast=passed visible=2/2`).
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `go build ./...` exited 0; `TestChapter9Verification/ch09-l07` (`VERIFIED 100% PASSED`, score=100, 3 stages in `1.52s`, `1.903s` package total); `TEST_CHAPTER=9 TestDynamicVisibleTestsCurriculum` (`ch09-l07 | 2/2 tests passed`, all 8 Ch. 9 lessons passed in `15.64s` / `15.699s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 

@@ -148,18 +148,28 @@ init:stop().
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
     AuditRes = incident_ets_wipeout:audit_table_heir(),
-    HandoverRes = incident_ets_wipeout:test_heir_handover(),
-    Passed = (AuditRes =:= {ok, heir_configured}) andalso (HandoverRes =:= {ok, 3, survived}),
-    #{call_str => <<"incident_ets_wipeout:test_heir_handover()">>,
-      expected => <<"{ok, 3, survived}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("Audit: ~p, Handover: ~p", [AuditRes, HandoverRes]))),
-      passed => Passed,
+    #{call_str => <<"incident_ets_wipeout:audit_table_heir()">>,
+      expected => <<"{ok, heir_configured}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [AuditRes]))),
+      passed => (AuditRes =:= {ok, heir_configured}),
       time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"incident_ets_wipeout test">>, expected => <<"{ok, 3, survived}">>,
+    #{call_str => <<"incident_ets_wipeout:audit_table_heir()">>, expected => <<"{ok, heir_configured}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    HandoverRes = incident_ets_wipeout:test_heir_handover(),
+    #{call_str => <<"incident_ets_wipeout:test_heir_handover()">>,
+      expected => <<"{ok, 3, survived}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [HandoverRes]))),
+      passed => (HandoverRes =:= {ok, 3, survived}),
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"incident_ets_wipeout:test_heir_handover()">>, expected => <<"{ok, 3, survived}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
