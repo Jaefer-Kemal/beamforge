@@ -340,15 +340,20 @@ ensure_table() ->
     terminate/3
 ]).
 
+%% @doc Starts a linked C2S connection state machine configured with Opts map.
 start_link(Opts) when is_map(Opts) ->
     gen_statem:start_link(?MODULE, Opts, []).
 
+%% @doc Feeds an incoming XML chunk binary synchronously into the C2S FSM,
+%% returning {ok, NextState, OutXmlList}.
 feed_xml(Pid, XmlChunkBin) when is_pid(Pid), is_binary(XmlChunkBin) ->
     gen_statem:call(Pid, {xml_chunk, XmlChunkBin}).
 
+%% @doc Returns the current protocol phase atom and connection state map.
 get_session_info(Pid) when is_pid(Pid) ->
     gen_statem:call(Pid, get_session_info).
 
+%% @doc Synchronously stops the C2S connection process and triggers cleanup.
 stop(Pid) when is_pid(Pid) ->
     gen_statem:stop(Pid).
 
@@ -514,22 +519,27 @@ send_to_socket(Socket, Data) ->
 ]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
+%% @doc Starts and locally registers the stanza router gen_server process.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc Synchronously stops the locally registered stanza router if running.
 stop() ->
     case whereis(?MODULE) of
         undefined -> ok;
         Pid -> gen_server:stop(Pid)
     end.
 
+%% @doc Dispatches XmlBin to online target PIDs or spools it offline by Bare JID.
 route_stanza(FromFullJid, ToJid, XmlBin)
   when is_binary(FromFullJid), is_binary(ToJid), is_binary(XmlBin) ->
     gen_server:call(?MODULE, {route_stanza, FromFullJid, ToJid, XmlBin}).
 
+%% @doc Retrieves and clears FIFO offline messages queued for TargetJid's Bare JID.
 pop_offline_messages(TargetJid) when is_binary(TargetJid) ->
     gen_server:call(?MODULE, {pop_offline, TargetJid}).
 
+%% @doc Returns the integer count of offline messages spooled for TargetJid's Bare JID.
 get_offline_count(TargetJid) when is_binary(TargetJid) ->
     gen_server:call(?MODULE, {get_offline_count, TargetJid}).
 

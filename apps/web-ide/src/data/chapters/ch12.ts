@@ -549,59 +549,94 @@ Implement \`src/xmpp_session_registry.erl\` (\`-behaviour(gen_server)\`) maintai
     conceptMarkdown: `## Milestone 4: Client-to-Server State Machine (\`gen_statem\`)
 
 ### Why This Matters in Production
-Network protocol connections are fundamentally stateful. A client socket connected to port 5222 cannot simply begin sending chat stanzas immediately. The connection must strictly progress through authentication and resource binding gates:
+Client TCP connections on port 5222 are strictly phase-gated: an unauthenticated socket must never route chat stanzas or bind resources before negotiating the XML stream and completing SASL authentication. Treating every incoming packet in one flat \`gen_server\` handler risks privilege bypass bugs whenever a clause forgets a phase check.
 
-1. It must initiate an XML stream and negotiate encryption/features.
-2. It must authenticate identity via SASL PLAIN.
-3. It must bind an authorized resource identifier (e.g. \`/obsidian\` or \`/desktop\`).
-4. Only upon entering the **session_established** state is it permitted to route stanzas and receive incoming messages.
+> [!IMPORTANT]
+> **\`state_functions\` Isolation:** Modeling the connection with OTP \`gen_statem\` in \`callback_mode() -> state_functions\` isolates each lifecycle phase (\`wait_for_stream\`, \`wait_for_sasl\`, \`authenticated\`, \`session_established\`) into its own callback function, while pipelined XML events returned by \`xmpp_stream_parser:feed_chunk/2\` advance sequentially via \`process_events/4\`.
 
-In Erlang/OTP, the premier abstraction for modeling complex connection lifecycles is the \`gen_statem\` behaviour using **\`callback_mode() -> state_functions\`**.
+---
 
-> **4-Phase Connection Lifecycle:** \`wait_for_stream\` (\`<stream:stream>\`) -> \`wait_for_sasl\` (\`<auth mechanism='PLAIN'>\`) -> \`authenticated\` (\`<iq bind>\`) -> \`session_established\` (real-time stanza routing).
+### Deep Concept Breakdown & Under the Hood
 
-### Deep Concept Breakdown: \`state_functions\` & \`process_events/4\`
-In our industrial architecture, incoming chunks from either unit-test calls (\`{xml_chunk, Chunk}\`) or live TCP sockets (\`{tcp, Socket, Chunk}\`) are fed into \`xmpp_stream_parser:feed_chunk/2\`. The resulting list of structured XML events is then processed sequentially by \`process_events(Events, CurrentState, Data, OutXmlAcc)\`:
+1. **Coalesced Pipelining Across States**: A single TCP read can carry multiple complete stanzas (e.g., \`<auth>...</auth><ping/>\` in one packet). Folding through the event list while carrying \`NextState\` ensures transitions apply deterministically mid-chunk.
+2. **Active-Once Backpressure**: On socket creation and each \`{tcp, Socket, Chunk}\` message, arm \`inet:setopts(Socket, [{active, once}])\` so kernel packets cannot flood the actor mailbox faster than the FSM processes them.
+3. **Clean Session Teardown**: When a client disconnects or the FSM terminates in \`terminate/3\`, invoke \`xmpp_session_registry:unregister_session/1\` if a \`full_jid\` was bound.
+
+---
+
+### Official OTP \`gen_statem\` & Socket API Reference
 
 \`\`\`erlang
-process_events([], State, Data, OutAcc) ->
-    {State, Data, lists:reverse(OutAcc)};
+%% Official OTP Signatures (stdlib / gen_statem & kernel / inet)
+gen_statem:start_link(Module, Args, Opts) -> StartRet
+  Types: Module = module(), Args = term(), Opts = [term()], StartRet = {ok, pid()} | {error, term()}
+
+inet:setopts(Socket, Options) -> ok | {error, posix()}
+  Types: Socket = port(), Options = [{active, once | true | false} | term()]
 \`\`\`
 
-Each clause of \`process_events/4\` inspects the current protocol state:
-- **\`wait_for_stream\`**: When \`{stream_open, Domain}\` arrives, respond with the opening stream header advertising SASL PLAIN, and advance state to \`wait_for_sasl\`.
-- **\`wait_for_sasl\`**: When \`{sasl_auth, Mech, Payload}\` arrives, extract the username, reply with \`<success .../>\`, and advance state to \`authenticated\`.
-- **Pre-Auth Security Rejection**: In \`wait_for_sasl\`, any unauthenticated message stanza (\`_PreAuthStanza\`) received before SASL authentication is completed MUST be rejected with:
-  \`\`\`xml
-  <stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>
-  \`\`\`
-  The state machine remains in \`wait_for_sasl\`.
-- **\`authenticated\`**: When \`{iq_bind, Id, ResourceBin}\` arrives, default resource to \`<<"obsidian">\`, register in \`xmpp_session_registry\`, reply with the bound JID result IQ, and advance state to \`session_established\`.
-- **\`session_established\`**: Normal chat stanzas are passed to \`xmpp_router:route_stanza/3\`.
+Attach \`xmpp_c2s_statem\` lifecycle details via the attached \`gen_statem:start_link/3\` reference card *(below)*.
 
-### Active-Once TCP Flow Control & Mailbox Protection
-In Erlang socket programming, we set the socket to \`{active, once}\` during \`init/1\` and after every received packet. The OS kernel delivers exactly one packet to the actor as an Erlang message \`{tcp, Socket, Data}\`, switching the socket to passive mode until we process it and re-enable active-once. This provides built-in TCP backpressure!
+---
 
-### Step-by-Step Assignment Task
-1. Open \`src/xmpp_c2s_statem.erl\`.
-2. In \`process_events([{stream_open, Domain} | Rest], wait_for_stream, Data, OutAcc)\`:
-   - Construct \`Reply = <<"<stream:stream from='", Domain/binary, "' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'><stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>">>\`.
-   - Recurse with \`wait_for_sasl\`, \`Data#{domain => Domain}\`, and \`[Reply | OutAcc]\`.
-3. In \`process_events([{sasl_auth, _Mech, Payload} | Rest], wait_for_sasl, Data, OutAcc)\`:
-   - Extract user: \`User = extract_user_from_sasl(Payload, maps:get(username, Data, <<"alice">>))\`.
-   - Construct \`Reply = <<"<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>">>\`.
-   - Recurse with \`authenticated\`, \`Data#{username => User}\`, and \`[Reply | OutAcc]\`.
-4. In \`process_events([_PreAuthStanza | Rest], wait_for_sasl, Data, OutAcc)\`:
-   - Construct \`Err = <<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>\`.
-   - Recurse with \`wait_for_sasl\`, \`Data\`, and \`[Err | OutAcc]\`.
-5. In \`process_events([{stream_open, Domain} | Rest], authenticated, Data, OutAcc)\`:
-   - Construct \`Reply = <<"<stream:stream from='", Domain/binary, "' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'><stream:features><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/></stream:features>">>\`.
-   - Recurse with \`authenticated\`, \`Data#{domain => Domain}\`, and \`[Reply | OutAcc]\`.
-6. In \`process_events([{iq_bind, Id, ResourceBin} | Rest], authenticated, Data, OutAcc)\`:
-   - Format resource and \`FullJid = <<User/binary, "@", Domain/binary, "/", Res/binary>>\`.
-   - Register: \`xmpp_session_registry:register_session(FullJid, maps:get(priority, Data, 10), self())\`.
-   - Construct \`Reply = <<"<iq type='result' id='", Id/binary, "'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>", FullJid/binary, "</jid></bind></iq>">>\`.
-   - Recurse with \`session_established\`, \`Data#{resource => Res, full_jid => FullJid}\`, and \`[Reply | OutAcc]\`.`,
+### Chunked Reference Architecture (Domain-Neutral \`gen_statem\` Pattern)
+
+The compact \`proto_gate_statem\` example demonstrates \`callback_mode() -> state_functions\`, synchronous \`{call, From}\` dispatch, and asynchronous \`info\` mailbox accumulation (for a tiny two-step command gate unrelated to XMPP):
+
+\`\`\`erlang
+-module(proto_gate_statem).
+-behaviour(gen_statem).
+-export([start_link/0, send_cmd/2, stop/1, callback_mode/0, init/1, locked/3, unlocked/3]).
+
+start_link() -> gen_statem:start_link(?MODULE, [], []).
+send_cmd(Pid, Cmd) -> gen_statem:call(Pid, {cmd, Cmd}).
+stop(Pid) -> gen_statem:stop(Pid).
+callback_mode() -> state_functions.
+
+init([]) -> {ok, locked, #{inbox => []}}.
+
+locked({call, From}, {cmd, <<"OPEN">>}, Data) ->
+    {next_state, unlocked, Data, [{reply, From, {ok, unlocked}}]};
+locked({call, From}, {cmd, _Other}, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, locked}}]}.
+
+unlocked({call, From}, {cmd, <<"CLOSE">>}, Data) ->
+    {next_state, locked, Data, [{reply, From, {ok, locked}}]};
+unlocked(info, {push, Payload}, Data = #{inbox := Inbox}) ->
+    {keep_state, Data#{inbox => Inbox ++ [Payload]}};
+unlocked({call, From}, _Other, Data) ->
+    {keep_state_and_data, [{reply, From, {ok, unlocked, Data}}]}.
+\`\`\`
+
+---
+
+## Assignment Specification
+
+Implement \`src/xmpp_c2s_statem.erl\` (\`-behaviour(gen_statem)\`, \`callback_mode() -> state_functions\`) coordinating \`xmpp_stream_parser:feed_chunk/2\`, \`xmpp_session_registry:register_session/3\`, and \`xmpp_router:route_stanza/3\`:
+
+### 1. Client API & Lifecycle (\`start_link/1\`, \`feed_xml/2\`, \`get_session_info/1\`, \`stop/1\`)
+- **Input**: \`Opts :: map()\` (optional keys \`socket\`, \`domain\` defaulting to \`<<"localhost">>\`, \`username\` defaulting to \`<<"alice">>\`); raw XML chunk binaries for \`feed_xml/2\`.
+- **Behavior**: Starts in \`wait_for_stream\` tracking \`#{socket, buffer, domain, username, resource, full_jid, priority => 10, delivered_inbox => []}\` and arms \`[{active, once}]\` when a socket is provided.
+  - \`feed_xml(Pid, XmlChunkBin)\` feeds the chunk synchronously and returns \`{ok, NextState, OutXmlList}\`.
+  - \`get_session_info(Pid)\` returns \`{ok, CurrentState, Data}\`.
+  - In \`session_established\`, receiving \`info\` message \`{deliver_stanza, XmlBin}\` forwards to any socket and appends \`XmlBin\` to \`delivered_inbox\`.
+  - \`terminate/3\` unregisters any non-empty \`full_jid\` from \`xmpp_session_registry\`.
+
+### 2. Protocol Phase Transitions & Wire Replies (\`process_events/4\`)
+- **\`wait_for_stream\` + \`{stream_open, Domain}\`**: Updates \`domain => Domain\`, transitions to \`wait_for_sasl\`, and emits \`<stream:stream from='<Domain>' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'><stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>\`.
+- **\`wait_for_sasl\` + \`{sasl_auth, _Mech, Payload}\`**: Extracts username from \`<<0, Authcid, 0, Pass>>\` (or non-empty single token, falling back to existing \`username\`), advances to \`authenticated\`, and emits \`<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>\`.
+- **Pre-Auth Guard (\`wait_for_sasl\` + any non-ping/non-close stanza)**: Remains in \`wait_for_sasl\` and emits \`<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>\`.
+- **\`authenticated\` + \`{stream_open, Domain}\`**: Remains in \`authenticated\`, updates \`domain\`, and emits \`<stream:stream ...><stream:features><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/></stream:features>\`.
+- **\`authenticated\` + \`{iq_bind, Id, ResourceBin}\`**: Defaults empty resource to \`<<"obsidian">>\`, builds \`FullJid = <<User/binary, "@", Domain/binary, "/", Res/binary>>\`, calls \`xmpp_session_registry:register_session(FullJid, Priority, self())\`, stores \`resource\` & \`full_jid\`, advances to \`session_established\`, and emits \`<iq type='result' id='<Id>'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid><FullJid></jid></bind></iq>\`.
+- **\`session_established\` + \`{chat_message, Id, ToJid, Body}\`**: Formats \`<message from='<FromJid>' to='<TargetJid>' id='<Id>' type='chat'><body><Body></body></message>\` (defaulting empty \`ToJid\` to \`FromJid\`) and routes via \`xmpp_router:route_stanza/3\`.
+- **Any state**: \`{ping, Id}\` replies \`<iq type='result' id='<Id>'/>\`; \`stream_close\` replies \`</stream:stream>\` and resets state to \`wait_for_stream\`.
+
+---
+
+## Rules & Verification Constraints
+- Compile cleanly with \`erlc -Wall\` (zero warnings under \`-behaviour(gen_statem)\`).
+- \`callback_mode/0\` MUST return \`state_functions\`; must integrate \`xmpp_stream_parser:feed_chunk/2\`, \`xmpp_session_registry:register_session/3\`, and \`xmpp_router:route_stanza/3\`.
+- Must reject unauthenticated message stanzas during \`wait_for_sasl\` with \`not-authorized\` without advancing state.`,
   },
   {
     id: 'ch12-m5',
@@ -635,7 +670,100 @@ In Erlang socket programming, we set the socket to \`{active, once}\` during \`i
         },
       ],
     },
-    conceptMarkdown: "## Milestone 5: Stanza Routing Engine & Offline Message Queue\n\n### Why This Matters in Production\nThe final piece of our production XMPP architecture is the **Stanza Router**. The router acts as the central messaging switchboard: it decouples client connection processes from each other. Individual C2S connection actors do not need to know where recipient sockets are hosted; they simply pass outgoing stanzas to `xmpp_router:route_stanza/3`.\n\nFurthermore, in mobile networks, users are frequently disconnected due to dead zones, subway tunnels, or app backgrounding. If a message arrives for an offline user, the router must safely spool the stanza in an offline message store so it can be delivered immediately upon the user's next login.\n\n> **Routing Dispatch Semantics:** Incoming stanzas query `xmpp_session_registry:lookup_by_jid/1`. If target PIDs are online, the stanza is dispatched directly (`Pid ! {deliver_stanza, Xml}`); if offline, it is spooled into the router's in-memory `offline_store` map.\n\n### Deep Concept Breakdown: Dispatch Semantics\nWhen `route_stanza(FromFullJid, ToJid, XmlBin)` is called:\n1. It queries `xmpp_session_registry:lookup_by_jid(ToJid)`.\n2. **If PIDs are found (User is Online)**:\n   It dispatches the raw XML directly to each target process's mailbox:\n   ```erlang\n   lists:foreach(fun(Pid) ->\n       Pid ! {deliver_stanza, binary:copy(XmlBin)}\n   end, TargetPids)\n   ```\n   And increments the internal `total_routed` telemetry counter.\n3. **If no PIDs are found (User is Offline)**:\n   It extracts the bare JID with `xmpp_session_registry:parse_jid(ToJid)`, retrieves the user's existing queue from the `offline_store` map (defaulting to `[]`), appends `binary:copy(XmlBin)`, and updates the map.\n\n### Offline Message Retrieval\nWhen a previously offline user finishes connecting and authenticating, their client requests unread messages:\n- `pop_offline_messages(TargetJid)`: Extracts all pending stanzas for that user's bare JID, deletes them from the `offline_store` map, and returns `{ok, StanzaList}`.\n- `get_offline_count(TargetJid)`: Returns an integer count of queued messages for monitoring.\n\n### Step-by-Step Assignment Task\n1. Open `src/xmpp_router.erl`.\n2. In `init/1`, initialize the state map with `offline_store => #{}` and `total_routed => 0`.\n3. In `handle_call({route_stanza, FromFullJid, ToJid, XmlBin}, ...)`:\n   - Query `xmpp_session_registry:lookup_by_jid(ToJid)`.\n   - If `TargetPids` is non-empty, deliver `{deliver_stanza, binary:copy(XmlBin)}` to each PID and return `{reply, {routed, length(TargetPids)}, NewState}`.\n   - If empty, append `binary:copy(XmlBin)` to `offline_store[BareJid]` and return `{reply, {queued_offline, BareJid}, NewState}`.\n4. In `handle_call({pop_offline, TargetJid}, ...)`:\n   - Extract messages for `BareJid`, remove key from `offline_store`, and return `{reply, {ok, Messages}, NewState}`.\n5. In `handle_call({get_offline_count, TargetJid}, ...)`:\n   - Return `{reply, length(Messages), State}`.",
+    conceptMarkdown: `## Milestone 5: Stanza Routing Engine & Offline Message Queue
+
+### Why This Matters in Production
+Individual client \`gen_statem\` connection actors must stay decoupled from one another: Alice's TCP handler shouldn't track where Bob is connected or whether Bob just stepped into a subway dead zone. Centralizing stanza dispatch inside \`xmpp_router\` allows senders to pass formatted XML payloads to one switchboard, while ETS reads handle target PID resolution and an in-memory offline spool preserves messages for disconnected users in FIFO order.
+
+> [!IMPORTANT]
+> **Unpinned Delivery & Bare JID Normalization:** When delivering online via \`Pid ! {deliver_stanza, XmlCopy}\` or spooling offline by **Bare JID**, pass \`XmlBin\` through \`binary:copy/1\` so stalled or offline queues never pin large upstream TCP buffers, and always key offline queues by \`BareJid\` so messages addressed to either \`user@host\` or \`user@host/res\` drain together on reconnect.
+
+---
+
+### Deep Concept Breakdown & Under the Hood
+
+1. **Online Dispatch**: Query \`xmpp_session_registry:lookup_by_jid(ToJid)\`. If one or more target PIDs are returned, send \`{deliver_stanza, binary:copy(XmlBin)}\` to every target PID, increment \`total_routed\`, and reply \`{routed, Count}\`.
+2. **Offline FIFO Spooling & Drain**: When \`lookup_by_jid/1\` returns \`[]\`, normalize \`ToJid\` via \`xmpp_session_registry:parse_jid/1\` to its Bare JID, append \`binary:copy(XmlBin)\` to that user's FIFO list in \`offline_store\`, and reply \`{queued_offline, BareJid}\`. Calling \`pop_offline_messages/1\` returns \`{ok, Msgs}\` and removes the Bare JID key atomically.
+
+---
+
+### Official OTP \`gen_server\` API Reference
+
+\`\`\`erlang
+%% Official OTP Signatures (stdlib / gen_server & binary)
+gen_server:start_link(ServerName, Module, Args, Options) -> Result
+  Types: ServerName = {local, Name :: atom()}, Module = module(), Args = term(), Options = [term()]
+
+gen_server:call(ServerRef, Request) -> Reply
+  Types: ServerRef = pid() | atom(), Request = term(), Reply = term()
+\`\`\`
+
+---
+
+### Chunked Reference Architecture (Domain-Neutral Event Relay & DLQ)
+
+The \`webhook_relay\` server below shows the same online-dispatch vs. map-backed offline FIFO spool and drain pattern on HTTP webhook events (unrelated to XMPP JIDs or stanzas):
+
+\`\`\`erlang
+-module(webhook_relay).
+-behaviour(gen_server).
+-export([start_link/0, forward/2, drain_dlq/1, init/1, handle_call/3, handle_cast/2]).
+
+start_link() -> gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+forward(HookId, Payload) -> gen_server:call(?MODULE, {forward, HookId, Payload}).
+drain_dlq(HookId) -> gen_server:call(?MODULE, {drain, HookId}).
+
+init([]) -> {ok, #{dlq => #{}}}.
+
+handle_call({forward, HookId, Payload}, _From, State = #{dlq := Dlq}) ->
+    case whereis(HookId) of
+        Pid when is_pid(Pid) ->
+            Pid ! {hook_event, binary:copy(Payload)},
+            {reply, {sent, 1}, State};
+        undefined ->
+            Q = maps:get(HookId, Dlq, []),
+            {reply, {spooled, HookId}, State#{dlq => Dlq#{HookId => Q ++ [binary:copy(Payload)]}}}
+    end;
+handle_call({drain, HookId}, _From, State = #{dlq := Dlq}) ->
+    Q = maps:get(HookId, Dlq, []),
+    {reply, {ok, Q}, State#{dlq => maps:remove(HookId, Dlq)}}.
+
+handle_cast(_Msg, State) -> {noreply, State}.
+\`\`\`
+
+---
+
+## Assignment Specification
+
+Implement \`src/xmpp_router.erl\` (\`-behaviour(gen_server)\`) exporting \`start_link/0\`, \`stop/0\`, \`route_stanza/3\`, \`pop_offline_messages/1\`, and \`get_offline_count/1\`:
+
+### 1. \`start_link()\`, \`stop()\` & \`init([])\`
+- **Input**: None for \`start_link/0\` / \`stop/0\`; empty list \`[]\` for \`init/1\`.
+- **Behavior**: Registers locally as \`?MODULE\`. \`init([])\` initializes state map \`#{offline_store => #{}, total_routed => 0}\`. \`stop/0\` stops cleanly if running or returns \`ok\`.
+
+### 2. \`route_stanza(FromFullJid, ToJid, XmlBin)\`
+- **Input**: Three binaries (\`FromFullJid\`, \`ToJid\`, \`XmlBin\`).
+- **Behavior**:
+  - Looks up recipients via \`xmpp_session_registry:lookup_by_jid(ToJid)\`.
+  - **Online**: Sends \`Pid ! {deliver_stanza, binary:copy(XmlBin)}\` to each PID, updates \`total_routed\`, and returns \`{routed, length(TargetPids)}\`.
+  - **Offline**: Extracts \`BareJid\` via \`xmpp_session_registry:parse_jid(ToJid)\`, appends \`binary:copy(XmlBin)\` to the FIFO list for \`BareJid\` in \`offline_store\`, and returns \`{queued_offline, BareJid}\`.
+- **Examples**:
+  - Online Bob: \`route_stanza(<<"alice@host/a">>, <<"bob@host/b">>, Xml)\` -> \`{routed, 1}\`.
+  - Offline Charlie: \`route_stanza(<<"alice@host/a">>, <<"charlie@host">>, Xml)\` -> \`{queued_offline, <<"charlie@host">>}\`.
+
+### 3. \`pop_offline_messages(TargetJid)\` & \`get_offline_count(TargetJid)\`
+- **Input**: Full or Bare \`TargetJid :: binary()\`.
+- **Behavior**:
+  - \`pop_offline_messages/1\` parses \`BareJid\`, returns \`{ok, FIFOOrderedMsgs}\` (or \`{ok, []}\`), and removes \`BareJid\` from \`offline_store\`.
+  - \`get_offline_count/1\` parses \`BareJid\` and returns the non-negative integer count of queued messages.
+
+---
+
+## Rules & Verification Constraints
+- Compile cleanly with \`erlc -Wall\` (zero warnings under \`-behaviour(gen_server)\`).
+- \`init([])\` MUST return a map containing \`offline_store => #{}\`.
+- Must invoke \`xmpp_session_registry:lookup_by_jid/1\`, \`xmpp_session_registry:parse_jid/1\`, and \`binary:copy/1\`.
+- Online dispatch must send \`{deliver_stanza, StanzaBin}\`; offline spooling must preserve FIFO order and reset count to \`0\` on \`pop_offline_messages/1\`.`,
   },
   {
     id: 'ch12-m6',
@@ -644,32 +772,59 @@ In Erlang socket programming, we set the socket to \`{active, once}\` during \`i
     title: 'Milestone 6: Chaos Monkey Resilience & Fault-Injection (xmpp_sup)',
     targetFile: 'src/xmpp_sup.erl',
     targetFunctions: ['start_link/0', 'stop/0', 'init/1'],
-    verificationHint: 'Boot xmpp_sup, inject an abnormal exit into xmpp_session_registry, and verify the supervisor restarts both registry and router with fresh PIDs.',
+    verificationHint: 'Boot all 5 modules under xmpp_sup, verify full E2E message routing and offline spooling, and confirm killing xmpp_router or xmpp_session_registry recovers cleanly under rest_for_one.',
     mentalModelCheck: {
-      question: 'When xmpp_session_registry terminates abnormally under rest_for_one, why is xmpp_router terminated and restarted even if it experienced no internal errors?',
-      codeSnippet: `#{strategy => rest_for_one, intensity => 5, period => 10}\n[RegistryChildSpec, RouterChildSpec]`,
+      question: 'When Chaos Monkey injects exit(whereis(xmpp_router), kill) while Alice has an established C2S session registered in xmpp_session_registry, what happens?',
+      codeSnippet: `#{strategy => rest_for_one, intensity => 5, period => 10}
+%% Child #1: xmpp_session_registry | Child #2: xmpp_router`,
       options: [
         {
           id: 'A',
-          label: 'The router depends on the registry\'s ETS table. Restarting the router ensures it reconnects to the newly created ETS table rather than crashing on stale references.',
+          label: 'Only xmpp_router restarts with a fresh PID; xmpp_session_registry stays untouched with the same PID and active sessions keep routing immediately.',
           isCorrect: true,
-          explanation: 'Correct! Under rest_for_one, child processes booted after the failed process are terminated and restarted in forward sequence, guaranteeing all downstream dependencies re-synchronize with the fresh upstream state.',
+          explanation: 'Correct! Under rest_for_one, crashing a downstream child (#2 xmpp_router) only restarts that child (#2) while leaving upstream siblings (#1 xmpp_session_registry) and all registered ETS sessions intact.',
         },
         {
           id: 'B',
-          label: 'In OTP, rest_for_one is an alias for one_for_all and terminates all processes unconditionally.',
+          label: 'xmpp_sup kills xmpp_session_registry as well, disconnecting Alice and wiping xmpp_sessions_tab.',
           isCorrect: false,
-          explanation: 'rest_for_one only terminates siblings started after the failed process; earlier siblings remain unaffected.',
+          explanation: 'rest_for_one only restarts siblings started AFTER the crashed worker. Upstream xmpp_session_registry is isolated from router crashes.',
         },
         {
           id: 'C',
-          label: 'The BEAM runtime automatically kills all processes that share the same atom table.',
+          label: 'Both workers exit permanently until a client reconnects manually.',
           isCorrect: false,
-          explanation: 'Process isolation guarantees that one process crash does not kill others unless linked or managed by a supervisor.',
+          explanation: 'Both children are configured as permanent workers, so xmpp_sup automatically restarts xmpp_router in milliseconds.',
         },
       ],
     },
-    conceptMarkdown: "## Milestone 6: Chaos Monkey Resilience & 5-Module Integration\\n\\n### Why This Matters in Production\\nIn distributed messaging backends, testing happy paths is never enough. Production systems inevitably encounter network partitions, unexpected packet bursts, OOM kills, and runtime crashes. Erlang's core design philosophy—**'Let It Crash'**—is only effective if your supervision hierarchy deterministically recovers from failures without human intervention.\\n\\nIn this final milestone, you subject your complete 5-module XMPP cluster to **Chaos Monkey Fault Injection**: deliberately killing key worker processes and verifying that the supervision hierarchy cleanly self-heals.\\n\\n> **Chaos Invariant:** When `xmpp_session_registry` is killed with `exit(RegPid, kill)`, `xmpp_sup` must immediately detect the termination, kill all downstream children (`xmpp_router`), restart the registry (creating a fresh ETS table), and restart the router.\\n\\n### Supervision Cascade Mechanics\\nBecause `xmpp_sup` uses the `rest_for_one` strategy with child order `[xmpp_session_registry, xmpp_router]`:\\n\\n1. **Registry Crash**: If `xmpp_session_registry` terminates:\\n   - `xmpp_router` is terminated by the supervisor (because it was started *after* the registry).\\n   - `xmpp_session_registry` is started anew (`init([])` creates a new public ETS table).\\n   - `xmpp_router` is restarted, binding to the fresh registry.\\n2. **Router Crash**: If `xmpp_router` terminates:\\n   - Only `xmpp_router` is restarted.\\n   - `xmpp_session_registry` and all active client sessions remain completely undisturbed!\\n\\n### Step-by-Step Assignment Task\\n1. Open `src/xmpp_sup.erl`.\\n2. Ensure `stop/0` is exported and properly implemented using modern OTP 29 `supervisor:stop(Pid)`:\\n   ```erlang\\n   stop() ->\\n       case whereis(?MODULE) of\\n           undefined -> ok;\\n           Pid -> supervisor:stop(Pid)\\n       end.\\n   ```\\n3. Verify that `start_link/0` registers `{local, ?MODULE}`.\\n4. Click **Submit** to run the complete 6-stage verification suite, including the live Chaos Monkey resilience test!",
+    conceptMarkdown: `## Milestone 6: Chaos Monkey Resilience & 5-Module Integration
+
+### Why This Matters in Production
+Passing isolated unit tests on happy paths does not guarantee reliability when live TCP sockets drop, ETS table owners crash, or burst malformed frames take down a routing worker. Erlang/OTP's **"Let It Crash"** architecture earns its reputation only when every module composes under a supervision tree that heals autonomously under chaos fault injection.
+
+> [!IMPORTANT]
+> **End-to-End 5-Module Contract:** \`xmpp_sup\` boots \`xmpp_session_registry\` (#1) and \`xmpp_router\` (#2) under \`rest_for_one\`; client C2S FSMs (\`xmpp_c2s_statem\`) frame fragmented wire chunks via \`xmpp_stream_parser\`, register into \`xmpp_session_registry\`, and route live or offline stanzas through \`xmpp_router\`.
+
+---
+
+### Fault-Injection Verification Breakdown
+
+1. **Registry Failure (Upstream Crash -> Downstream Cascade)**: Killing \`xmpp_session_registry\` triggers \`rest_for_one\` termination of \`xmpp_router\`, followed by ordered restart of a fresh registry (with a clean ETS table) and fresh router.
+2. **Router Failure (Downstream Crash -> Zero-Session-Loss Recovery)**: Killing \`xmpp_router\` restarts **only** \`xmpp_router\` with a new PID while preserving \`xmpp_session_registry\`'s PID and all registered client sessions—new messages route immediately once the router restarts.
+3. **Client Crash (Monitor Auto-Pruning)**: Killing a high-priority \`C2sPid\` fires an asynchronous \`'DOWN'\` monitor into \`xmpp_session_registry\`, evicting the dead row so traffic fails over to any lower-priority surviving session automatically.
+
+---
+
+## Integration Checklist & Rules
+- Ensure all 5 modules (\`xmpp_sup\`, \`xmpp_stream_parser\`, \`xmpp_session_registry\`, \`xmpp_c2s_statem\`, \`xmpp_router\`) compile cleanly with \`erlc -Wall\`.
+- Run **Submit** on this final milestone to execute all **6 live integration & Chaos Monkey stages**:
+  1. **M1**: \`xmpp_sup\` boot with \`rest_for_one\` and ordered child specs.
+  2. **M2**: Fragmented TCP stream framing & \`binary:copy/1\` heap unpinning.
+  3. **M3**: Priority lookup & automatic \`'DOWN'\` monitor pruning in ETS.
+  4. **M4**: 4-phase \`gen_statem\` handshake, pre-auth rejection, and ETS bind.
+  5. **M5**: Multi-client online delivery into \`delivered_inbox\` and FIFO offline drain.
+  6. **M6 Chaos Monkey**: Live \`exit(RouterPid, kill)\` confirming registry preservation and immediate zero-loss message recovery.`,
   },
 ];
 
@@ -1007,15 +1162,20 @@ ensure_table() ->
     terminate/3
 ]).
 
+%% @doc Starts a linked C2S connection state machine configured with Opts map.
 start_link(Opts) when is_map(Opts) ->
     gen_statem:start_link(?MODULE, Opts, []).
 
+%% @doc Feeds an incoming XML chunk binary synchronously into the C2S FSM,
+%% returning {ok, NextState, OutXmlList}.
 feed_xml(Pid, XmlChunkBin) when is_pid(Pid), is_binary(XmlChunkBin) ->
     gen_statem:call(Pid, {xml_chunk, XmlChunkBin}).
 
+%% @doc Returns the current protocol phase atom and connection state map.
 get_session_info(Pid) when is_pid(Pid) ->
     gen_statem:call(Pid, get_session_info).
 
+%% @doc Synchronously stops the C2S connection process and triggers cleanup.
 stop(Pid) when is_pid(Pid) ->
     gen_statem:stop(Pid).
 
@@ -1181,22 +1341,27 @@ send_to_socket(Socket, Data) ->
 ]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
+%% @doc Starts and locally registers the stanza router gen_server process.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc Synchronously stops the locally registered stanza router if running.
 stop() ->
     case whereis(?MODULE) of
         undefined -> ok;
         Pid -> gen_server:stop(Pid)
     end.
 
+%% @doc Dispatches XmlBin to online target PIDs or spools it offline by Bare JID.
 route_stanza(FromFullJid, ToJid, XmlBin)
   when is_binary(FromFullJid), is_binary(ToJid), is_binary(XmlBin) ->
     gen_server:call(?MODULE, {route_stanza, FromFullJid, ToJid, XmlBin}).
 
+%% @doc Retrieves and clears FIFO offline messages queued for TargetJid's Bare JID.
 pop_offline_messages(TargetJid) when is_binary(TargetJid) ->
     gen_server:call(?MODULE, {pop_offline, TargetJid}).
 
+%% @doc Returns the integer count of offline messages spooled for TargetJid's Bare JID.
 get_offline_count(TargetJid) when is_binary(TargetJid) ->
     gen_server:call(?MODULE, {get_offline_count, TargetJid}).
 
@@ -1248,7 +1413,7 @@ terminate(_Reason, _State) ->
 `,
 };
 
-// ── Starter Code Files (SCAFFOLDED WITH % TODO CHALLENGES - NOT PRE-SOLVED!) ─
+// ── Starter Code Files (CLEAN ANTI-SPOILER STUBS - NOT PRE-SOLVED!) ──────────
 export const CH12_STARTER_FILES: Record<string, string> = {
   'src/xmpp_sup.erl': `-module(xmpp_sup).
 -behaviour(supervisor).
@@ -1430,15 +1595,20 @@ terminate(_Reason, _State) ->
     terminate/3
 ]).
 
+%% @doc Starts a linked C2S connection state machine configured with Opts map.
 start_link(Opts) when is_map(Opts) ->
     gen_statem:start_link(?MODULE, Opts, []).
 
+%% @doc Feeds an incoming XML chunk binary synchronously into the C2S FSM,
+%% returning {ok, NextState, OutXmlList}.
 feed_xml(Pid, XmlChunkBin) when is_pid(Pid), is_binary(XmlChunkBin) ->
     gen_statem:call(Pid, {xml_chunk, XmlChunkBin}).
 
+%% @doc Returns the current protocol phase atom and connection state map.
 get_session_info(Pid) when is_pid(Pid) ->
     gen_statem:call(Pid, get_session_info).
 
+%% @doc Synchronously stops the C2S connection process and triggers cleanup.
 stop(Pid) when is_pid(Pid) ->
     gen_statem:stop(Pid).
 
@@ -1531,86 +1701,76 @@ handle_incoming_chunk(Chunk, CurrentState, Data, ReplyFrom) ->
             {next_state, NextState, UpdatedData, [{reply, From, {ok, NextState, OutXmlList}}]}
     end.
 
-%% % TODO [Milestone 4 - Event Processing Engine]:
-%% process_events(Events, CurrentState, Data, OutXmlAcc) -> {NextState, UpdatedData, OutXmlList}
-
 process_events([], State, Data, OutAcc) ->
     {State, Data, lists:reverse(OutAcc)};
-
-%% % TODO [Milestone 4 - Step 1]: Handle {stream_open, Domain} in wait_for_stream
-%% Reply with stream header advertising SASL PLAIN mechanism:
-%%   Reply = <<"<stream:stream from='", Domain/binary, "' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'><stream:features><mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'><mechanism>PLAIN</mechanism></mechanisms></stream:features>">>
-%% Advance state to 'wait_for_sasl', store domain in Data, append Reply to OutAcc.
-process_events([{stream_open, Domain} | Rest], wait_for_stream, Data, OutAcc) ->
-    %% Implement stream_open transition here:
-    process_events(Rest, wait_for_stream, Data, OutAcc);
-
-%% % TODO [Milestone 4 - Step 2]: Handle {sasl_auth, Mech, Payload} in wait_for_sasl
-%% Extract username with extract_user_from_sasl(Payload, maps:get(username, Data, <<"alice">>))
-%% Reply with success stanza: <<"<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>">>
-%% Advance state to 'authenticated', store username in Data, append Reply to OutAcc.
-process_events([{sasl_auth, _Mech, Payload} | Rest], wait_for_sasl, Data, OutAcc) ->
-    %% Implement sasl_auth transition here:
-    process_events(Rest, wait_for_sasl, Data, OutAcc);
-
-%% % TODO [Milestone 4 - Step 3]: Pre-Auth Security Rejection in wait_for_sasl
-%% Any unauthenticated stanza received before SASL authentication completes MUST be rejected!
-%% Reply with: <<"<stream:error><not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>">>
-%% Remain in wait_for_sasl state.
-process_events([_PreAuthStanza | Rest], wait_for_sasl, Data, OutAcc) ->
-    %% Implement pre-auth stanza rejection here:
-    process_events(Rest, wait_for_sasl, Data, OutAcc);
-
-%% % TODO [Milestone 4 - Step 4]: Handle {stream_open, Domain} in authenticated
-%% After SASL success, client re-opens stream. Reply advertising bind feature:
-%%   Reply = <<"<stream:stream from='", Domain/binary, "' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'><stream:features><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/></stream:features>">>
-%% Remain in 'authenticated' state.
-process_events([{stream_open, Domain} | Rest], authenticated, Data, OutAcc) ->
-    %% Implement second stream_open response here:
-    process_events(Rest, authenticated, Data, OutAcc);
-
-%% % TODO [Milestone 4 - Step 5]: Handle {iq_bind, Id, ResourceBin} in authenticated
-%% 1. Res = if ResourceBin == <<>> -> <<"obsidian">>; true -> ResourceBin end.
-%% 2. FullJid = <<User/binary, "@", Domain/binary, "/", Res/binary>>.
-%% 3. Register session: try xmpp_session_registry:register_session(FullJid, maps:get(priority, Data, 10), self()) catch _:_ -> ok end.
-%% 4. Reply = <<"<iq type='result' id='", Id/binary, "'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><jid>", FullJid/binary, "</jid></bind></iq>">>.
-%% 5. Advance state to 'session_established', update Data with resource and full_jid.
-process_events([{iq_bind, Id, ResourceBin} | Rest], authenticated, Data, OutAcc) ->
-    %% Implement resource binding and session registration here:
-    process_events(Rest, authenticated, Data, OutAcc);
-
-process_events([{chat_message, Id, ToJid, Body} | Rest], session_established, Data, OutAcc) ->
-    FromJid = maps:get(full_jid, Data, <<"alice@localhost/obsidian">>),
-    TargetJid = case ToJid of <<>> -> FromJid; T -> T end,
-    StanzaXml = <<"<message from='", FromJid/binary, "' to='", TargetJid/binary, "' id='", Id/binary, "' type='chat'><body>", Body/binary, "</body></message>">>,
-    _ = try xmpp_router:route_stanza(FromJid, TargetJid, StanzaXml) catch _:_ -> ok end,
-    process_events(Rest, session_established, Data, OutAcc);
-
-process_events([{ping, Id} | Rest], State, Data, OutAcc) ->
-    Reply = <<"<iq type='result' id='", Id/binary, "'/>">>,
-    process_events(Rest, State, Data, [Reply | OutAcc]);
-
-process_events([stream_close | Rest], _State, Data, OutAcc) ->
-    Reply = <<"</stream:stream>">>,
-    process_events(Rest, wait_for_stream, Data, [Reply | OutAcc]);
-
-process_events([_Other | Rest], State, Data, OutAcc) ->
+process_events([_Event | Rest], State, Data, OutAcc) ->
     process_events(Rest, State, Data, OutAcc).
-
-extract_user_from_sasl(<<>>, Default) -> Default;
-extract_user_from_sasl(Payload, Default) ->
-    case binary:split(Payload, <<0>>, [global]) of
-        [_Authzid, Authcid, _Pass | _] when Authcid =/= <<>> -> Authcid;
-        [Single | _] when Single =/= <<>> -> Single;
-        _ -> Default
-    end.
 
 send_to_socket(undefined, _Data) -> ok;
 send_to_socket(Socket, Data) ->
     try gen_tcp:send(Socket, Data) catch _:_ -> ok end,
     ok.
 `,
-  'src/xmpp_router.erl': "-module(xmpp_router).\n-behaviour(gen_server).\n\n-export([\n    start_link/0,\n    stop/0,\n    route_stanza/3,\n    pop_offline_messages/1,\n    get_offline_count/1\n]).\n-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).\n\nstart_link() ->\n    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).\n\nstop() ->\n    case whereis(?MODULE) of\n        undefined -> ok;\n        Pid -> gen_server:stop(Pid)\n    end.\n\nroute_stanza(FromFullJid, ToJid, XmlBin)\n  when is_binary(FromFullJid), is_binary(ToJid), is_binary(XmlBin) ->\n    gen_server:call(?MODULE, {route_stanza, FromFullJid, ToJid, XmlBin}).\n\npop_offline_messages(TargetJid) when is_binary(TargetJid) ->\n    gen_server:call(?MODULE, {pop_offline, TargetJid}).\n\nget_offline_count(TargetJid) when is_binary(TargetJid) ->\n    gen_server:call(?MODULE, {get_offline_count, TargetJid}).\n\ninit([]) ->\n    {ok, #{offline_store => #{}, total_routed => 0}}.\n\n%% % TODO [Milestone 5 - Step 1]: Online Routing vs Offline Fallback Spooling\n%% 1. Query target recipients with xmpp_session_registry:lookup_by_jid(ToJid).\n%% 2. If target PIDs exist ([_ | _]):\n%%    - For each Pid, send: Pid ! {deliver_stanza, binary:copy(XmlBin)}\n%%    - Increment total_routed counter\n%%    - Return {reply, {routed, length(TargetPids)}, UpdatedState}\n%% 3. If no target PIDs exist (recipient is offline: []):\n%%    - Parse BareJid with xmpp_session_registry:parse_jid(ToJid)\n%%    - Append binary:copy(XmlBin) to list for BareJid in State.offline_store\n%%    - Return {reply, {queued_offline, BareJid}, UpdatedState}\nhandle_call({route_stanza, _FromFullJid, ToJid, XmlBin}, _From, State) ->\n    %% Implement online delivery vs offline queueing here:\n    {reply, {queued_offline, ToJid}, State};\n\n%% % TODO [Milestone 5 - Step 2]: Pop Offline Messages for Target JID\n%% 1. Parse BareJid with xmpp_session_registry:parse_jid(TargetJid).\n%% 2. Get list of queued messages from State.offline_store (default []).\n%% 3. Remove BareJid from State.offline_store map.\n%% 4. Return {reply, {ok, Messages}, UpdatedState}.\nhandle_call({pop_offline, TargetJid}, _From, State) ->\n    %% Implement offline message retrieval here:\n    {reply, {ok, []}, State};\n\n%% % TODO [Milestone 5 - Step 3]: Get Count of Offline Messages\n%% 1. Parse BareJid with xmpp_session_registry:parse_jid(TargetJid).\n%% 2. Return {reply, length(Messages), State}.\nhandle_call({get_offline_count, TargetJid}, _From, State) ->\n    %% Implement offline count query here:\n    {reply, 0, State};\n\nhandle_call(_Req, _From, State) ->\n    {reply, {error, unknown_request}, State}.\n\nhandle_cast(_Msg, State) ->\n    {noreply, State}.\n\nhandle_info(_Info, State) ->\n    {noreply, State}.\n\nterminate(_Reason, _State) ->\n    ok.\n",
+  'src/xmpp_router.erl': `-module(xmpp_router).
+-behaviour(gen_server).
+
+-export([
+    start_link/0,
+    stop/0,
+    route_stanza/3,
+    pop_offline_messages/1,
+    get_offline_count/1
+]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+
+%% @doc Starts and locally registers the stanza router gen_server process.
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+%% @doc Synchronously stops the locally registered stanza router if running.
+stop() ->
+    case whereis(?MODULE) of
+        undefined -> ok;
+        Pid -> gen_server:stop(Pid)
+    end.
+
+%% @doc Dispatches XmlBin to online target PIDs or spools it offline by Bare JID.
+route_stanza(FromFullJid, ToJid, XmlBin)
+  when is_binary(FromFullJid), is_binary(ToJid), is_binary(XmlBin) ->
+    gen_server:call(?MODULE, {route_stanza, FromFullJid, ToJid, XmlBin}).
+
+%% @doc Retrieves and clears FIFO offline messages queued for TargetJid's Bare JID.
+pop_offline_messages(TargetJid) when is_binary(TargetJid) ->
+    gen_server:call(?MODULE, {pop_offline, TargetJid}).
+
+%% @doc Returns the integer count of offline messages spooled for TargetJid's Bare JID.
+get_offline_count(TargetJid) when is_binary(TargetJid) ->
+    gen_server:call(?MODULE, {get_offline_count, TargetJid}).
+
+init([]) ->
+    {ok, #{}}.
+
+handle_call({route_stanza, _FromFullJid, ToJid, _XmlBin}, _From, State) ->
+    {reply, {queued_offline, ToJid}, State};
+
+handle_call({pop_offline, _TargetJid}, _From, State) ->
+    {reply, {ok, []}, State};
+
+handle_call({get_offline_count, _TargetJid}, _From, State) ->
+    {reply, 0, State};
+
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_request}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+`,
 };
 
 // ── Chapter 12 Lessons Definition ─────────────────────────────────────────────
@@ -1651,14 +1811,17 @@ export const CHAPTER_12_LESSONS: LessonContent[] = [
     },
     conceptMarkdown: `## Building a Production Real-Time XMPP Server in Erlang/OTP
 
-Welcome to the **BeamForge Final Capstone**. In this capstone project, you unify all concepts mastered across the curriculum—immutable functional terms, tail-call recursion, binary packet framing, lightweight BEAM actors, OTP \`gen_server\` and \`gen_statem\` behaviours, crash-resilient shared ETS tables, and ordered \`rest_for_one\` supervision trees—into a **fully functional, production-grade XMPP chat server**.
+Welcome to the **BeamForge Final Capstone**. Across the 6 Studio Milestones, you compose 5 cooperating Erlang/OTP modules—functional immutability, $O(1)$ sub-binary unpinning, \`gen_server\` + public ETS tables with unidirectional monitors, \`gen_statem\` phase isolation, and \`rest_for_one\` supervision—into a complete real-time XMPP chat server.
 
 ### The 5 Interconnected Modules
-1. **Module 1 (\`src/xmpp_sup.erl\`):** The root OTP supervisor using \`rest_for_one\` restart strategy.
-2. **Module 2 (\`src/xmpp_stream_parser.erl\`):** High-speed binary XML framer that handles TCP chunk fragmentation.
-3. **Module 3 (\`src/xmpp_session_registry.erl\`):** Shared concurrent ETS table storing active user sessions with Erlang process monitors (\`erlang:monitor/2\`).
-4. **Module 4 (\`src/xmpp_c2s_statem.erl\`):** Client-to-server connection state machine implementing the 4-phase XMPP lifecycle.
-5. **Module 5 (\`src/xmpp_router.erl\`):** Message routing engine with online delivery and fallback offline queue.`,
+1. **\`src/xmpp_sup.erl\`**: Root OTP supervisor using \`rest_for_one\` ordering \`[xmpp_session_registry, xmpp_router]\`.
+2. **\`src/xmpp_stream_parser.erl\`**: Incremental binary XML framer handling TCP fragmentation with \`binary:copy/1\` heap unpinning.
+3. **\`src/xmpp_session_registry.erl\`**: Hybrid \`gen_server\` + \`public\` ETS table (\`xmpp_sessions_tab\`) with \`erlang:monitor/2\` auto-pruning.
+4. **\`src/xmpp_c2s_statem.erl\`**: Connection \`gen_statem\` (\`state_functions\`) enforcing \`wait_for_stream -> wait_for_sasl -> authenticated -> session_established\`.
+5. **\`src/xmpp_router.erl\`**: Switchboard \`gen_server\` dispatching live stanzas via ETS and spooling offline messages in FIFO order.
+
+### End-to-End Verification Constraints
+- Every module must compile cleanly with \`erlc -Wall\` and work independently per milestone before full 5-module Chaos Monkey integration in Milestone 6.`,
 
     capstoneMilestones: CH12_CAPSTONE_MILESTONES,
 

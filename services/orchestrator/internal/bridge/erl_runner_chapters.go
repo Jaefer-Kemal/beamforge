@@ -9134,16 +9134,32 @@ catch C1:R1 ->
 end,
 
 S2 = try
+    BeamPath = code:which(xmpp_c2s_statem),
+    WsRoot = filename:dirname(filename:dirname(BeamPath)),
+    SrcPath = filename:join([WsRoot, "src", "xmpp_c2s_statem.erl"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    AstRes = bf_ast_verifier:verify_rules(SrcPath, BeamBin, #{
+        required_remote_calls => [
+            {xmpp_stream_parser, feed_chunk, 2},
+            {xmpp_session_registry, register_session, 3},
+            {xmpp_router, route_stanza, 3}
+        ]
+    }),
     Mode = xmpp_c2s_statem:callback_mode(),
-    case Mode =:= state_functions of
-        true ->
+    case {AstRes, Mode =:= state_functions} of
+        {{ok, _}, true} ->
             #{id => <<"m4_ast_callback_mode">>,
-              title => <<"Callback Mode: state_functions Architecture">>,
+              title => <<"Callback Mode & Integration Calls: state_functions">>,
               status => <<"passed">>, time_ms => 15,
-              details => <<"xmpp_c2s_statem defines callback_mode/0 returning state_functions.">>};
-        false ->
+              details => <<"Verified state_functions callback mode and AST calls to xmpp_stream_parser, xmpp_session_registry, and xmpp_router.">>};
+        {{error, AstErr}, _} ->
             #{id => <<"m4_ast_callback_mode">>,
-              title => <<"Callback Mode: state_functions Architecture">>,
+              title => <<"Callback Mode & Integration Calls: state_functions">>,
+              status => <<"failed">>, time_ms => 15,
+              details => list_to_binary(io_lib:format("AST violation: ~p", [AstErr]))};
+        {_, false} ->
+            #{id => <<"m4_ast_callback_mode">>,
+              title => <<"Callback Mode & Integration Calls: state_functions">>,
               status => <<"failed">>, time_ms => 15,
               details => list_to_binary(io_lib:format("callback_mode expected state_functions, got: ~p", [Mode]))}
     end
@@ -9189,20 +9205,26 @@ S4 = try
     RejectOk = binary:match(ErrResp, <<"not-authorized">>) =/= nomatch,
     {ok, authenticated, _} = xmpp_c2s_statem:feed_xml(C2s2, <<"<auth mechanism='PLAIN'>frank</auth>">>),
     {ok, session_established, _} = xmpp_c2s_statem:feed_xml(C2s2, <<"<iq id='b2'><resource>desk</resource></iq>">>),
+    {ok, session_established, InfoData} = xmpp_c2s_statem:get_session_info(C2s2),
+    InfoOk = maps:get(full_jid, InfoData, <<>>) =:= <<"frank@localhost/desk">>,
+    {ok, session_established, [PingReply]} = xmpp_c2s_statem:feed_xml(C2s2, <<"<ping id='p1'/>">>),
+    PingOk = binary:match(PingReply, <<"id='p1'">>) =/= nomatch,
+    {ok, wait_for_stream, [CloseReply]} = xmpp_c2s_statem:feed_xml(C2s2, <<"</stream:stream>">>),
+    CloseOk = CloseReply =:= <<"</stream:stream>">>,
     LookedUp = xmpp_session_registry:lookup_by_jid(<<"frank@localhost/desk">>),
     RegOk = (LookedUp =:= [C2s2]),
     xmpp_c2s_statem:stop(C2s2),
-    case RejectOk andalso RegOk of
+    case RejectOk andalso InfoOk andalso PingOk andalso CloseOk andalso RegOk of
         true ->
             #{id => <<"m4_preauth_rejection_and_registry">>,
-              title => <<"Security & Binding: Pre-Auth Stanza Rejection & Automatic ETS Registration">>,
+              title => <<"Security & Binding: Pre-Auth Rejection, Info, Ping, Close & ETS Registration">>,
               status => <<"passed">>, time_ms => 30,
-              details => <<"Rejected unauthenticated stanzas with not-authorized error and registered bound session in ETS.">>};
+              details => <<"Rejected unauthenticated stanzas with not-authorized, verified ping/close/session_info, and bound session in ETS.">>};
         false ->
             #{id => <<"m4_preauth_rejection_and_registry">>,
-              title => <<"Security & Binding: Pre-Auth Stanza Rejection & Automatic ETS Registration">>,
+              title => <<"Security & Binding: Pre-Auth Rejection, Info, Ping, Close & ETS Registration">>,
               status => <<"failed">>, time_ms => 30,
-              details => list_to_binary(io_lib:format("RejectOk: ~p, RegOk: ~p", [RejectOk, RegOk]))}
+              details => list_to_binary(io_lib:format("RejectOk: ~p, InfoOk: ~p, PingOk: ~p, CloseOk: ~p, RegOk: ~p", [RejectOk, InfoOk, PingOk, CloseOk, RegOk]))}
     end
 catch C4:R4 ->
     #{id => <<"m4_preauth_rejection_and_registry">>,
@@ -9248,16 +9270,32 @@ catch C1:R1 ->
 end,
 
 S2 = try
+    BeamPath = code:which(xmpp_router),
+    WsRoot = filename:dirname(filename:dirname(BeamPath)),
+    SrcPath = filename:join([WsRoot, "src", "xmpp_router.erl"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    AstRes = bf_ast_verifier:verify_rules(SrcPath, BeamBin, #{
+        required_remote_calls => [
+            {xmpp_session_registry, lookup_by_jid, 1},
+            {xmpp_session_registry, parse_jid, 1},
+            {binary, copy, 1}
+        ]
+    }),
     {ok, State} = xmpp_router:init([]),
-    case is_map(State) andalso maps:is_key(offline_store, State) of
-        true ->
+    case {AstRes, is_map(State) andalso maps:is_key(offline_store, State)} of
+        {{ok, _}, true} ->
             #{id => <<"m5_ast_server_callbacks">>,
-              title => <<"State Architecture: In-Memory Offline Store Map">>,
+              title => <<"State & AST Spec: Offline Store Map & Registry/Unpinning Calls">>,
               status => <<"passed">>, time_ms => 15,
-              details => <<"xmpp_router initialized with #{offline_store => #{}} state map.">>};
-        false ->
+              details => <<"Verified AST calls to xmpp_session_registry and binary:copy/1 plus #{offline_store => #{}} init state.">>};
+        {{error, AstErr}, _} ->
             #{id => <<"m5_ast_server_callbacks">>,
-              title => <<"State Architecture: In-Memory Offline Store Map">>,
+              title => <<"State & AST Spec: Offline Store Map & Registry/Unpinning Calls">>,
+              status => <<"failed">>, time_ms => 15,
+              details => list_to_binary(io_lib:format("AST violation: ~p", [AstErr]))};
+        {_, false} ->
+            #{id => <<"m5_ast_server_callbacks">>,
+              title => <<"State & AST Spec: Offline Store Map & Registry/Unpinning Calls">>,
               status => <<"failed">>, time_ms => 15,
               details => list_to_binary(io_lib:format("Initial state expected #{offline_store => #{}}, got: ~p", [State]))}
     end

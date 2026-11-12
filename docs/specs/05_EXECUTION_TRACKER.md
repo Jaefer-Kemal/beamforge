@@ -2996,6 +2996,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter12Verification/ch12-l03` (`VERIFIED 100% PASSED`, score=100, 4 stages in `2.61s` / `2.954s` total); `TEST_CHAPTER=12 TestDynamicVisibleTestsCurriculum` (`ch12-capstone | 6/6 tests passed` in `2.08s` / `2.104s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
 
+## Phase 182: Pillar 5 Milestone Despoiling, AST Verification & Live Integration of Chapter 12 Milestones 4–6 & Capstone (`ch12-m4`, `ch12-m5`, `ch12-m6`, `ch12-capstone`)
+- [x] **182.1: Rework `ch12-m4` & `ch12-m5` Textbooks, Clean Neutral Starters, `ch12-m6` Fault-Isolation & Capstone Synthesis**:
+  - Updated `ch12-m4` (`lines 549–639`) and `ch12-m5` (`lines 673–766`) `conceptMarkdown` in `apps/web-ide/src/data/chapters/ch12.ts`: added GFM `> [!IMPORTANT]` callouts, official OTP API signatures (`gen_statem:start_link/3`, `inet:setopts/2`, `gen_server:start_link/4`, `gen_server:call/2`), domain-neutral **Chunked Reference Architectures** (`proto_gate_statem`, `webhook_relay`), and Spec 08 Pillar 2 (`Input`/`Behavior`/`Examples`) specs without literal solution code dumps.
+  - Updated `ch12-m6` (`lines 776–827`) and `ch12-capstone` (`lines 1816–1824`): replaced duplicate `rest_for_one` quiz with Chaos Monkey child #2 kill isolation (`xmpp_router` restart preserves `xmpp_session_registry` PID), removed double-escaped `\\n` and `stop/0` spoilers, and added 6-stage integration & verification constraints.
+  - Scrubbed pre-solved `process_events/4` handlers (`chat_message`, `ping`, `stream_close`), unused `extract_user_from_sasl/2`, and all `%% % TODO` hints from `CH12_STARTER_FILES['src/xmpp_c2s_statem.erl']` (`lines 1579–1715`) and `CH12_STARTER_FILES['src/xmpp_router.erl']` (`lines 1716–1776`), synced `%% @doc` contracts across starters, solutions (`lines 1146–1413`), and `services/orchestrator/internal/bridge/ch12_verification_test.go` (`lines 324–688`), and cleaned the line 1416 starter banner comment.
+  - Hardened `services/orchestrator/internal/bridge/erl_runner_chapters.go` (`ch12-l04` lines `9136–9238`, `ch12-l05` lines `9272–9307`): enforced `bf_ast_verifier` `required_remote_calls` (`feed_chunk/2`, `register_session/3`, `route_stanza/3` for M4; `lookup_by_jid/1`, `parse_jid/1`, `binary:copy/1` for M5) and expanded M4 `S4` to verify `get_session_info/1`, `<ping id='p1'/>`, and `</stream:stream>`.
+- [x] **182.2: Mandatory Live Tri-Verification & Full Chapter 12 Compiler/Test Suite**:
+  - **Chunked OTP References (`proto_gate_statem.erl`, `webhook_relay.erl`)**: Extracted from `ch12.ts`, compiled with `erlc.exe -Wall -Werror`, and verified live (`REFS_OK`).
+  - **Starter Pack (`CH12_STARTER_FILES['src/xmpp_c2s_statem.erl']`, `['src/xmpp_router.erl']`)**: Compiled cleanly (`erlc.exe -Wall -Werror`), verified M1 `xmpp_sup` boot compatibility + neutral stubs (`STARTERS_OK`), and confirmed 0 `TODO` markers, 0 ASCII boxes, and 0 escaped `\\n` across `ch12.ts`.
+  - **5-Module Solution Pack (`CH12_SOLUTION_FILES`)**: Compiled `+debug_info -Wall -Werror`, passed `bf_ast_verifier` rules for M4 & M5, and passed E2E C2S handshake + pre-auth `not-authorized` + Chaos Monkey `exit(RouterPid, kill)` zero-loss recovery (`SOLUTIONS_AND_CHAOS_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited 0; `TestChapter12Verification` passed all 6 milestones (`ch12-l01`–`ch12-l05` + `ch12-capstone` with 6/6 stages in `17.20s` / `17.227s` total); `TEST_CHAPTER=12 TestDynamicVisibleTestsCurriculum` passed (`ch12-capstone | 6/6 tests passed` in `4.35s` / `4.399s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated) exited with code 0.
+
 
 
 
