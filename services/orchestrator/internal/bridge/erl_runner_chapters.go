@@ -1871,9 +1871,9 @@ T1_Res = try
             #{call_str => <<"ping_actor:ping(P, <<\"syn\">>)">>, expected => <<"{ok, <<\"syn\">>}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
     end
-catch C1:R1 ->
+catch C1:Err1 ->
     #{call_str => <<"ping_actor:ping(...)">>, expected => <<"{ok, <<\"syn\">>}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try
@@ -1890,11 +1890,30 @@ T2_Res = try
             #{call_str => <<"ping_actor:broadcast([P1, P2], stop)">>, expected => <<"{sent, 2}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
     end
-catch C2:R2 ->
+catch C2:Err2 ->
     #{call_str => <<"ping_actor:broadcast(...)">>, expected => <<"{sent, 2}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res, T2_Res],
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    Dead = spawn(fun() -> receive forever -> ok end end),
+    TRes = ping_actor:ping(Dead, <<"timeout_test">>),
+    Dead ! stop,
+    case TRes of
+        {error, timeout} = R3 ->
+            #{call_str => <<"ping_actor:ping(Unresponsive, <<\"timeout_test\">>)">>,
+              expected => <<"{error, timeout}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))), passed => true,
+              time_ms => erlang:system_time(millisecond) - T3_Start};
+        Other3 ->
+            #{call_str => <<"ping_actor:ping(Unresponsive, <<\"timeout_test\">>)">>, expected => <<"{error, timeout}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
+    end
+catch C3:Err3 ->
+    #{call_str => <<"ping_actor:ping(Unresponsive, ...)">>, expected => <<"{error, timeout}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -7084,9 +7103,10 @@ Stages = [CompileStage, S_Ast, S1_Bench, S2_Inspect]
 CompileStage = case code:ensure_loaded(ping_actor) of
     {module, ping_actor} ->
         Exports = ping_actor:module_info(exports),
-        case lists:member({start_responder, 0}, Exports) andalso lists:member({ping, 2}, Exports) of
-            true -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"ping_actor.erl compiled cleanly; start_responder/0 and ping/2 exported.">>};
-            false -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => <<"Missing required exports: start_responder/0 or ping/2">>}
+        Required = [{start_responder, 0}, {responder_loop, 0}, {ping, 2}, {broadcast, 2}],
+        case lists:all(fun(MFA) -> lists:member(MFA, Exports) end, Required) of
+            true -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"ping_actor.erl compiled cleanly; start_responder/0, responder_loop/0, ping/2, and broadcast/2 exported.">>};
+            false -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => <<"Missing required exports: start_responder/0, responder_loop/0, ping/2, or broadcast/2">>}
         end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}

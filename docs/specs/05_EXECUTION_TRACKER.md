@@ -3416,6 +3416,22 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 3 subtests in `5.01s` (`5.075s` total); `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l01 | 3/3 tests passed`) in `12.41s` (`12.437s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 218: Spec 04 / Spec 08 Anti-Spoiler Audit, Tail-Recursion & self/0 AST Hardening & Live Tri-Verification of Chapter 5 Lecture 2 (`ch05-l02`)
+- [x] **218.1: Spec 04/08 Anti-Spoiler Audit & Erlang/AST Hardening (`ch05-l02`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch05.ts` (`ch05-l02`, `ping_actor.erl`, `lines 389–730`) against Spec 04, 07, and 08.
+  - Re-ordered Spec 04 layout so `## Official Erlang Docs & Function Reference` precedes `## Parallel Worked Example`.
+  - Redesigned `## Parallel Worked Example` to `sensor_monitor.erl` (`start_monitor/0`, `post_reading/3`, `query_status/1`, `monitor_loop/1`) across 4 annotated phases, eliminating the 1:1 clone of `ping_actor.erl`.
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across `start_responder/0`, `responder_loop/0`, `ping/2`, and `broadcast/2`.
+  - Expanded `visibleTestCases` to 3 comprehensive test cases (`tc-ch05-02-1` roundtrip, `tc-ch05-02-2` broadcast, `tc-ch05-02-3` timeout on unresponsive process).
+  - Configured `astRules` (`requiredCalls: ['erlang:self/0']`, `requireTailRecursion: ['responder_loop/0']`), aligned 10/10 plain-English `%% @doc` contracts across all 4 copies (`files`, `solutionFiles`, `starterCode`, `solutionCode`), stripped pre-solved logic in starter code down to neutral `ok.` stubs, and verified zero syntax leaks.
+  - Expanded `Run` (`services/orchestrator/internal/bridge/erl_runner_chapters.go`) to evaluate all 3 visible tests (`T1_Res`–`T3_Res`) with isolated catch bindings, and hardened `Submit` with 4 automated stages (`compile_and_export_audit`, `ast_ping_actor_audit` verifying AST calls to `erlang:self/0` and BEAM bytecode TCO inspection on `responder_loop/0`, `ping_actor_roundtrip_and_broadcast`, and `ping_actor_timeout_and_stop`).
+  - Expanded `services/orchestrator/internal/bridge/ch05_verification_test.go` with positive verification (100% score, 4/4 stages passed, 3/3 visible tests passed) and 2 negative regression tests (`ch05-l02_Negative_Body_Recursion` and `ch05-l02_Negative_Missing_Export`).
+- [x] **218.2: Mandatory Live Tri-Verification & Verification Suites (`ch05-l02`)**:
+  - **Parallel Worked Example (`sensor_monitor.erl`)**: Extracted from `ch05.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified live on OTP 29 (`PWE_SUCCESS`).
+  - **Starter & Solution Pack (`ping_actor.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/ping_actor.erl'] === solutionCode`), compiled starter with `erlc.exe` (exit code 0, `STARTER_SUCCESS`), compiled solution with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `required_calls => [{erlang, self, 0}]` and `require_tail_recursion => [{responder_loop, 0}]` verified via AST and BEAM bytecode inspection (`AST_VERIFIER_SUCCESS`).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 6 subtests in `14.08s` (`14.117s` total); `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l02 | 3/3 tests passed`) in `13.57s` (`13.654s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
 
 
 

@@ -51,6 +51,39 @@ inspect_process(Pid) ->
     end.
 `
 
+	pingActorSolution := `-module(ping_actor).
+-export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
+
+%% @doc Spawn a new concurrent process executing responder_loop/0 and return its process identifier.
+start_responder() ->
+    spawn(fun() -> responder_loop() end).
+
+%% @doc Receive loop handling ping request tuples by sending pong replies with responder PID, or terminating cleanly on stop.
+responder_loop() ->
+    receive
+        {ping, CallerPid, Payload} ->
+            CallerPid ! {pong, self(), Payload},
+            responder_loop();
+        stop ->
+            ok
+    end.
+
+%% @doc Asynchronously send a ping request tuple to ResponderPid with caller PID and Payload, returning {ok, Payload} on matching pong response or {error, timeout} after one second.
+ping(ResponderPid, Payload) ->
+    ResponderPid ! {ping, self(), Payload},
+    receive
+        {pong, ResponderPid, Payload} ->
+            {ok, Payload}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Asynchronously send Msg to each process identifier in PidsList and return a tagged tuple with the total count dispatched.
+broadcast(PidsList, Msg) ->
+    [P ! Msg || P <- PidsList],
+    {sent, length(PidsList)}.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -64,6 +97,16 @@ inspect_process(Pid) ->
 			exerciseID: "ch05-l01",
 			files: map[string]string{
 				"src/process_bench.erl": processBenchSolution,
+			},
+			wantScore:    100,
+			wantStages:   4,
+			visibleCount: 3,
+		},
+		{
+			name:       "ch05-l02 Asynchronous Ping Actor & Broadcast",
+			exerciseID: "ch05-l02",
+			files: map[string]string{
+				"src/ping_actor.erl": pingActorSolution,
 			},
 			wantScore:    100,
 			wantStages:   4,
@@ -114,6 +157,7 @@ inspect_process(Pid) ->
 				t.Fatalf("RunCode compilation failed:\n%s", runRes.Stdout)
 			}
 			if len(runRes.VisibleTests) != tt.visibleCount {
+				t.Logf("[%s] RunCode Stdout:\n%s", tt.exerciseID, runRes.Stdout)
 				t.Errorf("VisibleTests count mismatch: got %d, want %d", len(runRes.VisibleTests), tt.visibleCount)
 			}
 			for i, vt := range runRes.VisibleTests {
@@ -211,6 +255,131 @@ inspect_process(_Pid) -> 2688.
 		}
 		if !foundFailedBench {
 			t.Errorf("Expected process_spawn_benchmark to fail for bloated memory")
+		}
+	})
+
+	// Negative test: body recursion in responder_loop/0 rejected by AST verifier
+	t.Run("ch05-l02 Negative Body Recursion", func(t *testing.T) {
+		sessID := "test-sess-ch05-l02-neg-rec"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		bodyRecCode := `-module(ping_actor).
+-export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
+
+start_responder() ->
+    spawn(fun() -> responder_loop() end).
+
+responder_loop() ->
+    receive
+        {ping, CallerPid, Payload} ->
+            CallerPid ! {pong, self(), Payload},
+            responder_loop(),
+            ok;
+        stop ->
+            ok
+    end.
+
+ping(ResponderPid, Payload) ->
+    ResponderPid ! {ping, self(), Payload},
+    receive
+        {pong, ResponderPid, Payload} ->
+            {ok, Payload}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+broadcast(PidsList, Msg) ->
+    [P ! Msg || P <- PidsList],
+    {sent, length(PidsList)}.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l02", map[string]string{
+			"src/ping_actor.erl": bodyRecCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for body recursion, got %d", report.Score)
+		}
+
+		foundFailedAst := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_self_and_spawn_audit" && st.Status == "failed" {
+				foundFailedAst = true
+			}
+		}
+		if !foundFailedAst {
+			t.Errorf("Expected ast_self_and_spawn_audit to fail on body recursion")
+		}
+	})
+
+	// Negative test: missing export broadcast/2
+	t.Run("ch05-l02 Negative Missing Export", func(t *testing.T) {
+		sessID := "test-sess-ch05-l02-neg-export"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		badExportCode := `-module(ping_actor).
+-export([start_responder/0, ping/2, responder_loop/0]).
+
+start_responder() ->
+    spawn(fun() -> responder_loop() end).
+
+responder_loop() ->
+    receive
+        {ping, CallerPid, Payload} ->
+            CallerPid ! {pong, self(), Payload},
+            responder_loop();
+        stop ->
+            ok
+    end.
+
+ping(ResponderPid, Payload) ->
+    ResponderPid ! {ping, self(), Payload},
+    receive
+        {pong, ResponderPid, Payload} ->
+            {ok, Payload}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+broadcast(PidsList, Msg) ->
+    [P ! Msg || P <- PidsList],
+    {sent, length(PidsList)}.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l02", map[string]string{
+			"src/ping_actor.erl": badExportCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for missing export, got %d", report.Score)
+		}
+
+		foundFailedCompile := false
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				foundFailedCompile = true
+			}
+		}
+		if !foundFailedCompile {
+			t.Errorf("Expected compile_and_export_audit to fail on missing export")
 		}
 	})
 }

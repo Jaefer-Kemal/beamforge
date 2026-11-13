@@ -435,44 +435,6 @@ Erlang provides two ways to spawn processes:
 > 
 > In contrast, processes spawned via \`spawn(?MODULE, loop, [])\` that make fully qualified tail calls (\`?MODULE:loop()\`) seamlessly transition to the newest compiled bytecode without dropping existing state!
 
-## Parallel Worked Example
-
-Consider a distributed audit sink that records telemetry metrics:
-
-\`\`\`erlang
--module(audit_sink).
--export([start_sink/0, submit_event/3, fanout_alert/2, sink_loop/0]).
-
-%% Spawns the sink actor using MFA spawn for hot-code reload compatibility
-start_sink() ->
-    spawn(?MODULE, sink_loop, []).
-
-%% Client API: sends telemetry event and awaits confirmation
-submit_event(SinkPid, DeviceId, Metric) ->
-    SinkPid ! {record_metric, self(), DeviceId, Metric},
-    receive
-        {recorded, SinkPid, DeviceId} ->
-            {ok, DeviceId}
-    after 1000 ->
-        {error, timeout}
-    end.
-
-%% Client API: fans out an emergency notification to observer processes
-fanout_alert(ObserverPids, Alert) ->
-    [Pid ! {emergency_notice, Alert} || Pid <- ObserverPids],
-    {sent, length(ObserverPids)}.
-
-%% Internal actor loop: executes inside the spawned process
-sink_loop() ->
-    receive
-        {record_metric, CallerPid, DeviceId, _Metric} ->
-            CallerPid ! {recorded, self(), DeviceId},
-            sink_loop();
-        shutdown ->
-            ok
-    end.
-\`\`\`
-
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
@@ -488,36 +450,90 @@ self() -> pid()
 Dest ! Message -> Message
 \`\`\`
 
+The \`spawn/3\` BIF allocates an isolated ~2.5 KB process control block and starts execution at \`Module:Function(Args)\`. Message sending (\`Dest ! Message\`) evaluates asynchronously and yields \`Message\`. Consult the **Official OTP Doc Cards** below for full signature specifications.
+
+## Parallel Worked Example
+
+The following sensor monitor actor illustrates spawning a stateful process via MFA, sending asynchronous telemetry updates, and querying state:
+
+\`\`\`erlang
+-module(sensor_monitor).
+-export([start_monitor/0, post_reading/3, query_status/1, monitor_loop/1]).
+
+%% Phase 1: Process Creation via spawn/3 (MFA)
+start_monitor() ->
+    spawn(?MODULE, monitor_loop, [#{readings => 0, last_seen => none}]).
+
+%% Phase 2: Client request-response protocol passing self()
+post_reading(MonitorPid, SensorId, Value) ->
+    MonitorPid ! {reading, self(), SensorId, Value},
+    receive
+        {ack, SensorId} ->
+            ok
+    after 500 ->
+        {error, timeout}
+    end.
+
+%% Phase 3: Synchronous query returning state snapshot
+query_status(MonitorPid) ->
+    MonitorPid ! {get_status, self()},
+    receive
+        {status, State} ->
+            {ok, State}
+    after 500 ->
+        {error, timeout}
+    end.
+
+%% Phase 4: Actor receive loop with state accumulation
+monitor_loop(State) ->
+    receive
+        {reading, From, SensorId, _Val} ->
+            From ! {ack, SensorId},
+            Count = maps:get(readings, State, 0),
+            monitor_loop(State#{readings := Count + 1, last_seen := SensorId});
+        {get_status, From} ->
+            From ! {status, State},
+            monitor_loop(State);
+        stop ->
+            ok
+    end.
+\`\`\`
+
+### Architectural Notes:
+1. **Explicit Caller PID Protocol**: In \`post_reading/3\` and \`query_status/1\`, the client sends its own PID (\`self()\`) so the worker process knows where to route acknowledgments and responses.
+2. **Selective Receive with Timeout**: The client waits up to 500 milliseconds for a matching response tuple, safely returning \`{error, timeout}\` if the worker process is delayed or unreachable.
+3. **Clean Termination Handling**: Receiving the atom \`stop\` allows the process loop to terminate normally without leaking process descriptors or heap memory.
+
 ## Assignment Specification
 
 Implement \`src/ping_actor.erl\` exporting \`start_responder/0\`, \`responder_loop/0\`, \`ping/2\`, and \`broadcast/2\`:
 
 ### 1. \`start_responder/0\`
-- **Input**: None.
-- **Behavior**: Spawns a concurrent process running \`responder_loop/0\` and returns its process identifier.
+- **Input**: None (\`()\`).
+- **Behavior**: Spawns a concurrent process running \`responder_loop/0\` and returns its process identifier (\`pid()\`).
 - **Examples**:
   - \`is_pid(ping_actor:start_responder())\` returns \`true\`.
 
 ### 2. \`responder_loop/0\`
 - **Input**: None (called inside the spawned process).
 - **Behavior**: Executes an infinite tail-recursive message loop waiting for incoming messages:
-  - On receipt of a ping request tuple containing the atom \`ping\`, the caller PID, and an arbitrary payload term: asynchronously sends a reply tuple containing the atom \`pong\`, the responder's own PID (\`self()\`), and the echoing payload back to the caller, then tail-recursively resumes \`responder_loop/0\`.
+  - On receipt of a ping request tuple \`{ping, CallerPid, Payload}\`: asynchronously transmits \`{pong, self(), Payload}\` back to \`CallerPid\`, then tail-recursively resumes \`responder_loop/0\`.
   - On receipt of the atom \`stop\`: terminates the loop cleanly and evaluates to \`ok\`.
 - **Examples**:
   - Handles \`{ping, CallerPid, <<"syn">>}\` by sending \`{pong, self(), <<"syn">>}\` to \`CallerPid\`.
   - Handles \`stop\` by exiting cleanly with \`ok\`.
 
 ### 3. \`ping/2\`
-- **Input**: \`ResponderPid\` (valid process identifier), \`Payload\` (arbitrary Erlang term).
-- **Behavior**: Transmits an asynchronous request tuple containing the atom \`ping\`, the calling process's PID (\`self()\`), and \`Payload\` to \`ResponderPid\`. Waits up to 1,000 milliseconds in a selective receive block for a matching response tuple containing the atom \`pong\`, \`ResponderPid\`, and \`Payload\`. Returns a tagged success tuple wrapping \`Payload\` if received, or a timeout error tuple if 1,000 milliseconds elapse without a response.
+- **Input**: \`ResponderPid :: pid()\`, \`Payload :: term()\`.
+- **Behavior**: Transmits an asynchronous request tuple \`{ping, self(), Payload}\` to \`ResponderPid\`. Waits up to 1,000 milliseconds in a selective receive block for a matching response tuple \`{pong, ResponderPid, Payload}\`. Returns \`{ok, Payload}\` if received, or \`{error, timeout}\` if 1,000 milliseconds elapse without a matching response.
 - **Examples**:
   - \`ping_actor:ping(Pid, <<"syn">>)\` returns \`{ok, <<"syn">>}\`.
   - \`ping_actor:ping(Pid, {metric, 42})\` returns \`{ok, {metric, 42}}\`.
-  - Calling \`ping/2\` against an unresponsive PID returns \`{error, timeout}\` after 1,000ms.
+  - \`ping_actor:ping(DeadPid, <<"probe">>)\` returns \`{error, timeout}\`.
 
 ### 4. \`broadcast/2\`
-- **Input**: \`PidsList\` (list of process identifiers), \`Msg\` (arbitrary Erlang term).
-- **Behavior**: Iterates over \`PidsList\` and asynchronously dispatches \`Msg\` to every recipient process without blocking. Returns a tagged tuple reporting the total count of recipient processes to which the message was dispatched.
+- **Input**: \`PidsList :: [pid()]\`, \`Msg :: term()\`.
+- **Behavior**: Iterates over \`PidsList\` and asynchronously dispatches \`Msg\` to every recipient process without blocking. Returns a tagged tuple \`{sent, Count}\` reporting the total count of recipient processes to which the message was dispatched.
 - **Examples**:
   - \`ping_actor:broadcast([P1, P2], stop)\` returns \`{sent, 2}\`.
   - \`ping_actor:broadcast([], stop)\` returns \`{sent, 0}\`.
@@ -525,8 +541,9 @@ Implement \`src/ping_actor.erl\` exporting \`start_responder/0\`, \`responder_lo
 ## Rules & Verification Constraints
 
 - Must invoke \`erlang:self/0\` to include the caller's PID in request tuples.
-- The \`responder_loop/0\` function must be strictly tail-recursive.
-- All message transmissions must use the asynchronous \`!\` operator.`,
+- The \`responder_loop/0\` function must be strictly tail-recursive (enforced via AST and BEAM bytecode inspection).
+- All message transmissions must use the asynchronous \`!\` operator.
+- Must cleanly export \`start_responder/0\`, \`responder_loop/0\`, \`ping/2\`, and \`broadcast/2\`.`,
     mentalModelCheck: {
       question: 'Why does an Erlang process need to include `self()` inside its request message tuple when communicating with an actor?',
       codeSnippet: `%% Sending a request to a worker:
@@ -587,6 +604,13 @@ WorkerPid ! {calculate_tax, self(), OrderTotal}.`,
         expectedOutput: '{sent, 2}',
         explanation: 'Broadcasts stop message asynchronously to two processes, returning {sent, 2}.',
       },
+      {
+        id: 'tc-ch05-02-3',
+        title: 'Ping Timeout on Unresponsive Process',
+        erlangCall: 'begin Unresponsive = spawn(fun() -> receive forever -> ok end end), Res = ping_actor:ping(Unresponsive, <<"timeout_test">>), Unresponsive ! stop, Res end',
+        expectedOutput: '{error, timeout}',
+        explanation: 'Verifies that ping/2 waits for up to 1,000 milliseconds and returns {error, timeout} when no pong reply arrives.',
+      },
     ],
     astRules: {
       requiredCalls: ['erlang:self/0'],
@@ -600,19 +624,19 @@ WorkerPid ! {calculate_tax, self(), OrderTotal}.`,
         content: `-module(ping_actor).
 -export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
 
-%% @doc Spawn a concurrent responder actor executing responder_loop/0.
+%% @doc Spawn a new concurrent process executing responder_loop/0 and return its process identifier.
 start_responder() ->
     ok.
 
-%% @doc Receive loop handling ping requests and clean termination.
+%% @doc Receive loop handling ping request tuples by sending pong replies with responder PID, or terminating cleanly on stop.
 responder_loop() ->
     ok.
 
-%% @doc Asynchronously send a ping request to responder and await matching pong response.
+%% @doc Asynchronously send a ping request tuple to ResponderPid with caller PID and Payload, returning {ok, Payload} on matching pong response or {error, timeout} after one second.
 ping(_ResponderPid, _Payload) ->
     ok.
 
-%% @doc Asynchronously dispatch message to each PID and return dispatched count.
+%% @doc Asynchronously send Msg to each process identifier in PidsList and return a tagged tuple with the total count dispatched.
 broadcast(_PidsList, _Msg) ->
     ok.
 `,
@@ -622,9 +646,11 @@ broadcast(_PidsList, _Msg) ->
       'src/ping_actor.erl': `-module(ping_actor).
 -export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
 
+%% @doc Spawn a new concurrent process executing responder_loop/0 and return its process identifier.
 start_responder() ->
     spawn(fun() -> responder_loop() end).
 
+%% @doc Receive loop handling ping request tuples by sending pong replies with responder PID, or terminating cleanly on stop.
 responder_loop() ->
     receive
         {ping, CallerPid, Payload} ->
@@ -634,6 +660,7 @@ responder_loop() ->
             ok
     end.
 
+%% @doc Asynchronously send a ping request tuple to ResponderPid with caller PID and Payload, returning {ok, Payload} on matching pong response or {error, timeout} after one second.
 ping(ResponderPid, Payload) ->
     ResponderPid ! {ping, self(), Payload},
     receive
@@ -643,6 +670,7 @@ ping(ResponderPid, Payload) ->
         {error, timeout}
     end.
 
+%% @doc Asynchronously send Msg to each process identifier in PidsList and return a tagged tuple with the total count dispatched.
 broadcast(PidsList, Msg) ->
     [P ! Msg || P <- PidsList],
     {sent, length(PidsList)}.
@@ -651,28 +679,30 @@ broadcast(PidsList, Msg) ->
     starterCode: `-module(ping_actor).
 -export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
 
-%% @doc Spawn a concurrent responder actor executing responder_loop/0.
+%% @doc Spawn a new concurrent process executing responder_loop/0 and return its process identifier.
 start_responder() ->
     ok.
 
-%% @doc Receive loop handling ping requests and clean termination.
+%% @doc Receive loop handling ping request tuples by sending pong replies with responder PID, or terminating cleanly on stop.
 responder_loop() ->
     ok.
 
-%% @doc Asynchronously send a ping request to responder and await matching pong response.
+%% @doc Asynchronously send a ping request tuple to ResponderPid with caller PID and Payload, returning {ok, Payload} on matching pong response or {error, timeout} after one second.
 ping(_ResponderPid, _Payload) ->
     ok.
 
-%% @doc Asynchronously dispatch message to each PID and return dispatched count.
+%% @doc Asynchronously send Msg to each process identifier in PidsList and return a tagged tuple with the total count dispatched.
 broadcast(_PidsList, _Msg) ->
     ok.
 `,
     solutionCode: `-module(ping_actor).
 -export([start_responder/0, ping/2, broadcast/2, responder_loop/0]).
 
+%% @doc Spawn a new concurrent process executing responder_loop/0 and return its process identifier.
 start_responder() ->
     spawn(fun() -> responder_loop() end).
 
+%% @doc Receive loop handling ping request tuples by sending pong replies with responder PID, or terminating cleanly on stop.
 responder_loop() ->
     receive
         {ping, CallerPid, Payload} ->
@@ -682,6 +712,7 @@ responder_loop() ->
             ok
     end.
 
+%% @doc Asynchronously send a ping request tuple to ResponderPid with caller PID and Payload, returning {ok, Payload} on matching pong response or {error, timeout} after one second.
 ping(ResponderPid, Payload) ->
     ResponderPid ! {ping, self(), Payload},
     receive
@@ -691,6 +722,7 @@ ping(ResponderPid, Payload) ->
         {error, timeout}
     end.
 
+%% @doc Asynchronously send Msg to each process identifier in PidsList and return a tagged tuple with the total count dispatched.
 broadcast(PidsList, Msg) ->
     [P ! Msg || P <- PidsList],
     {sent, length(PidsList)}.
