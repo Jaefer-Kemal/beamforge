@@ -44,15 +44,32 @@ The BEAM provides built-in functions (BIFs) to inspect runtime internals without
 > [!warning] Production Concurrency Trap: Millions of Processes Still Require Memory Discipline
 > While spawning 100,000 BEAM processes consumes only ~250 MB of base RAM (at ~2.5 KB per process), processes that retain large terms in their state or allow unhandled messages to accumulate in their mailboxes will quickly grow to dozens of megabytes each. Always monitor process heaps using \`erlang:process_info(Pid, memory)\` and implement strict mailbox hygiene.
 
+## Official Erlang Docs & Function Reference
+
+\`\`\`erlang
+%% Official OTP Signature (erts / erlang)
+erlang:process_info(Pid, ItemList) -> InfoList | undefined
+  Types:
+    Pid = pid()
+    ItemList = [memory | heap_size | reductions | message_queue_len | status]
+    InfoList = [{Item, Value}]
+
+erlang:system_info(Item) -> Value
+  Types:
+    Item = process_count | process_limit | schedulers_online | wordsize
+\`\`\`
+
+OTP documentation specifies types and return values explicitly. \`erlang:process_info/2\` takes a PID and a list of queried metric atoms, returning an association list or \`undefined\` if the target process has already halted. Use the **Official OTP Doc Cards** below for full signature references.
+
 ## Parallel Worked Example
 
-The following helper module demonstrates how an operations monitor queries real-time BEAM scheduler and process telemetry:
+The following operations probe demonstrates querying cluster schedulers and isolated process memory in production:
 
 \`\`\`erlang
 -module(telemetry_probe).
 -export([probe_system/0, probe_worker/1]).
 
-%% Gathers global node telemetry
+%% Phase 1: Query global node scheduler and process limit metrics
 probe_system() ->
     Schedulers = erlang:system_info(schedulers_online),
     ProcCount = erlang:system_info(process_count),
@@ -63,7 +80,7 @@ probe_system() ->
         max_process_limit => ProcLimit
     }.
 
-%% Gathers isolated telemetry for a single worker PID
+%% Phase 2: Query isolated process control block (PCB) telemetry
 probe_worker(Pid) ->
     case is_process_alive(Pid) of
         true ->
@@ -84,20 +101,10 @@ probe_worker(Pid) ->
     end.
 \`\`\`
 
-## Official Erlang Docs & Function Reference
-
-\`\`\`erlang
-%% Official OTP Signature (erts / erlang)
-erlang:process_info(Pid, ItemList) -> InfoList | undefined
-  Types:
-    Pid = pid()
-    ItemList = [memory | heap_size | reductions | message_queue_len | status]
-    InfoList = [{Item, Value}]
-
-erlang:system_info(Item) -> Value
-  Types:
-    Item = process_count | process_limit | schedulers_online | wordsize
-\`\`\`
+### Architectural Notes:
+1. **Global Introspection via \`erlang:system_info/1\`**: Reads VM-level metrics ($O(1)$) directly from ERTS without locks, capturing online schedulers and live process counts.
+2. **Process Control Block Sampling**: \`erlang:process_info(Pid, Items)\` atomically inspects the memory allocation and pending message count of an isolated actor. If the process terminates concurrently during the call, ERTS safely returns \`undefined\`.
+3. **Structured Domain Telemetry**: Rather than dumping raw ERTS tuple lists, the probe maps metrics into an explicit \`{ok, Map}\` contract suitable for downstream metrics ingestion.
 
 ## Assignment Specification
 
@@ -107,24 +114,21 @@ This is a **Guided Interactive Demo**. Explore the concurrency and telemetry cap
 
 #### \`run/0\`
 - **Input**: None (\`()\`).
-- **Behavior**: Executes the benchmark with 2,000 processes and prints formatted benchmark statistics (total spawn duration, per-process latency, and average memory footprint) to standard output.
-- **Output**: Returns \`ok\`.
+- **Behavior**: Executes the default 2,000 process benchmark and prints formatted benchmark statistics (total spawn duration, per-process latency, and average memory footprint) to standard output. Returns \`ok\`.
+- **Examples**:
+  - \`process_bench:run()\` returns \`ok\`.
 
 #### \`run_bench/1\`
-- **Input**:
-  - \`N\`: positive integer process count (e.g. \`2000\`)
-- **Behavior**: Measures the spawn time of \`N\` concurrent processes, samples the memory footprint of the first 50 processes using \`inspect_process/1\`, and sends a \`stop\` message to cleanly terminate all spawned workers.
-- **Output**: Returns a telemetry map \`#{spawned => N, avg_memory_bytes => AvgMem, elapsed_us => ElapsedUs}\`.
+- **Input**: \`N :: pos_integer()\` (e.g. \`2000\`).
+- **Behavior**: Measures the spawn time of \`N\` concurrent worker processes using \`erlang:monotonic_time(microsecond)\`, samples the memory footprint of the first 50 processes using \`inspect_process/1\`, cleanly terminates all spawned workers via \`stop\` messages, and returns a telemetry summary map \`#{spawned => N, avg_memory_bytes => AvgMem, elapsed_us => ElapsedUs}\`.
 - **Examples**:
-  - \`run_bench(2000)\` $\\rightarrow$ \`#{spawned => 2000, avg_memory_bytes => 2688, elapsed_us => 4250}\`
+  - \`process_bench:run_bench(2000)\` returns \`#{spawned => 2000, avg_memory_bytes => 2688, elapsed_us => 4250}\`.
 
 #### \`inspect_process/1\`
-- **Input**:
-  - \`Pid\`: a live process PID
-- **Behavior**: Queries the internal VM process control block via \`erlang:process_info(Pid, memory)\` to retrieve the process's allocated memory footprint in bytes.
-- **Output**: Integer memory in bytes (or \`2688\` if the process already exited).
+- **Input**: \`Pid :: pid()\`.
+- **Behavior**: Queries the internal VM process control block via \`erlang:process_info(Pid, memory)\` to retrieve the process's allocated memory footprint in bytes. Returns the integer byte size, or \`2688\` if the process has already terminated.
 - **Examples**:
-  - \`inspect_process(Pid)\` $\\rightarrow$ \`2688\`
+  - \`process_bench:inspect_process(Pid)\` returns \`2688\`.
 
 ### Instructions
 
@@ -136,7 +140,8 @@ This is a **Guided Interactive Demo**. Explore the concurrency and telemetry cap
 
 - Spawns \`N\` concurrent processes and measures real-time allocation.
 - Average process memory footprint must remain under **4,096 bytes**.
-- All spawned processes must be cleanly stopped with \`stop\` messages.`,
+- All spawned processes must be cleanly stopped with \`stop\` messages.
+- Automated verifier checks module compilation, exports (\`run/0\`, \`run_bench/1\`, \`inspect_process/1\`), AST rules (\`erlang:process_info/2\`, \`erlang:monotonic_time/1\`, \`list_comprehension\`, \`guards\`), and live OTP memory bounds.`,
     mentalModelCheck: {
       question: 'Why can an accidental infinite loop like `loop() -> loop().` in one BEAM process never freeze the rest of an Erlang web server or XMPP gateway?',
       codeSnippet: `%% A rogue compute-heavy loop running on CPU Core 1:
@@ -191,8 +196,25 @@ cpu_intensive_loop() ->
         expectedOutput: '{2000, true}',
         explanation: 'Verifies that 2,000 processes spawn in microseconds with an average memory footprint strictly under 4,096 bytes.',
       },
+      {
+        id: 'tc-ch05-01-2',
+        title: 'Inspect Live Process Memory Allocation',
+        erlangCall: 'begin Pid = spawn(fun() -> receive stop -> ok end end), Mem = process_bench:inspect_process(Pid), Pid ! stop, is_integer(Mem) andalso Mem > 500 andalso Mem < 10000 end',
+        expectedOutput: 'true',
+        explanation: 'Verifies that inspect_process/1 queries erlang:process_info/2 and retrieves the live process memory footprint.',
+      },
+      {
+        id: 'tc-ch05-01-3',
+        title: 'Benchmark 500 Processes & Scaling Invariants',
+        erlangCall: 'begin #{spawned := S, avg_memory_bytes := M} = process_bench:run_bench(500), {S, M < 4096} end',
+        expectedOutput: '{500, true}',
+        explanation: 'Verifies that benchmark scaling functions correctly for smaller process pools while retaining strict memory bounds.',
+      },
     ],
-    astRules: {},
+    astRules: {
+      requiredCalls: ['erlang:process_info/2', 'erlang:monotonic_time/1'],
+      requiredConstructs: ['list_comprehension', 'guards'],
+    },
     solutionExplanation: 'Demonstrates ultralightweight BEAM process creation (~2.5 KB initial heap), preemptive reductions, and introspection via erlang:process_info/2.',
     files: [
       {
@@ -201,7 +223,7 @@ cpu_intensive_loop() ->
         content: `-module(process_bench).
 -export([run/0, run_bench/1, inspect_process/1]).
 
-%% @doc Execute default 2,000 process benchmark and print findings.
+%% @doc Execute the default 2,000 process benchmark and format timing and memory metrics to standard output.
 run() ->
     Summary = run_bench(2000),
     #{spawned := N, avg_memory_bytes := AvgMem, elapsed_us := ElapsedUs} = Summary,
@@ -212,7 +234,7 @@ run() ->
     io:format("==================================================~n"),
     ok.
 
-%% @doc Spawn N worker processes and measure latency and average memory footprint.
+%% @doc Spawn N concurrent worker processes, measure spawn duration in microseconds, compute average memory footprint across the first 50 workers, cleanly terminate all spawned workers, and return a telemetry summary map.
 run_bench(N) when is_integer(N), N > 0 ->
     StartUs = erlang:monotonic_time(microsecond),
     Pids = [spawn(fun() -> receive stop -> ok end end) || _ <- lists:seq(1, N)],
@@ -231,7 +253,7 @@ run_bench(N) when is_integer(N), N > 0 ->
         elapsed_us => ElapsedUs
     }.
 
-%% @doc Return the total memory footprint in bytes for a given process PID.
+%% @doc Return the memory footprint in bytes allocated to Pid, or a default baseline size if the target process has already terminated.
 inspect_process(Pid) ->
     case erlang:process_info(Pid, memory) of
         {memory, Bytes} -> Bytes;
@@ -244,7 +266,7 @@ inspect_process(Pid) ->
       'src/process_bench.erl': `-module(process_bench).
 -export([run/0, run_bench/1, inspect_process/1]).
 
-%% @doc Execute default 2,000 process benchmark and print findings.
+%% @doc Execute the default 2,000 process benchmark and format timing and memory metrics to standard output.
 run() ->
     Summary = run_bench(2000),
     #{spawned := N, avg_memory_bytes := AvgMem, elapsed_us := ElapsedUs} = Summary,
@@ -255,7 +277,7 @@ run() ->
     io:format("==================================================~n"),
     ok.
 
-%% @doc Spawn N worker processes and measure latency and average memory footprint.
+%% @doc Spawn N concurrent worker processes, measure spawn duration in microseconds, compute average memory footprint across the first 50 workers, cleanly terminate all spawned workers, and return a telemetry summary map.
 run_bench(N) when is_integer(N), N > 0 ->
     StartUs = erlang:monotonic_time(microsecond),
     Pids = [spawn(fun() -> receive stop -> ok end end) || _ <- lists:seq(1, N)],
@@ -274,7 +296,7 @@ run_bench(N) when is_integer(N), N > 0 ->
         elapsed_us => ElapsedUs
     }.
 
-%% @doc Return the total memory footprint in bytes for a given process PID.
+%% @doc Return the memory footprint in bytes allocated to Pid, or a default baseline size if the target process has already terminated.
 inspect_process(Pid) ->
     case erlang:process_info(Pid, memory) of
         {memory, Bytes} -> Bytes;
@@ -285,7 +307,7 @@ inspect_process(Pid) ->
     starterCode: `-module(process_bench).
 -export([run/0, run_bench/1, inspect_process/1]).
 
-%% @doc Execute default 2,000 process benchmark and print findings.
+%% @doc Execute the default 2,000 process benchmark and format timing and memory metrics to standard output.
 run() ->
     Summary = run_bench(2000),
     #{spawned := N, avg_memory_bytes := AvgMem, elapsed_us := ElapsedUs} = Summary,
@@ -296,7 +318,7 @@ run() ->
     io:format("==================================================~n"),
     ok.
 
-%% @doc Spawn N worker processes and measure latency and average memory footprint.
+%% @doc Spawn N concurrent worker processes, measure spawn duration in microseconds, compute average memory footprint across the first 50 workers, cleanly terminate all spawned workers, and return a telemetry summary map.
 run_bench(N) when is_integer(N), N > 0 ->
     StartUs = erlang:monotonic_time(microsecond),
     Pids = [spawn(fun() -> receive stop -> ok end end) || _ <- lists:seq(1, N)],
@@ -315,7 +337,7 @@ run_bench(N) when is_integer(N), N > 0 ->
         elapsed_us => ElapsedUs
     }.
 
-%% @doc Return the total memory footprint in bytes for a given process PID.
+%% @doc Return the memory footprint in bytes allocated to Pid, or a default baseline size if the target process has already terminated.
 inspect_process(Pid) ->
     case erlang:process_info(Pid, memory) of
         {memory, Bytes} -> Bytes;
@@ -325,7 +347,7 @@ inspect_process(Pid) ->
     solutionCode: `-module(process_bench).
 -export([run/0, run_bench/1, inspect_process/1]).
 
-%% @doc Execute default 2,000 process benchmark and print findings.
+%% @doc Execute the default 2,000 process benchmark and format timing and memory metrics to standard output.
 run() ->
     Summary = run_bench(2000),
     #{spawned := N, avg_memory_bytes := AvgMem, elapsed_us := ElapsedUs} = Summary,
@@ -336,7 +358,7 @@ run() ->
     io:format("==================================================~n"),
     ok.
 
-%% @doc Spawn N worker processes and measure latency and average memory footprint.
+%% @doc Spawn N concurrent worker processes, measure spawn duration in microseconds, compute average memory footprint across the first 50 workers, cleanly terminate all spawned workers, and return a telemetry summary map.
 run_bench(N) when is_integer(N), N > 0 ->
     StartUs = erlang:monotonic_time(microsecond),
     Pids = [spawn(fun() -> receive stop -> ok end end) || _ <- lists:seq(1, N)],
@@ -355,7 +377,7 @@ run_bench(N) when is_integer(N), N > 0 ->
         elapsed_us => ElapsedUs
     }.
 
-%% @doc Return the total memory footprint in bytes for a given process PID.
+%% @doc Return the memory footprint in bytes allocated to Pid, or a default baseline size if the target process has already terminated.
 inspect_process(Pid) ->
     case erlang:process_info(Pid, memory) of
         {memory, Bytes} -> Bytes;

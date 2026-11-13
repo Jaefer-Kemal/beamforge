@@ -3400,6 +3400,22 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Deployed Chapter 4 production release (`dpl_FX5ycrDvDQ3ahaxqjR2J8Aok6Hrm`, `readyState: READY`) via `npx vercel --prod --yes` to `https://beamforge-p5l8zykqc-jaefer-kemals-projects.vercel.app` aliased to `https://beamforge-eight.vercel.app`.
   - Verified live `HTTP 200` responses via `npx vercel curl` across `/`, `/syllabus`, `/learn/ch04-l01`, `/learn/ch04-l02`, `/learn/ch04-l03`, `/learn/ch04-l04`, `/learn/ch04-l05`, `/learn/ch04-l06`, `/learn/ch04-l07`, and `/learn/ch04-l08`.
 
+## Phase 217: Chapter 5 Concurrency & Actor Model Pedagogical Audit & Verification
+
+- [x] **217.1: Spec 04/08 Anti-Spoiler Audit & Erlang/AST Hardening (`ch05-l01`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch05.ts` (`ch05-l01`, `process_bench.erl`, `lines 6–380`) against Spec 04, 07, and 08.
+  - Fixed Spec 04 section ordering by moving `## Official Erlang Docs & Function Reference` (`erlang:process_info/2` and `erlang:system_info/1`) prior to `## Parallel Worked Example`.
+  - Hardened `## Parallel Worked Example` (`telemetry_probe.erl`) with clear phase headers (`%% Phase 1: Query global node scheduler and process limit metrics`, `%% Phase 2: Query isolated process control block (PCB) telemetry`) and prose explaining $O(1)$ ERTS system info, PCB sampling, and structured `{ok, Map}` telemetry.
+  - Upgraded `## Assignment Specification` to strict 3-part layout (`Input`, `Behavior`, `Examples`) across `run/0`, `run_bench/1`, and `inspect_process/1`, removed LaTeX math arrows (`$\rightarrow$`), and expanded `visibleTestCases` to 3 comprehensive test cases.
+  - Updated `astRules` (`requiredCalls: ['erlang:process_info/2', 'erlang:monotonic_time/1']`, `requiredConstructs: ['list_comprehension', 'guards']`), aligned 10/10 plain-English `%% @doc` contracts across all 4 copies (`files`, `solutionFiles`, `starterCode`, `solutionCode`), and verified zero syntax leaks.
+  - Expanded `Run` (`services/orchestrator/internal/bridge/erl_runner_chapters.go`) to evaluate all 3 visible tests (`T1_Res`–`T3_Res`) with isolated catch bindings, and hardened `Submit` with 4 automated stages (`compile_and_export_audit`, `ast_process_bench_audit` verifying AST via `bf_ast_verifier:verify_rules`, `process_spawn_benchmark` timing 2,000 processes and asserting average memory < 4096 bytes, and `process_memory_inspection` verifying live process PCB memory).
+  - Created `services/orchestrator/internal/bridge/ch05_verification_test.go` implementing `TestChapter5Verification` with positive verification (100% score, 4/4 stages passed, 3/3 visible tests passed) and 2 negative regression tests (missing export audit rejection and bloated memory failure).
+- [x] **217.2: Mandatory Live Tri-Verification & Verification Suites (`ch05-l01`)**:
+  - **Parallel Worked Example (`telemetry_probe.erl`)**: Extracted from `ch05.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified live on OTP 29 (`PWE_OK`).
+  - **Starter & Solution Pack (`process_bench.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/process_bench.erl'] === solutionCode`), compiled starter with `-Wall -Werror` (0 warnings) and verified clean benchmark run, compiled solution with `+debug_info -Wall -Werror`, passed `bf_ast_verifier:verify_rules/2` with required calls and constructs, and passed 100% of visible and hidden tests (`SOLUTION_OK`).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 3 subtests in `5.01s` (`5.075s` total); `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l01 | 3/3 tests passed`) in `12.41s` (`12.437s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
 
 
 

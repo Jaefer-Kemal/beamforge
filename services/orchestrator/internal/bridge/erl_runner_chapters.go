@@ -1804,20 +1804,52 @@ init:stop().
 		return `
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try process_bench:run_bench(2000) of
-    #{spawned := 2000, avg_memory_bytes := AvgMem} = R1 ->
+    #{spawned := 2000, avg_memory_bytes := AvgMem1} = R1 ->
+        Passed1 = AvgMem1 < 4096,
         #{call_str => <<"process_bench:run_bench(2000)">>,
-          expected => <<"#{spawned => 2000, avg_memory_bytes => ...}">>,
-          actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))),
-          passed => AvgMem < 4096,
+          expected => <<"{2000, true}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("{~p, ~p}", [2000, Passed1]))),
+          passed => Passed1,
           time_ms => erlang:system_time(millisecond) - T1_Start};
     Other1 ->
-        #{call_str => <<"process_bench:run_bench(2000)">>, expected => <<"#{...}">>,
+        #{call_str => <<"process_bench:run_bench(2000)">>, expected => <<"{2000, true}">>,
           actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
 catch C1:R1 ->
-    #{call_str => <<"process_bench:run_bench(2000)">>, expected => <<"#{...}">>,
+    #{call_str => <<"process_bench:run_bench(2000)">>, expected => <<"{2000, true}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    TestPid2 = spawn(fun() -> receive stop -> ok end end),
+    MemVal2 = process_bench:inspect_process(TestPid2),
+    TestPid2 ! stop,
+    Passed2 = is_integer(MemVal2) andalso MemVal2 > 500 andalso MemVal2 < 10000,
+    #{call_str => <<"process_bench:inspect_process(TestPid)">>,
+      expected => <<"true">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Passed2]))),
+      passed => Passed2,
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"process_bench:inspect_process(TestPid)">>, expected => <<"true">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try process_bench:run_bench(500) of
+    #{spawned := 500, avg_memory_bytes := AvgMem3} = R3 ->
+        Passed3 = AvgMem3 < 4096,
+        #{call_str => <<"process_bench:run_bench(500)">>,
+          expected => <<"{500, true}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("{~p, ~p}", [500, Passed3]))),
+          passed => Passed3,
+          time_ms => erlang:system_time(millisecond) - T3_Start};
+    Other3 ->
+        #{call_str => <<"process_bench:run_bench(500)">>, expected => <<"{500, true}">>,
+          actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
+catch C3:R3 ->
+    #{call_str => <<"process_bench:run_bench(500)">>, expected => <<"{500, true}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -6995,9 +7027,31 @@ Stages = [CompileStage_M08, S_Ast_M08, S1_Tlv]
 		return fmt.Sprintf(`
 CompileStage = case code:ensure_loaded(process_bench) of
     {module, process_bench} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"process_bench.erl compiled cleanly; run_bench/1 and inspect_process/1 exported.">>};
+        Exports = process_bench:module_info(exports),
+        Required = [{run, 0}, {run_bench, 1}, {inspect_process, 1}],
+        case lists:all(fun(MFA) -> lists:member(MFA, Exports) end, Required) of
+            true ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"process_bench.erl compiled cleanly; run/0, run_bench/1, and inspect_process/1 exported.">>};
+            false ->
+                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => <<"Missing required exports: run/0, run_bench/1, or inspect_process/1.">>}
+        end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
+end,
+S_Ast = try
+    SrcPath = filename:join("%s", "src/process_bench.erl"),
+    Rules = #{
+        required_remote_calls => [{erlang, process_info, 2}, {erlang, monotonic_time, 1}],
+        required_constructs => [list_comprehension, guards]
+    },
+    case bf_ast_verifier:verify_rules(SrcPath, Rules) of
+        {ok, _} ->
+            #{id => <<"ast_process_bench_audit">>, title => <<"AST Analysis: BIF Introspection & List Comprehension Audit">>, status => <<"passed">>, time_ms => 10, details => <<"Verified required process_info/2 and monotonic_time/1 telemetry calls alongside list comprehensions and guards.">>};
+        {error, Violations} ->
+            #{id => <<"ast_process_bench_audit">>, title => <<"AST Analysis: BIF Introspection & List Comprehension Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
+    end
+catch C_Ast:R_Ast ->
+    #{id => <<"ast_process_bench_audit">>, title => <<"AST Analysis: BIF Introspection & List Comprehension Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
 end,
 S1_Bench = try
     case process_bench:run_bench(2000) of
@@ -7022,8 +7076,8 @@ S2_Inspect = try
 catch C2:R2 ->
     #{id => <<"process_memory_inspection">>, title => <<"BEAM Process Telemetry & Heap Isolation Audit">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2]))}
 end,
-Stages = [CompileStage, S1_Bench, S2_Inspect]
-`), true
+Stages = [CompileStage, S_Ast, S1_Bench, S2_Inspect]
+`, wsDir), true
 
 	case "ch05-l02":
 		return fmt.Sprintf(`
