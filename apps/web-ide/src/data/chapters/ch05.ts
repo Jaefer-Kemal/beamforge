@@ -2711,22 +2711,39 @@ To eliminate mailbox leaks in production actors:
 > [!warning] Production Concurrency Trap: Selective Receive Without Catch-All
 > In long-lived singleton actors (registries, routers, telemetry pools), omitting a catch-all clause is the #1 cause of silent memory leaks in Erlang systems. Even if your current modules only send valid messages, third-party libraries, exit signals, or legacy nodes will eventually send unexpected messages to your PID.
 
-## Parallel Worked Example
+## Official Erlang Docs & Function Reference
 
-Consider a packet cache worker with defensive mailbox hygiene:
+\`\`\`erlang
+%% Official OTP Signature (erts / erlang)
+erlang:process_info(Pid, Item) -> {Item, Info} | undefined
+  Types:
+    Pid = pid()
+    Item = message_queue_len | memory | heap_size
+\`\`\`
+
+## Parallel Worked Example: Defensive Mailbox Hygiene in a Packet Cache Actor
+
+Consider a high-throughput network packet cache designed with defensive mailbox hygiene:
 
 \`\`\`erlang
 -module(packet_cache).
 -export([start/0, cache_packet/2, fetch_packet/2, inspect_depth/1, stop/1, loop/1]).
 
+%% === Phase 1: Spawning Actor with Initial Map State ===
+
+%% @doc Spawns the packet cache actor with an empty storage map.
 start() ->
     Pid = spawn(fun() -> loop(#{}) end),
     {ok, Pid}.
 
+%% === Phase 2: Client API with Asynchronous Casts & Synchronous Calls with make_ref/0 and Timeout Guard ===
+
+%% @doc Asynchronously caches a binary payload under a numeric key.
 cache_packet(Pid, {Id, BinaryPayload}) ->
     Pid ! {store, Id, BinaryPayload},
     ok.
 
+%% @doc Synchronously fetches a cached payload with unique reference correlation and 1,000ms timeout guard.
 fetch_packet(Pid, Id) ->
     Ref = make_ref(),
     Pid ! {fetch, self(), Ref, Id},
@@ -2737,16 +2754,23 @@ fetch_packet(Pid, Id) ->
         {error, timeout}
     end.
 
+%% === Phase 3: Runtime Mailbox Inspection ===
+
+%% @doc Queries the runtime for the current mailbox queue depth of the target actor.
 inspect_depth(Pid) ->
     case erlang:process_info(Pid, message_queue_len) of
         {message_queue_len, Len} -> Len;
         undefined -> 0
     end.
 
+%% @doc Commands clean actor termination.
 stop(Pid) ->
     Pid ! stop,
     ok.
 
+%% === Phase 4: Actor State Loop with Defensive Mailbox Hygiene Catch-All Clause ===
+
+%% @doc Tail-recursive state loop handling valid packet commands and purging unhandled noise.
 loop(Store) ->
     receive
         {store, Id, BinaryPayload} ->
@@ -2766,43 +2790,63 @@ loop(Store) ->
     end.
 \`\`\`
 
-## Official Erlang Docs & Function Reference
-
-\`\`\`erlang
-%% Official OTP Signature (erts / erlang)
-erlang:process_info(Pid, Item) -> {Item, Info} | undefined
-  Types:
-    Pid = pid()
-    Item = message_queue_len | memory | heap_size
-\`\`\`
+### Architectural Breakdown: Save Queue Traversal Mechanics
+1. **Unbounded Growth**: Without \`_IgnoredNoise\`, every unmatched message moves into the Save Queue and remains there indefinitely.
+2. **Linear Traversal Degradation**: As messages accumulate, every subsequent \`receive\` must traverse every saved message pointer in RAM, causing CPU usage to spike to 100% and query latency to skyrocket.
+3. **Caller Timeout Protection**: Adding \`after 1000 -> {error, timeout}\` in client APIs ensures that callers unblock deterministically even if a worker crashes or becomes CPU-starved.
 
 ## Assignment Specification
 
-Triage and fix \`src/incident_mailbox_leak.erl\`:
+Triage and fix \`src/incident_mailbox_leak.erl\` exporting \`start/0\`, \`record_metric/2\`, \`get_summary/1\`, \`inspect_queue_len/1\`, \`get_mailbox_len/1\`, \`stop/1\`, and \`loop/1\`:
 
-### 1. \`get_summary/1\`
-- **Diagnostic**: Client calls to \`get_summary/1\` currently wait in an unprotected \`receive\` block without a timeout boundary. If the target actor is slow, unresponsive, or terminated, calling processes freeze indefinitely.
-- **Triage Objective**: Add an asynchronous timeout protection boundary that guarantees the caller receives \`{error, timeout}\` if no response arrives within 1,000 milliseconds.
+### 1. \`start/0\`
+- **Input**: None.
+- **Behavior**: Spawns a concurrent telemetry actor initialized with an immutable map holding zero count and zero total, returning a tagged tuple containing the process identifier.
 - **Examples**:
-  - \`incident_mailbox_leak:get_summary(DeadPid)\` returns \`{error, timeout}\` in ~1,000ms.
+  - \`incident_mailbox_leak:start()\` returns \`{ok, Pid}\`.
 
-### 2. \`loop/1\`
-- **Diagnostic**: Legacy diagnostic probes and network sensors are dispatching unhandled heartbeat messages (\`{legacy_heartbeat, ...}\`) to the actor's mailbox. Because \`loop/1\` only matches recognized protocol tuples, unmatched messages are permanently retained in the BEAM Save Queue, consuming gigabytes of heap memory.
-- **Triage Objective**: Implement a defensive catch-all clause in \`loop/1\` that purges any unrecognized noise messages from the mailbox and tail-recursively continues running with existing state intact.
-- **Verification Contract**:
-  - The process mailbox length must remain strictly \`0\` even after 300 unhandled heartbeat messages are sent to the actor.
-  - All recorded metrics must remain accurate (\`#{count => Count, total => Sum}\`).
-
-### 3. \`inspect_queue_len/1\` & \`get_mailbox_len/1\`
-- **Input**: \`Pid\` (process identifier).
-- **Behavior**: Queries the BEAM runtime for \`Pid\`'s current \`message_queue_len\` via \`erlang:process_info/2\`. Returns the integer queue length, or \`0\` if the process is undefined. \`get_mailbox_len/1\` provides an identical backward-compatible alias.
+### 2. \`record_metric/2\`
+- **Input**: Pid (process identifier of the telemetry actor), Val (numeric metric value).
+- **Behavior**: Asynchronously dispatches a metric measurement to the actor. Increments the accumulated count by 1 and adds Val to the running total.
 - **Examples**:
-  - \`incident_mailbox_leak:inspect_queue_len(P)\` returns \`0\`.
+  - \`incident_mailbox_leak:record_metric(P, 50)\` returns \`ok\`.
+
+### 3. \`get_summary/1\`
+- **Input**: Pid (process identifier of the telemetry actor).
+- **Behavior**: Generates a correlation reference via \`make_ref/0\` and synchronously requests summary metrics from the actor. If no response arrives within 1,000 milliseconds, unblocks and returns an error tuple.
+- **Examples**:
+  - \`incident_mailbox_leak:get_summary(P)\` returns \`{ok, #{count => 2, total => 30}}\` on active worker.
+  - \`incident_mailbox_leak:get_summary(DeadPid)\` returns \`{error, timeout}\` after 1,000ms.
+
+### 4. \`inspect_queue_len/1\`
+- **Input**: Pid (process identifier of the target actor).
+- **Behavior**: Queries the BEAM virtual machine via \`process_info/2\` for the process message queue length. Returns the integer queue length, or 0 if the process has already terminated.
+- **Examples**:
+  - \`incident_mailbox_leak:inspect_queue_len(P)\` returns \`0\` when drained.
+
+### 5. \`get_mailbox_len/1\`
+- **Input**: Pid (process identifier of the target actor).
+- **Behavior**: Provides an identical backward-compatible alias for \`inspect_queue_len/1\`.
+- **Examples**:
+  - \`incident_mailbox_leak:get_mailbox_len(P)\` returns \`0\`.
+
+### 6. \`stop/1\`
+- **Input**: Pid (process identifier of the telemetry actor).
+- **Behavior**: Asynchronously commands the actor to terminate execution cleanly.
+- **Examples**:
+  - \`incident_mailbox_leak:stop(P)\` returns \`ok\`.
+
+### 7. \`loop/1\`
+- **Input**: State (map containing metric count and total).
+- **Behavior**: Tail-recursive actor message loop. Must defensively handle unexpected message noise by discarding unhandled terms and recurring with existing state unchanged, preventing Save Queue memory leaks.
+- **Examples**:
+  - Mailbox length remains 0 even after hundreds of unhandled messages arrive.
 
 ## Rules & Verification Constraints
 
-- Mailbox length must remain strictly \`0\` even after blasting 300 unhandled heartbeat messages at the process.
-- \`get_summary/1\` must return \`{error, timeout}\` within 1,000ms when invoked against a dead PID.`,
+- Mailbox length must remain strictly 0 even after 500 unhandled heartbeat and diagnostic messages arrive.
+- \`get_summary/1\` must return \`{error, timeout}\` within 1,000ms when invoked against an unresponsive process.
+- Tail-call optimization must be strictly maintained in \`loop/1\`.`,
     mentalModelCheck: {
       question: 'What is the fatal production consequence of omitting a catch-all `_Other -> loop(State)` clause in an actor’s `receive` block?',
       codeSnippet: `loop(State) ->
@@ -2857,10 +2901,18 @@ Triage and fix \`src/incident_mailbox_leak.erl\`:
         expectedOutput: '{error, timeout}',
         explanation: 'Calls get_summary/1 against a dead process; confirms caller returns {error, timeout} within 1,000ms instead of hanging forever.',
       },
+      {
+        id: 'tc-ch05-07-3',
+        title: 'Metrics Aggregation & get_mailbox_len/1 Alias',
+        erlangCall: 'begin {ok, P} = incident_mailbox_leak:start(), ok = incident_mailbox_leak:record_metric(P, 100), ok = incident_mailbox_leak:record_metric(P, 250), {ok, Summary} = incident_mailbox_leak:get_summary(P), 0 = incident_mailbox_leak:get_mailbox_len(P), incident_mailbox_leak:stop(P), Summary end',
+        expectedOutput: '#{count => 2, total => 350}',
+        explanation: 'Records metrics, confirms get_mailbox_len/1 alias returns 0, and asserts exact summary statistics.',
+      },
     ],
     astRules: {
       requireTailRecursion: ['loop/1'],
       requiredConstructs: ['receive_after'],
+      requiredCalls: ['erlang:process_info/2', 'erlang:make_ref/0'],
     },
     solutionExplanation: 'Adds a catch-all `_Unknown -> loop(State)` clause to the actor receive loop to purge unhandled messages from the Save Queue, and adds `after 1000 -> {error, timeout}` to protect client callers.',
     files: [
@@ -2878,17 +2930,17 @@ Triage and fix \`src/incident_mailbox_leak.erl\`:
     loop/1
 ]).
 
-%% @doc Starts the telemetry aggregator actor with initial zeroed state.
+%% @doc Spawn a concurrent telemetry aggregator actor initialized with count 0 and total 0, returning {ok, Pid}.
 start() ->
     Pid = spawn(fun() -> loop(#{count => 0, total => 0}) end),
     {ok, Pid}.
 
-%% @doc Asynchronously records a numeric metric.
+%% @doc Asynchronously send a numeric measurement to the telemetry aggregator actor.
 record_metric(Pid, Val) ->
     Pid ! {record_metric, Val},
     ok.
 
-%% @doc Retrieves aggregated summary metrics from the telemetry actor.
+%% @doc Query aggregated summary metrics from the telemetry actor with a 1,000ms timeout guard.
 get_summary(Pid) ->
     Ref = erlang:make_ref(),
     Pid ! {get_summary, self(), Ref},
@@ -2897,23 +2949,23 @@ get_summary(Pid) ->
             {ok, Summary}
     end.
 
-%% @doc Returns the current message queue length of the process.
+%% @doc Query the BEAM runtime for the current message queue length of Pid, returning 0 if dead.
 inspect_queue_len(Pid) ->
     case erlang:process_info(Pid, message_queue_len) of
         {message_queue_len, Len} -> Len;
         undefined -> 0
     end.
 
-%% @doc Backward-compatible alias for inspect_queue_len/1.
+%% @doc Query the BEAM runtime for the current message queue length of Pid, returning 0 if dead.
 get_mailbox_len(Pid) ->
     inspect_queue_len(Pid).
 
-%% @doc Asynchronously stops the telemetry actor process.
+%% @doc Asynchronously command the telemetry aggregator actor to terminate cleanly.
 stop(Pid) ->
     Pid ! stop,
     ok.
 
-%% @doc Main actor message loop accumulating telemetry count and total.
+%% @doc Tail-recursive state loop accumulating metric measurements and discarding unhandled messages.
 loop(State = #{count := Count, total := Total}) ->
     receive
         {record_metric, Val} ->
@@ -2939,14 +2991,17 @@ loop(State = #{count := Count, total := Total}) ->
     loop/1
 ]).
 
+%% @doc Spawn a concurrent telemetry aggregator actor initialized with count 0 and total 0, returning {ok, Pid}.
 start() ->
     Pid = spawn(fun() -> loop(#{count => 0, total => 0}) end),
     {ok, Pid}.
 
+%% @doc Asynchronously send a numeric measurement to the telemetry aggregator actor.
 record_metric(Pid, Val) ->
     Pid ! {record_metric, Val},
     ok.
 
+%% @doc Query aggregated summary metrics from the telemetry actor with a 1,000ms timeout guard.
 get_summary(Pid) ->
     Ref = erlang:make_ref(),
     Pid ! {get_summary, self(), Ref},
@@ -2957,19 +3012,23 @@ get_summary(Pid) ->
         {error, timeout}
     end.
 
+%% @doc Query the BEAM runtime for the current message queue length of Pid, returning 0 if dead.
 inspect_queue_len(Pid) ->
     case erlang:process_info(Pid, message_queue_len) of
         {message_queue_len, Len} -> Len;
         undefined -> 0
     end.
 
+%% @doc Query the BEAM runtime for the current message queue length of Pid, returning 0 if dead.
 get_mailbox_len(Pid) ->
     inspect_queue_len(Pid).
 
+%% @doc Asynchronously command the telemetry aggregator actor to terminate cleanly.
 stop(Pid) ->
     Pid ! stop,
     ok.
 
+%% @doc Tail-recursive state loop accumulating metric measurements and discarding unhandled messages.
 loop(State = #{count := Count, total := Total}) ->
     receive
         {record_metric, Val} ->
@@ -2995,17 +3054,17 @@ loop(State = #{count := Count, total := Total}) ->
     loop/1
 ]).
 
-%% @doc Starts the telemetry aggregator actor with initial zeroed state.
+%% @doc Spawn a concurrent telemetry aggregator actor initialized with count 0 and total 0, returning {ok, Pid}.
 start() ->
     Pid = spawn(fun() -> loop(#{count => 0, total => 0}) end),
     {ok, Pid}.
 
-%% @doc Asynchronously records a numeric metric.
+%% @doc Asynchronously send a numeric measurement to the telemetry aggregator actor.
 record_metric(Pid, Val) ->
     Pid ! {record_metric, Val},
     ok.
 
-%% @doc Retrieves aggregated summary metrics from the telemetry actor.
+%% @doc Query aggregated summary metrics from the telemetry actor with a 1,000ms timeout guard.
 get_summary(Pid) ->
     Ref = erlang:make_ref(),
     Pid ! {get_summary, self(), Ref},
@@ -3014,23 +3073,23 @@ get_summary(Pid) ->
             {ok, Summary}
     end.
 
-%% @doc Returns the current message queue length of the process.
+%% @doc Query the BEAM runtime for the current message queue length of Pid, returning 0 if dead.
 inspect_queue_len(Pid) ->
     case erlang:process_info(Pid, message_queue_len) of
         {message_queue_len, Len} -> Len;
         undefined -> 0
     end.
 
-%% @doc Backward-compatible alias for inspect_queue_len/1.
+%% @doc Query the BEAM runtime for the current message queue length of Pid, returning 0 if dead.
 get_mailbox_len(Pid) ->
     inspect_queue_len(Pid).
 
-%% @doc Asynchronously stops the telemetry actor process.
+%% @doc Asynchronously command the telemetry aggregator actor to terminate cleanly.
 stop(Pid) ->
     Pid ! stop,
     ok.
 
-%% @doc Main actor message loop accumulating telemetry count and total.
+%% @doc Tail-recursive state loop accumulating metric measurements and discarding unhandled messages.
 loop(State = #{count := Count, total := Total}) ->
     receive
         {record_metric, Val} ->
@@ -3053,14 +3112,17 @@ loop(State = #{count := Count, total := Total}) ->
     loop/1
 ]).
 
+%% @doc Spawn a concurrent telemetry aggregator actor initialized with count 0 and total 0, returning {ok, Pid}.
 start() ->
     Pid = spawn(fun() -> loop(#{count => 0, total => 0}) end),
     {ok, Pid}.
 
+%% @doc Asynchronously send a numeric measurement to the telemetry aggregator actor.
 record_metric(Pid, Val) ->
     Pid ! {record_metric, Val},
     ok.
 
+%% @doc Query aggregated summary metrics from the telemetry actor with a 1,000ms timeout guard.
 get_summary(Pid) ->
     Ref = erlang:make_ref(),
     Pid ! {get_summary, self(), Ref},
@@ -3071,19 +3133,23 @@ get_summary(Pid) ->
         {error, timeout}
     end.
 
+%% @doc Query the BEAM runtime for the current message queue length of Pid, returning 0 if dead.
 inspect_queue_len(Pid) ->
     case erlang:process_info(Pid, message_queue_len) of
         {message_queue_len, Len} -> Len;
         undefined -> 0
     end.
 
+%% @doc Query the BEAM runtime for the current message queue length of Pid, returning 0 if dead.
 get_mailbox_len(Pid) ->
     inspect_queue_len(Pid).
 
+%% @doc Asynchronously command the telemetry aggregator actor to terminate cleanly.
 stop(Pid) ->
     Pid ! stop,
     ok.
 
+%% @doc Tail-recursive state loop accumulating metric measurements and discarding unhandled messages.
 loop(State = #{count := Count, total := Total}) ->
     receive
         {record_metric, Val} ->

@@ -342,6 +342,69 @@ unlocked(SecretCode) ->
     end.
 `
 
+	incidentMailboxLeakSolution := `-module(incident_mailbox_leak).
+-export([
+    start/0,
+    record_metric/2,
+    get_summary/1,
+    inspect_queue_len/1,
+    get_mailbox_len/1,
+    stop/1,
+    loop/1
+]).
+
+%% @doc Spawn a concurrent telemetry aggregator actor initialized with count 0 and total 0, returning {ok, Pid}.
+start() ->
+    Pid = spawn(fun() -> loop(#{count => 0, total => 0}) end),
+    {ok, Pid}.
+
+%% @doc Asynchronously send a numeric measurement to the telemetry aggregator actor.
+record_metric(Pid, Val) ->
+    Pid ! {record_metric, Val},
+    ok.
+
+%% @doc Query aggregated summary metrics from the telemetry actor with a 1,000ms timeout guard.
+get_summary(Pid) ->
+    Ref = erlang:make_ref(),
+    Pid ! {get_summary, self(), Ref},
+    receive
+        {summary, Ref, Summary} ->
+            {ok, Summary}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Query the BEAM runtime for the current message queue length of Pid, returning 0 if dead.
+inspect_queue_len(Pid) ->
+    case erlang:process_info(Pid, message_queue_len) of
+        {message_queue_len, Len} -> Len;
+        undefined -> 0
+    end.
+
+%% @doc Query the BEAM runtime for the current message queue length of Pid, returning 0 if dead.
+get_mailbox_len(Pid) ->
+    inspect_queue_len(Pid).
+
+%% @doc Asynchronously command the telemetry aggregator actor to terminate cleanly.
+stop(Pid) ->
+    Pid ! stop,
+    ok.
+
+%% @doc Tail-recursive state loop accumulating metric measurements and discarding unhandled messages.
+loop(State = #{count := Count, total := Total}) ->
+    receive
+        {record_metric, Val} ->
+            loop(State#{count => Count + 1, total => Total + Val});
+        {get_summary, From, Ref} ->
+            From ! {summary, Ref, State},
+            loop(State);
+        stop ->
+            ok;
+        _Unknown ->
+            loop(State)
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -405,6 +468,16 @@ unlocked(SecretCode) ->
 			exerciseID: "ch05-l06",
 			files: map[string]string{
 				"src/door_lock_fsm.erl": doorLockFsmSolution,
+			},
+			wantScore:    100,
+			wantStages:   4,
+			visibleCount: 3,
+		},
+		{
+			name:       "ch05-l07 Production Incident #101: Unbounded Mailbox Memory Leak in Telemetry Actor",
+			exerciseID: "ch05-l07",
+			files: map[string]string{
+				"src/incident_mailbox_leak.erl": incidentMailboxLeakSolution,
 			},
 			wantScore:    100,
 			wantStages:   4,
@@ -1516,6 +1589,242 @@ unlocked(SecretCode) ->
 		}
 		if !foundFailedFsm {
 			t.Errorf("Expected fsm_state_transitions to fail on counter bug")
+		}
+	})
+
+	// ch05-l07 Negative test 1: missing catch-all in loop/1 causes unhandled messages to leak in mailbox
+	t.Run("ch05-l07 Negative Missing Catch All (Mailbox Leak)", func(t *testing.T) {
+		sessID := "test-sess-ch05-l07-neg-leak"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		leakBugCode := `-module(incident_mailbox_leak).
+-export([start/0, record_metric/2, get_summary/1, inspect_queue_len/1, get_mailbox_len/1, stop/1, loop/1]).
+
+start() ->
+    Pid = spawn(fun() -> loop(#{count => 0, total => 0}) end),
+    {ok, Pid}.
+
+record_metric(Pid, Val) ->
+    Pid ! {record_metric, Val},
+    ok.
+
+get_summary(Pid) ->
+    Ref = erlang:make_ref(),
+    Pid ! {get_summary, self(), Ref},
+    receive
+        {summary, Ref, Summary} -> {ok, Summary}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+inspect_queue_len(Pid) ->
+    case erlang:process_info(Pid, message_queue_len) of
+        {message_queue_len, Len} -> Len;
+        undefined -> 0
+    end.
+
+get_mailbox_len(Pid) -> inspect_queue_len(Pid).
+
+stop(Pid) ->
+    Pid ! stop,
+    ok.
+
+loop(State = #{count := Count, total := Total}) ->
+    receive
+        {record_metric, Val} ->
+            loop(State#{count => Count + 1, total => Total + Val});
+        {get_summary, From, Ref} ->
+            From ! {summary, Ref, State},
+            loop(State);
+        stop ->
+            ok
+        %% BUG: Missing _Unknown -> loop(State) clause!
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l07", map[string]string{
+			"src/incident_mailbox_leak.erl": leakBugCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for mailbox leak bug, got %d", report.Score)
+		}
+
+		foundFailedLeak := false
+		for _, st := range report.Stages {
+			if st.ID == "unbounded_mailbox_leak_triage" && st.Status == "failed" {
+				foundFailedLeak = true
+			}
+		}
+		if !foundFailedLeak {
+			t.Errorf("Expected unbounded_mailbox_leak_triage to fail on missing catch-all")
+		}
+	})
+
+	// ch05-l07 Negative test 2: missing receive...after timeout in get_summary/1
+	t.Run("ch05-l07 Negative Missing Timeout Guard", func(t *testing.T) {
+		sessID := "test-sess-ch05-l07-neg-notimeout"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		noTimeoutCode := `-module(incident_mailbox_leak).
+-export([start/0, record_metric/2, get_summary/1, inspect_queue_len/1, get_mailbox_len/1, stop/1, loop/1]).
+
+start() ->
+    Pid = spawn(fun() -> loop(#{count => 0, total => 0}) end),
+    {ok, Pid}.
+
+record_metric(Pid, Val) ->
+    Pid ! {record_metric, Val},
+    ok.
+
+get_summary(Pid) ->
+    Ref = erlang:make_ref(),
+    Pid ! {get_summary, self(), Ref},
+    receive
+        {summary, Ref, Summary} -> {ok, Summary}
+        %% BUG: Missing receive...after 1000 timeout!
+    end.
+
+inspect_queue_len(Pid) ->
+    case erlang:process_info(Pid, message_queue_len) of
+        {message_queue_len, Len} -> Len;
+        undefined -> 0
+    end.
+
+get_mailbox_len(Pid) -> inspect_queue_len(Pid).
+
+stop(Pid) ->
+    Pid ! stop,
+    ok.
+
+loop(State = #{count := Count, total := Total}) ->
+    receive
+        {record_metric, Val} ->
+            loop(State#{count => Count + 1, total => Total + Val});
+        {get_summary, From, Ref} ->
+            From ! {summary, Ref, State},
+            loop(State);
+        stop ->
+            ok;
+        _Unknown ->
+            loop(State)
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l07", map[string]string{
+			"src/incident_mailbox_leak.erl": noTimeoutCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for missing timeout guard, got %d", report.Score)
+		}
+
+		foundFailedAst := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_and_tco_invariants" && st.Status == "failed" {
+				foundFailedAst = true
+			}
+		}
+		if !foundFailedAst {
+			t.Errorf("Expected ast_and_tco_invariants to fail on missing receive_after")
+		}
+	})
+
+	// ch05-l07 Negative test 3: missing get_mailbox_len/1 export
+	t.Run("ch05-l07 Negative Missing Export", func(t *testing.T) {
+		sessID := "test-sess-ch05-l07-neg-export"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		missingExportCode := `-module(incident_mailbox_leak).
+-export([start/0, record_metric/2, get_summary/1, inspect_queue_len/1, stop/1, loop/1]).
+%% BUG: get_mailbox_len/1 is not exported!
+
+start() ->
+    Pid = spawn(fun() -> loop(#{count => 0, total => 0}) end),
+    {ok, Pid}.
+
+record_metric(Pid, Val) ->
+    Pid ! {record_metric, Val},
+    ok.
+
+get_summary(Pid) ->
+    Ref = erlang:make_ref(),
+    Pid ! {get_summary, self(), Ref},
+    receive
+        {summary, Ref, Summary} -> {ok, Summary}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+inspect_queue_len(Pid) ->
+    case erlang:process_info(Pid, message_queue_len) of
+        {message_queue_len, Len} -> Len;
+        undefined -> 0
+    end.
+
+get_mailbox_len(Pid) -> inspect_queue_len(Pid).
+
+stop(Pid) ->
+    Pid ! stop,
+    ok.
+
+loop(State = #{count := Count, total := Total}) ->
+    receive
+        {record_metric, Val} ->
+            loop(State#{count => Count + 1, total => Total + Val});
+        {get_summary, From, Ref} ->
+            From ! {summary, Ref, State},
+            loop(State);
+        stop ->
+            ok;
+        _Unknown ->
+            loop(State)
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l07", map[string]string{
+			"src/incident_mailbox_leak.erl": missingExportCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for missing export, got %d", report.Score)
+		}
+
+		foundFailedCompile := false
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				foundFailedCompile = true
+			}
+		}
+		if !foundFailedCompile {
+			t.Errorf("Expected compile_and_export_audit to fail on missing export")
 		}
 	})
 }

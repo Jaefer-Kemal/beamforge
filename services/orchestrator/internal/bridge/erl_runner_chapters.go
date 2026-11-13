@@ -2136,88 +2136,56 @@ init:stop().
 	case "ch05-l06":
 		return `
 T1_Start = erlang:system_time(millisecond),
-IsDoorLock = case code:ensure_loaded(door_lock_fsm) of
-    {module, door_lock_fsm} -> true;
-    _ -> false
+T1_Res = try
+    P1 = door_lock_fsm:start(<<"1234">>),
+    Res1 = door_lock_fsm:enter_code(P1, <<"1234">>),
+    State1 = door_lock_fsm:get_state(P1),
+    door_lock_fsm:stop(P1),
+    Pair1 = {Res1, State1},
+    #{call_str => <<"door_lock_fsm:enter_code(P, <<\"1234\">>)">>,
+      expected => <<"{{ok, unlocked}, unlocked}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Pair1]))),
+      passed => Pair1 =:= {{ok, unlocked}, unlocked},
+      time_ms => erlang:system_time(millisecond) - T1_Start}
+catch C1:R1 ->
+    #{call_str => <<"door_lock_fsm:enter_code(...)">>, expected => <<"{{ok, unlocked}, unlocked}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-if
-    IsDoorLock ->
-        T1_Res = try
-            P1 = door_lock_fsm:start(<<"1234">>),
-            Res1 = door_lock_fsm:enter_code(P1, <<"1234">>),
-            State1 = door_lock_fsm:get_state(P1),
-            door_lock_fsm:stop(P1),
-            Pair1 = {Res1, State1},
-            #{call_str => <<"door_lock_fsm:enter_code(P, <<\"1234\">>)">>,
-              expected => <<"{{ok, unlocked}, unlocked}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Pair1]))),
-              passed => Pair1 =:= {{ok, unlocked}, unlocked},
-              time_ms => erlang:system_time(millisecond) - T1_Start}
-        catch C1:R1 ->
-            #{call_str => <<"door_lock_fsm:enter_code(...)">>, expected => <<"{{ok, unlocked}, unlocked}">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
-        end,
-        T2_Start = erlang:system_time(millisecond),
-        T2_Res = try
-            P2 = door_lock_fsm:start(<<"secret">>),
-            Err1 = door_lock_fsm:enter_code(P2, <<"wrong1">>),
-            Err2 = door_lock_fsm:enter_code(P2, <<"wrong2">>),
-            State2 = door_lock_fsm:get_state(P2),
-            door_lock_fsm:stop(P2),
-            Triple2 = {Err1, Err2, State2},
-            Expected2 = {{error, {wrong_code, 1}}, {error, {wrong_code, 2}}, {locked, 2}},
-            #{call_str => <<"door_lock_fsm:enter_code(P2, <<\"wrong...\">>)">>,
-              expected => <<"{{error, {wrong_code, 1}}, {error, {wrong_code, 2}}, {locked, 2}}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Triple2]))),
-              passed => Triple2 =:= Expected2,
-              time_ms => erlang:system_time(millisecond) - T2_Start}
-        catch C2:R2 ->
-            #{call_str => <<"door_lock_fsm wrong code test">>, expected => <<"{{error, {wrong_code, 1}}, {error, {wrong_code, 2}}, {locked, 2}}">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
-        end,
-        T3_Start = erlang:system_time(millisecond),
-        T3_Res = try
-            P3 = door_lock_fsm:start(1111),
-            {ok, unlocked} = door_lock_fsm:enter_code(P3, 1111),
-            ok = door_lock_fsm:lock(P3),
-            State3 = door_lock_fsm:get_state(P3),
-            door_lock_fsm:stop(P3),
-            #{call_str => <<"door_lock_fsm:lock(P)">>,
-              expected => <<"{locked, 0}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [State3]))),
-              passed => State3 =:= {locked, 0},
-              time_ms => erlang:system_time(millisecond) - T3_Start}
-        catch C3:R3 ->
-            #{call_str => <<"door_lock_fsm lock transition test">>, expected => <<"{locked, 0}">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
-        end,
-        AllResults = [T1_Res, T2_Res, T3_Res];
-    true ->
-        T1_Res = try
-            Accounts = [{account, 1, <<"Alice">>, 100}, {account, 2, <<"Bob">>, 50}],
-            P = ledger_actor:start(Accounts),
-            {ok, 100} = ledger_actor:get_balance(P, 1),
-            {ok, 150} = ledger_actor:process_transaction(P, {deposit, 1, 50}),
-            {error, insufficient_funds} = ledger_actor:process_transaction(P, {withdraw, 1, 500}),
-            {ok, 120} = ledger_actor:process_transaction(P, {transfer, 1, 2, 30}),
-            {ok, 80} = ledger_actor:get_balance(P, 2),
-            Txs = [{deposit, 1, 10}, {withdraw, 2, 200}, {transfer, 1, 2, 30}],
-            {ok, 2, 1} = ledger_actor:process_batch(P, Txs),
-            {ok, FinalB1} = ledger_actor:get_balance(P, 1),
-            {ok, FinalB2} = ledger_actor:get_balance(P, 2),
-            ledger_actor:stop(P),
-            Res = {FinalB1, FinalB2},
-            #{call_str => <<"ledger_actor:process_batch(P, Txs)">>,
-              expected => <<"{100, 110}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res]))),
-              passed => Res =:= {100, 110},
-              time_ms => erlang:system_time(millisecond) - T1_Start}
-        catch C1:R1 ->
-            #{call_str => <<"ledger_actor transactions test">>, expected => <<"{100, 110}">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
-        end,
-        AllResults = [T1_Res]
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    P2 = door_lock_fsm:start(<<"secret">>),
+    Err1 = door_lock_fsm:enter_code(P2, <<"wrong1">>),
+    Err2 = door_lock_fsm:enter_code(P2, <<"wrong2">>),
+    State2 = door_lock_fsm:get_state(P2),
+    door_lock_fsm:stop(P2),
+    Triple2 = {Err1, Err2, State2},
+    Expected2 = {{error, {wrong_code, 1}}, {error, {wrong_code, 2}}, {locked, 2}},
+    #{call_str => <<"door_lock_fsm:enter_code(P2, <<\"wrong...\">>)">>,
+      expected => <<"{{error, {wrong_code, 1}}, {error, {wrong_code, 2}}, {locked, 2}}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Triple2]))),
+      passed => Triple2 =:= Expected2,
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"door_lock_fsm wrong code test">>, expected => <<"{{error, {wrong_code, 1}}, {error, {wrong_code, 2}}, {locked, 2}}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    P3 = door_lock_fsm:start(1111),
+    {ok, unlocked} = door_lock_fsm:enter_code(P3, 1111),
+    ok = door_lock_fsm:lock(P3),
+    State3 = door_lock_fsm:get_state(P3),
+    door_lock_fsm:stop(P3),
+    #{call_str => <<"door_lock_fsm:lock(P)">>,
+      expected => <<"{locked, 0}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [State3]))),
+      passed => State3 =:= {locked, 0},
+      time_ms => erlang:system_time(millisecond) - T3_Start}
+catch C3:R3 ->
+    #{call_str => <<"door_lock_fsm lock transition test">>, expected => <<"{locked, 0}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -7503,121 +7471,84 @@ Stages = [CompileStage, S1_Ast, S2_Kv, S3_Unreg, S4_Timeout]
 
 	case "ch05-l06":
 		return fmt.Sprintf(`
-IsDoorFsm = case code:ensure_loaded(door_lock_fsm) of
-    {module, door_lock_fsm} -> true;
-    _ -> false
+CompileStage_Door = case code:ensure_loaded(door_lock_fsm) of
+    {module, door_lock_fsm} ->
+        ExportsD = door_lock_fsm:module_info(exports),
+        ReqD = [{start, 1}, {enter_code, 2}, {lock, 1}, {get_state, 1}, {stop, 1}, {locked, 2}, {unlocked, 1}],
+        case [E || E <- ReqD, not lists:member(E, ExportsD)] of
+            [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"door_lock_fsm.erl compiled cleanly; all state and client functions exported.">>};
+            MissingD -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [MissingD]))}
+        end;
+    {error, E_D} ->
+        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_D]))}
 end,
-if
-    IsDoorFsm ->
-        CompileStage_Door = case code:ensure_loaded(door_lock_fsm) of
-            {module, door_lock_fsm} ->
-                ExportsD = door_lock_fsm:module_info(exports),
-                ReqD = [{start, 1}, {enter_code, 2}, {lock, 1}, {get_state, 1}, {stop, 1}, {locked, 2}, {unlocked, 1}],
-                case [E || E <- ReqD, not lists:member(E, ExportsD)] of
-                    [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"door_lock_fsm.erl compiled cleanly; all state and client functions exported.">>};
-                    MissingD -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [MissingD]))}
-                end;
-            {error, E_D} ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_D]))}
-        end,
-        S1_Ast_Door = try
-            SrcPathD = filename:join(["%s", "src", "door_lock_fsm.erl"]),
-            BeamPathD = filename:join(["%s", "ebin", "door_lock_fsm.beam"]),
-            {ok, BeamBinD} = file:read_file(BeamPathD),
-            RulesD = #{
-                require_tail_recursion => [{locked, 2}, {unlocked, 1}],
-                required_calls => [{erlang, make_ref, 0}]
-            },
-            case bf_ast_verifier:verify_rules(SrcPathD, BeamBinD, RulesD) of
-                {ok, _} ->
-                    #{id => <<"ast_mutual_tail_recursion">>, title => <<"AST Analysis: Mutual Tail Recursion in locked/2 and unlocked/1">>, status => <<"passed">>, time_ms => 15, details => <<"Verified tail call optimization across mutually recursive FSM state functions in O(1) space with make_ref/0 correlation.">>};
-                {error, ViolationsD} ->
-                    #{id => <<"ast_mutual_tail_recursion">>, title => <<"AST Analysis: Mutual Tail Recursion in locked/2 and unlocked/1">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [ViolationsD]))}
-            end
-        catch C1_D:R1_D ->
-            #{id => <<"ast_mutual_tail_recursion">>, title => <<"AST Analysis: Mutual Tail Recursion in locked/2 and unlocked/1">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1_D, R1_D]))}
-        end,
-        S2_Fsm_Door = try
-            P_D = door_lock_fsm:start(<<"4321">>),
-            {locked, 0} = door_lock_fsm:get_state(P_D),
-            {error, {wrong_code, 1}} = door_lock_fsm:enter_code(P_D, <<"0000">>),
-            {error, {wrong_code, 2}} = door_lock_fsm:enter_code(P_D, <<"9999">>),
-            {locked, 2} = door_lock_fsm:get_state(P_D),
-            {ok, unlocked} = door_lock_fsm:enter_code(P_D, <<"4321">>),
-            unlocked = door_lock_fsm:get_state(P_D),
-            {ok, already_unlocked} = door_lock_fsm:enter_code(P_D, <<"anything">>),
-            ok = door_lock_fsm:lock(P_D),
-            {locked, 0} = door_lock_fsm:get_state(P_D),
-            ok = door_lock_fsm:lock(P_D),
-            ok = door_lock_fsm:stop(P_D),
-            #{id => <<"fsm_state_transitions">>, title => <<"Mutual Recursion State Machine Transitions & Failure Counter">>, status => <<"passed">>, time_ms => 20, details => <<"Verified locked -> unlocked -> relocked transitions and failed attempts counter.">>}
-        catch C2_D:R2_D ->
-            #{id => <<"fsm_state_transitions">>, title => <<"Mutual Recursion State Machine Transitions & Failure Counter">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("FSM Crash: ~p:~p", [C2_D, R2_D]))}
-        end,
-        S3_Timeout_Door = begin
-            Parent_D = self(),
-            Watchdog_D = spawn(fun() ->
-                receive
-                    cancel -> ok
-                after 1500 ->
-                    Parent_D ! {stage_timeout, timeout_exceeded}
-                end
-            end),
-            TimeoutRes_D = try
-                Dummy_D = spawn(fun() -> receive after 10000 -> ok end end),
-                T_Res = door_lock_fsm:get_state(Dummy_D),
-                exit(Dummy_D, kill),
-                case T_Res of
-                    {error, timeout} ->
-                        #{id => <<"sync_call_timeout_guard">>, title => <<"Synchronous Call Timeout Guard Audit">>, status => <<"passed">>, time_ms => 1010, details => <<"Verified receive...after 1000 timeout handling on unresponsive target.">>};
-                    Other_D ->
-                        #{id => <<"sync_call_timeout_guard">>, title => <<"Synchronous Call Timeout Guard Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Expected {error, timeout}, got: ~p", [Other_D]))}
-                end
-            catch
-                CT_D:RT_D ->
-                    #{id => <<"sync_call_timeout_guard">>, title => <<"Synchronous Call Timeout Guard Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Timeout test crashed: ~p:~p", [CT_D, RT_D]))}
-            end,
-            Watchdog_D ! cancel,
-            receive
-                {stage_timeout, timeout_exceeded} ->
-                    #{id => <<"sync_call_timeout_guard">>, title => <<"Synchronous Call Timeout Guard Audit">>, status => <<"failed">>, time_ms => 1500, details => <<"Watchdog: Call blocked indefinitely without timing out.">>}
-            after 0 ->
-                TimeoutRes_D
-            end
-        end,
-        Stages = [CompileStage_Door, S1_Ast_Door, S2_Fsm_Door, S3_Timeout_Door];
-    true ->
-        CompileStage_L = case code:ensure_loaded(ledger_actor) of
-            {module, ledger_actor} ->
-                ExportsL = ledger_actor:module_info(exports),
-                ReqL = [{start, 1}, {get_balance, 2}, {process_transaction, 2}, {process_batch, 2}, {stop, 1}],
-                case [E || E <- ReqL, not lists:member(E, ExportsL)] of
-                    [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"ledger_actor.erl compiled cleanly; all API functions exported.">>};
-                    MissingL -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [MissingL]))}
-                end;
-            {error, E_L} ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_L]))}
-        end,
-        S1_Ast_L = try
-            SrcPathL = filename:join(["%s", "src", "ledger_actor.erl"]),
-            BeamPathL = filename:join(["%s", "ebin", "ledger_actor.beam"]),
-            {ok, BeamBinL} = file:read_file(BeamPathL),
-            RulesL = #{
-                require_tail_recursion => [{loop, 1}],
-                required_constructs => [receive_after]
-            },
-            case bf_ast_verifier:verify_rules(SrcPathL, BeamBinL, RulesL) of
-                {ok, _} ->
-                    #{id => <<"ast_and_tco_invariants">>, title => <<"AST Analysis: Tail-Recursive loop/1 & receive...after Audit">>, status => <<"passed">>, time_ms => 18, details => <<"Tail call optimization verified on loop/1; receive...after timeouts confirmed.">>};
-                {error, ViolationsL} ->
-                    #{id => <<"ast_and_tco_invariants">>, title => <<"AST Analysis: Tail-Recursive loop/1 & receive...after Audit">>, status => <<"failed">>, time_ms => 18, details => list_to_binary(io_lib:format("AST Violations: ~p", [ViolationsL]))}
-            end
-        catch C1_L:R1_L ->
-            #{id => <<"ast_and_tco_invariants">>, title => <<"AST Analysis: Tail-Recursive loop/1 & receive...after Audit">>, status => <<"failed">>, time_ms => 18, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1_L, R1_L]))}
-        end,
-        Stages = [CompileStage_L, S1_Ast_L]
-end
-`, wsDir, wsDir, wsDir, wsDir), true
+S1_Ast_Door = try
+    SrcPathD = filename:join(["%s", "src", "door_lock_fsm.erl"]),
+    BeamPathD = filename:join(["%s", "ebin", "door_lock_fsm.beam"]),
+    {ok, BeamBinD} = file:read_file(BeamPathD),
+    RulesD = #{
+        require_tail_recursion => [{locked, 2}, {unlocked, 1}],
+        required_calls => [{erlang, make_ref, 0}]
+    },
+    case bf_ast_verifier:verify_rules(SrcPathD, BeamBinD, RulesD) of
+        {ok, _} ->
+            #{id => <<"ast_mutual_tail_recursion">>, title => <<"AST Analysis: Mutual Tail Recursion in locked/2 and unlocked/1">>, status => <<"passed">>, time_ms => 15, details => <<"Verified tail call optimization across mutually recursive FSM state functions in O(1) space with make_ref/0 correlation.">>};
+        {error, ViolationsD} ->
+            #{id => <<"ast_mutual_tail_recursion">>, title => <<"AST Analysis: Mutual Tail Recursion in locked/2 and unlocked/1">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [ViolationsD]))}
+    end
+catch C1_D:R1_D ->
+    #{id => <<"ast_mutual_tail_recursion">>, title => <<"AST Analysis: Mutual Tail Recursion in locked/2 and unlocked/1">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1_D, R1_D]))}
+end,
+S2_Fsm_Door = try
+    P_D = door_lock_fsm:start(<<"4321">>),
+    {locked, 0} = door_lock_fsm:get_state(P_D),
+    {error, {wrong_code, 1}} = door_lock_fsm:enter_code(P_D, <<"0000">>),
+    {error, {wrong_code, 2}} = door_lock_fsm:enter_code(P_D, <<"9999">>),
+    {locked, 2} = door_lock_fsm:get_state(P_D),
+    {ok, unlocked} = door_lock_fsm:enter_code(P_D, <<"4321">>),
+    unlocked = door_lock_fsm:get_state(P_D),
+    {ok, already_unlocked} = door_lock_fsm:enter_code(P_D, <<"anything">>),
+    ok = door_lock_fsm:lock(P_D),
+    {locked, 0} = door_lock_fsm:get_state(P_D),
+    ok = door_lock_fsm:lock(P_D),
+    ok = door_lock_fsm:stop(P_D),
+    #{id => <<"fsm_state_transitions">>, title => <<"Mutual Recursion State Machine Transitions & Failure Counter">>, status => <<"passed">>, time_ms => 20, details => <<"Verified locked -> unlocked -> relocked transitions and failed attempts counter.">>}
+catch C2_D:R2_D ->
+    #{id => <<"fsm_state_transitions">>, title => <<"Mutual Recursion State Machine Transitions & Failure Counter">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("FSM Crash: ~p:~p", [C2_D, R2_D]))}
+end,
+S3_Timeout_Door = begin
+    Parent_D = self(),
+    Watchdog_D = spawn(fun() ->
+        receive
+            cancel -> ok
+        after 1500 ->
+            Parent_D ! {stage_timeout, timeout_exceeded}
+        end
+    end),
+    TimeoutRes_D = try
+        Dummy_D = spawn(fun() -> receive after 10000 -> ok end end),
+        T_Res = door_lock_fsm:get_state(Dummy_D),
+        exit(Dummy_D, kill),
+        case T_Res of
+            {error, timeout} ->
+                #{id => <<"sync_call_timeout_guard">>, title => <<"Synchronous Call Timeout Guard Audit">>, status => <<"passed">>, time_ms => 1010, details => <<"Verified receive...after 1000 timeout handling on unresponsive target.">>};
+            Other_D ->
+                #{id => <<"sync_call_timeout_guard">>, title => <<"Synchronous Call Timeout Guard Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Expected {error, timeout}, got: ~p", [Other_D]))}
+        end
+    catch
+        CT_D:RT_D ->
+            #{id => <<"sync_call_timeout_guard">>, title => <<"Synchronous Call Timeout Guard Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Timeout test crashed: ~p:~p", [CT_D, RT_D]))}
+    end,
+    Watchdog_D ! cancel,
+    receive
+        {stage_timeout, timeout_exceeded} ->
+            #{id => <<"sync_call_timeout_guard">>, title => <<"Synchronous Call Timeout Guard Audit">>, status => <<"failed">>, time_ms => 1500, details => <<"Watchdog: Call blocked indefinitely without timing out.">>}
+    after 0 ->
+        TimeoutRes_D
+    end
+end,
+Stages = [CompileStage_Door, S1_Ast_Door, S2_Fsm_Door, S3_Timeout_Door]
+`, wsDir, wsDir), true
 
 	case "ch05-l08":
 		return fmt.Sprintf(`

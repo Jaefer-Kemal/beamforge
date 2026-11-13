@@ -3481,6 +3481,34 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 22 subtests across CH05 in `56.22s` (`56.241s` total); `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l06 | 3/3 tests passed`) in `19.37s` (`19.480s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 223: Spec 04 / Spec 08 Anti-Spoiler Audit, Production Incident #101 Mailbox Leak Triage, Non-Blocking Timeout Guard & Live Tri-Verification of Chapter 5 Lecture 7 (`ch05-l07`)
+
+- [x] **223.1: Spec 04/07/08 Pedagogical Anti-Spoiler Audit & Erlang/AST Hardening (`ch05-l07`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch05.ts` (`ch05-l07`, `incident_mailbox_leak.erl`) against Spec 04, 07, and 08.
+  - Re-ordered Spec 04 layout so `## Official Erlang Docs & Function Reference` (`erlang:process_info/2` with `message_queue_len` and `erlang:make_ref/0`) precedes `## Parallel Worked Example`.
+  - Authored domain-distinct `## Parallel Worked Example` (`packet_cache.erl`) across 4 clear execution phases (`Phase 1: Starting Worker and Mailbox Telemetry Helpers`, `Phase 2: Synchronous Cache Lookup with Caller self() and Timeout Guard`, `Phase 3: Asynchronous Invalidation Cast`, `Phase 4: Tail-Recursive Loop with Catch-All Mailbox Drain Clause`) with deep architectural breakdown explaining FIFO queue accumulation, memory leaks from unhandled messages, and unbounded client blocking without `after` clauses.
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across all 7 functions (`start/0`, `record_metric/2`, `get_summary/1`, `inspect_queue_len/1`, `get_mailbox_len/1`, `stop/1`, `loop/1`) with zero Erlang code leaks or syntax spoilers in prompt text.
+  - Aligned 10/10 plain-English `%% @doc` contracts across all 4 representations (`files`, `solutionFiles`, `starterCode`, `solutionCode`).
+  - Preserved authentic production bug in starter code (missing catch-all drain clause `_Unknown -> loop(State)` and missing 1000ms timeout guard in `get_summary/1`) that compiles cleanly with `erlc.exe` (exit code 0) but fails AST and runtime verification cleanly.
+  - Configured `astRules` (`requireTailRecursion: ['loop/1']`, `requiredConstructs: ['receive_after']`, `requiredCalls: ['erlang:process_info/2', 'erlang:make_ref/0']`).
+  - Fixed test ordering race condition in `tc-ch05-07-3` so synchronous `get_summary/1` runs before `get_mailbox_len/1` to ensure FIFO actor queue draining before mailbox assertion.
+- [x] **223.2: Go Orchestrator Incident Runner & Non-Blocking Verification Hardening (`ch05-l07`)**:
+  - Updated `buildIncidentRunScript` in `services/orchestrator/internal/bridge/erl_runner_incidents.go` to evaluate all 3 visible tests (`T1_Res`: drain test with 100 messages, `T2_Res`: dead pid timeout fallback, `T3_Res`: metrics aggregation with `get_mailbox_len/1` alias) and return `[T1_Res, T2_Res, T3_Res]`.
+  - Modernized `buildIncidentVerificationScript` for `ch05-l07` with 4 robust, non-blocking stages:
+    1. `compile_and_export_audit`: audits compilation and exports across all 7 functions.
+    2. `ast_and_tco_invariants`: verifies `loop/1` tail recursion, `receive_after` construct, and `process_info/2` + `make_ref/0` calls using `bf_ast_verifier`.
+    3. `unbounded_mailbox_leak_triage`: blasts 500 noise messages, asserts mailbox length remains 0, and validates exact summary stats.
+    4. `timeout_guarantee_on_dead_actor`: spawns isolated tester worker with 1400ms outer receive watchdog so missing `after 1000` guards fail with informative errors rather than hanging the runner.
+  - Cleaned up `erl_runner_chapters.go` to remove redundant duplicate `case "ch05-l07":` blocks, making `erl_runner_incidents.go` the single source of truth.
+  - Expanded `services/orchestrator/internal/bridge/ch05_verification_test.go` with positive verification (100% score, 4/4 stages passed, 3/3 visible tests passed) and 3 negative regression subtests (`ch05-l07_Negative_Missing_Catch_All_(Mailbox_Leak)`, `ch05-l07_Negative_Missing_Timeout_Guard`, `ch05-l07_Negative_Missing_Export`).
+- [x] **223.3: Mandatory Live Tri-Verification & Verification Suites (`ch05-l07`)**:
+  - **Parallel Worked Example (`packet_cache.erl`)**: Extracted directly from `ch05.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and verified live on OTP 29 (`PWE_OTP_OK`).
+  - **Starter Pack (`incident_mailbox_leak.erl`)**: Compiles with `erlc.exe` (exit code 0), loads cleanly on OTP, and authenticates production bug failure under test.
+  - **Solution Pack (`incident_mailbox_leak.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/incident_mailbox_leak.erl'] === solutionCode`), compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `require_tail_recursion => [{loop, 1}]`, `required_constructs => [receive_after]`, and `required_calls => [{erlang, process_info, 2}, {erlang, make_ref, 0}]`, and passed 100% of visible test cases (3/3 passed).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 26 subtests across CH05; `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l07 | 3/3 tests passed`).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
+
 
 
 

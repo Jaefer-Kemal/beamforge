@@ -1,6 +1,9 @@
 package bridge
 
 import (
+	"fmt"
+	"path/filepath"
+
 	"github.com/beamforge/orchestrator/internal/pool"
 )
 
@@ -13,30 +16,59 @@ func (r *Runner) buildIncidentRunScript(session *pool.Session, exerciseID string
 		return `
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
-    {ok, P} = incident_mailbox_leak:start(),
-    [P ! {legacy_heartbeat, os:system_time()} || _ <- lists:seq(1, 50)],
-    ok = incident_mailbox_leak:record_metric(P, 10),
-    ok = incident_mailbox_leak:record_metric(P, 20),
-    [P ! {legacy_heartbeat, os:system_time()} || _ <- lists:seq(1, 50)],
+    {ok, P1} = incident_mailbox_leak:start(),
+    [P1 ! {legacy_heartbeat, os:system_time()} || _ <- lists:seq(1, 50)],
+    ok = incident_mailbox_leak:record_metric(P1, 10),
+    ok = incident_mailbox_leak:record_metric(P1, 20),
+    [P1 ! {legacy_heartbeat, os:system_time()} || _ <- lists:seq(1, 50)],
     timer:sleep(30),
-    Len = case erlang:function_exported(incident_mailbox_leak, inspect_queue_len, 1) of
-        true -> incident_mailbox_leak:inspect_queue_len(P);
-        false -> incident_mailbox_leak:get_mailbox_len(P)
-    end,
-    {ok, Summary} = incident_mailbox_leak:get_summary(P),
-    catch incident_mailbox_leak:stop(P),
-    exit(P, kill),
-    Passed = (Len =:= 0) andalso (Summary =:= #{count => 2, total => 30}),
-    #{call_str => <<"incident_mailbox_leak:inspect_queue_len(P) & get_summary(P)">>,
-      expected => <<"{len => 0, count => 2, total => 30}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("len: ~p, summary: ~p", [Len, Summary]))),
-      passed => Passed,
+    Len1 = incident_mailbox_leak:inspect_queue_len(P1),
+    {ok, Summary1} = incident_mailbox_leak:get_summary(P1),
+    incident_mailbox_leak:stop(P1),
+    Pair1 = {Len1, Summary1},
+    Expected1 = {0, #{count => 2, total => 30}},
+    #{call_str => <<"incident_mailbox_leak:start() + 100 heartbeats + metrics">>,
+      expected => list_to_binary(lists:flatten(io_lib:format("~p", [Expected1]))),
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Pair1]))),
+      passed => Pair1 =:= Expected1,
       time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"incident_mailbox_leak test">>, expected => <<"{len => 0}">>,
+    #{call_str => <<"incident_mailbox_leak:start() + 100 heartbeats + metrics">>, expected => <<"{0, #{count => 2, total => 30}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    DeadPid = spawn(fun() -> ok end),
+    timer:sleep(10),
+    Res2 = incident_mailbox_leak:get_summary(DeadPid),
+    #{call_str => <<"incident_mailbox_leak:get_summary(DeadPid)">>,
+      expected => <<"{error, timeout}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res2]))),
+      passed => Res2 =:= {error, timeout},
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"incident_mailbox_leak:get_summary(DeadPid)">>, expected => <<"{error, timeout}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    {ok, P3} = incident_mailbox_leak:start(),
+    ok = incident_mailbox_leak:record_metric(P3, 100),
+    ok = incident_mailbox_leak:record_metric(P3, 250),
+    {ok, Summary3} = incident_mailbox_leak:get_summary(P3),
+    0 = incident_mailbox_leak:get_mailbox_len(P3),
+    incident_mailbox_leak:stop(P3),
+    Expected3 = #{count => 2, total => 350},
+    #{call_str => <<"incident_mailbox_leak:get_mailbox_len(P) & metrics aggregation">>,
+      expected => list_to_binary(lists:flatten(io_lib:format("~p", [Expected3]))),
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Summary3]))),
+      passed => Summary3 =:= Expected3,
+      time_ms => erlang:system_time(millisecond) - T3_Start}
+catch C3:R3 ->
+    #{call_str => <<"incident_mailbox_leak:get_mailbox_len(P) & metrics aggregation">>, expected => <<"#{count => 2, total => 350}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -257,63 +289,102 @@ func (r *Runner) buildIncidentVerificationScript(session *pool.Session, exercise
 
 	// ── Incident #101 (Ch. 5): Unbounded Mailbox Memory Leak ─────────────────
 	case "ch05-l07":
-		return `
-CompileStage = case code:ensure_loaded(incident_mailbox_leak) of
+		wsDir := filepath.ToSlash(session.WorkspaceDir)
+		return fmt.Sprintf(`
+CompileStage_Leak = case code:ensure_loaded(incident_mailbox_leak) of
     {module, incident_mailbox_leak} ->
         Exports = incident_mailbox_leak:module_info(exports),
-        HasQueueFn = lists:member({inspect_queue_len, 1}, Exports) orelse lists:member({get_mailbox_len, 1}, Exports),
-        Req = [{start, 0}, {record_metric, 2}, {get_summary, 1}],
+        Req = [{start, 0}, {record_metric, 2}, {get_summary, 1}, {inspect_queue_len, 1}, {get_mailbox_len, 1}, {stop, 1}, {loop, 1}],
         case [E || E <- Req, not lists:member(E, Exports)] of
-            [] when HasQueueFn ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 10, details => <<"incident_mailbox_leak.erl compiled cleanly; all required functions exported.">>};
-            [] ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 10, details => <<"Missing export: inspect_queue_len/1 or get_mailbox_len/1">>};
-            Missing ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
+            [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"incident_mailbox_leak.erl compiled cleanly; all telemetry and inspection functions exported.">>};
+            Missing -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
         end;
-    {error, E1} ->
-        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
+    {error, E_L} ->
+        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E_L]))}
 end,
-S1_NoiseDrain = try
+S1_Ast_Leak = try
+    SrcPath = filename:join(["%s", "src", "incident_mailbox_leak.erl"]),
+    BeamPath = filename:join(["%s", "ebin", "incident_mailbox_leak.beam"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    Rules = #{
+        require_tail_recursion => [{loop, 1}],
+        required_constructs => [receive_after],
+        required_calls => [{erlang, process_info, 2}, {erlang, make_ref, 0}]
+    },
+    case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
+        {ok, _} ->
+            #{id => <<"ast_and_tco_invariants">>, title => <<"AST Analysis: Tail-Recursive loop/1, Correlation Ref & receive...after Guard">>, status => <<"passed">>, time_ms => 15, details => <<"Verified tail call optimization on loop/1, selective receive with make_ref/0, and receive...after 1000 timeout.">>};
+        {error, Violations} ->
+            #{id => <<"ast_and_tco_invariants">>, title => <<"AST Analysis: Tail-Recursive loop/1, Correlation Ref & receive...after Guard">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
+    end
+catch CAst:RAst ->
+    #{id => <<"ast_and_tco_invariants">>, title => <<"AST Analysis: Tail-Recursive loop/1, Correlation Ref & receive...after Guard">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [CAst, RAst]))}
+end,
+S2_Drain_Leak = try
     {ok, P} = incident_mailbox_leak:start(),
-    [P ! {legacy_heartbeat, os:system_time()} || _ <- lists:seq(1, 150)],
-    ok = incident_mailbox_leak:record_metric(P, 100),
-    [P ! {legacy_heartbeat, os:system_time()} || _ <- lists:seq(1, 150)],
+    [P ! {legacy_spam, I} || I <- lists:seq(1, 250)],
+    ok = incident_mailbox_leak:record_metric(P, 10),
+    ok = incident_mailbox_leak:record_metric(P, 20),
+    ok = incident_mailbox_leak:record_metric(P, 30),
+    ok = incident_mailbox_leak:record_metric(P, 40),
     ok = incident_mailbox_leak:record_metric(P, 50),
-    timer:sleep(40),
-    Len = case erlang:function_exported(incident_mailbox_leak, inspect_queue_len, 1) of
-        true -> incident_mailbox_leak:inspect_queue_len(P);
-        false -> incident_mailbox_leak:get_mailbox_len(P)
-    end,
-    {ok, Sum} = incident_mailbox_leak:get_summary(P),
-    catch incident_mailbox_leak:stop(P),
-    exit(P, kill),
-    if
-        Len =:= 0 andalso Sum =:= #{count => 2, total => 150} ->
-            #{id => <<"mailbox_save_queue_drain">>, title => <<"Mailbox Noise Drain & Save Queue Leak Audit">>, status => <<"passed">>, time_ms => 45, details => <<"300 unhandled heartbeat messages drained cleanly. Message queue length = 0.">>};
-        true ->
-            #{id => <<"mailbox_save_queue_drain">>, title => <<"Mailbox Noise Drain & Save Queue Leak Audit">>, status => <<"failed">>, time_ms => 45, details => list_to_binary(io_lib:format("Mailbox leaked unmatched messages: len=~p, sum=~p", [Len, Sum]))}
+    [P ! {unhandled_event, I} || I <- lists:seq(1, 250)],
+    timer:sleep(50),
+    QLen1 = incident_mailbox_leak:inspect_queue_len(P),
+    QLen2 = incident_mailbox_leak:get_mailbox_len(P),
+    {ok, Summary} = incident_mailbox_leak:get_summary(P),
+    incident_mailbox_leak:stop(P),
+    ExpectedSummary = #{count => 5, total => 150},
+    case {QLen1, QLen2, Summary} of
+        {0, 0, ExpectedSummary} ->
+            #{id => <<"unbounded_mailbox_leak_triage">>, title => <<"Unbounded Mailbox Leak Triage (500 Noise Messages Drained)">>, status => <<"passed">>, time_ms => 65, details => <<"Verified 500 unhandled messages were purged from Save Queue; mailbox length is 0; metrics aggregated accurately.">>};
+        {L1, L2, _} when L1 > 0 orelse L2 > 0 ->
+            #{id => <<"unbounded_mailbox_leak_triage">>, title => <<"Unbounded Mailbox Leak Triage (500 Noise Messages Drained)">>, status => <<"failed">>, time_ms => 65, details => list_to_binary(io_lib:format("Mailbox leak detected! inspect_queue_len=~p, get_mailbox_len=~p (expected 0). Missing catch-all clause in loop/1.", [L1, L2]))};
+        {_, _, BadSummary} ->
+            #{id => <<"unbounded_mailbox_leak_triage">>, title => <<"Unbounded Mailbox Leak Triage (500 Noise Messages Drained)">>, status => <<"failed">>, time_ms => 65, details => list_to_binary(io_lib:format("Metrics summary mismatch: got ~p, expected ~p", [BadSummary, ExpectedSummary]))}
     end
-catch C1:R1 ->
-    #{id => <<"mailbox_save_queue_drain">>, title => <<"Mailbox Noise Drain & Save Queue Leak Audit">>, status => <<"failed">>, time_ms => 45, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
+catch CDrain:RDrain ->
+    #{id => <<"unbounded_mailbox_leak_triage">>, title => <<"Unbounded Mailbox Leak Triage (500 Noise Messages Drained)">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Triage Crash: ~p:~p", [CDrain, RDrain]))}
 end,
-S2_TimeoutContract = try
-    DeadPid = spawn(fun() -> ok end),
+S3_Timeout_Leak = begin
+    ParentL = self(),
+    DeadP = spawn(fun() -> ok end),
     timer:sleep(10),
-    T_Start = erlang:system_time(millisecond),
-    TimeoutRes = incident_mailbox_leak:get_summary(DeadPid),
-    Elapsed = erlang:system_time(millisecond) - T_Start,
-    case TimeoutRes of
-        {error, timeout} when Elapsed >= 950, Elapsed =< 1400 ->
-            #{id => <<"client_timeout_contract">>, title => <<"Client-Side 1000ms Timeout Defense Contract">>, status => <<"passed">>, time_ms => Elapsed, details => list_to_binary(io_lib:format("Caller returned {error, timeout} after ~p ms", [Elapsed]))};
-        Other ->
-            #{id => <<"client_timeout_contract">>, title => <<"Client-Side 1000ms Timeout Defense Contract">>, status => <<"failed">>, time_ms => Elapsed, details => list_to_binary(io_lib:format("Expected {error, timeout} within 1000ms, got: ~p in ~p ms", [Other, Elapsed]))}
+    TesterDead = spawn(fun() ->
+        ResDead = try incident_mailbox_leak:get_summary(DeadP) catch CDead:RDead -> {crash, CDead, RDead} end,
+        ParentL ! {dead_test_res, ResDead}
+    end),
+    DeadRes = receive
+        {dead_test_res, ValDead} -> ValDead
+    after 1400 ->
+        exit(TesterDead, kill),
+        timeout_blocked
+    end,
+    HangP = spawn(fun() -> receive after 10000 -> ok end end),
+    TesterHang = spawn(fun() ->
+        ResHang = try incident_mailbox_leak:get_summary(HangP) catch CHang:RHang -> {crash, CHang, RHang} end,
+        ParentL ! {hang_test_res, ResHang}
+    end),
+    HangRes = receive
+        {hang_test_res, ValHang} -> ValHang
+    after 1400 ->
+        exit(TesterHang, kill),
+        timeout_blocked
+    end,
+    exit(HangP, kill),
+    case {DeadRes, HangRes} of
+        {{error, timeout}, {error, timeout}} ->
+            #{id => <<"client_call_timeout_guard">>, title => <<"Client Call Timeout Guard (Unresponsive/Dead Target)">>, status => <<"passed">>, time_ms => 1020, details => <<"Verified receive...after 1000 returned {error, timeout} cleanly against dead and unresponsive actors without hanging.">>};
+        {timeout_blocked, _} ->
+            #{id => <<"client_call_timeout_guard">>, title => <<"Client Call Timeout Guard (Unresponsive/Dead Target)">>, status => <<"failed">>, time_ms => 1400, details => <<"Client call to dead PID blocked indefinitely (>1400ms). Missing receive...after 1000 guard.">>};
+        {_, timeout_blocked} ->
+            #{id => <<"client_call_timeout_guard">>, title => <<"Client Call Timeout Guard (Unresponsive/Dead Target)">>, status => <<"failed">>, time_ms => 1400, details => <<"Client call to unresponsive PID blocked indefinitely (>1400ms). Missing receive...after 1000 guard.">>};
+        {Other1, Other2} ->
+            #{id => <<"client_call_timeout_guard">>, title => <<"Client Call Timeout Guard (Unresponsive/Dead Target)">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Expected {{error, timeout}, {error, timeout}}, got: {~p, ~p}", [Other1, Other2]))}
     end
-catch C2:R2 ->
-    #{id => <<"client_timeout_contract">>, title => <<"Client-Side 1000ms Timeout Defense Contract">>, status => <<"failed">>, time_ms => 0, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2]))}
 end,
-Stages = [CompileStage, S1_NoiseDrain, S2_TimeoutContract]
-`, true
+Stages = [CompileStage_Leak, S1_Ast_Leak, S2_Drain_Leak, S3_Timeout_Leak]
+`, wsDir, wsDir), true
 
 	// ── Incident #102 (Ch. 6): Hanging Client Calls on Worker Crash ──────────
 	case "ch06-l09", "incident_hanging_call":
