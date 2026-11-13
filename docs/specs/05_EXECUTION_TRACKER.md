@@ -3464,6 +3464,23 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 14 subtests across CH05 in `37.49s` (`37.543s` total); `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l04 | 3/3 tests passed`) in `12.89s` (`12.911s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 221: Spec 04 / Spec 08 Anti-Spoiler Audit, Process Registry, whereis/1 Guard & make_ref/0 AST Hardening & Live Tri-Verification of Chapter 5 Lecture 5 (`ch05-l05`)
+- [x] **221.1: Spec 04/08 Anti-Spoiler Audit & Erlang/AST Hardening (`ch05-l05`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch05.ts` (`ch05-l05`, `named_kv_actor.erl`) against Spec 04, 07, and 08.
+  - Re-ordered Spec 04 layout so `## Official Erlang Docs & Function Reference` precedes `## Parallel Worked Example`.
+  - Annotated `## Parallel Worked Example` (`license_server.erl`) with 4 clear execution phases (`Phase 1: Safe Registration & Service Boot`, `Phase 2: Client Abstraction API with make_ref() Request Correlation & whereis/1 Guard`, `Phase 3: Synchronous Cluster Query & Termination Protocol`, `Phase 4: Actor State Loop Handling Seat Allocation, Checkin, and Dynamic Unregistration`) and deep architectural notes on atom send safety, `make_ref()` stale reply rejection, and clean unregistration.
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across `start_registered/0`, `put/2`, `get/1`, `stop/0`, and `loop/1`.
+  - Added 3rd visible test case `tc-ch05-05-3` verifying safe return of `{error, not_running}` without `badarg` crashes when calling the actor while unregistered.
+  - Hardened `bf_ast_verifier.erl` `normalize_rule_key` to recognize atom and binary variations of `required_calls` and `forbidden_calls`.
+  - Configured `astRules` (`requiredCalls: ['erlang:make_ref/0', 'erlang:register/2', 'erlang:whereis/1']`, `requireTailRecursion: ['loop/1']`), aligned 10/10 plain-English `%% @doc` contracts across all 4 copies (`files`, `solutionFiles`, `starterCode`, `solutionCode`), stripped pre-solved logic down to neutral `ok.` stubs, and verified zero syntax leaks.
+  - Hardened `Run` in `services/orchestrator/internal/bridge/erl_runner_chapters.go` with safe catch variables (`Err1`, `Err2`, `Err3`) evaluating all 3 visible tests, and hardened `Submit` with 5 automated stages (`compile_and_export_audit`, `ast_registry_and_ref_audit`, `named_registry_operations`, `unregistered_atom_safety`, and `request_timeout_guard` with an isolated 1500ms watchdog).
+  - Expanded `services/orchestrator/internal/bridge/ch05_verification_test.go` with positive verification (100% score, 5/5 stages passed, 3/3 visible tests passed) and 3 negative regression tests (`ch05-l05_Negative_Missing_whereis/1_AST_Rule_Violation`, `ch05-l05_Negative_Missing_Export`, `ch05-l05_Negative_Body_Recursion_on_loop/1`).
+- [x] **221.2: Mandatory Live Tri-Verification & Verification Suites (`ch05-l05`)**:
+  - **Parallel Worked Example (`license_server.erl`)**: Extracted from `ch05.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and verified live on OTP 29 (`PWE_SUCCESS`).
+  - **Starter & Solution Pack (`named_kv_actor.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/named_kv_actor.erl'] === solutionCode`), compiled starter with `erlc.exe` (exit code 0, `STARTER_SUCCESS`), compiled solution with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `required_calls => [{erlang, make_ref, 0}, {erlang, register, 2}, {erlang, whereis, 1}]` and `require_tail_recursion => [{loop, 1}]` (`AST_VERIFIER_SUCCESS`).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 18 subtests across CH05 in `41.17s` (`41.192s` total); `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l05 | 3/3 tests passed`) in `12.56s` (`12.579s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
 
 
 

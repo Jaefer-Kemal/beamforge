@@ -2082,12 +2082,53 @@ T1_Res = try
             #{call_str => <<"named_kv_actor:get(...)">>, expected => <<"{ok, <<\"active_123\">>}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
     end
-catch C1:R1 ->
+catch C1:Err1 ->
     catch named_kv_actor:stop(),
     #{call_str => <<"named_kv_actor:get(...)">>, expected => <<"{ok, <<\"active_123\">>}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    catch named_kv_actor:stop(),
+    {ok, _} = named_kv_actor:start_registered(),
+    case named_kv_actor:get(<<"non_existent">>) of
+        {error, not_found} = R2 ->
+            named_kv_actor:stop(),
+            #{call_str => <<"named_kv_actor:get(<<\"non_existent\">>)">>,
+              expected => <<"{error, not_found}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
+              time_ms => erlang:system_time(millisecond) - T2_Start};
+        Other2 ->
+            named_kv_actor:stop(),
+            #{call_str => <<"named_kv_actor:get(<<\"non_existent\">>)">>, expected => <<"{error, not_found}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
+    end
+catch C2:Err2 ->
+    catch named_kv_actor:stop(),
+    #{call_str => <<"named_kv_actor:get(<<\"non_existent\">>)">>, expected => <<"{error, not_found}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2])), passed => false, time_ms => 0}
+end,
+
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    catch named_kv_actor:stop(),
+    case named_kv_actor:get(<<"test_token">>) of
+        {error, not_running} = R3 ->
+            #{call_str => <<"named_kv_actor:get(<<\"test_token\">>)">>,
+              expected => <<"{error, not_running}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))), passed => true,
+              time_ms => erlang:system_time(millisecond) - T3_Start};
+        Other3 ->
+            #{call_str => <<"named_kv_actor:get(<<\"test_token\">>)">>, expected => <<"{error, not_running}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
+    end
+catch C3:Err3 ->
+    #{call_str => <<"named_kv_actor:get(<<\"test_token\">>)">>, expected => <<"{error, not_running}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3])), passed => false, time_ms => 0}
+end,
+
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -7380,8 +7421,8 @@ S1_Ast = try
         {error, Violations} ->
             #{id => <<"ast_registry_and_ref_audit">>, title => <<"AST Analysis: register/2, whereis/1, and make_ref/0 Invariants">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
     end
-catch C1:R1 ->
-    #{id => <<"ast_registry_and_ref_audit">>, title => <<"AST Analysis: register/2, whereis/1, and make_ref/0 Invariants">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"ast_registry_and_ref_audit">>, title => <<"AST Analysis: register/2, whereis/1, and make_ref/0 Invariants">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, Err1]))}
 end,
 S2_Kv = try
     catch named_kv_actor:stop(),
@@ -7396,11 +7437,47 @@ S2_Kv = try
     timer:sleep(20),
     undefined = whereis(named_kv_actor),
     #{id => <<"named_registry_operations">>, title => <<"Atom Registry Lifecycle, Map Storage & make_ref() Verification">>, status => <<"passed">>, time_ms => 20, details => <<"Named process lifecycle, key-value retrieval, and clean unregistering verified.">>}
-catch C2:R2 ->
+catch C2:Err2 ->
     catch named_kv_actor:stop(),
-    #{id => <<"named_registry_operations">>, title => <<"Atom Registry Lifecycle, Map Storage & make_ref() Verification">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("KV error: ~p:~p", [C2, R2]))}
+    #{id => <<"named_registry_operations">>, title => <<"Atom Registry Lifecycle, Map Storage & make_ref() Verification">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("KV error: ~p:~p", [C2, Err2]))}
 end,
-Stages = [CompileStage, S1_Ast, S2_Kv]
+S3_Unreg = try
+    catch named_kv_actor:stop(),
+    timer:sleep(10),
+    {error, not_running} = named_kv_actor:get(<<"test_key">>),
+    {error, not_running} = named_kv_actor:put(<<"test_key">>, <<"val">>),
+    {error, not_running} = named_kv_actor:stop(),
+    #{id => <<"unregistered_atom_safety">>, title => <<"Unregistered Atom Safety & whereis/1 Guard Verification">>, status => <<"passed">>, time_ms => 15, details => <<"Verified safe return of {error, not_running} without badarg crashes when unregistered.">>}
+catch C3:Err3 ->
+    #{id => <<"unregistered_atom_safety">>, title => <<"Unregistered Atom Safety & whereis/1 Guard Verification">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Unregistered atom crash: ~p:~p", [C3, Err3]))}
+end,
+S4_Timeout = try
+    catch named_kv_actor:stop(),
+    TestPid5 = self(),
+    Watchdog5 = spawn(fun() ->
+        receive
+            cancel -> ok
+        after 1500 ->
+            exit(TestPid5, kill)
+        end
+    end),
+    DummyPid = spawn(fun() -> receive after 3000 -> ok end end),
+    register(named_kv_actor, DummyPid),
+    T_Res = named_kv_actor:get(<<"hang_key">>),
+    Watchdog5 ! cancel,
+    catch unregister(named_kv_actor),
+    exit(DummyPid, kill),
+    case T_Res of
+        {error, timeout} ->
+            #{id => <<"request_timeout_guard">>, title => <<"Request-Reply Timeout Deadline & Mailbox Isolation">>, status => <<"passed">>, time_ms => 1020, details => <<"Verified 1000ms selective receive timeout on unresponsive actor.">>};
+        OtherT ->
+            #{id => <<"request_timeout_guard">>, title => <<"Request-Reply Timeout Deadline & Mailbox Isolation">>, status => <<"failed">>, time_ms => 1020, details => list_to_binary(io_lib:format("Expected {error, timeout}, got: ~p", [OtherT]))}
+    end
+catch C4:Err4 ->
+    catch unregister(named_kv_actor),
+    #{id => <<"request_timeout_guard">>, title => <<"Request-Reply Timeout Deadline & Mailbox Isolation">>, status => <<"failed">>, time_ms => 1020, details => list_to_binary(io_lib:format("Timeout test crash: ~p:~p", [C4, Err4]))}
+end,
+Stages = [CompileStage, S1_Ast, S2_Kv, S3_Unreg, S4_Timeout]
 `, wsDir, wsDir), true
 
 	case "ch05-l06":

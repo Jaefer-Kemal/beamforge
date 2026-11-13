@@ -207,8 +207,10 @@ normalize_rules(Rules) when is_map(Rules) ->
     end, #{}, Rules).
 
 normalize_rule_key(forbidden_remote_calls) -> forbidden_remote_calls;
+normalize_rule_key(forbidden_calls) -> forbidden_remote_calls;
 normalize_rule_key(forbiddenCalls) -> forbidden_remote_calls;
 normalize_rule_key(<<"forbidden_remote_calls">>) -> forbidden_remote_calls;
+normalize_rule_key(<<"forbidden_calls">>) -> forbidden_remote_calls;
 normalize_rule_key(<<"forbiddenCalls">>) -> forbidden_remote_calls;
 
 normalize_rule_key(forbidden_constructs) -> forbidden_constructs;
@@ -217,8 +219,10 @@ normalize_rule_key(<<"forbidden_constructs">>) -> forbidden_constructs;
 normalize_rule_key(<<"forbiddenConstructs">>) -> forbidden_constructs;
 
 normalize_rule_key(required_remote_calls) -> required_remote_calls;
+normalize_rule_key(required_calls) -> required_remote_calls;
 normalize_rule_key(requiredCalls) -> required_remote_calls;
 normalize_rule_key(<<"required_remote_calls">>) -> required_remote_calls;
+normalize_rule_key(<<"required_calls">>) -> required_remote_calls;
 normalize_rule_key(<<"requiredCalls">>) -> required_remote_calls;
 
 normalize_rule_key(required_constructs) -> required_constructs;

@@ -1584,6 +1584,22 @@ end.
 \`\`\`
 If a delayed reply from an earlier timed-out request arrives with an older reference, the \`receive\` pattern \`{task_result, Ref, ...}\` **rejects it**, keeping it in the mailbox or ignoring it, completely preventing stale reply corruption!
 
+## Official Erlang Docs & Function Reference
+
+\`\`\`erlang
+%% Official OTP Signatures (erts / erlang)
+register(RegName, Pid) -> true
+whereis(RegName) -> pid() | undefined
+unregister(RegName) -> true
+make_ref() -> reference()
+  Types:
+    RegName = atom()
+    Pid = pid()
+    reference() = 128-bit unique token
+\`\`\`
+
+The \`register/2\` BIF binds an atom to an active PID in the local node registry table. \`whereis/1\` safely inspects the table, returning the PID or \`undefined\` if unmapped. Calling \`unregister/1\` cleanly releases the atom mapping. \`make_ref/0\` produces a 128-bit monotonically increasing unique token used to correlate asynchronous request-reply messages across concurrency barriers.
+
 ## Parallel Worked Example
 
 Consider a cluster license server managing concurrent seat allocations:
@@ -1592,6 +1608,7 @@ Consider a cluster license server managing concurrent seat allocations:
 -module(license_server).
 -export([start_server/1, checkout_seat/1, checkin_seat/1, query_available/0, shutdown/0, server_loop/2]).
 
+%% Phase 1: Safe Registration & Service Boot (Avoid Multiple Registration Collisions)
 start_server(MaxSeats) ->
     case whereis(license_server) of
         undefined ->
@@ -1602,6 +1619,7 @@ start_server(MaxSeats) ->
             {error, already_started}
     end.
 
+%% Phase 2: Client Abstraction API with make_ref() Request Correlation & whereis/1 Guard
 checkout_seat(UserId) ->
     case whereis(license_server) of
         undefined -> {error, not_running};
@@ -1629,6 +1647,7 @@ checkin_seat(SeatId) ->
             end
     end.
 
+%% Phase 3: Synchronous Cluster Query & Termination Protocol
 query_available() ->
     case whereis(license_server) of
         undefined -> {error, not_running};
@@ -1655,6 +1674,7 @@ shutdown() ->
             end
     end.
 
+%% Phase 4: Actor State Loop Handling Seat Allocation, Checkin, and Dynamic Unregistration
 server_loop(ActiveSeats, RemainingCount) ->
     receive
         {checkout, Ref, CallerPid, UserId} when RemainingCount > 0 ->
@@ -1678,65 +1698,59 @@ server_loop(ActiveSeats, RemainingCount) ->
     end.
 \`\`\`
 
-## Official Erlang Docs & Function Reference
-
-\`\`\`erlang
-%% Official OTP Signatures (erts / erlang)
-register(RegName, Pid) -> true
-whereis(RegName) -> pid() | undefined
-unregister(RegName) -> true
-make_ref() -> reference()
-  Types:
-    RegName = atom()
-    Pid = pid()
-    reference() = 128-bit unique token
-\`\`\`
+### Architectural Notes:
+1. **Unregistered Atom Guarding**: Every client API function resolves \`whereis(license_server)\` prior to transmission. If unmapped, it immediately evaluates to \`{error, not_running}\`, protecting the caller from fatal \`badarg\` exit signals.
+2. **Correlation References with \`make_ref/0\`**: Every synchronous call generates a unique 128-bit reference token (\`Ref = make_ref()\`) carried in the request envelope. The selective \`receive\` block pattern matches strictly against \`{..., Ref, ...}\`, neutralizing stale replies from previous timeouts.
+3. **State Invariants & Clean Unregistration**: When \`shutdown/0\` is evaluated, the actor removes the atom mapping via \`unregister(license_server)\`, delivers a correlated acknowledgement to the caller, and exits without recursing.
 
 ## Assignment Specification
 
 Implement \`src/named_kv_actor.erl\` registered under atom \`named_kv_actor\`:
 
 ### 1. \`start_registered/0\`
-- **Input**: None.
-- **Behavior**: Checks if the atom \`named_kv_actor\` is currently registered on the local node. If already registered, returns \`{error, already_started}\`. If not registered, spawns a new concurrent process executing \`loop(#{}) \`, registers it under the atom \`named_kv_actor\`, and returns \`{ok, Pid}\`.
+- **Input**: None (\`()\`).
+- **Behavior**: Inspects the local node registry to determine if the atom \`named_kv_actor\` is currently mapped. If an existing registration is detected, evaluates to \`{error, already_started}\`. If unmapped, spawns a new concurrent actor process executing \`loop(#{}) \`, registers the spawned process under the atom \`named_kv_actor\`, and returns \`{ok, Pid}\`.
 - **Examples**:
-  - \`named_kv_actor:start_registered()\` returns \`{ok, Pid}\` on initial start.
-  - Calling \`start_registered/0\` while the actor is running returns \`{error, already_started}\`.
+  - \`named_kv_actor:start_registered()\` returns \`{ok, Pid}\` on clean boot.
+  - Calling \`named_kv_actor:start_registered()\` when the actor is already active returns \`{error, already_started}\`.
 
 ### 2. \`put/2\`
-- **Input**: \`Key\` (arbitrary Erlang term), \`Value\` (arbitrary Erlang term).
-- **Behavior**: Verifies that \`named_kv_actor\` is currently registered; if unregistered, immediately returns \`{error, not_running}\` without attempting an atom send. Generates a unique correlation reference via \`make_ref/0\` and transmits an asynchronous request tuple containing the reference, the caller's PID (\`self()\`), \`Key\`, and \`Value\` to the registered actor process. Selectively awaits a matching acknowledgement tuple carrying the exact correlation reference for up to 1,000 milliseconds. Returns \`ok\` upon receipt, or \`{error, timeout}\` if the timer expires.
+- **Input**: \`Key :: term()\`, \`Value :: term()\`.
+- **Behavior**: Inspects the local process registry for \`named_kv_actor\`. If the atom is unregistered, immediately evaluates to \`{error, not_running}\` without attempting an atom send. When running, generates an opaque correlation token via \`make_ref/0\` and dispatches a request containing the token, caller process identifier (\`self()\`), \`Key\`, and \`Value\` to the registered process. Selectively awaits a matching confirmation carrying the exact correlation token for up to 1,000 milliseconds. Evaluates to \`ok\` on receipt, or \`{error, timeout}\` if the deadline expires.
 - **Examples**:
-  - \`named_kv_actor:put(<<"k1">>, <<"v1">>)\` returns \`ok\`.
-  - Calling \`put/2\` when the actor is stopped returns \`{error, not_running}\`.
+  - \`named_kv_actor:put(<<"session_token">>, <<"active_123">>)\` returns \`ok\`.
+  - Calling \`named_kv_actor:put(k, v)\` when the actor is not running returns \`{error, not_running}\`.
 
 ### 3. \`get/1\`
-- **Input**: \`Key\` (arbitrary Erlang term).
-- **Behavior**: Verifies that \`named_kv_actor\` is currently registered; if unregistered, returns \`{error, not_running}\`. Generates a unique correlation reference via \`make_ref/0\` and transmits a query request tuple containing the reference, the caller's PID, and \`Key\` to the registered process. Selectively awaits a matching response tuple carrying the exact correlation reference for up to 1,000 milliseconds. Returns \`{ok, Value}\` if the key exists, \`{error, not_found}\` if absent, or \`{error, timeout}\` on timeout.
+- **Input**: \`Key :: term()\`.
+- **Behavior**: Inspects the local process registry for \`named_kv_actor\`. If unregistered, evaluates to \`{error, not_running}\`. When running, generates an opaque correlation token via \`make_ref/0\` and dispatches a query containing the token, caller process identifier, and \`Key\` to the registered process. Selectively awaits a matching response carrying the exact correlation token for up to 1,000 milliseconds. Evaluates to \`{ok, Value}\` if present, \`{error, not_found}\` if absent, or \`{error, timeout}\` if the deadline expires.
 - **Examples**:
-  - \`named_kv_actor:get(<<"k1">>)\` returns \`{ok, <<"v1">>}\`.
-  - \`named_kv_actor:get(<<"missing">>)\` returns \`{error, not_found}\`.
+  - \`named_kv_actor:get(<<"session_token">>)\` returns \`{ok, <<"active_123">>}\`.
+  - \`named_kv_actor:get(<<"missing_token">>)\` returns \`{error, not_found}\`.
 
 ### 4. \`stop/0\`
-- **Input**: None.
-- **Behavior**: Verifies that \`named_kv_actor\` is currently registered; if unregistered, returns \`{error, not_running}\`. Generates a unique correlation reference via \`make_ref/0\` and transmits a stop request tuple carrying the reference and the caller's PID to the registered process. Selectively awaits an acknowledgement tuple with matching reference for up to 1,000 milliseconds. Returns \`ok\` upon completion, guaranteeing the process has unregistered itself.
+- **Input**: None (\`()\`).
+- **Behavior**: Inspects the local process registry for \`named_kv_actor\`. If unregistered, evaluates to \`{error, not_running}\`. When running, generates an opaque correlation token via \`make_ref/0\` and dispatches a stop command carrying the token and caller process identifier to the registered process. Selectively awaits a matching confirmation carrying the exact correlation token for up to 1,000 milliseconds. Evaluates to \`ok\` on completion, guaranteeing the process has unregistered itself.
 - **Examples**:
   - \`named_kv_actor:stop()\` returns \`ok\`.
+  - Calling \`named_kv_actor:stop()\` when the actor is not running returns \`{error, not_running}\`.
 
 ### 5. \`loop/1\`
-- **Input**: \`Map\` (map associative array).
-- **Behavior**: Executes an infinite tail-recursive state loop handling key insertion, key retrieval, and clean termination:
-  - On receipt of a put request: inserts \`Key => Value\` into \`Map\`, replies to the sender with a correlated acknowledgement matching the incoming reference, and tail-recursively resumes \`loop/1\` with the updated map.
-  - On receipt of a get request: looks up \`Key\` in \`Map\`, replies to the sender with \`{ok, Value}\` or \`{error, not_found}\` tagged with the correlation reference, and tail-recursively resumes \`loop/1\` with unchanged map state.
-  - On receipt of a stop request: unregisters the atom \`named_kv_actor\` from the node registry, sends a correlated acknowledgement back to the caller, and exits cleanly.
+- **Input**: \`Map :: #{term() => term()}\`.
+- **Behavior**: Executes a tail-recursive actor state loop handling key insertion, key query, and service termination in constant stack space:
+  - On put request: associates \`Key\` with \`Value\` in the map state, delivers a correlated acknowledgement to the sender, and tail-recursively continues with the updated map.
+  - On get request: queries \`Key\` in the map state, delivers \`{ok, Value}\` or \`{error, not_found}\` tagged with the matching correlation token to the sender, and tail-recursively continues with unchanged map state.
+  - On stop request: unregisters the atom \`named_kv_actor\` from the node registry table, delivers a correlated acknowledgement to the sender, and cleanly terminates without recursing.
 - **Examples**:
-  - Preserves stored keys across multiple client requests.
+  - Preserves key-value bindings across concurrent queries.
+  - Unregisters the atom name from the local node registry table upon termination.
 
 ## Rules & Verification Constraints
 
-- Must call \`erlang:make_ref/0\`, \`erlang:register/2\`, and \`erlang:whereis/1\`.
-- Enforced by AST rule: \`requiredCalls: ["erlang:make_ref/0", "erlang:register/2", "erlang:whereis/1"]\`.
-- \`loop/1\` must be tail-recursive.`,
+- Must invoke \`erlang:make_ref/0\`, \`erlang:register/2\`, and \`erlang:whereis/1\` (enforced by AST rule \`requiredCalls\`).
+- Must maintain strict tail recursion on \`loop/1\` (enforced by AST rule \`requireTailRecursion: ['loop/1']\`).
+- Must guard every client call against unregistered atoms returning \`{error, not_running}\` without crashing with \`badarg\`.
+- Must cleanly export \`start_registered/0\`, \`put/2\`, \`get/1\`, \`stop/0\`, and \`loop/1\`.`,
     mentalModelCheck: {
       question: 'Why does evaluating `unregistered_atom ! {ping, self()}` crash the sender process with a badarg error, whereas sending to an exited PID does not crash?',
       codeSnippet: `%% Scenario A:
@@ -1810,6 +1824,13 @@ named_service ! {ping, self()}. %% CRASHES sender with badarg!`,
         expectedOutput: '{error, not_found}',
         explanation: 'Returns {error, not_found} when querying an absent key from the actor map.',
       },
+      {
+        id: 'tc-ch05-05-3',
+        title: 'Safe Return on Unregistered Service',
+        erlangCall: 'begin catch named_kv_actor:stop(), named_kv_actor:get(<<"test_token">>) end',
+        expectedOutput: '{error, not_running}',
+        explanation: 'Verifies that calling get/1 when the actor is stopped returns {error, not_running} without crashing the caller process with badarg.',
+      },
     ],
     astRules: {
       requiredCalls: ['erlang:make_ref/0', 'erlang:register/2', 'erlang:whereis/1'],
@@ -1823,23 +1844,23 @@ named_service ! {ping, self()}. %% CRASHES sender with badarg!`,
         content: `-module(named_kv_actor).
 -export([start_registered/0, put/2, get/1, stop/0, loop/1]).
 
-%% @doc Spawns and registers actor under named_kv_actor if not already running.
+%% @doc Spawn and register the actor under atom named_kv_actor if not already registered, returning {ok, Pid} or {error, already_started}.
 start_registered() ->
     ok.
 
-%% @doc Associates Key with Value in the registered actor map state.
+%% @doc Associate Key with Value in the registered actor map state, awaiting correlated acknowledgement up to one second.
 put(_Key, _Value) ->
     ok.
 
-%% @doc Retrieves Value associated with Key from the registered actor map state.
+%% @doc Retrieve Value associated with Key from the registered actor map state, awaiting correlated reply up to one second.
 get(_Key) ->
     ok.
 
-%% @doc Stops the registered actor process and unregisters its name.
+%% @doc Request the registered actor to unregister its atom name and cleanly terminate, awaiting correlated acknowledgement up to one second.
 stop() ->
     ok.
 
-%% @doc Tail-recursive state loop holding map data.
+%% @doc Tail-recursive state loop storing key-value pairs in an immutable map and answering correlated client requests.
 loop(_Map) ->
     ok.
 `,
@@ -1849,6 +1870,7 @@ loop(_Map) ->
       'src/named_kv_actor.erl': `-module(named_kv_actor).
 -export([start_registered/0, put/2, get/1, stop/0, loop/1]).
 
+%% @doc Spawn and register the actor under atom named_kv_actor if not already registered, returning {ok, Pid} or {error, already_started}.
 start_registered() ->
     case whereis(named_kv_actor) of
         undefined ->
@@ -1859,6 +1881,7 @@ start_registered() ->
             {error, already_started}
     end.
 
+%% @doc Associate Key with Value in the registered actor map state, awaiting correlated acknowledgement up to one second.
 put(Key, Value) ->
     case whereis(named_kv_actor) of
         undefined -> {error, not_running};
@@ -1871,6 +1894,7 @@ put(Key, Value) ->
             end
     end.
 
+%% @doc Retrieve Value associated with Key from the registered actor map state, awaiting correlated reply up to one second.
 get(Key) ->
     case whereis(named_kv_actor) of
         undefined -> {error, not_running};
@@ -1883,6 +1907,7 @@ get(Key) ->
             end
     end.
 
+%% @doc Request the registered actor to unregister its atom name and cleanly terminate, awaiting correlated acknowledgement up to one second.
 stop() ->
     case whereis(named_kv_actor) of
         undefined -> {error, not_running};
@@ -1895,6 +1920,7 @@ stop() ->
             end
     end.
 
+%% @doc Tail-recursive state loop storing key-value pairs in an immutable map and answering correlated client requests.
 loop(Map) ->
     receive
         {put, Ref, From, K, V} ->
@@ -1917,29 +1943,30 @@ loop(Map) ->
     starterCode: `-module(named_kv_actor).
 -export([start_registered/0, put/2, get/1, stop/0, loop/1]).
 
-%% @doc Spawns and registers actor under named_kv_actor if not already running.
+%% @doc Spawn and register the actor under atom named_kv_actor if not already registered, returning {ok, Pid} or {error, already_started}.
 start_registered() ->
     ok.
 
-%% @doc Associates Key with Value in the registered actor map state.
+%% @doc Associate Key with Value in the registered actor map state, awaiting correlated acknowledgement up to one second.
 put(_Key, _Value) ->
     ok.
 
-%% @doc Retrieves Value associated with Key from the registered actor map state.
+%% @doc Retrieve Value associated with Key from the registered actor map state, awaiting correlated reply up to one second.
 get(_Key) ->
     ok.
 
-%% @doc Stops the registered actor process and unregisters its name.
+%% @doc Request the registered actor to unregister its atom name and cleanly terminate, awaiting correlated acknowledgement up to one second.
 stop() ->
     ok.
 
-%% @doc Tail-recursive state loop holding map data.
+%% @doc Tail-recursive state loop storing key-value pairs in an immutable map and answering correlated client requests.
 loop(_Map) ->
     ok.
 `,
     solutionCode: `-module(named_kv_actor).
 -export([start_registered/0, put/2, get/1, stop/0, loop/1]).
 
+%% @doc Spawn and register the actor under atom named_kv_actor if not already registered, returning {ok, Pid} or {error, already_started}.
 start_registered() ->
     case whereis(named_kv_actor) of
         undefined ->
@@ -1950,6 +1977,7 @@ start_registered() ->
             {error, already_started}
     end.
 
+%% @doc Associate Key with Value in the registered actor map state, awaiting correlated acknowledgement up to one second.
 put(Key, Value) ->
     case whereis(named_kv_actor) of
         undefined -> {error, not_running};
@@ -1962,6 +1990,7 @@ put(Key, Value) ->
             end
     end.
 
+%% @doc Retrieve Value associated with Key from the registered actor map state, awaiting correlated reply up to one second.
 get(Key) ->
     case whereis(named_kv_actor) of
         undefined -> {error, not_running};
@@ -1974,6 +2003,7 @@ get(Key) ->
             end
     end.
 
+%% @doc Request the registered actor to unregister its atom name and cleanly terminate, awaiting correlated acknowledgement up to one second.
 stop() ->
     case whereis(named_kv_actor) of
         undefined -> {error, not_running};
@@ -1986,6 +2016,7 @@ stop() ->
             end
     end.
 
+%% @doc Tail-recursive state loop storing key-value pairs in an immutable map and answering correlated client requests.
 loop(Map) ->
     receive
         {put, Ref, From, K, V} ->

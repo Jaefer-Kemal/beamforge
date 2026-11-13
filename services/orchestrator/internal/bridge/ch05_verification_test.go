@@ -175,6 +175,79 @@ loop(CurrentVal) ->
     end.
 `
 
+	namedKvActorSolution := `-module(named_kv_actor).
+-export([start_registered/0, put/2, get/1, stop/0, loop/1]).
+
+%% @doc Spawn and register the actor under atom named_kv_actor if not already registered, returning {ok, Pid} or {error, already_started}.
+start_registered() ->
+    case whereis(named_kv_actor) of
+        undefined ->
+            Pid = spawn(fun() -> loop(#{}) end),
+            register(named_kv_actor, Pid),
+            {ok, Pid};
+        _Pid ->
+            {error, already_started}
+    end.
+
+%% @doc Associate Key with Value in the registered actor map state, awaiting correlated acknowledgement up to one second.
+put(Key, Value) ->
+    case whereis(named_kv_actor) of
+        undefined -> {error, not_running};
+        Pid ->
+            Ref = make_ref(),
+            Pid ! {put, Ref, self(), Key, Value},
+            receive
+                {reply, Ref, ok} -> ok
+            after 1000 -> {error, timeout}
+            end
+    end.
+
+%% @doc Retrieve Value associated with Key from the registered actor map state, awaiting correlated reply up to one second.
+get(Key) ->
+    case whereis(named_kv_actor) of
+        undefined -> {error, not_running};
+        Pid ->
+            Ref = make_ref(),
+            Pid ! {get, Ref, self(), Key},
+            receive
+                {reply, Ref, Result} -> Result
+            after 1000 -> {error, timeout}
+            end
+    end.
+
+%% @doc Request the registered actor to unregister its atom name and cleanly terminate, awaiting correlated acknowledgement up to one second.
+stop() ->
+    case whereis(named_kv_actor) of
+        undefined -> {error, not_running};
+        Pid ->
+            Ref = make_ref(),
+            Pid ! {stop, Ref, self()},
+            receive
+                {reply, Ref, ok} -> ok
+            after 1000 -> {error, timeout}
+            end
+    end.
+
+%% @doc Tail-recursive state loop storing key-value pairs in an immutable map and answering correlated client requests.
+loop(Map) ->
+    receive
+        {put, Ref, From, K, V} ->
+            From ! {reply, Ref, ok},
+            loop(maps:put(K, V, Map));
+        {get, Ref, From, K} ->
+            Result = case maps:find(K, Map) of
+                {ok, Val} -> {ok, Val};
+                error -> {error, not_found}
+            end,
+            From ! {reply, Ref, Result},
+            loop(Map);
+        {stop, Ref, From} ->
+            unregister(named_kv_actor),
+            From ! {reply, Ref, ok},
+            ok
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -221,6 +294,16 @@ loop(CurrentVal) ->
 			},
 			wantScore:    100,
 			wantStages:   4,
+			visibleCount: 3,
+		},
+		{
+			name:       "ch05-l05 Process Registry, Dead-PID vs. Unregistered-Atom Semantics & make_ref() Correlation",
+			exerciseID: "ch05-l05",
+			files: map[string]string{
+				"src/named_kv_actor.erl": namedKvActorSolution,
+			},
+			wantScore:    100,
+			wantStages:   5,
 			visibleCount: 3,
 		},
 	}
@@ -817,6 +900,233 @@ loop(CurrentVal) ->
 		}
 		if !foundFailedCalc {
 			t.Errorf("Expected actor_state_accumulation to fail on calculation bug")
+		}
+	})
+
+	// ch05-l05 Negative test 1: missing required AST call whereis/1
+	t.Run("ch05-l05 Negative Missing whereis/1 AST Rule Violation", func(t *testing.T) {
+		sessID := "test-sess-ch05-l05-neg-ast"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		// Directly sends to atom without whereis/1 lookup
+		buggyAstCode := `-module(named_kv_actor).
+-export([start_registered/0, put/2, get/1, stop/0, loop/1]).
+
+start_registered() ->
+    Pid = spawn(fun() -> loop(#{}) end),
+    register(named_kv_actor, Pid),
+    {ok, Pid}.
+
+put(Key, Value) ->
+    Ref = make_ref(),
+    named_kv_actor ! {put, Ref, self(), Key, Value},
+    receive {reply, Ref, ok} -> ok after 1000 -> {error, timeout} end.
+
+get(Key) ->
+    Ref = make_ref(),
+    named_kv_actor ! {get, Ref, self(), Key},
+    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
+
+stop() ->
+    Ref = make_ref(),
+    named_kv_actor ! {stop, Ref, self()},
+    receive {reply, Ref, ok} -> ok after 1000 -> {error, timeout} end.
+
+loop(Map) ->
+    receive
+        {put, Ref, From, K, V} -> From ! {reply, Ref, ok}, loop(maps:put(K, V, Map));
+        {get, Ref, From, K} ->
+            Res = case maps:find(K, Map) of {ok, Val} -> {ok, Val}; error -> {error, not_found} end,
+            From ! {reply, Ref, Res}, loop(Map);
+        {stop, Ref, From} -> unregister(named_kv_actor), From ! {reply, Ref, ok}, ok
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l05", map[string]string{
+			"src/named_kv_actor.erl": buggyAstCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for missing whereis/1 call, got %d", report.Score)
+		}
+
+		foundFailedAst := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_registry_and_ref_audit" && st.Status == "failed" {
+				foundFailedAst = true
+			}
+		}
+		if !foundFailedAst {
+			t.Errorf("Expected ast_registry_and_ref_audit to fail on missing whereis/1")
+		}
+	})
+
+	// ch05-l05 Negative test 2: missing required export stop/0
+	t.Run("ch05-l05 Negative Missing Export", func(t *testing.T) {
+		sessID := "test-sess-ch05-l05-neg-export"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		missingExportCode := `-module(named_kv_actor).
+-export([start_registered/0, put/2, get/1, loop/1]). %% Missing stop/0
+
+start_registered() ->
+    case whereis(named_kv_actor) of
+        undefined ->
+            Pid = spawn(fun() -> loop(#{}) end),
+            register(named_kv_actor, Pid),
+            {ok, Pid};
+        _Pid -> {error, already_started}
+    end.
+
+put(Key, Value) ->
+    case whereis(named_kv_actor) of
+        undefined -> {error, not_running};
+        Pid ->
+            Ref = make_ref(),
+            Pid ! {put, Ref, self(), Key, Value},
+            receive {reply, Ref, ok} -> ok after 1000 -> {error, timeout} end
+    end.
+
+get(Key) ->
+    case whereis(named_kv_actor) of
+        undefined -> {error, not_running};
+        Pid ->
+            Ref = make_ref(),
+            Pid ! {get, Ref, self(), Key},
+            receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end
+    end.
+
+stop() -> ok.
+
+loop(Map) ->
+    receive
+        {put, Ref, From, K, V} -> From ! {reply, Ref, ok}, loop(maps:put(K, V, Map));
+        {get, Ref, From, K} ->
+            Res = case maps:find(K, Map) of {ok, Val} -> {ok, Val}; error -> {error, not_found} end,
+            From ! {reply, Ref, Res}, loop(Map);
+        {stop, Ref, From} -> unregister(named_kv_actor), From ! {reply, Ref, ok}, ok
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l05", map[string]string{
+			"src/named_kv_actor.erl": missingExportCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for missing export, got %d", report.Score)
+		}
+
+		foundFailedCompile := false
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				foundFailedCompile = true
+			}
+		}
+		if !foundFailedCompile {
+			t.Errorf("Expected compile_and_export_audit to fail on missing export")
+		}
+	})
+
+	// ch05-l05 Negative test 3: non-tail recursion on loop/1
+	t.Run("ch05-l05 Negative Body Recursion on loop/1", func(t *testing.T) {
+		sessID := "test-sess-ch05-l05-neg-rec"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		bodyRecCode := `-module(named_kv_actor).
+-export([start_registered/0, put/2, get/1, stop/0, loop/1]).
+
+start_registered() ->
+    case whereis(named_kv_actor) of
+        undefined ->
+            Pid = spawn(fun() -> loop(#{}) end),
+            register(named_kv_actor, Pid),
+            {ok, Pid};
+        _Pid -> {error, already_started}
+    end.
+
+put(Key, Value) ->
+    case whereis(named_kv_actor) of
+        undefined -> {error, not_running};
+        Pid ->
+            Ref = make_ref(),
+            Pid ! {put, Ref, self(), Key, Value},
+            receive {reply, Ref, ok} -> ok after 1000 -> {error, timeout} end
+    end.
+
+get(Key) ->
+    case whereis(named_kv_actor) of
+        undefined -> {error, not_running};
+        Pid ->
+            Ref = make_ref(),
+            Pid ! {get, Ref, self(), Key},
+            receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end
+    end.
+
+stop() ->
+    case whereis(named_kv_actor) of
+        undefined -> {error, not_running};
+        Pid ->
+            Ref = make_ref(),
+            Pid ! {stop, Ref, self()},
+            receive {reply, Ref, ok} -> ok after 1000 -> {error, timeout} end
+    end.
+
+loop(Map) ->
+    receive
+        {put, Ref, From, K, V} ->
+            From ! {reply, Ref, ok},
+            loop(maps:put(K, V, Map)) + 1; %% VIOLATION: Body recursion
+        {get, Ref, From, K} ->
+            Res = case maps:find(K, Map) of {ok, Val} -> {ok, Val}; error -> {error, not_found} end,
+            From ! {reply, Ref, Res},
+            loop(Map);
+        {stop, Ref, From} -> unregister(named_kv_actor), From ! {reply, Ref, ok}, ok
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l05", map[string]string{
+			"src/named_kv_actor.erl": bodyRecCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for body recursion, got %d", report.Score)
+		}
+
+		foundFailedAst := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_registry_and_ref_audit" && st.Status == "failed" {
+				foundFailedAst = true
+			}
+		}
+		if !foundFailedAst {
+			t.Errorf("Expected ast_registry_and_ref_audit to fail on body recursion")
 		}
 	})
 }
