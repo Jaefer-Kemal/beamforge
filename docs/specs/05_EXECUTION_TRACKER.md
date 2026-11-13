@@ -4016,6 +4016,39 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 29 subtests across Chapter 7 in `61.95s`; `TEST_CHAPTER=07 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l07 | 2/2 tests passed` in `9.35s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+## Phase 242: Chapter 7 Lecture 8 (`ch07-l08`) Pedagogical Audit, Problem Set Hardening & Live Tri-Verification
+- [x] **242.1: Spec 04/08 Pedagogical Hardening & Anti-Spoiler Shielding (`ch07-l08`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch07.ts` for Lecture 8 (*Chapter 7 Problem Set: API Gateway Token-Bucket Rate Limiter*, `src/rate_limiter_srv.erl`).
+  - Single-Lecture Context Shielding preserved: touched only `ch07-l08` within `apps/web-ide/src/data/chapters/ch07.ts`.
+  - Added comprehensive `## Official Erlang Docs & Function Reference` section covering `gen_server:start_link/3,4`, `gen_server:call/2,3`, `gen_server:cast/2`, `maps:get/3`, `maps:map/2`, `maps:size/1`, and `sys:get_state/1,2`.
+  - Injected an in-depth 4-step architectural deep dive under the Parallel Worked Example (`download_budget_srv.erl`):
+    - *Step 1: Dynamic Allocation via Default Fallback*: Details `maps:get(UserId, Budgets, Max)` fallback pattern without eager provisioning loops.
+    - *Step 2: Atomic Verification & Side-Effect Isolation*: Explains serial `handle_call` verifying balance vs cost and returning `{error, limit_exceeded}` without mutating state on denial.
+    - *Step 3: Pure Batch Transformations with Ceiling Capping*: Analyzes `maps:map/2` applying `min(Balance + Add, Max)` capping guarantees.
+    - *Step 4: Asynchronous Fire-and-Forget Admin Resets*: Contrasts synchronous calls with `gen_server:cast/2` for administrative balance resets.
+  - Expanded `otpDocCards` with 5 official OTP reference cards (`start_link`, `call`, `cast`, `map`, `get_state`).
+  - Standardized visible test IDs to `tc-ch07-08-1`, `tc-ch07-08-2`, and `tc-ch07-08-3`.
+  - Enforced exact parity: `starterCode === files[0].content` and `solutionCode === solutionFiles['src/rate_limiter_srv.erl']`.
+  - Zero ASCII art diagrams across all markdown and visual fields.
+
+- [x] **242.2: Go Orchestrator Multi-Test Harness & Negative Regression Suite (`ch07-l08`)**:
+  - Updated `services/orchestrator/internal/bridge/erl_runner_chapters.go`:
+    - Aligned `buildRunScript` for `ch07-l08` test 3 to match `ch07.ts` visible test call sequence (`10 -> {allow, 0}, refill_all -> ok, 2 -> {allow, 1}`).
+  - Updated `services/orchestrator/internal/bridge/ch07_verification_test.go`:
+    - Extracted and pinned `const rateLimiterSrvSolution`.
+    - Updated `ch07-l08` verification entry: `wantScore: 100, wantStages: 6, visibleCount: 3`.
+    - Added 3 negative regression subtests for `ch07-l08`:
+      1. `ch07-l08 Negative Missing gen_server cast AST Violation`: verifies rejection in `ast_rate_limiter_spec` when `gen_server:cast/2` is bypassed in `reset_client/2`.
+      2. `ch07-l08 Negative Missing Export`: verifies rejection in `compile_and_export_audit` when `get_stats/1` is omitted from exports.
+      3. `ch07-l08 Negative Uncapped Refill Exceeds MaxTokens`: verifies rejection in `batch_refill_and_capping` when token replenishment fails to cap at `MaxTokens`.
+
+- [x] **242.3: Mandatory Live Tri-Verification Certification (`ch07-l08`)**:
+  - **Parallel Worked Example (`download_budget_srv.erl`)**: Extracted directly from `ch07.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with download quota deductions, replenishments, and user resets passing in 0 ms.
+  - **Starter Pack (`rate_limiter_srv.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0) and loads cleanly on OTP.
+  - **Solution Pack (`rate_limiter_srv.erl`)**: Verified parity, compiled with `+debug_info -Wall -Werror` (0 warnings), passed `bf_ast_verifier` rules (`gen_server:start_link/3`, `gen_server:call/2`, `gen_server:cast/2`), executed 100% of visible test cases (3/3 passed), and passed all 6 stages of Go verification.
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 32 subtests across Chapter 7 in `63.30s`; `TEST_CHAPTER=07 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l08 | 3/3 tests passed` in `9.71s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
 
 
 

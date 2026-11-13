@@ -4460,20 +4460,53 @@ code_change(_OldVsn, State, _Extra) ->
     xpReward: 250,
     conceptMarkdown: `## Why This Matters in Production
 
-In microservice ecosystems and public developer platforms (such as Stripe, GitHub, or AWS API Gateway), rate limiting is the primary defense line against distributed denial-of-service (DDoS) attacks, abusive web scrapers, and runaway client retry loops.
+In high-throughput microservice ecosystems and public cloud platforms (such as Stripe, GitHub, or AWS API Gateway), rate limiting is the indispensable first line of defense against distributed denial-of-service (DDoS) spikes, misconfigured retry storms, and abusive scrapers.
 
-The gold standard for API throttling is the **Token-Bucket Algorithm**:
+The industry benchmark for flexible traffic shaping is the **Token-Bucket Algorithm**:
 - Each client starts with a maximum bucket capacity of \`MaxTokens\`.
-- Every incoming API request consumes $N$ tokens depending on its computational cost (e.g., \`GET /v1/user\` costs 1 token; heavy \`POST /v1/reports\` costs 5 tokens).
-- If a client has sufficient tokens, the request is allowed immediately.
-- If tokens are insufficient, the request is denied with an HTTP 429 status (\`{deny, Remaining}\`).
-- Periodically, a background sweep refills $R$ tokens back into every active bucket, capped strictly at \`MaxTokens\`.
+- Every incoming API request attempts to consume $N$ tokens corresponding to its computational cost (e.g., standard queries require 1 token; heavy analytical reports require 5 tokens).
+- When a client possesses sufficient tokens, the request is allowed immediately and tokens are deducted atomically.
+- When tokens are insufficient, the request is rejected with a structured denial (corresponding to HTTP 429 Too Many Requests), preserving the client's current balance without penalizing failed requests.
+- Periodically or on administrative demand, a replenishment cycle adds $R$ tokens to every active client bucket, capped strictly at \`MaxTokens\`.
 
-In this Capstone Problem Set for Chapter 7, you will engineer a high-throughput, production-grade **Token-Bucket Rate Limiter Server** using \`gen_server\`!
+In this Capstone Problem Set for Chapter 7, you will engineer a robust, production-grade **Token-Bucket Rate Limiter Server** using OTP \`gen_server\`!
+
+## Official Erlang Docs & Function Reference
+
+The following OTP primitives and standard library functions form the architectural foundation for this problem set:
+
+- **\`gen_server:start_link/3,4\`**:
+  - \`gen_server:start_link(?MODULE, Args, Opts) -> {ok, Pid} | {error, Reason}\`
+  - Spawns and links a new \`gen_server\` process, synchronously executing \`init(Args)\` before returning the pid.
+  - [Official Erlang gen_server:start_link/3 Documentation](https://www.erlang.org/doc/apps/stdlib/gen_server.html#start_link/3)
+- **\`gen_server:call/2,3\`**:
+  - \`gen_server:call(ServerRef, Request) -> Reply\`
+  - Performs a synchronous remote procedure call with automatic correlation tag matching and caller blocking (default timeout 5000 ms).
+  - [Official Erlang gen_server:call/2 Documentation](https://www.erlang.org/doc/apps/stdlib/gen_server.html#call/2)
+- **\`gen_server:cast/2\`**:
+  - \`gen_server:cast(ServerRef, Request) -> ok\`
+  - Dispatches an asynchronous, fire-and-forget message without waiting for a reply or blocking the caller.
+  - [Official Erlang gen_server:cast/2 Documentation](https://www.erlang.org/doc/apps/stdlib/gen_server.html#cast/2)
+- **\`maps:get/3\`**:
+  - \`maps:get(Key, Map, Default) -> Value\`
+  - Safe key lookup that returns \`Default\` if \`Key\` is not present, avoiding crash exceptions on missing entries.
+  - [Official Erlang maps:get/3 Documentation](https://www.erlang.org/doc/apps/stdlib/maps.html#get/3)
+- **\`maps:map/2\`**:
+  - \`maps:map(Fun, Map) -> Map\`
+  - Transforms all values in a map using \`Fun(Key, Value) -> NewValue\`, returning a new map with identical keys.
+  - [Official Erlang maps:map/2 Documentation](https://www.erlang.org/doc/apps/stdlib/maps.html#map/2)
+- **\`maps:size/1\`**:
+  - \`maps:size(Map) -> non_neg_integer()\`
+  - Returns the number of key-value associations in $O(1)$ time.
+  - [Official Erlang maps:size/1 Documentation](https://www.erlang.org/doc/apps/stdlib/maps.html#size/1)
+- **\`sys:get_state/1,2\`**:
+  - \`sys:get_state(Pid) -> State\`
+  - Queries the live internal state of an OTP process via the system protocol without modifying process state or message queues.
+  - [Official Erlang sys:get_state/1 Documentation](https://www.erlang.org/doc/apps/stdlib/sys.html#get_state/1)
 
 ## Parallel Worked Example: The Download Budget Server
 
-The following \`download_budget_srv\` module demonstrates how a \`gen_server\` tracks dynamic per-client resource balances, enforces quotas with fallback defaults, executes batch replenishments, and accepts asynchronous reset casts:
+The following complete \`download_budget_srv\` module demonstrates how a \`gen_server\` tracks dynamic per-client resource balances, enforces quotas with fallback defaults, executes batch replenishments, and accepts asynchronous reset casts:
 
 \`\`\`erlang
 -module(download_budget_srv).
@@ -4571,11 +4604,24 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 \`\`\`
 
+## Architectural Deep Dive: 4 Core Engine Invariants
+
+### Step 1: Dynamic Allocation via Default Fallback
+In \`download_budget_srv\`, client balances are stored in a nested map (\`budgets\`). When a user attempts consumption for the first time, their ID is not yet in the map. Instead of requiring a separate registration step, \`maps:get(UserId, Budgets, Max)\` seamlessly falls back to \`Max\`, giving new clients an immediate full quota on their first request.
+
+### Step 2: Atomic Verification & Side-Effect Isolation
+In \`handle_call({consume_mb, UserId, Mb}, ...)\`, the check and debit are strictly serialized within the single \`gen_server\` process. Race conditions between concurrent calls for the same user cannot occur. Crucially, when balance is insufficient, the server replies with \`{reply, {error, limit_exceeded}, State}\`—leaving \`State\` completely unmodified so failed attempts do not consume quota.
+
+### Step 3: Pure Batch Transformations with Ceiling Capping
+The \`replenish_all\` handler utilizes \`maps:map/2\` to iterate across all active user budgets in a single pass. The formula \`min(Balance + Add, Max)\` guarantees that balances increase by the replenish amount but never exceed maximum allowed capacity, preventing idle clients from accumulating unbounded allowances.
+
+### Step 4: Asynchronous Fire-and-Forget Admin Resets
+While quota checks require synchronous confirmation via \`gen_server:call/2\`, administrative resets use \`gen_server:cast/2\`. Casts do not wait for a response, freeing the caller immediately. The server processes the cast in its mailbox order, placing the client's balance back at full capacity without blocking network threads.
+
 ## Architecture & Under the Hood
 
-### State Architecture
-
-Your \`rate_limiter_srv\` maintains state as a map holding configuration, dynamic client balances, and global telemetry:
+### State Representation
+Your \`rate_limiter_srv\` manages its internal state as a map holding configuration, active client balances, and aggregate observability counters:
 
 \`\`\`erlang
 #{
@@ -4590,21 +4636,19 @@ Your \`rate_limiter_srv\` maintains state as a map holding configuration, dynami
 }
 \`\`\`
 
-### Dynamic On-Demand Client Bucket Creation
-When a request arrives for a previously unseen \`ClientId\`, your server provisions a fresh bucket initialized to \`MaxTokens\` before deducting the requested cost.
+### Real-Time Telemetry Counters
+Every invocation of \`check_request/3\` updates the global metrics:
+- On approval: increments \`total_allowed\` by 1.
+- On denial: increments \`total_rejected\` by 1.
 
-### Capped Batch Refills
-When \`refill_all(Pid)\` is executed, every existing client bucket in \`clients\` receives \`RefillAmount\` additional tokens, capped strictly at \`max_tokens\`.
+The \`get_stats/1\` call returns a snapshot map containing \`total_allowed\`, \`total_rejected\`, and \`active_clients\` (computed via \`maps:size(Clients)\`).
 
-### Live Introspection via \`sys:get_state/1\`
-Because your module implements standard \`gen_server\` callbacks, production operators can inspect internal balances and counters in real time using \`sys:get_state(Pid)\`.
-
-> [!warning] Production OTP Trap: Map Allocation Leaks on Infinite Clients
-> In a production gateway handling millions of ephemeral IP addresses, inserting an entry into \`clients\` for every unique IP will eventually exhaust memory. In production systems (as we will explore in Chapter 9), client buckets are backed by off-heap ETS tables with automatic TTL evictions (\`select_delete\`).
+> [!warning] Production OTP Trap: Memory Leaks with Ephemeral IPs
+> In high-traffic edge gateways handling millions of unique ephemeral IP addresses, storing client balances in a persistent in-process map causes unbounded memory growth over time. In production architectures (which we explore in Chapter 9), client buckets are stored in off-heap ETS tables equipped with sliding TTL eviction sweeps (\`select_delete\`).
 
 ## Assignment Specification
 
-Implement \`src/rate_limiter_srv.erl\` with the following client API and OTP callbacks:
+Implement \`src/rate_limiter_srv.erl\` with the following client API and standard \`gen_server\` callbacks:
 
 \`\`\`erlang
 -module(rate_limiter_srv).
@@ -4623,21 +4667,21 @@ Implement \`src/rate_limiter_srv.erl\` with the following client API and OTP cal
 ### Functional Requirements
 
 #### \`start_link/2\`
-- **Input**: \`MaxTokens\` (positive integer capacity), \`RefillAmount\` (positive integer added per refill).
-- **Behavior**: Spawns and links the \`rate_limiter_srv\` gen_server. Initializes state map with \`max_tokens\`, \`refill_amount\`, an empty \`clients\` map, \`total_allowed => 0\`, and \`total_rejected => 0\`.
+- **Input**: \`MaxTokens\` (positive integer maximum bucket capacity), \`RefillAmount\` (positive integer tokens added per refill cycle).
+- **Behavior**: Spawns and links the \`rate_limiter_srv\` gen_server. Initializes state map with \`max_tokens\`, \`refill_amount\`, an empty \`clients\` map (\`#{}\`), \`total_allowed => 0\`, and \`total_rejected => 0\`.
 - **Examples**:
   - \`rate_limiter_srv:start_link(10, 3)\` returns \`{ok, Pid}\`.
 
 #### \`check_request/3\`
 - **Input**: \`Pid\` (server pid), \`ClientId\` (binary client identifier), \`Cost\` (positive integer tokens required).
-- **Behavior**: Synchronously verifies if \`ClientId\` has sufficient tokens. If \`ClientId\` is new, its starting balance is \`MaxTokens\`. If balance is greater than or equal to \`Cost\`, deducts \`Cost\`, increments \`total_allowed\`, and replies with \`{allow, Remaining}\`. If balance is less than \`Cost\`, leaves balance unchanged, increments \`total_rejected\`, and replies with \`{deny, Balance}\`.
+- **Behavior**: Synchronously verifies if \`ClientId\` has sufficient tokens. If \`ClientId\` is previously unseen, its starting balance is \`MaxTokens\`. If current balance is greater than or equal to \`Cost\`, deducts \`Cost\`, increments \`total_allowed\`, and replies with \`{allow, Remaining}\`. If balance is less than \`Cost\`, leaves balance unchanged, increments \`total_rejected\`, and replies with \`{deny, CurrentTokens}\`.
 - **Examples**:
   - \`rate_limiter_srv:check_request(Pid, <<"client_a">>, 3)\` returns \`{allow, 7}\` (from 10 capacity).
   - \`rate_limiter_srv:check_request(Pid, <<"client_a">>, 8)\` returns \`{deny, 7}\` (when 7 remain).
 
 #### \`refill_all/1\`
 - **Input**: \`Pid\` (server pid).
-- **Behavior**: Synchronously adds \`RefillAmount\` tokens to every registered client bucket in \`clients\`, capping each balance at \`MaxTokens\`. Returns \`ok\`.
+- **Behavior**: Synchronously adds \`RefillAmount\` tokens to every registered client bucket in \`clients\`, capping each balance strictly at \`MaxTokens\`. Returns \`ok\`.
 - **Examples**:
   - \`rate_limiter_srv:refill_all(Pid)\` returns \`ok\`.
 
@@ -4649,57 +4693,94 @@ Implement \`src/rate_limiter_srv.erl\` with the following client API and OTP cal
 
 #### \`get_stats/1\`
 - **Input**: \`Pid\` (server pid).
-- **Behavior**: Synchronously returns a map containing global counters and active client count: \`#{total_allowed => integer(), total_rejected => integer(), active_clients => integer()}\`.
+- **Behavior**: Synchronously queries aggregate server metrics and active client count. Returns \`#{total_allowed => integer(), total_rejected => integer(), active_clients => integer()}\`.
 - **Examples**:
   - \`rate_limiter_srv:get_stats(Pid)\` returns \`#{total_allowed => 2, total_rejected => 1, active_clients => 1}\`.
 
 #### \`stop/1\`
 - **Input**: \`Pid\` (server pid).
-- **Behavior**: Gracefully stops the server process via \`gen_server:stop/1\`. Returns \`ok\`.
+- **Behavior**: Gracefully terminates the server process via \`gen_server:stop/1\`. Returns \`ok\`.
 - **Examples**:
   - \`rate_limiter_srv:stop(Pid)\` returns \`ok\`.
 
 ## Rules & Verification Constraints
 
 - Must export \`start_link/2\`, \`check_request/3\`, \`refill_all/1\`, \`reset_client/2\`, \`get_stats/1\`, and \`stop/1\`.
-- Must export all 6 standard \`gen_server\` callbacks.
+- Must export all 6 standard \`gen_server\` callbacks: \`init/1\`, \`handle_call/3\`, \`handle_cast/2\`, \`handle_info/2\`, \`terminate/2\`, and \`code_change/3\`.
 - \`reset_client/2\` must use \`gen_server:cast/2\`.
 - \`check_request/3\`, \`refill_all/1\`, and \`get_stats/1\` must use \`gen_server:call/2\`.
-- Token balances must never exceed \`MaxTokens\`.
+- Token balances in \`clients\` must never exceed \`MaxTokens\`.
+- Zero ASCII art diagrams across all markdown or documentation fields.
 `,
     mentalModelCheck: {
-      question: 'In a token-bucket rate limiter, why is refill_all capped at MaxTokens?',
+      question: 'In a token-bucket rate limiter, why is refill_all capped strictly at MaxTokens?',
       codeSnippet: `NewTokens = min(Current + Refill, MaxTokens)`,
       options: [
         {
           id: 'A',
-          label: 'To prevent clients from accumulating infinite credits during idle periods and subsequently overwhelming downstream services with uncontrolled bursts.',
+          label: 'To prevent idle clients from accumulating unbounded credits over hours of inactivity and subsequently overwhelming downstream services with massive traffic bursts.',
           isCorrect: true,
-          explanation: 'Correct! Without capping at MaxTokens, a client idle for 24 hours would accumulate millions of tokens and bypass all throttling protections.',
+          explanation: 'Correct! Without capping at MaxTokens, a client dormant for 24 hours would accumulate millions of tokens, completely defeating rate limiting.',
         },
         {
           id: 'B',
-          label: 'Erlang maps can only hold numbers less than 100.',
+          label: 'Erlang maps cannot store integers larger than 100.',
           isCorrect: false,
-          explanation: 'Erlang integers have arbitrary precision.',
+          explanation: 'Erlang integers have arbitrary precision and can grow to any size supported by system memory.',
         },
         {
           id: 'C',
-          label: 'Tokens are physical hardware chips in the CPU.',
+          label: 'Tokens are physical hardware registers on the NIC.',
           isCorrect: false,
-          explanation: 'Tokens are pure logical units in software.',
+          explanation: 'Tokens are purely software-defined accounting units managed in memory.',
         },
       ],
     },
     otpDocCards: [
       {
+        functionName: 'start_link',
+        module: 'gen_server',
+        signature: 'gen_server:start_link(Module, Args, Options) -> {ok, Pid} | {error, Reason}',
+        typesSpec: ['Module = atom()', 'Args = term()', 'Options = [term()]', 'Pid = pid()', 'Reason = term()'],
+        description: 'Creates a standalone gen_server process linked to the calling process, synchronously executing init/1.',
+        complexityNote: 'O(1) process spawn and synchronous handshake.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#start_link/3',
+      },
+      {
+        functionName: 'call',
+        module: 'gen_server',
+        signature: 'gen_server:call(ServerRef, Request) -> Reply',
+        typesSpec: ['ServerRef = pid() | atom()', 'Request = term()', 'Reply = term()'],
+        description: 'Makes a synchronous call to ServerRef and waits until a reply arrives or timeout expires.',
+        complexityNote: 'O(1) send + receive round-trip.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#call/2',
+      },
+      {
         functionName: 'cast',
         module: 'gen_server',
         signature: 'gen_server:cast(ServerRef, Request) -> ok',
         typesSpec: ['ServerRef = pid() | atom()', 'Request = term()'],
-        description: 'Sends an asynchronous request to the ServerRef and returns ok immediately.',
-        complexityNote: 'O(1) fire-and-forget message send.',
+        description: 'Sends an asynchronous fire-and-forget request to the ServerRef and returns ok immediately.',
+        complexityNote: 'O(1) asynchronous message send.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#cast/2',
+      },
+      {
+        functionName: 'map',
+        module: 'maps',
+        signature: 'maps:map(Fun, Map1) -> Map2',
+        typesSpec: ['Fun = fun((Key, Value1) -> Value2)', 'Map1 = #{Key => Value1}', 'Map2 = #{Key => Value2}'],
+        description: 'Produces a new map by applying Fun to every key-value pair of Map1.',
+        complexityNote: 'O(N) where N is number of key-value pairs.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/maps.html#map/2',
+      },
+      {
+        functionName: 'get_state',
+        module: 'sys',
+        signature: 'sys:get_state(Name) -> State',
+        typesSpec: ['Name = pid() | atom()', 'State = term()'],
+        description: 'Gets the current internal state of the process via the OTP system protocol.',
+        complexityNote: 'O(1) system message exchange.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/sys.html#get_state/1',
       },
     ],
     starterCode: `-module(rate_limiter_srv).
@@ -4729,19 +4810,19 @@ start_link(MaxTokens, RefillAmount) when is_integer(MaxTokens), is_integer(Refil
     gen_server:start_link(?MODULE, {MaxTokens, RefillAmount}, []).
 
 %% @doc Request tokens for a client. Returns {allow, Remaining} or {deny, Current}.
-check_request(Pid, ClientId, Cost) when is_integer(Cost), Cost > 0 ->
+check_request(_Pid, _ClientId, _Cost) ->
     ok.
 
 %% @doc Refill all active client buckets up to maximum token capacity.
-refill_all(Pid) ->
+refill_all(_Pid) ->
     ok.
 
 %% @doc Asynchronously reset a client bucket to full capacity.
-reset_client(Pid, ClientId) ->
+reset_client(_Pid, _ClientId) ->
     ok.
 
 %% @doc Query aggregate server metrics and active client count.
-get_stats(Pid) ->
+get_stats(_Pid) ->
     ok.
 
 %% @doc Gracefully terminate the rate limiter server.
@@ -4916,19 +4997,19 @@ start_link(MaxTokens, RefillAmount) when is_integer(MaxTokens), is_integer(Refil
     gen_server:start_link(?MODULE, {MaxTokens, RefillAmount}, []).
 
 %% @doc Request tokens for a client. Returns {allow, Remaining} or {deny, Current}.
-check_request(Pid, ClientId, Cost) when is_integer(Cost), Cost > 0 ->
+check_request(_Pid, _ClientId, _Cost) ->
     ok.
 
 %% @doc Refill all active client buckets up to maximum token capacity.
-refill_all(Pid) ->
+refill_all(_Pid) ->
     ok.
 
 %% @doc Asynchronously reset a client bucket to full capacity.
-reset_client(Pid, ClientId) ->
+reset_client(_Pid, _ClientId) ->
     ok.
 
 %% @doc Query aggregate server metrics and active client count.
-get_stats(Pid) ->
+get_stats(_Pid) ->
     ok.
 
 %% @doc Gracefully terminate the rate limiter server.
@@ -5078,25 +5159,25 @@ code_change(_OldVsn, State, _Extra) ->
     },
     visibleTestCases: [
       {
-        id: 'tc1',
+        id: 'tc-ch07-08-1',
         title: 'Quota Enforcement & Token Consumption',
         erlangCall: 'begin {ok, S} = rate_limiter_srv:start_link(10, 3), {allow, 7} = rate_limiter_srv:check_request(S, <<"client_a">>, 3), Res = rate_limiter_srv:check_request(S, <<"client_a">>, 5), rate_limiter_srv:stop(S), Res end',
         expectedOutput: '{allow, 2}',
         explanation: 'Deducts 3 and 5 tokens from 10 capacity, leaving 2 tokens.',
       },
       {
-        id: 'tc2',
+        id: 'tc-ch07-08-2',
         title: 'Denial When Cost Exceeds Remaining Tokens',
         erlangCall: 'begin {ok, S} = rate_limiter_srv:start_link(10, 3), {allow, 2} = rate_limiter_srv:check_request(S, <<"client_b">>, 8), Res = rate_limiter_srv:check_request(S, <<"client_b">>, 5), rate_limiter_srv:stop(S), Res end',
         expectedOutput: '{deny, 2}',
-        explanation: 'Denies request when 5 tokens are requested but only 2 remain.',
+        explanation: 'Denies request when 5 tokens are requested but only 2 remain in the client bucket.',
       },
       {
-        id: 'tc3',
-        title: 'Batch Refill All Clients',
+        id: 'tc-ch07-08-3',
+        title: 'Batch Refill All Clients & Capacity Capping',
         erlangCall: 'begin {ok, S} = rate_limiter_srv:start_link(10, 3), {allow, 0} = rate_limiter_srv:check_request(S, <<"client_c">>, 10), rate_limiter_srv:refill_all(S), Res = rate_limiter_srv:check_request(S, <<"client_c">>, 2), rate_limiter_srv:stop(S), Res end',
         expectedOutput: '{allow, 1}',
-        explanation: 'Refills tokens and caps strictly at max_tokens.',
+        explanation: 'Refills tokens by 3 (from 0 to 3) and allows 2 tokens deduction, leaving 1 remaining.',
       },
     ],
     solutionExplanation: 'Implements an API Gateway token-bucket rate limiter with per-client burst quotas, atomic bucket deduction, batch refilling, and live sys:get_state inspection.',

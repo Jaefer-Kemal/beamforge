@@ -548,6 +548,97 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `
 
+	const rateLimiterSrvSolution = `-module(rate_limiter_srv).
+-behaviour(gen_server).
+
+-export([
+    start_link/2,
+    check_request/3,
+    refill_all/1,
+    reset_client/2,
+    get_stats/1,
+    stop/1
+]).
+
+%% gen_server Callbacks
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(MaxTokens, RefillAmount) when is_integer(MaxTokens), is_integer(RefillAmount) ->
+    gen_server:start_link(?MODULE, {MaxTokens, RefillAmount}, []).
+
+check_request(Pid, ClientId, Cost) when is_integer(Cost), Cost > 0 ->
+    gen_server:call(Pid, {check_request, ClientId, Cost}).
+
+refill_all(Pid) ->
+    gen_server:call(Pid, refill_all).
+
+reset_client(Pid, ClientId) ->
+    gen_server:cast(Pid, {reset_client, ClientId}).
+
+get_stats(Pid) ->
+    gen_server:call(Pid, get_stats).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init({MaxTokens, RefillAmount}) ->
+    State = #{
+        max_tokens => MaxTokens,
+        refill_amount => RefillAmount,
+        clients => #{},
+        total_allowed => 0,
+        total_rejected => 0
+    },
+    {ok, State}.
+
+handle_call({check_request, ClientId, Cost}, _From, #{max_tokens := Max, clients := Clients, total_allowed := Allowed, total_rejected := Rejected} = State) ->
+    CurrentTokens = maps:get(ClientId, Clients, Max),
+    if
+        CurrentTokens >= Cost ->
+            Remaining = CurrentTokens - Cost,
+            NewClients = maps:put(ClientId, Remaining, Clients),
+            {reply, {allow, Remaining}, State#{clients := NewClients, total_allowed := Allowed + 1}};
+        true ->
+            {reply, {deny, CurrentTokens}, State#{total_rejected := Rejected + 1}}
+    end;
+handle_call(refill_all, _From, #{max_tokens := Max, refill_amount := Refill, clients := Clients} = State) ->
+    RefilledClients = maps:map(fun(_Id, Tokens) ->
+        min(Tokens + Refill, Max)
+    end, Clients),
+    {reply, ok, State#{clients := RefilledClients}};
+handle_call(get_stats, _From, #{clients := Clients, total_allowed := Allowed, total_rejected := Rejected} = State) ->
+    Stats = #{
+        total_allowed => Allowed,
+        total_rejected => Rejected,
+        active_clients => maps:size(Clients)
+    },
+    {reply, Stats, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast({reset_client, ClientId}, #{max_tokens := Max, clients := Clients} = State) ->
+    NewClients = maps:put(ClientId, Max, Clients),
+    {noreply, State#{clients := NewClients}};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -630,99 +721,11 @@ code_change(_OldVsn, State, _Extra) ->
 			name:       "ch07-l08 Rate Limiter Server",
 			exerciseID: "ch07-l08",
 			files: map[string]string{
-				"src/rate_limiter_srv.erl": `-module(rate_limiter_srv).
--behaviour(gen_server).
-
--export([
-    start_link/2,
-    check_request/3,
-    refill_all/1,
-    reset_client/2,
-    get_stats/1,
-    stop/1
-]).
-
--export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
-
-start_link(MaxTokens, RefillAmount) when is_integer(MaxTokens), is_integer(RefillAmount) ->
-    gen_server:start_link(?MODULE, {MaxTokens, RefillAmount}, []).
-
-check_request(Pid, ClientId, Cost) when is_integer(Cost), Cost > 0 ->
-    gen_server:call(Pid, {check_request, ClientId, Cost}).
-
-refill_all(Pid) ->
-    gen_server:call(Pid, refill_all).
-
-reset_client(Pid, ClientId) ->
-    gen_server:cast(Pid, {reset_client, ClientId}).
-
-get_stats(Pid) ->
-    gen_server:call(Pid, get_stats).
-
-stop(Pid) ->
-    gen_server:stop(Pid).
-
-init({MaxTokens, RefillAmount}) ->
-    State = #{
-        max_tokens => MaxTokens,
-        refill_amount => RefillAmount,
-        clients => #{},
-        total_allowed => 0,
-        total_rejected => 0
-    },
-    {ok, State}.
-
-handle_call({check_request, ClientId, Cost}, _From, State = #{max_tokens := Max, clients := Clients, total_allowed := Allowed, total_rejected := Rejected}) ->
-    CurrentTokens = maps:get(ClientId, Clients, Max),
-    if
-        CurrentTokens >= Cost ->
-            Remaining = CurrentTokens - Cost,
-            NewClients = maps:put(ClientId, Remaining, Clients),
-            {reply, {allow, Remaining}, State#{clients := NewClients, total_allowed := Allowed + 1}};
-        true ->
-            {reply, {deny, CurrentTokens}, State#{total_rejected := Rejected + 1}}
-    end;
-
-handle_call(refill_all, _From, State = #{max_tokens := Max, refill_amount := Refill, clients := Clients}) ->
-    RefilledClients = maps:map(fun(_Id, Tokens) ->
-        min(Tokens + Refill, Max)
-    end, Clients),
-    {reply, ok, State#{clients := RefilledClients}};
-
-handle_call(get_stats, _From, State = #{clients := Clients, total_allowed := Allowed, total_rejected := Rejected}) ->
-    Stats = #{
-        total_allowed => Allowed,
-        total_rejected => Rejected,
-        active_clients => maps:size(Clients)
-    },
-    {reply, Stats, State};
-
-handle_call(_Req, _From, State) ->
-    {reply, {error, unknown_call}, State}.
-
-handle_cast({reset_client, ClientId}, State = #{max_tokens := Max, clients := Clients}) ->
-    NewClients = maps:put(ClientId, Max, Clients),
-    {noreply, State#{clients := NewClients}};
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-`,
+				"src/rate_limiter_srv.erl": rateLimiterSrvSolution,
 			},
+			wantScore:    100,
+			wantStages:   6,
+			visibleCount: 3,
 		},
 	}
 
@@ -2954,6 +2957,375 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		if !hydrateFailed {
 			t.Errorf("Expected async_hydration_verification to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch07-l08 ──────────────────────────────
+	t.Run("ch07-l08 Negative Missing gen_server cast AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-cast-ast-ch07-l08"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/rate_limiter_srv.erl": `-module(rate_limiter_srv).
+-behaviour(gen_server).
+
+-export([
+    start_link/2,
+    check_request/3,
+    refill_all/1,
+    reset_client/2,
+    get_stats/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(MaxTokens, RefillAmount) when is_integer(MaxTokens), is_integer(RefillAmount) ->
+    gen_server:start_link(?MODULE, {MaxTokens, RefillAmount}, []).
+
+check_request(Pid, ClientId, Cost) when is_integer(Cost), Cost > 0 ->
+    gen_server:call(Pid, {check_request, ClientId, Cost}).
+
+refill_all(Pid) ->
+    gen_server:call(Pid, refill_all).
+
+%% BUG: Uses synchronous call instead of gen_server:cast/2!
+reset_client(Pid, ClientId) ->
+    gen_server:call(Pid, {reset_client, ClientId}).
+
+get_stats(Pid) ->
+    gen_server:call(Pid, get_stats).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init({MaxTokens, RefillAmount}) ->
+    State = #{
+        max_tokens => MaxTokens,
+        refill_amount => RefillAmount,
+        clients => #{},
+        total_allowed => 0,
+        total_rejected => 0
+    },
+    {ok, State}.
+
+handle_call({check_request, ClientId, Cost}, _From, #{max_tokens := Max, clients := Clients, total_allowed := Allowed, total_rejected := Rejected} = State) ->
+    CurrentTokens = maps:get(ClientId, Clients, Max),
+    if
+        CurrentTokens >= Cost ->
+            Remaining = CurrentTokens - Cost,
+            NewClients = maps:put(ClientId, Remaining, Clients),
+            {reply, {allow, Remaining}, State#{clients := NewClients, total_allowed := Allowed + 1}};
+        true ->
+            {reply, {deny, CurrentTokens}, State#{total_rejected := Rejected + 1}}
+    end;
+handle_call(refill_all, _From, #{max_tokens := Max, refill_amount := Refill, clients := Clients} = State) ->
+    RefilledClients = maps:map(fun(_Id, Tokens) ->
+        min(Tokens + Refill, Max)
+    end, Clients),
+    {reply, ok, State#{clients := RefilledClients}};
+handle_call({reset_client, ClientId}, _From, #{max_tokens := Max, clients := Clients} = State) ->
+    NewClients = maps:put(ClientId, Max, Clients),
+    {reply, ok, State#{clients := NewClients}};
+handle_call(get_stats, _From, #{clients := Clients, total_allowed := Allowed, total_rejected := Rejected} = State) ->
+    Stats = #{
+        total_allowed => Allowed,
+        total_rejected => Rejected,
+        active_clients => maps:size(Clients)
+    },
+    {reply, Stats, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l08", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on AST check (missing gen_server:cast/2), but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_rate_limiter_spec" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_rate_limiter_spec to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l08 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-export-ch07-l08"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/rate_limiter_srv.erl": `-module(rate_limiter_srv).
+-behaviour(gen_server).
+
+%% BUG: get_stats/1 omitted from export list
+-export([
+    start_link/2,
+    check_request/3,
+    refill_all/1,
+    reset_client/2,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(MaxTokens, RefillAmount) when is_integer(MaxTokens), is_integer(RefillAmount) ->
+    gen_server:start_link(?MODULE, {MaxTokens, RefillAmount}, []).
+
+check_request(Pid, ClientId, Cost) when is_integer(Cost), Cost > 0 ->
+    gen_server:call(Pid, {check_request, ClientId, Cost}).
+
+refill_all(Pid) ->
+    gen_server:call(Pid, refill_all).
+
+reset_client(Pid, ClientId) ->
+    gen_server:cast(Pid, {reset_client, ClientId}).
+
+get_stats(Pid) ->
+    gen_server:call(Pid, get_stats).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init({MaxTokens, RefillAmount}) ->
+    State = #{
+        max_tokens => MaxTokens,
+        refill_amount => RefillAmount,
+        clients => #{},
+        total_allowed => 0,
+        total_rejected => 0
+    },
+    {ok, State}.
+
+handle_call({check_request, ClientId, Cost}, _From, #{max_tokens := Max, clients := Clients, total_allowed := Allowed, total_rejected := Rejected} = State) ->
+    CurrentTokens = maps:get(ClientId, Clients, Max),
+    if
+        CurrentTokens >= Cost ->
+            Remaining = CurrentTokens - Cost,
+            NewClients = maps:put(ClientId, Remaining, Clients),
+            {reply, {allow, Remaining}, State#{clients := NewClients, total_allowed := Allowed + 1}};
+        true ->
+            {reply, {deny, CurrentTokens}, State#{total_rejected := Rejected + 1}}
+    end;
+handle_call(refill_all, _From, #{max_tokens := Max, refill_amount := Refill, clients := Clients} = State) ->
+    RefilledClients = maps:map(fun(_Id, Tokens) ->
+        min(Tokens + Refill, Max)
+    end, Clients),
+    {reply, ok, State#{clients := RefilledClients}};
+handle_call(get_stats, _From, #{clients := Clients, total_allowed := Allowed, total_rejected := Rejected} = State) ->
+    Stats = #{
+        total_allowed => Allowed,
+        total_rejected => Rejected,
+        active_clients => maps:size(Clients)
+    },
+    {reply, Stats, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast({reset_client, ClientId}, #{max_tokens := Max, clients := Clients} = State) ->
+    NewClients = maps:put(ClientId, Max, Clients),
+    {noreply, State#{clients := NewClients}};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l08", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing get_stats/1 export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l08 Negative Uncapped Refill Exceeds MaxTokens", func(t *testing.T) {
+		sessionID := "test-neg-uncapped-ch07-l08"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/rate_limiter_srv.erl": `-module(rate_limiter_srv).
+-behaviour(gen_server).
+
+-export([
+    start_link/2,
+    check_request/3,
+    refill_all/1,
+    reset_client/2,
+    get_stats/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(MaxTokens, RefillAmount) when is_integer(MaxTokens), is_integer(RefillAmount) ->
+    gen_server:start_link(?MODULE, {MaxTokens, RefillAmount}, []).
+
+check_request(Pid, ClientId, Cost) when is_integer(Cost), Cost > 0 ->
+    gen_server:call(Pid, {check_request, ClientId, Cost}).
+
+refill_all(Pid) ->
+    gen_server:call(Pid, refill_all).
+
+reset_client(Pid, ClientId) ->
+    gen_server:cast(Pid, {reset_client, ClientId}).
+
+get_stats(Pid) ->
+    gen_server:call(Pid, get_stats).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init({MaxTokens, RefillAmount}) ->
+    State = #{
+        max_tokens => MaxTokens,
+        refill_amount => RefillAmount,
+        clients => #{},
+        total_allowed => 0,
+        total_rejected => 0
+    },
+    {ok, State}.
+
+handle_call({check_request, ClientId, Cost}, _From, #{max_tokens := Max, clients := Clients, total_allowed := Allowed, total_rejected := Rejected} = State) ->
+    CurrentTokens = maps:get(ClientId, Clients, Max),
+    if
+        CurrentTokens >= Cost ->
+            Remaining = CurrentTokens - Cost,
+            NewClients = maps:put(ClientId, Remaining, Clients),
+            {reply, {allow, Remaining}, State#{clients := NewClients, total_allowed := Allowed + 1}};
+        true ->
+            {reply, {deny, CurrentTokens}, State#{total_rejected := Rejected + 1}}
+    end;
+%% BUG: Fails to cap token replenishment at MaxTokens!
+handle_call(refill_all, _From, #{max_tokens := _Max, refill_amount := Refill, clients := Clients} = State) ->
+    RefilledClients = maps:map(fun(_Id, Tokens) ->
+        Tokens + Refill
+    end, Clients),
+    {reply, ok, State#{clients := RefilledClients}};
+handle_call(get_stats, _From, #{clients := Clients, total_allowed := Allowed, total_rejected := Rejected} = State) ->
+    Stats = #{
+        total_allowed => Allowed,
+        total_rejected => Rejected,
+        active_clients => maps:size(Clients)
+    },
+    {reply, Stats, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast({reset_client, ClientId}, #{max_tokens := Max, clients := Clients} = State) ->
+    NewClients = maps:put(ClientId, Max, Clients),
+    {noreply, State#{clients := NewClients}};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l08", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on uncapped refill, but got PASSED")
+		}
+		var refillFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "batch_refill_and_capping" && st.Status == "failed" {
+				refillFailed = true
+				break
+			}
+		}
+		if !refillFailed {
+			t.Errorf("Expected batch_refill_and_capping to fail, stages: %+v", report.Stages)
 		}
 	})
 }
