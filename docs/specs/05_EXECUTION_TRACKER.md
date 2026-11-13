@@ -4049,6 +4049,11 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 32 subtests across Chapter 7 in `63.30s`; `TEST_CHAPTER=07 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l08 | 3/3 tests passed` in `9.71s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+- [x] **242.4: Batched Production Deployment (Chapter 7 Full Certification)**:
+  - Deployed entire audited Chapter 7 to Vercel production: `npx vercel --prod --yes` (`deployment: dpl_DS2cpUJ46WpuahuZ6k2qpBX1n2vy`, `READY`).
+  - Production Alias verified: `https://web-ide-nine.vercel.app`.
+  - Verified live endpoint with `vercel curl https://web-ide-nine.vercel.app/learn/ch07-l08` returning HTTP 200 and complete rendered HTML.
+
 
 
 
