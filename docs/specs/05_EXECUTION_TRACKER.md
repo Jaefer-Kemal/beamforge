@@ -3618,6 +3618,32 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l04` and its 3 negative regression tests in `32.38s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed `ch06-l04 | 3/3 tests passed`.
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 229: Spec 04 / Spec 08 Anti-Spoiler Audit, Trapping Exits & The Exit Signal Truth Table, AST Hardening & Live Tri-Verification of Chapter 6 Lecture 5 (`ch06-l05`)
+
+- [x] **229.1: Spec 04/08 Pedagogical Anti-Spoiler Audit & Erlang/AST Hardening (`ch06-l05`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch06.ts` (`ch06-l05`, `exit_trapper.erl`) against Spec 04, 07, and 08.
+  - Positioned `## Official Erlang Docs & Function Reference` (`process_flag/2`, `exit/2`) preceding `## Parallel Worked Example`.
+  - Replaced 1-to-1 transliteration clone (`queue_consumer_sentinel.erl`) with domain-distinct Resilient Database Connection Pool Guardian `## Parallel Worked Example` (`db_connection_guardian.erl`) exporting `start_guardian/1`, `fetch_active_connection/1`, `simulate_network_drop/2`, `probe_signal_fate/2`, and `guardian_loop/3`. Accompanied by a 4-step architectural deep dive:
+    1. *State Initialization & Exit Trapping Flag*
+    2. *Handling Clean vs Abnormal Connection Drops*
+    3. *The Untrappable Kill Invariant in Connection Pools*
+    4. *Probing Signal Fate via Process Monitors*
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across all 5 exported functions (`start_supervised/1`, `get_worker_pid/1`, `kill_worker/2`, `supervisor_loop/2`, `simulate_exit_truth_table/2`) with zero Erlang syntax leaks or code backticks in prompt bullets.
+  - Aligned 10/10 plain-English `%% @doc` contracts across all 4 code representations (`files[0].content`, `starterCode`, `solutionFiles['src/exit_trapper.erl']`, `solutionCode`).
+  - Scaffolding starter pack with `_` prefixed parameters (`_WorkerFun`, `_SupPid`, `_Reason`, `_TrappingBool`, `_SignalReason`, `_CurrentWorker`) compiling cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0).
+  - Configured `astRules` (`requiredCalls: ['erlang:process_flag/2', 'erlang:spawn_link/1']`).
+- [x] **229.2: Go Orchestrator Runner & AST Verification Hardening (`ch06-l05`)**:
+  - Upgraded `buildChapterRunScript` in `services/orchestrator/internal/bridge/erl_runner_chapters.go` to evaluate all 3 visible tests (`T1_Res`: supervisor reports active worker, `T2_Res`: automatic respawn on abnormal crash, `T3_Res`: untrappable kill signal simulation) and return `AllResults = [T1_Res, T2_Res, T3_Res]`. Removed obsolete legacy `my_gen_server` fallback.
+  - Fixed atom bug in `S4_TruthTable` in `buildChapterVerificationScript` (`{survived, {'EXIT', S1, normal}}` with `true = is_pid(S1)` instead of matching atom literal `sender`).
+  - Hardened `buildChapterVerificationScript` with 5 stages (`compile_and_export_audit`, `ast_trap_exit_invariants`, `self_healing_respawn`, `untrappable_kill_resilience`, `exit_signal_truth_table`) with decoupled catch variables (`Err1`–`Err4`).
+  - Expanded `services/orchestrator/internal/bridge/ch06_verification_test.go` with positive verification (100% score, 5/5 stages passed, 3/3 visible tests verified) and 3 negative regression subtests (`ch06-l05_Negative_Missing_trap_exit_AST_Violation`, `ch06-l05_Negative_Missing_Export`, `ch06-l05_Negative_Non-Trapping_Supervisor_Dies_on_Crash`).
+- [x] **229.3: Mandatory Live Tri-Verification & Full Test Suite Certification (`ch06-l05`)**:
+  - **Parallel Worked Example (`db_connection_guardian.erl`)**: Extracted directly from `ch06.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with all guardian recovery and signal probe permutations passing cleanly.
+  - **Starter Pack (`exit_trapper.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0), loads cleanly on OTP, and safely fails tests without compiler or syntax crashes.
+  - **Solution Pack (`exit_trapper.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/exit_trapper.erl'] === solutionCode`), compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `required_remote_calls => [{erlang, process_flag, 2}, {erlang, spawn_link, 1}]`, and passed 100% of visible test cases (3/3 passed) plus all 6 permutations of the exit signal truth table.
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l05` and its 3 negative regression tests in `46.64s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed `ch06-l05 | 3/3 tests passed`.
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
 
 
 

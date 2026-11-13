@@ -256,6 +256,98 @@ worker2_loop() ->
     end.
 `
 
+	exitTrapperSolution := `-module(exit_trapper).
+-export([
+    start_supervised/1,
+    get_worker_pid/1,
+    kill_worker/2,
+    simulate_exit_truth_table/2,
+    supervisor_loop/2
+]).
+
+%% @doc Spawns a supervisor process that traps exit signals and links to an initial worker.
+start_supervised(WorkerFun) when is_function(WorkerFun, 0) ->
+    InitRef = make_ref(),
+    Parent = self(),
+    SupPid = spawn(fun() ->
+        process_flag(trap_exit, true),
+        WorkerPid = spawn_link(WorkerFun),
+        Parent ! {InitRef, WorkerPid},
+        supervisor_loop(WorkerFun, WorkerPid)
+    end),
+    receive
+        {InitRef, InitialWorker} -> {ok, SupPid, InitialWorker}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Queries the supervisor for the process identifier of the currently active worker.
+get_worker_pid(SupPid) when is_pid(SupPid) ->
+    Ref = make_ref(),
+    SupPid ! {get_worker, self(), Ref},
+    receive
+        {Ref, WorkerPid} -> {ok, WorkerPid}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Requests the supervisor to asynchronously terminate its active worker with an exit signal.
+kill_worker(SupPid, Reason) when is_pid(SupPid) ->
+    SupPid ! {kill_worker, Reason},
+    ok.
+
+%% @doc Tail-recursive supervisor loop managing worker lifecycle, exit trapping, and restarts.
+supervisor_loop(WorkerFun, CurrentWorker) ->
+    receive
+        {get_worker, From, Ref} ->
+            From ! {Ref, CurrentWorker},
+            supervisor_loop(WorkerFun, CurrentWorker);
+
+        {kill_worker, Reason} ->
+            exit(CurrentWorker, Reason),
+            supervisor_loop(WorkerFun, CurrentWorker);
+
+        {'EXIT', CurrentWorker, normal} ->
+            ok;
+
+        {'EXIT', CurrentWorker, _AbnormalReason} ->
+            NewWorker = spawn_link(WorkerFun),
+            supervisor_loop(WorkerFun, NewWorker);
+
+        stop ->
+            exit(CurrentWorker, shutdown),
+            ok
+    end.
+
+%% @doc Simulates exit signal dispatch semantics across process trapping flags and signal reasons.
+simulate_exit_truth_table(TrappingBool, SignalReason) when is_boolean(TrappingBool) ->
+    Parent = self(),
+    Ref = make_ref(),
+    ProbePid = spawn(fun() ->
+        process_flag(trap_exit, TrappingBool),
+        Parent ! {ready, Ref},
+        receive
+            Msg -> Parent ! {survived, Ref, Msg}
+        after 50 ->
+            Parent ! {survived, Ref, none}
+        end
+    end),
+    receive {ready, Ref} -> ok end,
+    MonitorRef = erlang:monitor(process, ProbePid),
+    exit(ProbePid, SignalReason),
+    receive
+        {'DOWN', MonitorRef, process, ProbePid, DownReason} ->
+            erlang:demonitor(MonitorRef, [flush]),
+            {died, DownReason};
+        {survived, Ref, Msg} ->
+            erlang:demonitor(MonitorRef, [flush]),
+            {survived, Msg}
+    after 200 ->
+        erlang:demonitor(MonitorRef, [flush]),
+        {error, timeout}
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -294,6 +386,14 @@ worker2_loop() ->
 			name:         "ch06-l04 Bidirectional Process Links",
 			exerciseID:   "ch06-l04",
 			files:        map[string]string{"src/linked_pipeline.erl": linkedPipelineSolution},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 3,
+		},
+		{
+			name:         "ch06-l05 Trapping Exits & Truth Table",
+			exerciseID:   "ch06-l05",
+			files:        map[string]string{"src/exit_trapper.erl": exitTrapperSolution},
 			wantScore:    100,
 			wantStages:   5,
 			visibleCount: 3,
@@ -1505,6 +1605,308 @@ worker2_loop() ->
 		}
 		if !cascadeFailed {
 			t.Errorf("Expected cascading_exit_propagation to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch06-l05 ──────────────────────────────
+	t.Run("ch06-l05 Negative Missing trap_exit AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch06-l05"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/exit_trapper.erl": `-module(exit_trapper).
+-export([
+    start_supervised/1,
+    get_worker_pid/1,
+    kill_worker/2,
+    simulate_exit_truth_table/2,
+    supervisor_loop/2
+]).
+
+%% BUG: Missing process_flag(trap_exit, true) call!
+start_supervised(WorkerFun) when is_function(WorkerFun, 0) ->
+    InitRef = make_ref(),
+    Parent = self(),
+    SupPid = spawn(fun() ->
+        WorkerPid = spawn_link(WorkerFun),
+        Parent ! {InitRef, WorkerPid},
+        supervisor_loop(WorkerFun, WorkerPid)
+    end),
+    receive
+        {InitRef, InitialWorker} -> {ok, SupPid, InitialWorker}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+get_worker_pid(SupPid) ->
+    Ref = make_ref(),
+    SupPid ! {get_worker, self(), Ref},
+    receive {Ref, WorkerPid} -> {ok, WorkerPid} after 1000 -> {error, timeout} end.
+
+kill_worker(SupPid, Reason) ->
+    SupPid ! {kill_worker, Reason},
+    ok.
+
+supervisor_loop(WorkerFun, CurrentWorker) ->
+    receive
+        {get_worker, From, Ref} ->
+            From ! {Ref, CurrentWorker},
+            supervisor_loop(WorkerFun, CurrentWorker);
+        {kill_worker, Reason} ->
+            exit(CurrentWorker, Reason),
+            supervisor_loop(WorkerFun, CurrentWorker);
+        {'EXIT', CurrentWorker, normal} ->
+            ok;
+        {'EXIT', CurrentWorker, _AbnormalReason} ->
+            NewWorker = spawn_link(WorkerFun),
+            supervisor_loop(WorkerFun, NewWorker);
+        stop ->
+            exit(CurrentWorker, shutdown),
+            ok
+    end.
+
+simulate_exit_truth_table(TrappingBool, SignalReason) ->
+    Parent = self(),
+    Ref = make_ref(),
+    ProbePid = spawn(fun() ->
+        Parent ! {ready, Ref},
+        receive Msg -> Parent ! {survived, Ref, Msg} after 50 -> Parent ! {survived, Ref, none} end
+    end),
+    receive {ready, Ref} -> ok end,
+    MonitorRef = erlang:monitor(process, ProbePid),
+    exit(ProbePid, SignalReason),
+    receive
+        {'DOWN', MonitorRef, process, ProbePid, DownReason} ->
+            erlang:demonitor(MonitorRef, [flush]),
+            {died, DownReason};
+        {survived, Ref, Msg} ->
+            erlang:demonitor(MonitorRef, [flush]),
+            {survived, Msg}
+    after 200 ->
+        erlang:demonitor(MonitorRef, [flush]),
+        {error, timeout}
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l05", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing trap_exit AST rule, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_trap_exit_invariants" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_trap_exit_invariants to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l05 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-exp-ch06-l05"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/exit_trapper.erl": `-module(exit_trapper).
+%% BUG: simulate_exit_truth_table/2 intentionally omitted from export!
+-export([
+    start_supervised/1,
+    get_worker_pid/1,
+    kill_worker/2,
+    supervisor_loop/2
+]).
+
+start_supervised(WorkerFun) when is_function(WorkerFun, 0) ->
+    InitRef = make_ref(),
+    Parent = self(),
+    SupPid = spawn(fun() ->
+        process_flag(trap_exit, true),
+        WorkerPid = spawn_link(WorkerFun),
+        Parent ! {InitRef, WorkerPid},
+        supervisor_loop(WorkerFun, WorkerPid)
+    end),
+    receive
+        {InitRef, InitialWorker} -> {ok, SupPid, InitialWorker}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+get_worker_pid(SupPid) ->
+    Ref = make_ref(),
+    SupPid ! {get_worker, self(), Ref},
+    receive {Ref, WorkerPid} -> {ok, WorkerPid} after 1000 -> {error, timeout} end.
+
+kill_worker(SupPid, Reason) ->
+    SupPid ! {kill_worker, Reason},
+    ok.
+
+supervisor_loop(WorkerFun, CurrentWorker) ->
+    receive
+        {get_worker, From, Ref} ->
+            From ! {Ref, CurrentWorker},
+            supervisor_loop(WorkerFun, CurrentWorker);
+        {kill_worker, Reason} ->
+            exit(CurrentWorker, Reason),
+            supervisor_loop(WorkerFun, CurrentWorker);
+        {'EXIT', CurrentWorker, normal} ->
+            ok;
+        {'EXIT', CurrentWorker, _AbnormalReason} ->
+            NewWorker = spawn_link(WorkerFun),
+            supervisor_loop(WorkerFun, NewWorker);
+        stop ->
+            exit(CurrentWorker, shutdown),
+            ok
+    end.
+
+simulate_exit_truth_table(_TrappingBool, _SignalReason) ->
+    ok.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l05", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l05 Negative Non-Trapping Supervisor Dies on Crash", func(t *testing.T) {
+		sessionID := "test-neg-nontrap-ch06-l05"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/exit_trapper.erl": `-module(exit_trapper).
+-export([
+    start_supervised/1,
+    get_worker_pid/1,
+    kill_worker/2,
+    simulate_exit_truth_table/2,
+    supervisor_loop/2
+]).
+
+%% BUG: Supervisor explicitly sets trap_exit to false! It will die when worker crashes.
+start_supervised(WorkerFun) when is_function(WorkerFun, 0) ->
+    InitRef = make_ref(),
+    Parent = self(),
+    SupPid = spawn(fun() ->
+        process_flag(trap_exit, false),
+        WorkerPid = spawn_link(WorkerFun),
+        Parent ! {InitRef, WorkerPid},
+        supervisor_loop(WorkerFun, WorkerPid)
+    end),
+    receive
+        {InitRef, InitialWorker} -> {ok, SupPid, InitialWorker}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+get_worker_pid(SupPid) ->
+    Ref = make_ref(),
+    SupPid ! {get_worker, self(), Ref},
+    receive {Ref, WorkerPid} -> {ok, WorkerPid} after 1000 -> {error, timeout} end.
+
+kill_worker(SupPid, Reason) ->
+    SupPid ! {kill_worker, Reason},
+    ok.
+
+supervisor_loop(WorkerFun, CurrentWorker) ->
+    receive
+        {get_worker, From, Ref} ->
+            From ! {Ref, CurrentWorker},
+            supervisor_loop(WorkerFun, CurrentWorker);
+        {kill_worker, Reason} ->
+            exit(CurrentWorker, Reason),
+            supervisor_loop(WorkerFun, CurrentWorker);
+        {'EXIT', CurrentWorker, normal} ->
+            ok;
+        {'EXIT', CurrentWorker, _AbnormalReason} ->
+            NewWorker = spawn_link(WorkerFun),
+            supervisor_loop(WorkerFun, NewWorker);
+        stop ->
+            exit(CurrentWorker, shutdown),
+            ok
+    end.
+
+simulate_exit_truth_table(TrappingBool, SignalReason) ->
+    Parent = self(),
+    Ref = make_ref(),
+    ProbePid = spawn(fun() ->
+        process_flag(trap_exit, TrappingBool),
+        Parent ! {ready, Ref},
+        receive Msg -> Parent ! {survived, Ref, Msg} after 50 -> Parent ! {survived, Ref, none} end
+    end),
+    receive {ready, Ref} -> ok end,
+    MonitorRef = erlang:monitor(process, ProbePid),
+    exit(ProbePid, SignalReason),
+    receive
+        {'DOWN', MonitorRef, process, ProbePid, DownReason} ->
+            erlang:demonitor(MonitorRef, [flush]),
+            {died, DownReason};
+        {survived, Ref, Msg} ->
+            erlang:demonitor(MonitorRef, [flush]),
+            {survived, Msg}
+    after 200 ->
+        erlang:demonitor(MonitorRef, [flush]),
+        {error, timeout}
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l05", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on non-trapping supervisor, but got PASSED")
+		}
+		var respawnFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "self_healing_respawn" && st.Status == "failed" {
+				respawnFailed = true
+				break
+			}
+		}
+		if !respawnFailed {
+			t.Errorf("Expected self_healing_respawn to fail, stages: %+v", report.Stages)
 		}
 	})
 }

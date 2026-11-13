@@ -2612,46 +2612,64 @@ init:stop().
 		return `
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
-    case code:ensure_loaded(exit_trapper) of
-        {module, exit_trapper} ->
-            WorkerFun = fun() -> receive stop -> ok end end,
-            {ok, Sup, W1} = exit_trapper:start_supervised(WorkerFun),
-            exit_trapper:kill_worker(Sup, badarith),
-            timer:sleep(50),
-            {ok, W2} = exit_trapper:get_worker_pid(Sup),
-            SupAlive = is_process_alive(Sup),
-            W1Dead = not is_process_alive(W1),
-            W2Alive = is_process_alive(W2),
-            Different = (W1 =/= W2),
-            Sup ! stop,
-            Passed = SupAlive andalso W1Dead andalso W2Alive andalso Different,
-            #{call_str => <<"exit_trapper:kill_worker(Sup, badarith)">>,
-              expected => <<"Supervisor survives, W1 dead, W2 alive">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("SupAlive:~p, W1Dead:~p, W2Alive:~p, NewPid:~p", [SupAlive, W1Dead, W2Alive, Different]))),
-              passed => Passed,
-              time_ms => erlang:system_time(millisecond) - T1_Start};
-        _ ->
-            P = spawn(fun() -> receive {'$gen_call', {From, MRef}, crash_now} -> exit(fatal_database_error) end end),
-            TCallStart = erlang:system_time(millisecond),
-            Res = my_gen_server:call(P, crash_now, 5000),
-            Duration = erlang:system_time(millisecond) - TCallStart,
-            case Res of
-                {error, {server_crashed, fatal_database_error}} ->
-                    #{call_str => <<"my_gen_server:call(P, crash_now, 5000)">>,
-                      expected => <<"{error, {server_crashed, fatal_database_error}}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p (unblocked in ~p ms)", [Res, Duration]))),
-                      passed => Duration < 200,
-                      time_ms => erlang:system_time(millisecond) - T1_Start};
-                Other1 ->
-                    #{call_str => <<"my_gen_server:call(...)">>, expected => <<"{error, {server_crashed, ...}}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
-            end
-    end
+    {ok, Sup1, W1} = exit_trapper:start_supervised(fun() -> receive stop -> ok end end),
+    {ok, Reported} = exit_trapper:get_worker_pid(Sup1),
+    Sup1 ! stop,
+    Match = (W1 =:= Reported),
+    #{call_str => <<"begin {ok, Sup, W1} = exit_trapper:start_supervised(fun() -> receive stop -> ok end end), {ok, Reported} = exit_trapper:get_worker_pid(Sup), Sup ! stop, W1 =:= Reported end">>,
+      expected => <<"true">>,
+      actual => list_to_binary(io_lib:format("~p", [Match])),
+      passed => Match,
+      time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"exit_trapper supervisor test">>, expected => <<"Supervisor survives and respawns">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+    #{call_str => <<"exit_trapper:start_supervised/1 and get_worker_pid/1">>,
+      expected => <<"true">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])),
+      passed => false,
+      time_ms => erlang:system_time(millisecond) - T1_Start}
 end,
-AllResults = [T1_Res],
+
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    {ok, Sup2, W1_2} = exit_trapper:start_supervised(fun() -> receive stop -> ok end end),
+    exit_trapper:kill_worker(Sup2, badarith),
+    timer:sleep(50),
+    {ok, W2_2} = exit_trapper:get_worker_pid(Sup2),
+    Sup2 ! stop,
+    W1Dead = not is_process_alive(W1_2),
+    W2Alive = is_process_alive(W2_2),
+    Different = (W1_2 =/= W2_2),
+    RespawnOutcome = {W1Dead, W2Alive, Different},
+    #{call_str => <<"begin {ok, Sup, W1} = exit_trapper:start_supervised(fun() -> receive stop -> ok end end), exit_trapper:kill_worker(Sup, badarith), timer:sleep(50), {ok, W2} = exit_trapper:get_worker_pid(Sup), Sup ! stop, {is_process_alive(W1), is_process_alive(W2), W1 =/= W2} end">>,
+      expected => <<"{false, true, true}">>,
+      actual => list_to_binary(io_lib:format("~p", [{is_process_alive(W1_2), W2Alive, Different}])),
+      passed => (RespawnOutcome =:= {true, true, true}),
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"exit_trapper:kill_worker(Sup, badarith) abnormal crash respawn">>,
+      expected => <<"{false, true, true}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])),
+      passed => false,
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+end,
+
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    TruthKill = exit_trapper:simulate_exit_truth_table(true, kill),
+    #{call_str => <<"exit_trapper:simulate_exit_truth_table(true, kill)">>,
+      expected => <<"{died, killed}">>,
+      actual => list_to_binary(io_lib:format("~p", [TruthKill])),
+      passed => (TruthKill =:= {died, killed}),
+      time_ms => erlang:system_time(millisecond) - T3_Start}
+catch C3:R3 ->
+    #{call_str => <<"exit_trapper:simulate_exit_truth_table(true, kill)">>,
+      expected => <<"{died, killed}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])),
+      passed => false,
+      time_ms => erlang:system_time(millisecond) - T3_Start}
+end,
+
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -8186,12 +8204,7 @@ CompileStage = case code:ensure_loaded(exit_trapper) of
             Missing -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
         end;
     {error, E1} ->
-        case code:ensure_loaded(my_gen_server) of
-            {module, my_gen_server} ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit (Legacy)">>, status => <<"passed">>, time_ms => 12, details => <<"my_gen_server.erl loaded cleanly.">>};
-            _ ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
-        end
+        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
 S1_Ast = try
     SrcPath = filename:join(["%s", "src", "exit_trapper.erl"]),
@@ -8209,7 +8222,7 @@ S1_Ast = try
                     #{id => <<"ast_trap_exit_invariants">>, title => <<"AST Analysis: process_flag(trap_exit, true) and spawn_link/1">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
             end;
         false ->
-            #{id => <<"ast_trap_exit_invariants">>, title => <<"AST Analysis">>, status => <<"passed">>, time_ms => 15, details => <<"Legacy skipped.">>}
+            #{id => <<"ast_trap_exit_invariants">>, title => <<"AST Analysis: process_flag(trap_exit, true) and spawn_link/1">>, status => <<"failed">>, time_ms => 15, details => <<"exit_trapper.erl not found.">>}
     end
 catch C1:R1 ->
     #{id => <<"ast_trap_exit_invariants">>, title => <<"AST Analysis: process_flag(trap_exit, true) and spawn_link/1">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
@@ -8238,7 +8251,7 @@ S2_Supervised = try
                     #{id => <<"self_healing_respawn">>, title => <<"Exit Trapping & Automatic Self-Healing Respawn">>, status => <<"failed">>, time_ms => 22, details => list_to_binary(io_lib:format("Respawn check failed: Sup:~p W1Dead:~p W2Alive:~p Diff:~p", [SupAlive, W1Dead, W2Alive, Different]))}
             end;
         false ->
-            #{id => <<"self_healing_respawn">>, title => <<"Self Healing Respawn">>, status => <<"passed">>, time_ms => 22, details => <<"Legacy skipped.">>}
+            #{id => <<"self_healing_respawn">>, title => <<"Exit Trapping & Automatic Self-Healing Respawn">>, status => <<"failed">>, time_ms => 22, details => <<"exit_trapper module not loaded.">>}
     end
 catch C2:R2 ->
     #{id => <<"self_healing_respawn">>, title => <<"Exit Trapping & Automatic Self-Healing Respawn">>, status => <<"failed">>, time_ms => 22, details => list_to_binary(io_lib:format("Supervisor test error: ~p:~p", [C2, R2]))}
@@ -8262,7 +8275,7 @@ S3_KillSignal = try
                     #{id => <<"untrappable_kill_resilience">>, title => <<"Untrappable kill Handling ('killed' Trapped by Supervisor)">>, status => <<"failed">>, time_ms => 22, details => <<"Supervisor failed to recover from kill signal.">>}
             end;
         false ->
-            #{id => <<"untrappable_kill_resilience">>, title => <<"Kill Resilience">>, status => <<"passed">>, time_ms => 22, details => <<"Legacy skipped.">>}
+            #{id => <<"untrappable_kill_resilience">>, title => <<"Untrappable kill Handling ('killed' Trapped by Supervisor)">>, status => <<"failed">>, time_ms => 22, details => <<"exit_trapper module not loaded.">>}
     end
 catch C3:R3 ->
     #{id => <<"untrappable_kill_resilience">>, title => <<"Untrappable kill Handling ('killed' Trapped by Supervisor)">>, status => <<"failed">>, time_ms => 22, details => list_to_binary(io_lib:format("Kill test error: ~p:~p", [C3, R3]))}
@@ -8273,12 +8286,14 @@ S4_TruthTable = try
             {survived, none} = exit_trapper:simulate_exit_truth_table(false, normal),
             {died, badarith} = exit_trapper:simulate_exit_truth_table(false, badarith),
             {died, killed} = exit_trapper:simulate_exit_truth_table(false, kill),
-            {survived, {'EXIT', sender, normal}} = exit_trapper:simulate_exit_truth_table(true, normal),
-            {survived, {'EXIT', sender, badarith}} = exit_trapper:simulate_exit_truth_table(true, badarith),
+            {survived, {'EXIT', S1, normal}} = exit_trapper:simulate_exit_truth_table(true, normal),
+            true = is_pid(S1),
+            {survived, {'EXIT', S2, badarith}} = exit_trapper:simulate_exit_truth_table(true, badarith),
+            true = is_pid(S2),
             {died, killed} = exit_trapper:simulate_exit_truth_table(true, kill),
             #{id => <<"exit_signal_truth_table">>, title => <<"Exit Signal Truth Table Invariants">>, status => <<"passed">>, time_ms => 15, details => <<"All 6 permutations of the Exit Signal Truth Table verified with exact semantics.">>};
         false ->
-            #{id => <<"exit_signal_truth_table">>, title => <<"Truth Table">>, status => <<"passed">>, time_ms => 15, details => <<"Legacy skipped.">>}
+            #{id => <<"exit_signal_truth_table">>, title => <<"Exit Signal Truth Table Invariants">>, status => <<"failed">>, time_ms => 15, details => <<"exit_trapper module not loaded.">>}
     end
 catch C4:R4 ->
     #{id => <<"exit_signal_truth_table">>, title => <<"Exit Signal Truth Table Invariants">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Truth table error: ~p:~p", [C4, R4]))}

@@ -1827,135 +1827,167 @@ When you send \`exit(Pid, kill)\`:
 2. The BEAM runtime then notifies the target's linked peers with reason **\`killed\`** (not \`kill\`).
 3. This is a brilliant design: if the reason remained \`kill\`, the supervisor watching the runaway worker would be killed too! By rewriting it to \`killed\`, the supervisor can trap the exit message and cleanly restart a replacement worker.
 
+## Official Erlang Docs & Function Reference
+
+| Function | Module | Description | Official Manual |
+| :--- | :--- | :--- | :--- |
+| \`process_flag(trap_exit, true)\` | \`erlang\` | Alters calling process control block to convert incoming exit signals into mailbox messages \`{'EXIT', Sender, Reason}\`. | [Erlang Docs: process_flag/2](https://www.erlang.org/doc/apps/erts/erlang.html#process_flag/2) |
+| \`exit(Pid, Reason)\` | \`erlang\` | Emits asynchronous exit signal with specified reason term. Reason \`kill\` is unconditional and untrappable. | [Erlang Docs: exit/2](https://www.erlang.org/doc/apps/erts/erlang.html#exit/2) |
+
 ## Parallel Worked Example
 
-The following module implements a fault-tolerant sentinel process monitoring a queue consumer:
+The following module implements a resilient connection pool guardian managing a database worker socket:
 
 \`\`\`erlang
--module(queue_consumer_sentinel).
+-module(db_connection_guardian).
 -export([
-    start_sentinel/1,
-    query_active_consumer/1,
-    abort_consumer/2,
-    sentinel_loop/3
+    start_guardian/1,
+    fetch_active_connection/1,
+    simulate_network_drop/2,
+    probe_signal_fate/2,
+    guardian_loop/3
 ]).
 
-%% @doc Spawns a resilient sentinel process that traps exits and monitors an active queue consumer.
-start_sentinel(ConsumerInitFun) ->
+%% @doc Spawns a resilient connection pool guardian that traps exits and links to an active connection worker.
+start_guardian(WorkerInitFun) when is_function(WorkerInitFun, 0) ->
     InitRef = make_ref(),
     Caller = self(),
-    SentinelPid = spawn(fun() ->
+    GuardianPid = spawn(fun() ->
         process_flag(trap_exit, true),
-        ConsumerPid = spawn_link(ConsumerInitFun),
-        Caller ! {InitRef, ConsumerPid},
-        sentinel_loop(ConsumerInitFun, ConsumerPid, 0)
+        ConnPid = spawn_link(WorkerInitFun),
+        Caller ! {InitRef, ConnPid},
+        guardian_loop(WorkerInitFun, ConnPid, 0)
     end),
     receive
-        {InitRef, InitialConsumer} ->
-            {ok, SentinelPid, InitialConsumer}
+        {InitRef, InitialConn} ->
+            {ok, GuardianPid, InitialConn}
     after 1000 ->
         {error, timeout}
     end.
 
-%% @doc Queries the sentinel for the PID of the current consumer and total restart count.
-query_active_consumer(SentinelPid) ->
+%% @doc Queries the guardian for telemetry including the active connection PID and cumulative reconnect count.
+fetch_active_connection(GuardianPid) when is_pid(GuardianPid) ->
     Ref = make_ref(),
-    SentinelPid ! {query_status, self(), Ref},
+    GuardianPid ! {get_telemetry, self(), Ref},
     receive
-        {Ref, Status} -> {ok, Status}
+        {Ref, Telemetry} -> {ok, Telemetry}
     after 1000 ->
         {error, timeout}
     end.
 
-%% @doc Forcibly crashes the consumer with a simulated fault to verify sentinel recovery.
-abort_consumer(SentinelPid, FaultReason) ->
-    SentinelPid ! {terminate_consumer, FaultReason},
+%% @doc Dispatches a simulated network drop signal to the active connection worker.
+simulate_network_drop(GuardianPid, DropReason) when is_pid(GuardianPid) ->
+    GuardianPid ! {trigger_drop, DropReason},
     ok.
 
-%% @doc Core sentinel loop maintaining consumer state and restart telemetry.
-sentinel_loop(ConsumerInitFun, CurrentConsumer, RestartCount) ->
+%% @doc Core tail-recursive guardian loop maintaining connection state and handling exit signals.
+guardian_loop(WorkerInitFun, CurrentConn, ReconnectCount) ->
     receive
-        {query_status, From, Ref} ->
-            From ! {Ref, #{consumer => CurrentConsumer, restarts => RestartCount}},
-            sentinel_loop(ConsumerInitFun, CurrentConsumer, RestartCount);
+        {get_telemetry, From, Ref} ->
+            From ! {Ref, #{connection => CurrentConn, reconnects => ReconnectCount}},
+            guardian_loop(WorkerInitFun, CurrentConn, ReconnectCount);
 
-        {terminate_consumer, FaultReason} ->
-            exit(CurrentConsumer, FaultReason),
-            sentinel_loop(ConsumerInitFun, CurrentConsumer, RestartCount);
+        {trigger_drop, DropReason} ->
+            exit(CurrentConn, DropReason),
+            guardian_loop(WorkerInitFun, CurrentConn, ReconnectCount);
 
-        {'EXIT', CurrentConsumer, normal} ->
-            %% Consumer completed gracefully; sentinel retires without reviving
+        {'EXIT', CurrentConn, normal} ->
             ok;
 
-        {'EXIT', CurrentConsumer, _AbnormalReason} ->
-            %% Trapped abnormal termination: resurrect replacement consumer
-            NewConsumer = spawn_link(ConsumerInitFun),
-            sentinel_loop(ConsumerInitFun, NewConsumer, RestartCount + 1);
+        {'EXIT', CurrentConn, _AbnormalReason} ->
+            NewConn = spawn_link(WorkerInitFun),
+            guardian_loop(WorkerInitFun, NewConn, ReconnectCount + 1);
 
         shutdown ->
-            exit(CurrentConsumer, shutdown),
+            exit(CurrentConn, shutdown),
             ok
     end.
+
+%% @doc Probes how the BEAM runtime dispatches an exit signal to a target under varying trapping flags.
+probe_signal_fate(TrappingBool, ExitReason) when is_boolean(TrappingBool) ->
+    Parent = self(),
+    Ref = make_ref(),
+    ProbePid = spawn(fun() ->
+        process_flag(trap_exit, TrappingBool),
+        Parent ! {ready, Ref},
+        receive
+            IncomingSignal -> Parent ! {survived, Ref, IncomingSignal}
+        after 50 ->
+            Parent ! {survived, Ref, none}
+        end
+    end),
+    receive {ready, Ref} -> ok end,
+    MonitorRef = erlang:monitor(process, ProbePid),
+    exit(ProbePid, ExitReason),
+    receive
+        {'DOWN', MonitorRef, process, ProbePid, DownReason} ->
+            erlang:demonitor(MonitorRef, [flush]),
+            {died, DownReason};
+        {survived, Ref, Msg} ->
+            erlang:demonitor(MonitorRef, [flush]),
+            {survived, Msg}
+    after 200 ->
+        erlang:demonitor(MonitorRef, [flush]),
+        {error, timeout}
+    end.
 \`\`\`
+
+### 1. State Initialization & Exit Trapping Flag
+Inside \`start_guardian/1\`, the guardian executes \`process_flag(trap_exit, true)\` before establishing any links. This guarantees that when \`spawn_link(WorkerInitFun)\` executes, any subsequent crash in the connection process will arrive as a mailbox tuple rather than killing the guardian.
+
+### 2. Handling Clean vs Abnormal Connection Drops
+The guardian loop distinguishes between two failure modes:
+- **Normal completion**: \`{'EXIT', CurrentConn, normal}\` indicates intentional retirement or planned rollover. The guardian exits cleanly without spawning unwanted duplicates.
+- **Abnormal failure**: \`{'EXIT', CurrentConn, _AbnormalReason}\` catches unexpected socket disconnections or protocol crashes. The guardian increments \`ReconnectCount\`, links a fresh connection worker, and remains in service.
+
+### 3. The Untrappable Kill Invariant in Connection Pools
+When a connection freezes or deadlocks on TCP socket I/O, emitting an exit signal with reason \`kill\` terminates the stuck worker process unconditionally, regardless of its internal trapping configuration. Because the BEAM runtime rewrites the outgoing signal reason to \`killed\`, the guardian traps the resulting notification safely and revives the pool.
+
+### 4. Probing Signal Fate via Process Monitors
+In \`probe_signal_fate/2\`, an ephemeral probe process tests how varying flag combinations interact with signal delivery. By combining an active monitor with exit signal dispatch, the probe captures whether the process perished with a down reason or trapped the signal into its mailbox.
 
 ## Assignment Specification
 
 Implement \`src/exit_trapper.erl\` exporting \`start_supervised/1\`, \`get_worker_pid/1\`, \`kill_worker/2\`, \`simulate_exit_truth_table/2\`, and \`supervisor_loop/2\`:
 
 ### 1. \`start_supervised/1\`
-- **Input**: \`WorkerFun\` (a 0-arity fun defining the initial worker logic).
-- **Behavior**:
-  - Spawns a supervisor process running \`supervisor_loop/2\` configured with \`process_flag(trap_exit, true)\`.
-  - Atomically spawns and links the initial worker via \`spawn_link(WorkerFun)\`.
-  - Synchronously returns \`{ok, SupervisorPid, InitialWorkerPid}\` within 1,000ms (or \`{error, timeout}\`).
+- **Input**: Worker initialization 0-arity function.
+- **Behavior**: Spawns an exit-trapping supervisor process running the server loop and links to an initial worker. Establishes bidirectional failure containment and returns the supervisor and initial worker process identifiers within 1,000 milliseconds, or returns an error timeout tuple.
 - **Examples**:
-  - \`exit_trapper:start_supervised(fun() -> receive stop -> ok end end)\` returns \`{ok, SupPid, W1Pid}\`.
+  - \`exit_trapper:start_supervised(WorkerFun)\` returns \`{ok, SupervisorPid, WorkerPid}\`.
 
 ### 2. \`get_worker_pid/1\`
-- **Input**: \`SupervisorPid\` (pid of supervisor).
-- **Behavior**:
-  - Synchronously queries the supervisor for the PID of its currently active worker.
-  - Returns \`{ok, CurrentWorkerPid}\` within 1,000ms (or \`{error, timeout}\`).
+- **Input**: Process identifier of an active supervisor.
+- **Behavior**: Performs a synchronous round-trip request to the supervisor requesting the process identifier of the currently active worker. Returns the worker identifier within 1,000 milliseconds, or returns an error timeout tuple.
 - **Examples**:
-  - \`exit_trapper:get_worker_pid(SupPid)\` returns \`{ok, W1Pid}\`.
+  - \`exit_trapper:get_worker_pid(SupervisorPid)\` returns \`{ok, WorkerPid}\`.
 
 ### 3. \`kill_worker/2\`
-- **Input**: \`SupervisorPid\` (pid of supervisor), \`Reason\` (arbitrary exit reason term, such as \`badarith\` or \`kill\`).
-- **Behavior**:
-  - Dispatches an asynchronous instruction to the supervisor to terminate its active worker with \`exit(CurrentWorker, Reason)\`.
-  - Returns \`ok\`.
+- **Input**: Process identifier of the supervisor, and an arbitrary exit reason term.
+- **Behavior**: Asynchronously signals the supervisor to terminate its active worker with the designated reason term. Returns ok immediately without blocking the caller.
 - **Examples**:
-  - \`exit_trapper:kill_worker(SupPid, badarith)\` returns \`ok\`.
+  - \`exit_trapper:kill_worker(SupervisorPid, badarith)\` returns \`ok\`.
 
 ### 4. \`supervisor_loop/2\`
-- **Input**: \`WorkerFun\` (0-arity function), \`CurrentWorker\` (pid of the active worker).
-- **Behavior**:
-  - Tail-recursive loop managing worker lifecycle and trapping exit signals:
-    - Responds to worker PID queries with the active worker PID.
-    - Handles worker termination requests by executing \`exit(CurrentWorker, Reason)\`.
-    - Handles clean exits: when receiving \`{'EXIT', CurrentWorker, normal}\`, terminates cleanly with \`ok\`.
-    - Handles abnormal crashes: when receiving \`{'EXIT', CurrentWorker, _AbnormalReason}\`, traps the exit signal, respawns a replacement worker via \`spawn_link(WorkerFun)\`, and continues looping with the new worker PID.
-    - Handles \`stop\`: terminates the active worker with \`exit(CurrentWorker, shutdown)\` and exits cleanly with \`ok\`.
+- **Input**: Worker initialization 0-arity function, and the process identifier of the currently active worker.
+- **Behavior**: Executes a tail-recursive message processing loop. When handling worker PID queries, replies to the caller with the active worker PID and continues looping. When handling worker termination requests, signals the active worker to exit with the requested reason. When receiving a trapped normal exit signal, terminates cleanly without respawning. When receiving a trapped abnormal exit signal, traps the signal, spawns and links a replacement worker via the initialization fun, and continues looping with the new worker PID. When receiving a clean stop signal, signals the active worker to shut down and terminates cleanly with ok.
+- **Examples**:
+  - \`exit_trapper:supervisor_loop(WorkerFun, CurrentWorker)\` executes the tail-recursive supervisor server loop.
 
 ### 5. \`simulate_exit_truth_table/2\`
-- **Input**: \`TrappingBool\` (\`boolean()\` flag indicating whether to trap exits), \`SignalReason\` (term indicating the exit signal reason, e.g. \`normal\`, \`badarith\`, or \`kill\`).
-- **Behavior**:
-  - Evaluates the BEAM exit signal truth table in an isolated probe process:
-    - Spawns a probe configured with \`process_flag(trap_exit, TrappingBool)\`.
-    - Once the probe is ready, monitors it via \`erlang:monitor(process, ProbePid)\` and sends \`exit(ProbePid, SignalReason)\`.
-    - Awaits the outcome: if the probe dies, returns \`{died, DownReason}\`. If the probe survives and traps the signal into its mailbox, returns \`{survived, MailboxMsg}\` (or \`{survived, none}\` if the exit signal was ignored).
-    - Always demonitors with \`erlang:demonitor(MonitorRef, [flush])\`.
+- **Input**: Boolean flag specifying whether the probe traps exit signals, and a term specifying the exit signal reason to dispatch.
+- **Behavior**: Evaluates BEAM exit signal dispatch invariants in an isolated probe process. Spawns a probe process configured with the specified exit trapping boolean flag. Once the probe confirms readiness, monitors the probe and emits an exit signal with the specified reason term. Awaits the termination outcome: if the probe dies, returns a died tuple containing the termination reason. If the probe survives and traps the signal into its mailbox, returns a survived tuple containing the trapped message (or none if normal exit was silently ignored). In all cases, flushes and cleans up the process monitor before returning.
 - **Examples**:
-  - \`simulate_exit_truth_table(false, normal)\` -> \`{survived, none}\`
-  - \`simulate_exit_truth_table(false, badarith)\` -> \`{died, badarith}\`
-  - \`simulate_exit_truth_table(false, kill)\` -> \`{died, killed}\`
-  - \`simulate_exit_truth_table(true, normal)\` -> \`{survived, {'EXIT', Sender, normal}}\`
-  - \`simulate_exit_truth_table(true, badarith)\` -> \`{survived, {'EXIT', Sender, badarith}}\`
-  - \`simulate_exit_truth_table(true, kill)\` -> \`{died, killed}\`
+  - \`exit_trapper:simulate_exit_truth_table(false, normal)\` returns \`{survived, none}\`.
+  - \`exit_trapper:simulate_exit_truth_table(false, badarith)\` returns \`{died, badarith}\`.
+  - \`exit_trapper:simulate_exit_truth_table(false, kill)\` returns \`{died, killed}\`.
+  - \`exit_trapper:simulate_exit_truth_table(true, normal)\` returns \`{survived, {'EXIT', SenderPid, normal}}\`.
+  - \`exit_trapper:simulate_exit_truth_table(true, badarith)\` returns \`{survived, {'EXIT', SenderPid, badarith}}\`.
+  - \`exit_trapper:simulate_exit_truth_table(true, kill)\` returns \`{died, killed}\`.
 
 ## Rules & Verification Constraints
 
-- Must export all specified functions.
+- Must export \`start_supervised/1\`, \`get_worker_pid/1\`, \`kill_worker/2\`, \`simulate_exit_truth_table/2\`, and \`supervisor_loop/2\`.
 - Enforced AST rules: \`requiredCalls: ["erlang:process_flag/2", "erlang:spawn_link/1"]\`.
 `,
     mentalModelCheck: {
@@ -2040,24 +2072,24 @@ exit(WorkerPid, kill).`,
     supervisor_loop/2
 ]).
 
-%% @doc Spawns a supervisor that traps exits and links to an initial worker.
-start_supervised(WorkerFun) ->
+%% @doc Spawns a supervisor process that traps exit signals and links to an initial worker.
+start_supervised(_WorkerFun) ->
     ok.
 
-%% @doc Queries the supervisor for the PID of the active worker.
-get_worker_pid(SupPid) ->
+%% @doc Queries the supervisor for the process identifier of the currently active worker.
+get_worker_pid(_SupPid) ->
     ok.
 
-%% @doc Requests the supervisor to terminate its active worker with Reason.
-kill_worker(SupPid, Reason) ->
+%% @doc Requests the supervisor to asynchronously terminate its active worker with an exit signal.
+kill_worker(_SupPid, _Reason) ->
     ok.
 
-%% @doc Simulates exit signal behavior across trapping flags and signal reasons.
-simulate_exit_truth_table(TrappingBool, SignalReason) ->
+%% @doc Simulates exit signal dispatch semantics across process trapping flags and signal reasons.
+simulate_exit_truth_table(_TrappingBool, _SignalReason) ->
     ok.
 
-%% @doc Supervisor loop managing worker lifecycle, exit trapping, and restarts.
-supervisor_loop(WorkerFun, CurrentWorker) ->
+%% @doc Tail-recursive supervisor loop managing worker lifecycle, exit trapping, and restarts.
+supervisor_loop(_WorkerFun, _CurrentWorker) ->
     ok.
 `,
     solutionCode: `-module(exit_trapper).
@@ -2069,6 +2101,7 @@ supervisor_loop(WorkerFun, CurrentWorker) ->
     supervisor_loop/2
 ]).
 
+%% @doc Spawns a supervisor process that traps exit signals and links to an initial worker.
 start_supervised(WorkerFun) when is_function(WorkerFun, 0) ->
     InitRef = make_ref(),
     Parent = self(),
@@ -2084,7 +2117,8 @@ start_supervised(WorkerFun) when is_function(WorkerFun, 0) ->
         {error, timeout}
     end.
 
-get_worker_pid(SupPid) ->
+%% @doc Queries the supervisor for the process identifier of the currently active worker.
+get_worker_pid(SupPid) when is_pid(SupPid) ->
     Ref = make_ref(),
     SupPid ! {get_worker, self(), Ref},
     receive
@@ -2093,10 +2127,12 @@ get_worker_pid(SupPid) ->
         {error, timeout}
     end.
 
-kill_worker(SupPid, Reason) ->
+%% @doc Requests the supervisor to asynchronously terminate its active worker with an exit signal.
+kill_worker(SupPid, Reason) when is_pid(SupPid) ->
     SupPid ! {kill_worker, Reason},
     ok.
 
+%% @doc Tail-recursive supervisor loop managing worker lifecycle, exit trapping, and restarts.
 supervisor_loop(WorkerFun, CurrentWorker) ->
     receive
         {get_worker, From, Ref} ->
@@ -2119,7 +2155,8 @@ supervisor_loop(WorkerFun, CurrentWorker) ->
             ok
     end.
 
-simulate_exit_truth_table(TrappingBool, SignalReason) ->
+%% @doc Simulates exit signal dispatch semantics across process trapping flags and signal reasons.
+simulate_exit_truth_table(TrappingBool, SignalReason) when is_boolean(TrappingBool) ->
     Parent = self(),
     Ref = make_ref(),
     ProbePid = spawn(fun() ->
@@ -2159,24 +2196,24 @@ simulate_exit_truth_table(TrappingBool, SignalReason) ->
     supervisor_loop/2
 ]).
 
-%% @doc Spawns a supervisor that traps exits and links to an initial worker.
-start_supervised(WorkerFun) ->
+%% @doc Spawns a supervisor process that traps exit signals and links to an initial worker.
+start_supervised(_WorkerFun) ->
     ok.
 
-%% @doc Queries the supervisor for the PID of the active worker.
-get_worker_pid(SupPid) ->
+%% @doc Queries the supervisor for the process identifier of the currently active worker.
+get_worker_pid(_SupPid) ->
     ok.
 
-%% @doc Requests the supervisor to terminate its active worker with Reason.
-kill_worker(SupPid, Reason) ->
+%% @doc Requests the supervisor to asynchronously terminate its active worker with an exit signal.
+kill_worker(_SupPid, _Reason) ->
     ok.
 
-%% @doc Simulates exit signal behavior across trapping flags and signal reasons.
-simulate_exit_truth_table(TrappingBool, SignalReason) ->
+%% @doc Simulates exit signal dispatch semantics across process trapping flags and signal reasons.
+simulate_exit_truth_table(_TrappingBool, _SignalReason) ->
     ok.
 
-%% @doc Supervisor loop managing worker lifecycle, exit trapping, and restarts.
-supervisor_loop(WorkerFun, CurrentWorker) ->
+%% @doc Tail-recursive supervisor loop managing worker lifecycle, exit trapping, and restarts.
+supervisor_loop(_WorkerFun, _CurrentWorker) ->
     ok.
 `,
       },
@@ -2191,6 +2228,7 @@ supervisor_loop(WorkerFun, CurrentWorker) ->
     supervisor_loop/2
 ]).
 
+%% @doc Spawns a supervisor process that traps exit signals and links to an initial worker.
 start_supervised(WorkerFun) when is_function(WorkerFun, 0) ->
     InitRef = make_ref(),
     Parent = self(),
@@ -2206,7 +2244,8 @@ start_supervised(WorkerFun) when is_function(WorkerFun, 0) ->
         {error, timeout}
     end.
 
-get_worker_pid(SupPid) ->
+%% @doc Queries the supervisor for the process identifier of the currently active worker.
+get_worker_pid(SupPid) when is_pid(SupPid) ->
     Ref = make_ref(),
     SupPid ! {get_worker, self(), Ref},
     receive
@@ -2215,10 +2254,12 @@ get_worker_pid(SupPid) ->
         {error, timeout}
     end.
 
-kill_worker(SupPid, Reason) ->
+%% @doc Requests the supervisor to asynchronously terminate its active worker with an exit signal.
+kill_worker(SupPid, Reason) when is_pid(SupPid) ->
     SupPid ! {kill_worker, Reason},
     ok.
 
+%% @doc Tail-recursive supervisor loop managing worker lifecycle, exit trapping, and restarts.
 supervisor_loop(WorkerFun, CurrentWorker) ->
     receive
         {get_worker, From, Ref} ->
@@ -2241,7 +2282,8 @@ supervisor_loop(WorkerFun, CurrentWorker) ->
             ok
     end.
 
-simulate_exit_truth_table(TrappingBool, SignalReason) ->
+%% @doc Simulates exit signal dispatch semantics across process trapping flags and signal reasons.
+simulate_exit_truth_table(TrappingBool, SignalReason) when is_boolean(TrappingBool) ->
     Parent = self(),
     Ref = make_ref(),
     ProbePid = spawn(fun() ->
