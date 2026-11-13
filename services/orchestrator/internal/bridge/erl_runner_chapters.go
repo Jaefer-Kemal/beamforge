@@ -3272,39 +3272,31 @@ T1_Res = try
       actual => list_to_binary(lists:flatten(io_lib:format("~p", [Flags]))),
       passed => (Flags =:= Expected), time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"strategy_planner:build_sup_flags(...)">>, expected => <<"flags map">>,
+    #{call_str => <<"strategy_planner:build_sup_flags(rest_for_one, 3, 5)">>, expected => <<"flags map">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try
     S1 = strategy_planner:select_strategy_for_topology(dependent_pipeline),
-    S2 = strategy_planner:select_strategy_for_topology(independent_workers),
+    S2 = strategy_planner:select_strategy_for_topology(unknown),
     Pair = {S1, S2},
-    #{call_str => <<"strategy_planner:select_strategy_for_topology(...)">>,
-      expected => <<"{rest_for_one, one_for_one}">>,
+    #{call_str => <<"{strategy_planner:select_strategy_for_topology(dependent_pipeline), strategy_planner:select_strategy_for_topology(unknown)}">>,
+      expected => <<"{rest_for_one, {error, unknown_topology}}">>,
       actual => list_to_binary(lists:flatten(io_lib:format("~p", [Pair]))),
-      passed => (Pair =:= {rest_for_one, one_for_one}), time_ms => erlang:system_time(millisecond) - T2_Start}
+      passed => (Pair =:= {rest_for_one, {error, unknown_topology}}), time_ms => erlang:system_time(millisecond) - T2_Start}
 catch C2:R2 ->
-    #{call_str => <<"strategy_planner:select_strategy_for_topology(...)">>, expected => <<"{rest_for_one, one_for_one}">>,
+    #{call_str => <<"{strategy_planner:select_strategy_for_topology(dependent_pipeline), strategy_planner:select_strategy_for_topology(unknown)}">>, expected => <<"{rest_for_one, {error, unknown_topology}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
 T3_Res = try
-    Budget = strategy_planner:calculate_restart_budget(10, 5),
-    case Budget of
-        #{intensity := 10, period := 5, max_rate_per_sec := Rate, tolerated_downtime := ok} when is_float(Rate) ->
-            #{call_str => <<"strategy_planner:calculate_restart_budget(10, 5)">>,
-              expected => <<"#{intensity => 10, max_rate_per_sec => 2.0, period => 5, tolerated_downtime => ok}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Budget]))),
-              passed => (abs(Rate - 2.0) < 0.001), time_ms => erlang:system_time(millisecond) - T3_Start};
-        Other3 ->
-            #{call_str => <<"strategy_planner:calculate_restart_budget(10, 5)">>,
-              expected => <<"budget map">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))),
-              passed => false, time_ms => erlang:system_time(millisecond) - T3_Start}
-    end
+    Rate = maps:get(max_rate_per_sec, strategy_planner:calculate_restart_budget(10, 2)),
+    #{call_str => <<"maps:get(max_rate_per_sec, strategy_planner:calculate_restart_budget(10, 2))">>,
+      expected => <<"5.0">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Rate]))),
+      passed => (is_float(Rate) andalso abs(Rate - 5.0) < 0.001), time_ms => erlang:system_time(millisecond) - T3_Start}
 catch C3:R3 ->
-    #{call_str => <<"strategy_planner:calculate_restart_budget(...)">>, expected => <<"budget map">>,
+    #{call_str => <<"maps:get(max_rate_per_sec, strategy_planner:calculate_restart_budget(10, 2))">>, expected => <<"5.0">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res],
@@ -9196,14 +9188,22 @@ S2_SupFlags = try
     F2 = strategy_planner:build_sup_flags(rest_for_one, 5, 10),
     F3 = strategy_planner:build_sup_flags(one_for_all, 1, 1),
     F4 = strategy_planner:build_sup_flags(simple_one_for_one, 10, 20),
-    case {F1, F2, F3, F4} of
+    InvalidRejection = try
+        strategy_planner:build_sup_flags(invalid_strategy_atom, -1, 0),
+        false
+    catch
+        error:function_clause -> true;
+        _:_ -> false
+    end,
+    case {F1, F2, F3, F4, InvalidRejection} of
         {#{strategy := one_for_one, intensity := 3, period := 5},
          #{strategy := rest_for_one, intensity := 5, period := 10},
          #{strategy := one_for_all, intensity := 1, period := 1},
-         #{strategy := simple_one_for_one, intensity := 10, period := 20}} ->
-            #{id => <<"sup_flags_validation">>, title => <<"Supervisor Flags Construction (4 Strategies)">>, status => <<"passed">>, time_ms => 15, details => <<"Correctly constructed standardized sup_flags maps across all 4 OTP restart strategies.">>};
-        Other2 ->
-            #{id => <<"sup_flags_validation">>, title => <<"Supervisor Flags Construction (4 Strategies)">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Flags mismatch: ~p", [Other2]))}
+         #{strategy := simple_one_for_one, intensity := 10, period := 20},
+         true} ->
+            #{id => <<"sup_flags_validation">>, title => <<"Supervisor Flags Construction (4 Strategies)">>, status => <<"passed">>, time_ms => 15, details => <<"Correctly constructed standardized sup_flags maps across all 4 OTP restart strategies and enforced guard validation on invalid bounds.">>};
+        _ ->
+            #{id => <<"sup_flags_validation">>, title => <<"Supervisor Flags Construction (4 Strategies)">>, status => <<"failed">>, time_ms => 15, details => <<"Failed valid flag construction or failed to reject invalid strategy/bounds via function clause guards.">>}
     end
 catch C2:R2 ->
     #{id => <<"sup_flags_validation">>, title => <<"Supervisor Flags Construction (4 Strategies)">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Flags error: ~p:~p", [C2, R2]))}

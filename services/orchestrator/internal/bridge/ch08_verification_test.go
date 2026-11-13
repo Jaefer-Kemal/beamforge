@@ -9,16 +9,7 @@ import (
 func TestChapter8Verification(t *testing.T) {
 	runner, poolMgr := setupTestRunner(t)
 
-	tests := []struct {
-		name       string
-		exerciseID string
-		files      map[string]string
-	}{
-		{
-			name:       "ch08-l01 Strategy Planner",
-			exerciseID: "ch08-l01",
-			files: map[string]string{
-				"src/strategy_planner.erl": `-module(strategy_planner).
+	const strategyPlannerSolution = `-module(strategy_planner).
 
 -export([
     build_sup_flags/3,
@@ -26,6 +17,7 @@ func TestChapter8Verification(t *testing.T) {
     calculate_restart_budget/2
 ]).
 
+%% @doc Build a supervisor flags map from a valid restart strategy atom, non-negative crash intensity, and positive period; rejects invalid bounds.
 build_sup_flags(Strategy, Intensity, Period)
   when (Strategy =:= one_for_one orelse Strategy =:= rest_for_one orelse
         Strategy =:= one_for_all orelse Strategy =:= simple_one_for_one),
@@ -37,12 +29,14 @@ build_sup_flags(Strategy, Intensity, Period)
         period => Period
     }.
 
+%% @doc Map a recognized architecture topology atom to its OTP restart strategy, or return an error tuple for unknown inputs.
 select_strategy_for_topology(independent_workers) -> one_for_one;
 select_strategy_for_topology(dependent_pipeline)  -> rest_for_one;
 select_strategy_for_topology(coupled_cluster)     -> one_for_all;
 select_strategy_for_topology(dynamic_pool)        -> simple_one_for_one;
 select_strategy_for_topology(_)                   -> {error, unknown_topology}.
 
+%% @doc Compute per-second crash rate telemetry from a crash limit and positive time window in seconds; rejects invalid numeric bounds.
 calculate_restart_budget(MaxCrashes, WindowSeconds)
   when is_integer(MaxCrashes), is_integer(WindowSeconds), MaxCrashes >= 0, WindowSeconds > 0 ->
     Rate = MaxCrashes / WindowSeconds,
@@ -52,8 +46,25 @@ calculate_restart_budget(MaxCrashes, WindowSeconds)
         max_rate_per_sec => Rate,
         tolerated_downtime => ok
     }.
-`,
+`
+
+	tests := []struct {
+		name         string
+		exerciseID   string
+		files        map[string]string
+		wantScore    int
+		wantStages   int
+		visibleCount int
+	}{
+		{
+			name:         "ch08-l01 Strategy Planner",
+			exerciseID:   "ch08-l01",
+			files: map[string]string{
+				"src/strategy_planner.erl": strategyPlannerSolution,
 			},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 3,
 		},
 		{
 			name:       "ch08-l02 Child Spec Factory",
@@ -539,11 +550,156 @@ code_change(_OldVsn, State, _Extra) ->
 					t.Logf("  Stage %s (%s): status=%s, details=%s", st.ID, st.Title, st.Status, st.Details)
 				}
 			} else {
+				if tc.wantScore > 0 && report.Score != tc.wantScore {
+					t.Errorf("[%s] Score mismatch: got %d, want %d", tc.exerciseID, report.Score, tc.wantScore)
+				}
+				if tc.wantStages > 0 && len(report.Stages) != tc.wantStages {
+					t.Errorf("[%s] Stages count mismatch: got %d, want %d", tc.exerciseID, len(report.Stages), tc.wantStages)
+				}
 				t.Logf("[%s] VERIFIED 100%% PASSED (score=%d, %d stages)", tc.exerciseID, report.Score, len(report.Stages))
 				for _, st := range report.Stages {
 					t.Logf("  + Stage %s: %s", st.ID, st.Status)
 				}
 			}
+
+			if tc.visibleCount > 0 {
+				runRes, errRun := runner.RunCode(ctx, session, tc.exerciseID, tc.files, nil)
+				if errRun != nil {
+					t.Fatalf("[%s] RunCode failed: %v", tc.exerciseID, errRun)
+				}
+				if !runRes.CompileOk {
+					t.Fatalf("[%s] RunCode compilation failed:\n%s", tc.exerciseID, runRes.Stdout)
+				}
+				if len(runRes.VisibleTests) != tc.visibleCount {
+					t.Errorf("[%s] Visible test count mismatch: got %d, want %d", tc.exerciseID, len(runRes.VisibleTests), tc.visibleCount)
+				}
+				for idx, vt := range runRes.VisibleTests {
+					if !vt.Passed {
+						t.Errorf("[%s] Visible test #%d failed:\n  Call:     %s\n  Expected: %s\n  Actual:   %s",
+							tc.exerciseID, idx+1, vt.CallStr, vt.Expected, vt.Actual)
+					}
+				}
+			}
 		})
 	}
+
+	// ── Negative Regression Subtests for ch08-l01 ──────────────────────────────
+	t.Run("ch08-l01 Negative Missing Guards AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch08-l01"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/strategy_planner.erl": `-module(strategy_planner).
+-export([build_sup_flags/3, select_strategy_for_topology/1, calculate_restart_budget/2]).
+
+%% BUG: Missing when guards
+build_sup_flags(Strategy, Intensity, Period) ->
+    #{strategy => Strategy, intensity => Intensity, period => Period}.
+
+select_strategy_for_topology(independent_workers) -> one_for_one;
+select_strategy_for_topology(dependent_pipeline)  -> rest_for_one;
+select_strategy_for_topology(coupled_cluster)     -> one_for_all;
+select_strategy_for_topology(dynamic_pool)        -> simple_one_for_one;
+select_strategy_for_topology(_)                   -> {error, unknown_topology}.
+
+calculate_restart_budget(MaxCrashes, WindowSeconds) ->
+    #{intensity => MaxCrashes, period => WindowSeconds, max_rate_per_sec => MaxCrashes / WindowSeconds, tolerated_downtime => ok}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch08-l01", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure for missing guards AST violation, but got PASSED")
+		}
+	})
+
+	t.Run("ch08-l01 Negative Missing Export Failure", func(t *testing.T) {
+		sessionID := "test-neg-export-ch08-l01"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/strategy_planner.erl": `-module(strategy_planner).
+-export([build_sup_flags/3, select_strategy_for_topology/1]).
+
+build_sup_flags(Strategy, Intensity, Period)
+  when (Strategy =:= one_for_one orelse Strategy =:= rest_for_one orelse
+        Strategy =:= one_for_all orelse Strategy =:= simple_one_for_one),
+       is_integer(Intensity), Intensity >= 0,
+       is_integer(Period), Period > 0 ->
+    #{strategy => Strategy, intensity => Intensity, period => Period}.
+
+select_strategy_for_topology(independent_workers) -> one_for_one;
+select_strategy_for_topology(dependent_pipeline)  -> rest_for_one;
+select_strategy_for_topology(coupled_cluster)     -> one_for_all;
+select_strategy_for_topology(dynamic_pool)        -> simple_one_for_one;
+select_strategy_for_topology(_)                   -> {error, unknown_topology}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch08-l01", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure for missing export calculate_restart_budget/2, but got PASSED")
+		}
+	})
+
+	t.Run("ch08-l01 Negative Invalid Bounds Guard Rejection", func(t *testing.T) {
+		sessionID := "test-neg-bounds-ch08-l01"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/strategy_planner.erl": `-module(strategy_planner).
+-export([build_sup_flags/3, select_strategy_for_topology/1, calculate_restart_budget/2]).
+
+%% BUG: Allows invalid strategy and negative period
+build_sup_flags(Strategy, Intensity, Period)
+  when is_atom(Strategy), is_integer(Intensity), is_integer(Period) ->
+    #{strategy => Strategy, intensity => Intensity, period => Period}.
+
+select_strategy_for_topology(independent_workers) -> one_for_one;
+select_strategy_for_topology(dependent_pipeline)  -> rest_for_one;
+select_strategy_for_topology(coupled_cluster)     -> one_for_all;
+select_strategy_for_topology(dynamic_pool)        -> simple_one_for_one;
+select_strategy_for_topology(_)                   -> {error, unknown_topology}.
+
+calculate_restart_budget(MaxCrashes, WindowSeconds)
+  when is_integer(MaxCrashes), is_integer(WindowSeconds), MaxCrashes >= 0, WindowSeconds > 0 ->
+    #{intensity => MaxCrashes, period => WindowSeconds, max_rate_per_sec => MaxCrashes / WindowSeconds, tolerated_downtime => ok}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch08-l01", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure when build_sup_flags accepts invalid strategy / negative bounds, but got PASSED")
+		}
+	})
 }

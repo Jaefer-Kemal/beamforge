@@ -4054,6 +4054,24 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Production Alias verified: `https://web-ide-nine.vercel.app`.
   - Verified live endpoint with `vercel curl https://web-ide-nine.vercel.app/learn/ch07-l08` returning HTTP 200 and complete rendered HTML.
 
+## Phase 243: Chapter 8 Lecture 1 Pedagogical & Harness Audit (`ch08-l01`)
+- [x] **243.1: Spec 08 Pre-Flight Audit & Historical Analysis**:
+  - Confirmed previous Phase 146 (`c201dc5`) & Phase 147 (`3a5670d`) interventions that initially de-spoiled `ch08-l01`, replaced the clone example with `ingestion_sup.erl`, and codified 10/10 `@doc` contracts.
+  - Identified and closed 6 modern gap vectors relative to post-Phase 240 standards:
+    1. Upgraded PWE explanatory text with a structured `## Architectural Deep Dive: 4 Core Engine Invariants` (supervisor behaviour, compound guards with `orelse` + `,`, symbolic fallback matching, and floating-point division `/` for telemetry).
+    2. Underscore-prefixed unused parameter stubs in `starterCode` and `files[0].content` (`_Strategy`, `_Intensity`, etc.) ensuring `erlc.exe -Wall -Werror` passes with 0 warnings.
+    3. Expanded `otpDocCards` from 1 card (`supervisor:init/1`) to 4 complete cards (`supervisor:init/1`, `supervisor:start_link/2`, `supervisor:which_children/1`, and `maps:get/2`).
+    4. Standardized `visibleTestCases` IDs to `tc-ch08-01-1`, `tc-ch08-01-2`, and `tc-ch08-01-3`.
+    5. Aligned `buildRunScript` in `erl_runner_chapters.go` with `ch08.ts` visible test cases for 100% Run-mode parity.
+    6. Modernized `ch08_verification_test.go` with `wantScore: 100`, `wantStages: 5`, `visibleCount: 3`, and added 3 negative regression subtests (missing guards AST violation, missing export, and invalid bounds rejection).
+- [x] **243.2: Multi-Compiler & Live Tri-Verification**:
+  - Live PWE (`ingestion_sup.erl`): Compiles with `erlc.exe -Wall -Werror` (0 warnings/errors) and executes live on OTP cleanly.
+  - Starter Pack (`starterCode` & `files[0].content`): Compiles with `erlc.exe -Wall -Werror` (0 warnings/errors) and returns `ok.` safely.
+  - Solution Pack (`solutionCode` & `solutionFiles`): Compiles with `erlc.exe -Wall -Werror` (0 warnings/errors), satisfies `astRules: { requiredConstructs: ['guards'] }`, and passes all 3 visible tests.
+  - Go Verifier: `TestChapter8Verification` passes all 7 chapter exercises and 3 negative regression subtests (`14.30s`).
+  - Dynamic Curriculum Tests: `TEST_CHAPTER=08 go test -v -run TestDynamicVisibleTestsCurriculum ./internal/bridge` passes 100% (7/7 lessons, `9.10s`).
+  - Frontend Build: `npx tsc --noEmit` and `npm run build` pass with 0 errors across all 8 static and dynamic routes.
+
 
 
 

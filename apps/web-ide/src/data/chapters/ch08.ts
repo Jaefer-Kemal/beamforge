@@ -117,9 +117,12 @@ init({_Sink, _PoolSize}) ->
     {ok, {SupFlags, []}}.
 \`\`\`
 
-Key Erlang mechanics illustrated above:
-- **Compound \`orelse\` Guards**: Parenthesizing multiple \`=:=\` alternatives (as shown in \`start_link/2\`) lets Erlang validate an enum atom cleanly alongside comma-separated numeric checks (\`,\` acts as guard conjunction).
-- **Floating-Point Division (\`/\`)**: Unlike \`div\`, Erlang's \`/\` operator always evaluates to a \`float()\` even when operands divide evenly (e.g., \`10 / 2\` produces \`5.0\`).
+### Architectural Deep Dive: 4 Core Engine Invariants
+
+1. **Supervisor Behaviour Contract & Start Link**: \`start_link/2\` declares the supervision entry point and registers the process under \`?MODULE\` via \`{local, ?MODULE}\`. Notice that the arguments passed to \`supervisor:start_link/3\` are forwarded directly into \`init/1\` as \`{Sink, PoolSize}\`.
+2. **Compound Guard Conjunction (\`orelse\` + \`,\`)**: Parenthesizing multiple \`=:=\` alternatives within \`(Sink =:= stdout orelse Sink =:= disk orelse Sink =:= s3)\` allows Erlang to evaluate the disjunction safely, while subsequent comma-separated clauses (\`is_integer(PoolSize), PoolSize > 0\`) enforce integer bounds. If any check fails, the BEAM rejects execution with a \`function_clause\` exception before allocating memory.
+3. **Symbolic Fallback Pattern Matching**: \`is_valid_sink/1\` evaluates known sink atoms sequentially and terminates with the universal wildcard \`_\` fallback. This pattern allows OTP modules to validate domain descriptors predictably without crashing callers.
+4. **Rate Telemetry & Floating-Point Division (\`/\`)**: Unlike the integer truncation operator \`div\`, Erlang's \`/\` operator always produces a \`float()\` even when operands divide evenly (e.g., \`100 / 10\` evaluates to \`10.0\`). This is essential for accurate crash rate budgets and throughput telemetry.
 
 ## Assignment Specification
 
@@ -204,6 +207,45 @@ Implement \`src/strategy_planner.erl\` with the following exports:
         complexityNote: 'O(1) initialization. Executed synchronously during supervisor:start_link.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/supervisor.html#Module:init/1',
       },
+      {
+        functionName: 'start_link',
+        module: 'supervisor',
+        signature: 'supervisor:start_link(Module, Args) -> {ok, Pid} | ignore | {error, Reason}',
+        typesSpec: [
+          'Module = module()',
+          'Args = term()',
+          'Pid = pid()'
+        ],
+        description: 'Creates and links a supervisor process, synchronously calling its init/1 callback to mount its child specification pipeline.',
+        complexityNote: 'Synchronous boot. Traps exits immediately and links to the parent process.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/supervisor.html#start_link/2',
+      },
+      {
+        functionName: 'which_children',
+        module: 'supervisor',
+        signature: 'supervisor:which_children(SupRef) -> [{Id, Child, Type, Modules}]',
+        typesSpec: [
+          'SupRef = pid() | atom()',
+          'Child = pid() | undefined | restarting',
+          'Type = worker | supervisor'
+        ],
+        description: 'Returns newly allocated list of all child specifications and live worker PIDs under management.',
+        complexityNote: 'O(N) where N is the number of child specifications.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/supervisor.html#which_children/1',
+      },
+      {
+        functionName: 'get',
+        module: 'maps',
+        signature: 'maps:get(Key, Map) -> Value',
+        typesSpec: [
+          'Key = term()',
+          'Map = map()',
+          'Value = term()'
+        ],
+        description: 'Extracts the value associated with Key from Map, raising a badkey error if Key does not exist.',
+        complexityNote: 'O(log N) where N is the number of keys in the map.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/maps.html#get/2',
+      },
     ],
     starterCode: `-module(strategy_planner).
 
@@ -214,15 +256,15 @@ Implement \`src/strategy_planner.erl\` with the following exports:
 ]).
 
 %% @doc Build a supervisor flags map from a valid restart strategy atom, non-negative crash intensity, and positive period; rejects invalid bounds.
-build_sup_flags(Strategy, Intensity, Period) ->
+build_sup_flags(_Strategy, _Intensity, _Period) ->
     ok.
 
 %% @doc Map a recognized architecture topology atom to its OTP restart strategy, or return an error tuple for unknown inputs.
-select_strategy_for_topology(Topology) ->
+select_strategy_for_topology(_Topology) ->
     ok.
 
 %% @doc Compute per-second crash rate telemetry from a crash limit and positive time window in seconds; rejects invalid numeric bounds.
-calculate_restart_budget(MaxCrashes, WindowSeconds) ->
+calculate_restart_budget(_MaxCrashes, _WindowSeconds) ->
     ok.
 `,
     solutionCode: `-module(strategy_planner).
@@ -276,15 +318,15 @@ calculate_restart_budget(MaxCrashes, WindowSeconds)
 ]).
 
 %% @doc Build a supervisor flags map from a valid restart strategy atom, non-negative crash intensity, and positive period; rejects invalid bounds.
-build_sup_flags(Strategy, Intensity, Period) ->
+build_sup_flags(_Strategy, _Intensity, _Period) ->
     ok.
 
 %% @doc Map a recognized architecture topology atom to its OTP restart strategy, or return an error tuple for unknown inputs.
-select_strategy_for_topology(Topology) ->
+select_strategy_for_topology(_Topology) ->
     ok.
 
 %% @doc Compute per-second crash rate telemetry from a crash limit and positive time window in seconds; rejects invalid numeric bounds.
-calculate_restart_budget(MaxCrashes, WindowSeconds) ->
+calculate_restart_budget(_MaxCrashes, _WindowSeconds) ->
     ok.
 `,
       },
@@ -335,21 +377,21 @@ calculate_restart_budget(MaxCrashes, WindowSeconds)
     },
     visibleTestCases: [
       {
-        id: 'tc1',
+        id: 'tc-ch08-01-1',
         title: 'Build Valid Sup Flags Map',
         explanation: 'Validates strategy atom and returns standardized #{strategy, intensity, period} map.',
         erlangCall: 'strategy_planner:build_sup_flags(rest_for_one, 3, 5)',
         expectedOutput: '#{intensity => 3, period => 5, strategy => rest_for_one}',
       },
       {
-        id: 'tc2',
+        id: 'tc-ch08-01-2',
         title: 'Select Strategy for Topology',
         explanation: 'Maps dependent_pipeline to rest_for_one and unknown to error tuple.',
         erlangCall: '{strategy_planner:select_strategy_for_topology(dependent_pipeline), strategy_planner:select_strategy_for_topology(unknown)}',
         expectedOutput: '{rest_for_one, {error, unknown_topology}}',
       },
       {
-        id: 'tc3',
+        id: 'tc-ch08-01-3',
         title: 'Calculate Restart Budget',
         explanation: 'Computes max_rate_per_sec as a float from MaxCrashes and WindowSeconds.',
         erlangCall: 'maps:get(max_rate_per_sec, strategy_planner:calculate_restart_budget(10, 2))',
