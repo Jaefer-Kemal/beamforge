@@ -2692,7 +2692,18 @@ The beauty of \`state_timeout\` is that **it automatically cancels itself** if t
 > [!warning] Production OTP Trap: State Timeout Cancellation Invariants
 > Remember that \`{state_timeout, Ms, Event}\` is tied strictly to the state name. If your state machine executes an internal transition from \`open\` to \`open\` (e.g. \`{next_state, open, NewData}\`), the state timeout is **reset**! If you want to keep the existing running timer while updating state data, you must return \`{keep_state, NewData}\` instead of \`{next_state, CurrentState, NewData}\`.
 
-## Parallel Worked Example: The Session Probe State Machine
+## Official Erlang Docs & Function Reference
+
+Before examining the parallel session probe state machine, review the key \`gen_statem\` primitives and state action contracts:
+
+- **\`gen_statem:start_link/3,4\`** — Spawns and links a new \`gen_statem\` process, synchronously calling \`Mod:init/1\` before returning.
+- **\`gen_statem:call/2,3\`** — Sends a synchronous request to \`ServerRef\` and blocks caller execution until a reply arrives (default timeout: 5,000ms).
+- **\`gen_statem:stop/1,3\`** — Synchronously requests clean termination of the \`gen_statem\` process with exit reason \`normal\`.
+- **\`callback_mode/0\`** — Declares the callback dispatch mode. Returning \`state_functions\` specifies that each state in the state machine is implemented as a dedicated arity-3 function: \`StateName(EventType, EventContent, Data)\`.
+- **State Transition Tuples** — State functions return \`{next_state, NextStateName, NewData, Actions}\` to transition states, or \`{keep_state, NewData, Actions}\` to stay in the current state.
+- **\`state_timeout\` Action** — Attaches an automatic state-bound timer \`{state_timeout, TimeMs, EventContent}\`. The timer automatically cancels itself when leaving that state name.
+
+## Parallel Worked Example: The Session Probe State Machine (session_probe_statem.erl)
 
 The following \`session_probe_statem\` module demonstrates how to implement a finite state machine using OTP's modern \`gen_statem\` behaviour in \`state_functions\` callback mode.
 It models an automated connection probe transitioning across three distinct states: \`disconnected\`, \`probing\`, and \`connected\`. When entering \`probing\`, it arms an automatic \`state_timeout\` action that cleanly falls back to \`disconnected\` if confirmation does not arrive within the expected window:
@@ -2801,6 +2812,20 @@ code_change(_OldVsn, State, Data, _Extra) ->
     {ok, State, Data}.
 \`\`\`
 
+### Architectural Deep Dive: What the BEAM is Doing
+
+1. **Step 1: State Machine Boot & Callback Mode Handshake (\`callback_mode/0\` & \`init/1\`)**
+   When \`session_probe_statem:start_link(ProbeTimeoutMs)\` is called, the \`gen_statem\` engine queries \`callback_mode/0\`, confirming \`state_functions\` mode. It then evaluates \`init(ProbeTimeoutMs)\`, constructing state data \`#{timeout => ProbeTimeoutMs, attempts => 0}\` and entering initial state \`disconnected\`.
+
+2. **Step 2: State Transitions & Automatic Timeout Arming (\`probing/3\` & \`state_timeout\`)**
+   When the caller invokes \`connect(Pid)\`, the state function evaluates clause \`disconnected({call, From}, connect, Data)\`. It increments the attempts counter and transitions to \`probing\` with actions \`[{state_timeout, Timeout, probe_timeout}, {reply, From, ok}]\`. The BEAM attaches a state-bound timer directly to the process. If \`probe_timeout\` fires before confirmation, \`probing(state_timeout, probe_timeout, Data)\` transitions the state machine back to \`disconnected\`.
+
+3. **Step 3: Protocol Handshake Confirmation & Timer Auto-Cancellation (\`confirm/1\`)**
+   When \`confirm(Pid)\` arrives while in \`probing\`, the state machine evaluates clause \`probing({call, From}, confirm, Data)\` and returns \`{next_state, connected, Data, [{reply, From, ok}]}\`. Because the state machine transitions out of the \`probing\` state, the BEAM runtime **automatically cancels the pending \`state_timeout\`**. No dangling timer ticks ever leak into subsequent states.
+
+4. **Step 4: Clean Resource Teardown (\`terminate/3\`)**
+   When \`stop(Pid)\` is called, \`gen_statem\` executes \`terminate(normal, State, Data)\`, cleanly closing active connections, flushing state metrics, and shutting down with normal exit status.
+
 ## Assignment Specification
 
 Implement \`src/circuit_breaker_statem.erl\` representing an automated, self-healing circuit breaker that protects downstream systems from cascading failures by tracking execution results across three states: \`closed\`, \`open\`, and \`half_open\`.
@@ -2889,6 +2914,15 @@ Implement \`src/circuit_breaker_statem.erl\` representing an automated, self-hea
     },
     otpDocCards: [
       {
+        functionName: 'start_link',
+        module: 'gen_statem',
+        signature: 'gen_statem:start_link(Mod, Args, Opts) -> {ok, Pid} | {error, Reason}',
+        typesSpec: ['Mod = module()', 'Args = term()', 'Opts = list()'],
+        description: 'Spawns and links a gen_statem process, synchronously evaluating Mod:init(Args).',
+        complexityNote: 'O(1) process creation with atomic link.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_statem.html#start_link/3',
+      },
+      {
         functionName: 'call',
         module: 'gen_statem',
         signature: 'gen_statem:call(ServerRef, Request) -> Reply',
@@ -2896,6 +2930,33 @@ Implement \`src/circuit_breaker_statem.erl\` representing an automated, self-hea
         description: 'Synchronously sends a request to a gen_statem process and waits for a reply.',
         complexityNote: 'O(1) synchronous message round-trip.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_statem.html#call/2',
+      },
+      {
+        functionName: 'stop',
+        module: 'gen_statem',
+        signature: 'gen_statem:stop(ServerRef) -> ok',
+        typesSpec: ['ServerRef = pid() | atom()'],
+        description: 'Synchronously requests clean termination of the gen_statem process with exit reason normal.',
+        complexityNote: 'O(1) synchronous shutdown protocol.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_statem.html#stop/1',
+      },
+      {
+        functionName: 'callback_mode',
+        module: 'gen_statem',
+        signature: 'callback_mode() -> state_functions | handle_event_function',
+        typesSpec: [],
+        description: 'Declares whether each state is a separate function (state_functions) or handled centrally.',
+        complexityNote: 'Static callback contract evaluated at process boot.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_statem.html#Module:callback_mode/0',
+      },
+      {
+        functionName: 'state_timeout',
+        module: 'gen_statem',
+        signature: '{state_timeout, TimeMs, EventContent}',
+        typesSpec: ['TimeMs = non_neg_integer()', 'EventContent = term()'],
+        description: 'Action tuple that arms an automatic timer strictly bound to the current state, cancelled upon state exit.',
+        complexityNote: 'Built-in ERTS timer automatically cleared on state transitions.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_statem.html#type-state_timeout',
       },
     ],
     starterCode: `-module(circuit_breaker_statem).
@@ -2924,11 +2985,11 @@ start_link(FailureThreshold, OpenTimeoutMs) ->
     gen_statem:start_link(?MODULE, {FailureThreshold, OpenTimeoutMs}, []).
 
 %% @doc Execute a protected operation through the circuit breaker.
-execute(Pid, ActionFun) when is_function(ActionFun, 0) ->
+execute(_Pid, _ActionFun) when is_function(_ActionFun, 0) ->
     ok.
 
 %% @doc Synchronously query the current state name atom of the circuit breaker.
-get_state_name(Pid) ->
+get_state_name(_Pid) ->
     closed.
 
 %% @doc Gracefully terminate the state machine.
@@ -3080,11 +3141,11 @@ start_link(FailureThreshold, OpenTimeoutMs) ->
     gen_statem:start_link(?MODULE, {FailureThreshold, OpenTimeoutMs}, []).
 
 %% @doc Execute a protected operation through the circuit breaker.
-execute(Pid, ActionFun) when is_function(ActionFun, 0) ->
+execute(_Pid, _ActionFun) when is_function(_ActionFun, 0) ->
     ok.
 
 %% @doc Synchronously query the current state name atom of the circuit breaker.
-get_state_name(Pid) ->
+get_state_name(_Pid) ->
     closed.
 
 %% @doc Gracefully terminate the state machine.
@@ -3212,14 +3273,14 @@ code_change(_OldVsn, State, Data, _Extra) ->
     },
     visibleTestCases: [
       {
-        id: 'tc1',
+        id: 'tc-ch07-05-1',
         title: 'Closed State Normal Passthrough',
         erlangCall: 'begin {ok, CB} = circuit_breaker_statem:start_link(2, 5000), Res = circuit_breaker_statem:execute(CB, fun() -> {ok, 42} end), circuit_breaker_statem:stop(CB), Res end',
         expectedOutput: '{ok, 42}',
         explanation: 'In closed state, requests execute and return successfully.',
       },
       {
-        id: 'tc2',
+        id: 'tc-ch07-05-2',
         title: 'Tripping to Open & Immediate Fast-Fail',
         erlangCall: 'begin {ok, CB} = circuit_breaker_statem:start_link(2, 5000), catch circuit_breaker_statem:execute(CB, fun() -> error(fail1) end), catch circuit_breaker_statem:execute(CB, fun() -> error(fail2) end), Res = circuit_breaker_statem:execute(CB, fun() -> {ok, 42} end), circuit_breaker_statem:stop(CB), Res end',
         expectedOutput: '{error, circuit_open}',

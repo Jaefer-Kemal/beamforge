@@ -331,6 +331,91 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `
 
+	const circuitBreakerStatemSolution = `-module(circuit_breaker_statem).
+-behaviour(gen_statem).
+
+-export([
+    start_link/2,
+    execute/2,
+    get_state_name/1,
+    stop/1
+]).
+
+%% gen_statem Callbacks
+-export([
+    callback_mode/0,
+    init/1,
+    closed/3,
+    open/3,
+    half_open/3,
+    terminate/3,
+    code_change/4
+]).
+
+%% Client API
+start_link(FailureThreshold, OpenTimeoutMs) ->
+    gen_statem:start_link(?MODULE, {FailureThreshold, OpenTimeoutMs}, []).
+
+execute(Pid, ActionFun) when is_function(ActionFun, 0) ->
+    gen_statem:call(Pid, {execute, ActionFun}).
+
+get_state_name(Pid) ->
+    gen_statem:call(Pid, get_state_name).
+
+stop(Pid) ->
+    gen_statem:stop(Pid).
+
+%% gen_statem Callbacks
+callback_mode() ->
+    state_functions.
+
+init({Threshold, TimeoutMs}) ->
+    Data = #{threshold => Threshold, timeout => TimeoutMs, failures => 0},
+    {ok, closed, Data}.
+
+%% ── Closed State ───────────────────────────────────────────────────────────
+closed({call, From}, get_state_name, Data) ->
+    {keep_state, Data, [{reply, From, closed}]};
+closed({call, From}, {execute, ActionFun}, Data = #{threshold := Threshold, timeout := TimeoutMs, failures := Failures}) ->
+    case (try ActionFun() catch _:Crash -> {error, Crash} end) of
+        {ok, Res} ->
+            {keep_state, Data#{failures := 0}, [{reply, From, {ok, Res}}]};
+        Err ->
+            NewFailures = Failures + 1,
+            if
+                NewFailures >= Threshold ->
+                    {next_state, open, Data#{failures := NewFailures}, [{state_timeout, TimeoutMs, try_half_open}, {reply, From, Err}]};
+                true ->
+                    {keep_state, Data#{failures := NewFailures}, [{reply, From, Err}]}
+            end
+    end.
+
+%% ── Open State ─────────────────────────────────────────────────────────────
+open({call, From}, get_state_name, Data) ->
+    {keep_state, Data, [{reply, From, open}]};
+open({call, From}, {execute, _ActionFun}, Data) ->
+    {keep_state, Data, [{reply, From, {error, circuit_open}}]};
+open(state_timeout, try_half_open, Data) ->
+    {next_state, half_open, Data}.
+
+%% ── Half-Open State ────────────────────────────────────────────────────────
+half_open({call, From}, get_state_name, Data) ->
+    {keep_state, Data, [{reply, From, half_open}]};
+half_open({call, From}, {execute, ActionFun}, Data = #{timeout := TimeoutMs}) ->
+    case (try ActionFun() catch _:Crash -> {error, Crash} end) of
+        {ok, Res} ->
+            {next_state, closed, Data#{failures := 0}, [{reply, From, {ok, Res}}]};
+        Err ->
+            {next_state, open, Data, [{state_timeout, TimeoutMs, try_half_open}, {reply, From, Err}]}
+    end.
+
+terminate(_Reason, _State, _Data) ->
+    ok.
+
+code_change(_OldVsn, State, Data, _Extra) ->
+    {ok, State, Data}.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -383,85 +468,11 @@ code_change(_OldVsn, State, _Extra) ->
 			name:       "ch07-l05 Circuit Breaker Statem",
 			exerciseID: "ch07-l05",
 			files: map[string]string{
-				"src/circuit_breaker_statem.erl": `-module(circuit_breaker_statem).
--behaviour(gen_statem).
-
--export([
-    start_link/2,
-    execute/2,
-    get_state_name/1,
-    stop/1
-]).
-
--export([
-    callback_mode/0,
-    init/1,
-    closed/3,
-    open/3,
-    half_open/3,
-    terminate/3,
-    code_change/4
-]).
-
-start_link(FailureThreshold, OpenTimeoutMs) ->
-    gen_statem:start_link(?MODULE, {FailureThreshold, OpenTimeoutMs}, []).
-
-execute(Pid, ActionFun) when is_function(ActionFun, 0) ->
-    gen_statem:call(Pid, {execute, ActionFun}).
-
-get_state_name(Pid) ->
-    gen_statem:call(Pid, get_state_name).
-
-stop(Pid) ->
-    gen_statem:stop(Pid).
-
-callback_mode() ->
-    state_functions.
-
-init({Threshold, TimeoutMs}) ->
-    Data = #{threshold => Threshold, timeout => TimeoutMs, failures => 0},
-    {ok, closed, Data}.
-
-closed({call, From}, get_state_name, Data) ->
-    {keep_state, Data, [{reply, From, closed}]};
-closed({call, From}, {execute, ActionFun}, Data = #{threshold := Threshold, timeout := TimeoutMs, failures := Failures}) ->
-    case (try ActionFun() catch _:Crash -> {error, Crash} end) of
-        {ok, Res} ->
-            {keep_state, Data#{failures := 0}, [{reply, From, {ok, Res}}]};
-        Err ->
-            NewFailures = Failures + 1,
-            if
-                NewFailures >= Threshold ->
-                    {next_state, open, Data#{failures := NewFailures}, [{state_timeout, TimeoutMs, try_half_open}, {reply, From, Err}]};
-                true ->
-                    {keep_state, Data#{failures := NewFailures}, [{reply, From, Err}]}
-            end
-    end.
-
-open({call, From}, get_state_name, Data) ->
-    {keep_state, Data, [{reply, From, open}]};
-open({call, From}, {execute, _ActionFun}, Data) ->
-    {keep_state, Data, [{reply, From, {error, circuit_open}}]};
-open(state_timeout, try_half_open, Data) ->
-    {next_state, half_open, Data}.
-
-half_open({call, From}, get_state_name, Data) ->
-    {keep_state, Data, [{reply, From, half_open}]};
-half_open({call, From}, {execute, ActionFun}, Data = #{timeout := TimeoutMs}) ->
-    case (try ActionFun() catch _:Crash -> {error, Crash} end) of
-        {ok, Res} ->
-            {next_state, closed, Data#{failures := 0}, [{reply, From, {ok, Res}}]};
-        Err ->
-            {next_state, open, Data, [{state_timeout, TimeoutMs, try_half_open}, {reply, From, Err}]}
-    end.
-
-terminate(_Reason, _State, _Data) ->
-    ok.
-
-code_change(_OldVsn, State, Data, _Extra) ->
-    {ok, State, Data}.
-`,
+				"src/circuit_breaker_statem.erl": circuitBreakerStatemSolution,
 			},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 2,
 		},
 		{
 			name:       "ch07-l06 Security Audit Handler",
@@ -2010,6 +2021,342 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		if !astOrOffloadFailed {
 			t.Errorf("Expected ast_reply_and_worker or async_offloading_verification to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l05 Negative Missing callback_mode AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-cbmode-ast-ch07-l05"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/circuit_breaker_statem.erl": `-module(circuit_breaker_statem).
+-behaviour(gen_statem).
+
+-export([
+    start_link/2,
+    execute/2,
+    get_state_name/1,
+    stop/1
+]).
+
+-export([
+    callback_mode/0,
+    init/1,
+    closed/3,
+    open/3,
+    half_open/3,
+    terminate/3,
+    code_change/4
+]).
+
+start_link(FailureThreshold, OpenTimeoutMs) ->
+    gen_statem:start_link(?MODULE, {FailureThreshold, OpenTimeoutMs}, []).
+
+execute(Pid, ActionFun) when is_function(ActionFun, 0) ->
+    gen_statem:call(Pid, {execute, ActionFun}).
+
+get_state_name(Pid) ->
+    gen_statem:call(Pid, get_state_name).
+
+stop(Pid) ->
+    gen_statem:stop(Pid).
+
+%% BUG: Declares wrong callback_mode (handle_event_function instead of state_functions)
+callback_mode() ->
+    handle_event_function.
+
+init({Threshold, TimeoutMs}) ->
+    Data = #{threshold => Threshold, timeout => TimeoutMs, failures => 0},
+    {ok, closed, Data}.
+
+closed({call, From}, get_state_name, Data) ->
+    {keep_state, Data, [{reply, From, closed}]};
+closed({call, From}, {execute, ActionFun}, Data = #{threshold := Threshold, timeout := TimeoutMs, failures := Failures}) ->
+    case (try ActionFun() catch _:Crash -> {error, Crash} end) of
+        {ok, Res} ->
+            {keep_state, Data#{failures := 0}, [{reply, From, {ok, Res}}]};
+        Err ->
+            NewFailures = Failures + 1,
+            if
+                NewFailures >= Threshold ->
+                    {next_state, open, Data#{failures := NewFailures}, [{state_timeout, TimeoutMs, try_half_open}, {reply, From, Err}]};
+                true ->
+                    {keep_state, Data#{failures := NewFailures}, [{reply, From, Err}]}
+            end
+    end.
+
+open({call, From}, get_state_name, Data) ->
+    {keep_state, Data, [{reply, From, open}]};
+open({call, From}, {execute, _ActionFun}, Data) ->
+    {keep_state, Data, [{reply, From, {error, circuit_open}}]};
+open(state_timeout, try_half_open, Data) ->
+    {next_state, half_open, Data}.
+
+half_open({call, From}, get_state_name, Data) ->
+    {keep_state, Data, [{reply, From, half_open}]};
+half_open({call, From}, {execute, ActionFun}, Data = #{timeout := TimeoutMs}) ->
+    case (try ActionFun() catch _:Crash -> {error, Crash} end) of
+        {ok, Res} ->
+            {next_state, closed, Data#{failures := 0}, [{reply, From, {ok, Res}}]};
+        Err ->
+            {next_state, open, Data, [{state_timeout, TimeoutMs, try_half_open}, {reply, From, Err}]}
+    end.
+
+terminate(_Reason, _State, _Data) ->
+    ok.
+
+code_change(_OldVsn, State, Data, _Extra) ->
+    {ok, State, Data}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l05", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on invalid callback_mode AST check, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_gen_statem_modes" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_gen_statem_modes to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l05 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-export-ch07-l05"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/circuit_breaker_statem.erl": `-module(circuit_breaker_statem).
+-behaviour(gen_statem).
+
+%% BUG: Missing execute/2 export
+-export([
+    start_link/2,
+    get_state_name/1,
+    stop/1
+]).
+
+-export([
+    callback_mode/0,
+    init/1,
+    closed/3,
+    open/3,
+    half_open/3,
+    terminate/3,
+    code_change/4
+]).
+
+start_link(FailureThreshold, OpenTimeoutMs) ->
+    gen_statem:start_link(?MODULE, {FailureThreshold, OpenTimeoutMs}, []).
+
+execute(Pid, ActionFun) when is_function(ActionFun, 0) ->
+    gen_statem:call(Pid, {execute, ActionFun}).
+
+get_state_name(Pid) ->
+    gen_statem:call(Pid, get_state_name).
+
+stop(Pid) ->
+    gen_statem:stop(Pid).
+
+callback_mode() ->
+    state_functions.
+
+init({Threshold, TimeoutMs}) ->
+    Data = #{threshold => Threshold, timeout => TimeoutMs, failures => 0},
+    {ok, closed, Data}.
+
+closed({call, From}, get_state_name, Data) ->
+    {keep_state, Data, [{reply, From, closed}]};
+closed({call, From}, {execute, ActionFun}, Data = #{threshold := Threshold, timeout := TimeoutMs, failures := Failures}) ->
+    case (try ActionFun() catch _:Crash -> {error, Crash} end) of
+        {ok, Res} ->
+            {keep_state, Data#{failures := 0}, [{reply, From, {ok, Res}}]};
+        Err ->
+            NewFailures = Failures + 1,
+            if
+                NewFailures >= Threshold ->
+                    {next_state, open, Data#{failures := NewFailures}, [{state_timeout, TimeoutMs, try_half_open}, {reply, From, Err}]};
+                true ->
+                    {keep_state, Data#{failures := NewFailures}, [{reply, From, Err}]}
+            end
+    end.
+
+open({call, From}, get_state_name, Data) ->
+    {keep_state, Data, [{reply, From, open}]};
+open({call, From}, {execute, _ActionFun}, Data) ->
+    {keep_state, Data, [{reply, From, {error, circuit_open}}]};
+open(state_timeout, try_half_open, Data) ->
+    {next_state, half_open, Data}.
+
+half_open({call, From}, get_state_name, Data) ->
+    {keep_state, Data, [{reply, From, half_open}]};
+half_open({call, From}, {execute, ActionFun}, Data = #{timeout := TimeoutMs}) ->
+    case (try ActionFun() catch _:Crash -> {error, Crash} end) of
+        {ok, Res} ->
+            {next_state, closed, Data#{failures := 0}, [{reply, From, {ok, Res}}]};
+        Err ->
+            {next_state, open, Data, [{state_timeout, TimeoutMs, try_half_open}, {reply, From, Err}]}
+    end.
+
+terminate(_Reason, _State, _Data) ->
+    ok.
+
+code_change(_OldVsn, State, Data, _Extra) ->
+    {ok, State, Data}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l05", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l05 Negative Open State Executes Fun Leaking Downstream", func(t *testing.T) {
+		sessionID := "test-neg-openexec-ch07-l05"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/circuit_breaker_statem.erl": `-module(circuit_breaker_statem).
+-behaviour(gen_statem).
+
+-export([
+    start_link/2,
+    execute/2,
+    get_state_name/1,
+    stop/1
+]).
+
+-export([
+    callback_mode/0,
+    init/1,
+    closed/3,
+    open/3,
+    half_open/3,
+    terminate/3,
+    code_change/4
+]).
+
+start_link(FailureThreshold, OpenTimeoutMs) ->
+    gen_statem:start_link(?MODULE, {FailureThreshold, OpenTimeoutMs}, []).
+
+execute(Pid, ActionFun) when is_function(ActionFun, 0) ->
+    gen_statem:call(Pid, {execute, ActionFun}).
+
+get_state_name(Pid) ->
+    gen_statem:call(Pid, get_state_name).
+
+stop(Pid) ->
+    gen_statem:stop(Pid).
+
+callback_mode() ->
+    state_functions.
+
+init({Threshold, TimeoutMs}) ->
+    Data = #{threshold => Threshold, timeout => TimeoutMs, failures => 0},
+    {ok, closed, Data}.
+
+closed({call, From}, get_state_name, Data) ->
+    {keep_state, Data, [{reply, From, closed}]};
+closed({call, From}, {execute, ActionFun}, Data = #{threshold := Threshold, timeout := TimeoutMs, failures := Failures}) ->
+    case (try ActionFun() catch _:Crash -> {error, Crash} end) of
+        {ok, Res} ->
+            {keep_state, Data#{failures := 0}, [{reply, From, {ok, Res}}]};
+        Err ->
+            NewFailures = Failures + 1,
+            if
+                NewFailures >= Threshold ->
+                    {next_state, open, Data#{failures := NewFailures}, [{state_timeout, TimeoutMs, try_half_open}, {reply, From, Err}]};
+                true ->
+                    {keep_state, Data#{failures := NewFailures}, [{reply, From, Err}]}
+            end
+    end.
+
+open({call, From}, get_state_name, Data) ->
+    {keep_state, Data, [{reply, From, open}]};
+%% BUG: Invokes ActionFun() in open state instead of fast-failing!
+open({call, From}, {execute, ActionFun}, Data) ->
+    Res = ActionFun(),
+    {keep_state, Data, [{reply, From, Res}]};
+open(state_timeout, try_half_open, Data) ->
+    {next_state, half_open, Data}.
+
+half_open({call, From}, get_state_name, Data) ->
+    {keep_state, Data, [{reply, From, half_open}]};
+half_open({call, From}, {execute, ActionFun}, Data = #{timeout := TimeoutMs}) ->
+    case (try ActionFun() catch _:Crash -> {error, Crash} end) of
+        {ok, Res} ->
+            {next_state, closed, Data#{failures := 0}, [{reply, From, {ok, Res}}]};
+        Err ->
+            {next_state, open, Data, [{state_timeout, TimeoutMs, try_half_open}, {reply, From, Err}]}
+    end.
+
+terminate(_Reason, _State, _Data) ->
+    ok.
+
+code_change(_OldVsn, State, Data, _Extra) ->
+    {ok, State, Data}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l05", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on open state executing action fun, but got PASSED")
+		}
+		var tripFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "tripping_and_fast_fail" && st.Status == "failed" {
+				tripFailed = true
+				break
+			}
+		}
+		if !tripFailed {
+			t.Errorf("Expected tripping_and_fast_fail to fail, stages: %+v", report.Stages)
 		}
 	})
 }

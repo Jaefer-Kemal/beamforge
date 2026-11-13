@@ -3920,6 +3920,37 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 20 subtests across Chapter 7 in `55.88s`; `TEST_CHAPTER=7 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l04 | 2/2 tests passed` in `12.38s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+## Phase 239: Chapter 7 Lecture 5 (`ch07-l05`) Deep Pedagogical Audit, Anti-Spoiler Protocol & Exercise Hardening
+
+- [x] **239.1: Curriculum Pedagogical Audit & Exercise Structuring (`ch07-l05`, `circuit_breaker_statem.erl`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch07.ts` (`ch07-l05`, `circuit_breaker_statem.erl`) against Spec 04, 07, and 08.
+  - Injected `## Official Erlang Docs & Function Reference` (`gen_statem:start_link/3,4`, `gen_statem:call/2,3`, `gen_statem:stop/1,3`, `callback_mode/0` (`state_functions`), State Transition Tuples, `state_timeout` Action) preceding `## Parallel Worked Example`.
+  - Deepened Parallel Worked Example (`session_probe_statem.erl`) with a comprehensive 4-step architectural deep dive:
+    - *Step 1: State Machine Boot & Callback Mode Handshake (`callback_mode/0` & `init/1`)*
+    - *Step 2: State Transitions & Automatic Timeout Arming (`probing/3` & `state_timeout`)*
+    - *Step 3: Protocol Handshake Confirmation & Timer Auto-Cancellation (`confirm/1`)*
+    - *Step 4: Clean Resource Teardown (`terminate/3`)*
+  - Structured `## Assignment Specification` with clean 3-part layout (`Input`, `Behavior`, `Examples`) for all exported client functions (`callback_mode/0`, `start_link/2`, `execute/2`, `get_state_name/1`, `stop/1`) and state callbacks (`closed/3`, `open/3`, `half_open/3`).
+  - Expanded `otpDocCards` with 5 complete cards (`start_link`, `call`, `stop`, `callback_mode`, `state_timeout`).
+  - Normalized visible test IDs to `tc-ch07-05-1` and `tc-ch07-05-2`.
+  - Audited starter scaffolding (`starterCode` and `files[0].content`): prefixed unused stub parameters with `_` (`execute(_Pid, _ActionFun) when is_function(_ActionFun, 0)`, `get_state_name(_Pid)`), ensuring starter templates compile cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0). Verified 100% parity across `starterCode` and `files[0].content`, and across `solutionCode` and `solutionFiles['src/circuit_breaker_statem.erl']`.
+
+- [x] **239.2: Go Orchestrator Hardening (`ch07_verification_test.go`)**:
+  - In `ch07_verification_test.go`:
+    - Defined `const circuitBreakerStatemSolution = ...` matching `ch07.ts` line-for-line.
+    - Updated `tests` slice with `wantScore: 100, wantStages: 5, visibleCount: 2` for `ch07-l05`.
+    - Added 3 negative regression subtests for `ch07-l05`:
+      1. `ch07-l05 Negative Missing callback_mode AST Violation`: verifies rejection in `ast_gen_statem_modes` when `callback_mode` returns `handle_event_function` instead of `state_functions`.
+      2. `ch07-l05 Negative Missing Export`: verifies rejection in `compile_and_export_audit` when `execute/2` is omitted from exports.
+      3. `ch07-l05 Negative Open State Executes Fun Leaking Downstream`: verifies rejection in `tripping_and_fast_fail` when `open/3` executes `ActionFun()` instead of fast-failing with `{error, circuit_open}`.
+
+- [x] **239.3: Mandatory Live Tri-Verification Certification (`ch07-l05`)**:
+  - **Parallel Worked Example (`session_probe_statem.erl`)**: Extracted directly from `ch07.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with probe transitions, confirmation handshake, and timeout fallback passing in 0 ms.
+  - **Starter Pack (`circuit_breaker_statem.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0) and loads cleanly on OTP.
+  - **Solution Pack (`circuit_breaker_statem.erl`)**: Verified parity, compiled with `+debug_info -Wall -Werror` (0 warnings), passed `bf_ast_verifier` rules (`gen_statem:start_link/3`, `gen_statem:call/2`), executed 100% of visible test cases (2/2 passed), and passed all 5 stages of Go verification.
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 23 subtests across Chapter 7 in `61.21s`; `TEST_CHAPTER=7 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l05 | 2/2 tests passed` in `13.64s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
 
 
 
