@@ -257,6 +257,80 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `
 
+	const asyncReportServerSolution = `-module(async_report_server).
+-behaviour(gen_server).
+
+-export([
+    start_link/0,
+    generate_report/3,
+    get_completed_count/1,
+    hibernate_idle/1,
+    stop/1
+]).
+
+%% gen_server Callbacks
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+%% Client API
+start_link() ->
+    gen_server:start_link(?MODULE, [], []).
+
+generate_report(Pid, JobId, ComputeFun) ->
+    gen_server:call(Pid, {generate_report, JobId, ComputeFun}, 3000).
+
+get_completed_count(Pid) ->
+    gen_server:call(Pid, get_completed_count).
+
+hibernate_idle(Pid) ->
+    gen_server:call(Pid, hibernate_now).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+%% gen_server Callbacks
+init([]) ->
+    {ok, #{in_flight => 0, completed => 0}}.
+
+handle_call({generate_report, JobId, ComputeFun}, From, State = #{in_flight := InFlight}) ->
+    ServerSelf = self(),
+    spawn(fun() ->
+        Result = ComputeFun(),
+        gen_server:reply(From, {ok, JobId, Result}),
+        ServerSelf ! {job_finished, JobId}
+    end),
+    {noreply, State#{in_flight := InFlight + 1}};
+
+handle_call(get_completed_count, _From, State = #{in_flight := InFlight, completed := Completed}) ->
+    {reply, {ok, #{in_flight => InFlight, completed => Completed}}, State};
+
+handle_call(hibernate_now, _From, State) ->
+    {reply, hibernated, State, hibernate};
+
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info({job_finished, _JobId}, State = #{in_flight := InFlight, completed := Completed}) ->
+    {noreply, State#{in_flight := InFlight - 1, completed := Completed + 1}};
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -299,77 +373,11 @@ code_change(_OldVsn, State, _Extra) ->
 			name:       "ch07-l04 Async Report Server",
 			exerciseID: "ch07-l04",
 			files: map[string]string{
-				"src/async_report_server.erl": `-module(async_report_server).
--behaviour(gen_server).
-
--export([
-    start_link/0,
-    generate_report/3,
-    get_completed_count/1,
-    hibernate_idle/1,
-    stop/1
-]).
-
--export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
-
-start_link() ->
-    gen_server:start_link(?MODULE, [], []).
-
-generate_report(Pid, JobId, ComputeFun) ->
-    gen_server:call(Pid, {generate_report, JobId, ComputeFun}, 3000).
-
-get_completed_count(Pid) ->
-    gen_server:call(Pid, get_completed_count).
-
-hibernate_idle(Pid) ->
-    gen_server:call(Pid, hibernate_now).
-
-stop(Pid) ->
-    gen_server:stop(Pid).
-
-init([]) ->
-    {ok, #{in_flight => 0, completed => 0}}.
-
-handle_call({generate_report, JobId, ComputeFun}, From, State = #{in_flight := InFlight}) ->
-    ServerSelf = self(),
-    spawn(fun() ->
-        Result = ComputeFun(),
-        gen_server:reply(From, {ok, JobId, Result}),
-        ServerSelf ! {job_finished, JobId}
-    end),
-    {noreply, State#{in_flight := InFlight + 1}};
-
-handle_call(get_completed_count, _From, State = #{in_flight := InFlight, completed := Completed}) ->
-    {reply, {ok, #{in_flight => InFlight, completed => Completed}}, State};
-
-handle_call(hibernate_now, _From, State) ->
-    {reply, hibernated, State, hibernate};
-
-handle_call(_Req, _From, State) ->
-    {reply, {error, unknown_call}, State}.
-
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-handle_info({job_finished, _JobId}, State = #{in_flight := InFlight, completed := Completed}) ->
-    {noreply, State#{in_flight := InFlight - 1, completed := Completed + 1}};
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-`,
+				"src/async_report_server.erl": asyncReportServerSolution,
 			},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 2,
 		},
 		{
 			name:       "ch07-l05 Circuit Breaker Statem",
@@ -1698,6 +1706,310 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		if !continueFailed {
 			t.Errorf("Expected handle_continue_hydration to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l04 Negative Missing gen_server reply AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-reply-ast-ch07-l04"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/async_report_server.erl": `-module(async_report_server).
+-behaviour(gen_server).
+
+-export([
+    start_link/0,
+    generate_report/3,
+    get_completed_count/1,
+    hibernate_idle/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link() ->
+    gen_server:start_link(?MODULE, [], []).
+
+generate_report(Pid, JobId, ComputeFun) ->
+    gen_server:call(Pid, {generate_report, JobId, ComputeFun}, 3000).
+
+get_completed_count(Pid) ->
+    gen_server:call(Pid, get_completed_count).
+
+hibernate_idle(Pid) ->
+    gen_server:call(Pid, hibernate_now).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init([]) ->
+    {ok, #{in_flight => 0, completed => 0}}.
+
+%% BUG: Bypasses gen_server:reply/2 with raw ! send
+handle_call({generate_report, JobId, ComputeFun}, {ClientPid, _Tag}, State = #{in_flight := InFlight}) ->
+    ServerSelf = self(),
+    spawn(fun() ->
+        Result = ComputeFun(),
+        ClientPid ! {report, JobId, Result},
+        ServerSelf ! {job_finished, JobId}
+    end),
+    {noreply, State#{in_flight := InFlight + 1}};
+
+handle_call(get_completed_count, _From, State = #{in_flight := InFlight, completed := Completed}) ->
+    {reply, {ok, #{in_flight => InFlight, completed => Completed}}, State};
+
+handle_call(hibernate_now, _From, State) ->
+    {reply, hibernated, State, hibernate};
+
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info({job_finished, _JobId}, State = #{in_flight := InFlight, completed := Completed}) ->
+    {noreply, State#{in_flight := InFlight - 1, completed := Completed + 1}};
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l04", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing gen_server:reply/2 AST check, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_reply_and_worker" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_reply_and_worker to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l04 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-export-ch07-l04"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/async_report_server.erl": `-module(async_report_server).
+-behaviour(gen_server).
+
+%% BUG: Missing hibernate_idle/1 export
+-export([
+    start_link/0,
+    generate_report/3,
+    get_completed_count/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link() ->
+    gen_server:start_link(?MODULE, [], []).
+
+generate_report(Pid, JobId, ComputeFun) ->
+    gen_server:call(Pid, {generate_report, JobId, ComputeFun}, 3000).
+
+get_completed_count(Pid) ->
+    gen_server:call(Pid, get_completed_count).
+
+hibernate_idle(Pid) ->
+    gen_server:call(Pid, hibernate_now).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init([]) ->
+    {ok, #{in_flight => 0, completed => 0}}.
+
+handle_call({generate_report, JobId, ComputeFun}, From, State = #{in_flight := InFlight}) ->
+    ServerSelf = self(),
+    spawn(fun() ->
+        Result = ComputeFun(),
+        gen_server:reply(From, {ok, JobId, Result}),
+        ServerSelf ! {job_finished, JobId}
+    end),
+    {noreply, State#{in_flight := InFlight + 1}};
+
+handle_call(get_completed_count, _From, State = #{in_flight := InFlight, completed := Completed}) ->
+    {reply, {ok, #{in_flight => InFlight, completed => Completed}}, State};
+
+handle_call(hibernate_now, _From, State) ->
+    {reply, hibernated, State, hibernate};
+
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info({job_finished, _JobId}, State = #{in_flight := InFlight, completed := Completed}) ->
+    {noreply, State#{in_flight := InFlight - 1, completed := Completed + 1}};
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l04", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l04 Negative Synchronous HoL Blocking Worker", func(t *testing.T) {
+		sessionID := "test-neg-blocking-ch07-l04"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/async_report_server.erl": `-module(async_report_server).
+-behaviour(gen_server).
+
+-export([
+    start_link/0,
+    generate_report/3,
+    get_completed_count/1,
+    hibernate_idle/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link() ->
+    gen_server:start_link(?MODULE, [], []).
+
+generate_report(Pid, JobId, ComputeFun) ->
+    gen_server:call(Pid, {generate_report, JobId, ComputeFun}, 3000).
+
+get_completed_count(Pid) ->
+    gen_server:call(Pid, get_completed_count).
+
+hibernate_idle(Pid) ->
+    gen_server:call(Pid, hibernate_now).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init([]) ->
+    {ok, #{in_flight => 0, completed => 0}}.
+
+%% BUG: Computes synchronously on the gen_server process, causing HoL blocking and missing reply/2!
+handle_call({generate_report, JobId, ComputeFun}, _From, State = #{completed := Completed}) ->
+    Result = ComputeFun(),
+    {reply, {ok, JobId, Result}, State#{completed := Completed + 1}};
+
+handle_call(get_completed_count, _From, State = #{in_flight := InFlight, completed := Completed}) ->
+    {reply, {ok, #{in_flight => InFlight, completed => Completed}}, State};
+
+handle_call(hibernate_now, _From, State) ->
+    {reply, hibernated, State, hibernate};
+
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l04", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on synchronous HoL blocking, but got PASSED")
+		}
+		var astOrOffloadFailed bool
+		for _, st := range report.Stages {
+			if (st.ID == "ast_reply_and_worker" || st.ID == "async_offloading_verification") && st.Status == "failed" {
+				astOrOffloadFailed = true
+				break
+			}
+		}
+		if !astOrOffloadFailed {
+			t.Errorf("Expected ast_reply_and_worker or async_offloading_verification to fail, stages: %+v", report.Stages)
 		}
 	})
 }

@@ -2065,7 +2065,17 @@ When a new message arrives, the BEAM automatically wakes the process without any
 > [!warning] Production OTP Trap: Forgetting to Reply from the Spawned Worker
 > If you spawn a worker to handle a call and that worker crashes or exits before calling \`gen_server:reply(From, ...)\`, the client process will hang until its 5,000ms call timeout expires! In production, wrap the worker computation in \`try...catch\` to guarantee that \`gen_server:reply(From, {error, worker_crashed})\` is always invoked.
 
-## Parallel Worked Example: The Payload Hasher Coordinator
+## Official Erlang Docs & Function Reference
+
+Before examining the parallel payload hasher coordinator, review the key OTP primitives and hibernation contracts:
+
+- **\`gen_server:start_link/3,4\`** — Spawns and links a new \`gen_server\` process, synchronously invoking \`Mod:init/1\` before returning.
+- **\`gen_server:call/2,3\`** — Sends a synchronous request to \`ServerRef\` and blocks caller execution until a reply arrives (or 5,000ms timeout expires). Captures caller token \`From = {pid(), tag()}\`.
+- **\`gen_server:reply/2\`** — Explicitly delivers a reply to the caller identified by \`From\`. Can be invoked from any process (including background workers) to unblock the caller.
+- **\`gen_server:stop/1,3\`** — Synchronously requests clean termination of the server with reason \`normal\`.
+- **Process Hibernation (\`hibernate\`)** — Returning \`hibernate\` as the 4th element of \`{reply, Reply, NewState, hibernate}\` or 3rd element of \`{noreply, NewState, hibernate}\` instructs ERTS to discard the call stack, run an aggressive full garbage collection sweep, compact the heap to minimal memory (~300–1200 bytes), and suspend until the next message arrives.
+
+## Parallel Worked Example: The Payload Hasher Coordinator (payload_hasher.erl)
 
 The following \`payload_hasher\` module demonstrates how a \`gen_server\` offloads CPU-intensive hashing jobs to background workers using \`gen_server:reply/2\`, completely preventing Head-of-Line blocking for quick queries, and how it enters memory-compacted hibernation when idle:
 
@@ -2162,6 +2172,20 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 \`\`\`
 
+### Architectural Deep Dive: What the BEAM is Doing
+
+1. **Step 1: Process Initialization & State Setup (\`init/1\`)**
+   When \`payload_hasher:start_link()\` is invoked, the coordinator initializes its dispatch tracking counters \`#{dispatched => 0, completed => 0}\` and returns \`{ok, State}\`. The process is ready to handle queries immediately.
+
+2. **Step 2: Non-Blocking Call Offload & Direct Client Reply (\`gen_server:reply/2\`)**
+   When a client invokes \`digest(Pid, sha256, Payload)\`, \`handle_call/3\` captures the client's \`From\` token \`{ClientPid, Tag}\`. Instead of computing the SHA-256 digest on the coordinator process (which would block all other incoming requests), the coordinator spawns an ephemeral worker process, captures \`Coordinator = self()\`, and immediately returns \`{noreply, State#{dispatched := Dispatched + 1}}\` in microseconds. The worker evaluates \`crypto:hash/2\` in isolation and calls \`gen_server:reply(From, {ok, Digest})\`, unblocking the client directly.
+
+3. **Step 3: Completion Notification & Mailbox Routing (\`handle_info/2\`)**
+   After unblocking the client, the spawned worker delivers \`digest_completed\` to the coordinator process (\`Coordinator ! digest_completed\`). This message arrives unwrapped in \`handle_info/2\`, where the coordinator increments its \`completed\` counter. If 1,000 clients submit hash jobs simultaneously, fast queries (such as \`get_metrics/1\`) are never blocked behind slow hash computations.
+
+4. **Step 4: Memory Compaction via Idle Hibernation (\`hibernate\` action)**
+   When \`hibernate_idle(Pid)\` is called, the coordinator returns \`{reply, ok, State, hibernate}\`. The BEAM garbage collector immediately forces a full sweep, flushes the call stack, compacts the process heap to minimal footprint, and suspends the process until an incoming message wakes it automatically.
+
 ## Assignment Specification
 
 Implement \`src/async_report_server.erl\` as an asynchronous OTP coordinator that offloads heavy computational reports to background workers without blocking quick queries in its mailbox.
@@ -2247,6 +2271,24 @@ Implement \`src/async_report_server.erl\` as an asynchronous OTP coordinator tha
     },
     otpDocCards: [
       {
+        functionName: 'start_link',
+        module: 'gen_server',
+        signature: 'gen_server:start_link(Mod, Args, Opts) -> {ok, Pid} | {error, Reason}',
+        typesSpec: ['Mod = module()', 'Args = term()', 'Opts = list()'],
+        description: 'Spawns a gen_server linked to the caller, synchronously invoking Mod:init(Args).',
+        complexityNote: 'O(1) process creation with atomic link.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#start_link/3',
+      },
+      {
+        functionName: 'call',
+        module: 'gen_server',
+        signature: 'gen_server:call(ServerRef, Request, Timeout) -> Reply',
+        typesSpec: ['ServerRef = pid() | atom()', 'Request = term()', 'Timeout = timeout()', 'Reply = term()'],
+        description: 'Sends a synchronous request to ServerRef with an explicit timeout, capturing From = {pid(), tag()}.',
+        complexityNote: 'Synchronous round-trip; provides natural flow-control backpressure.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#call/3',
+      },
+      {
         functionName: 'reply',
         module: 'gen_server',
         signature: 'gen_server:reply(From, Reply) -> ok',
@@ -2254,6 +2296,24 @@ Implement \`src/async_report_server.erl\` as an asynchronous OTP coordinator tha
         description: 'Explicitly sends a reply to a client that invoked gen_server:call.',
         complexityNote: 'O(1) direct message delivery to waiting client.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#reply/2',
+      },
+      {
+        functionName: 'stop',
+        module: 'gen_server',
+        signature: 'gen_server:stop(ServerRef) -> ok',
+        typesSpec: ['ServerRef = pid() | atom()'],
+        description: 'Synchronously requests clean termination of the gen_server process with exit reason normal.',
+        complexityNote: 'O(1) synchronous shutdown protocol.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#stop/1',
+      },
+      {
+        functionName: 'hibernate',
+        module: 'gen_server',
+        signature: '{reply, Reply, NewState, hibernate} | {noreply, NewState, hibernate}',
+        typesSpec: ['Reply = term()', 'NewState = term()'],
+        description: 'Action atom instructing the BEAM VM to discard call stack, run full GC sweep, and compact process heap.',
+        complexityNote: 'Immediate garbage collection; memory footprint reduced to ~300-1200 bytes until next message.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#Module:handle_call/3',
       },
     ],
     starterCode: `-module(async_report_server).
@@ -2282,15 +2342,15 @@ start_link() ->
     gen_server:start_link(?MODULE, [], []).
 
 %% @doc Offload report generation to a worker and unblock caller upon completion.
-generate_report(Pid, JobId, ComputeFun) ->
+generate_report(_Pid, _JobId, _ComputeFun) ->
     ok.
 
 %% @doc Query the current count of in-flight and completed report jobs.
-get_completed_count(Pid) ->
+get_completed_count(_Pid) ->
     ok.
 
 %% @doc Command the coordinator process to enter memory-compacted idle hibernation.
-hibernate_idle(Pid) ->
+hibernate_idle(_Pid) ->
     ok.
 
 %% @doc Gracefully terminate the server.
@@ -2426,15 +2486,15 @@ start_link() ->
     gen_server:start_link(?MODULE, [], []).
 
 %% @doc Offload report generation to a worker and unblock caller upon completion.
-generate_report(Pid, JobId, ComputeFun) ->
+generate_report(_Pid, _JobId, _ComputeFun) ->
     ok.
 
 %% @doc Query the current count of in-flight and completed report jobs.
-get_completed_count(Pid) ->
+get_completed_count(_Pid) ->
     ok.
 
 %% @doc Command the coordinator process to enter memory-compacted idle hibernation.
-hibernate_idle(Pid) ->
+hibernate_idle(_Pid) ->
     ok.
 
 %% @doc Gracefully terminate the server.
@@ -2546,14 +2606,14 @@ code_change(_OldVsn, State, _Extra) ->
     },
     visibleTestCases: [
       {
-        id: 'tc1',
+        id: 'tc-ch07-04-1',
         title: 'Asynchronous Worker Report Offload',
-        erlangCall: 'begin {ok, S} = async_report_server:start_link(), Res = async_report_server:generate_report(S, "rep_1", fun() -> 42 * 2 end), async_report_server:stop(S), Res end',
-        expectedOutput: '{ok, "rep_1", 84}',
+        erlangCall: 'begin {ok, S} = async_report_server:start_link(), Res = async_report_server:generate_report(S, <<"job_42">>, fun() -> 42 * 2 end), async_report_server:stop(S), Res end',
+        expectedOutput: '{ok, <<"job_42">>, 84}',
         explanation: 'Worker computes 84 and delivers reply directly via gen_server:reply/2.',
       },
       {
-        id: 'tc2',
+        id: 'tc-ch07-04-2',
         title: 'Process Hibernation Verification',
         erlangCall: 'begin {ok, S} = async_report_server:start_link(), Res = async_report_server:hibernate_idle(S), async_report_server:stop(S), Res end',
         expectedOutput: 'hibernated',

@@ -3889,6 +3889,37 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 17 subtests across Chapter 7 in `52.41s`; `TEST_CHAPTER=7 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l03 | 2/2 tests passed` in `11.84s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+## Phase 238: Chapter 7 Lecture 4 (`ch07-l04`) Deep Pedagogical Audit, Anti-Spoiler Protocol & Exercise Hardening
+
+- [x] **238.1: Curriculum Pedagogical Audit & Exercise Structuring (`ch07-l04`, `async_report_server.erl`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch07.ts` (`ch07-l04`, `async_report_server.erl`) against Spec 04, 07, and 08.
+  - Injected `## Official Erlang Docs & Function Reference` (`gen_server:start_link/3,4`, `gen_server:call/2,3`, `gen_server:reply/2`, `gen_server:stop/1,3`, Process Hibernation action atom) preceding `## Parallel Worked Example`.
+  - Deepened Parallel Worked Example (`payload_hasher.erl`) with a comprehensive 4-step architectural deep dive:
+    - *Step 1: Process Initialization & State Setup (`init/1`)*
+    - *Step 2: Non-Blocking Call Offload & Direct Client Reply (`gen_server:reply/2`)*
+    - *Step 3: Completion Notification & Mailbox Routing (`handle_info/2`)*
+    - *Step 4: Memory Compaction via Idle Hibernation (`hibernate` action)*
+  - Structured `## Assignment Specification` with clean 3-part layout (`Input`, `Behavior`, `Examples`) for all exported client functions (`start_link/0`, `generate_report/3`, `get_completed_count/1`, `hibernate_idle/1`, `stop/1`) and OTP callbacks (`handle_call/3`, `handle_info/2`).
+  - Expanded `otpDocCards` with 5 complete cards (`start_link`, `call`, `reply`, `stop`, `hibernate`).
+  - Normalized visible test IDs to `tc-ch07-04-1` and `tc-ch07-04-2`, and aligned test input to binary `<<"job_42">>` matching assignment spec and Go runner.
+  - Audited starter scaffolding (`starterCode` and `files[0].content`): prefixed unused stub parameters with `_` (`generate_report(_Pid, _JobId, _ComputeFun)`, `get_completed_count(_Pid)`, `hibernate_idle(_Pid)`), ensuring starter templates compile cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0). Verified 100% parity across `starterCode` and `files[0].content`, and across `solutionCode` and `solutionFiles['src/async_report_server.erl']`.
+
+- [x] **238.2: Go Orchestrator Hardening (`ch07_verification_test.go`)**:
+  - In `ch07_verification_test.go`:
+    - Defined `const asyncReportServerSolution = ...` matching `ch07.ts` line-for-line.
+    - Updated `tests` slice with `wantScore: 100, wantStages: 5, visibleCount: 2` for `ch07-l04`.
+    - Added 3 negative regression subtests for `ch07-l04`:
+      1. `ch07-l04 Negative Missing gen_server reply AST Violation`: verifies rejection in `ast_reply_and_worker` when worker bypasses `gen_server:reply/2` with a raw `!` message.
+      2. `ch07-l04 Negative Missing Export`: verifies rejection in `compile_and_export_audit` when `hibernate_idle/1` is omitted from exports.
+      3. `ch07-l04 Negative Synchronous HoL Blocking Worker`: verifies rejection in `ast_reply_and_worker` when `ComputeFun` is evaluated synchronously without offloading.
+
+- [x] **238.3: Mandatory Live Tri-Verification Certification (`ch07-l04`)**:
+  - **Parallel Worked Example (`payload_hasher.erl`)**: Extracted directly from `ch07.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with SHA-256 worker offload, throughput metrics query, idle hibernation, and clean stop passing in 0 ms.
+  - **Starter Pack (`async_report_server.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0) and loads cleanly on OTP.
+  - **Solution Pack (`async_report_server.erl`)**: Verified parity, compiled with `+debug_info -Wall -Werror` (0 warnings), passed `bf_ast_verifier` rules (`gen_server:reply/2`), executed 100% of visible test cases (2/2 passed), and passed all 5 stages of Go verification.
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 20 subtests across Chapter 7 in `55.88s`; `TEST_CHAPTER=7 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l04 | 2/2 tests passed` in `12.38s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
 
 
 
