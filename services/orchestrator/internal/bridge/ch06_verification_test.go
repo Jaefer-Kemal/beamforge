@@ -85,6 +85,66 @@ trigger_class(exit, Reason) ->
     exit(Reason).
 `
 
+	domainValidatorSolution := `-module(domain_validator).
+-export([
+    safe_divide/2,
+    check_amount/1,
+    validate_email/1,
+    process_checkout_input/3
+]).
+
+%% @doc Safely divides Numerator by Denominator, returning {ok, Quotient} or tagged error.
+safe_divide(Num, Den) when is_number(Num), is_number(Den) ->
+    if
+        Den == 0 -> {error, division_by_zero};
+        true     -> {ok, Num / Den}
+    end;
+safe_divide(_Num, _Den) ->
+    {error, non_numeric}.
+
+%% @doc Validates that an amount is a strictly positive integer, returning {ok, Amount} or tagged error.
+check_amount(Amount) when is_integer(Amount) ->
+    if
+        Amount > 0 -> {ok, Amount};
+        true       -> {error, non_positive_amount}
+    end;
+check_amount(_Other) ->
+    {error, invalid_type}.
+
+%% @doc Validates email binary format, returning {ok, EmailBin} or tagged error.
+validate_email(EmailBin) when is_binary(EmailBin) ->
+    case binary:split(EmailBin, <<"@">>) of
+        [User, Domain] when byte_size(User) > 0, byte_size(Domain) > 0 ->
+            case binary:match(Domain, <<".">>) of
+                nomatch -> {error, invalid_email};
+                _       -> {ok, EmailBin}
+            end;
+        _ ->
+            {error, invalid_email}
+    end;
+validate_email(_Other) ->
+    {error, invalid_email}.
+
+%% @doc Coordinates checkout input validation pipeline, returning map or first failing error.
+process_checkout_input(EmailBin, TotalAmount, SplitCount) ->
+    case validate_email(EmailBin) of
+        {ok, ValidEmail} ->
+            case check_amount(TotalAmount) of
+                {ok, ValidTotal} ->
+                    case safe_divide(ValidTotal, SplitCount) of
+                        {ok, Share} ->
+                            {ok, #{email => ValidEmail, per_person => Share}};
+                        {error, DivErr} ->
+                            {error, DivErr}
+                    end;
+                {error, AmtErr} ->
+                    {error, AmtErr}
+            end;
+        {error, EmailErr} ->
+            {error, EmailErr}
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -104,67 +164,12 @@ trigger_class(exit, Reason) ->
 			visibleCount: 4,
 		},
 		{
-			name:       "ch06-l02 Safe Operations & Return Values",
-			exerciseID: "ch06-l02",
-			files: map[string]string{
-				"src/domain_validator.erl": `-module(domain_validator).
--export([
-    safe_divide/2,
-    check_amount/1,
-    validate_email/1,
-    process_checkout_input/3
-]).
-
-safe_divide(_Numerator, 0) ->
-    {error, division_by_zero};
-safe_divide(Numerator, Denominator) when is_number(Numerator), is_number(Denominator) ->
-    {ok, Numerator / Denominator};
-safe_divide(_Numerator, _Denominator) ->
-    {error, non_numeric}.
-
-check_amount(Amount) when is_integer(Amount), Amount > 0 ->
-    {ok, Amount};
-check_amount(Amount) when is_integer(Amount), Amount =< 0 ->
-    {error, non_positive_amount};
-check_amount(_Amount) ->
-    {error, invalid_type}.
-
-validate_email(EmailBin) when is_binary(EmailBin) ->
-    case binary:split(EmailBin, <<"@">>) of
-        [Username, Domain] when byte_size(Username) > 0, byte_size(Domain) > 0 ->
-            case binary:match(Domain, <<".">>) of
-                nomatch ->
-                    {error, invalid_email};
-                _ ->
-                    {ok, EmailBin}
-            end;
-        _ ->
-            {error, invalid_email}
-    end;
-validate_email(_Invalid) ->
-    {error, invalid_email}.
-
-process_checkout_input(EmailBin, TotalAmount, SplitCount) ->
-    try
-        ValidEmail = case validate_email(EmailBin) of
-            {ok, E} -> E;
-            {error, ReasonE} -> throw({validation_error, ReasonE})
-        end,
-        ValidAmount = case check_amount(TotalAmount) of
-            {ok, A} -> A;
-            {error, ReasonA} -> throw({validation_error, ReasonA})
-        end,
-        PerPerson = case safe_divide(ValidAmount, SplitCount) of
-            {ok, Share} -> Share;
-            {error, ReasonD} -> throw({validation_error, ReasonD})
-        end,
-        {ok, #{email => ValidEmail, per_person => PerPerson}}
-    catch
-        throw:{validation_error, Reason} ->
-            {error, Reason}
-    end.
-`,
-			},
+			name:         "ch06-l02 Safe Operations & Return Values",
+			exerciseID:   "ch06-l02",
+			files:        map[string]string{"src/domain_validator.erl": domainValidatorSolution},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 3,
 		},
 		{
 			name:       "ch06-l06 Unidirectional Monitors & noproc",
@@ -742,6 +747,194 @@ trigger_class(exit, R) -> exit(R).
 		}
 		if !domainFailed {
 			t.Errorf("Expected domain_exception_classification to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch06-l02 ──────────────────────────────
+	t.Run("ch06-l02 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-export-ch06-l02"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/domain_validator.erl": `-module(domain_validator).
+-export([
+    safe_divide/2,
+    check_amount/1,
+    validate_email/1
+]).
+
+safe_divide(Num, Den) when is_number(Num), is_number(Den), Den =/= 0 -> {ok, Num / Den};
+safe_divide(_Num, 0) -> {error, division_by_zero};
+safe_divide(_Num, _Den) -> {error, non_numeric}.
+
+check_amount(Amount) when is_integer(Amount), Amount > 0 -> {ok, Amount};
+check_amount(Amount) when is_integer(Amount) -> {error, non_positive_amount};
+check_amount(_) -> {error, invalid_type}.
+
+validate_email(EmailBin) when is_binary(EmailBin) -> {ok, EmailBin};
+validate_email(_) -> {error, invalid_email}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l02", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing process_checkout_input export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l02 Negative try_catch AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch06-l02"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/domain_validator.erl": `-module(domain_validator).
+-export([
+    safe_divide/2,
+    check_amount/1,
+    validate_email/1,
+    process_checkout_input/3
+]).
+
+safe_divide(Num, Den) when is_number(Num), is_number(Den), Den =/= 0 -> {ok, Num / Den};
+safe_divide(_Num, 0) -> {error, division_by_zero};
+safe_divide(_Num, _Den) -> {error, non_numeric}.
+
+check_amount(Amount) when is_integer(Amount), Amount > 0 -> {ok, Amount};
+check_amount(Amount) when is_integer(Amount) -> {error, non_positive_amount};
+check_amount(_) -> {error, invalid_type}.
+
+validate_email(EmailBin) when is_binary(EmailBin) -> {ok, EmailBin};
+validate_email(_) -> {error, invalid_email}.
+
+process_checkout_input(EmailBin, TotalAmount, SplitCount) ->
+    try
+        {ok, ValidEmail} = validate_email(EmailBin),
+        {ok, ValidTotal} = check_amount(TotalAmount),
+        {ok, Share} = safe_divide(ValidTotal, SplitCount),
+        {ok, #{email => ValidEmail, per_person => Share}}
+    catch
+        _:_ -> {error, invalid_input}
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l02", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on try_catch AST violation, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_safe_return_audit" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_safe_return_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l02 Negative Broken Short Circuit", func(t *testing.T) {
+		sessionID := "test-neg-shortcircuit-ch06-l02"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/domain_validator.erl": `-module(domain_validator).
+-export([
+    safe_divide/2,
+    check_amount/1,
+    validate_email/1,
+    process_checkout_input/3
+]).
+
+safe_divide(Num, Den) when is_number(Num), is_number(Den) ->
+    if
+        Den == 0 -> {error, division_by_zero};
+        true     -> {ok, Num / Den}
+    end;
+safe_divide(_Num, _Den) ->
+    {error, non_numeric}.
+
+check_amount(Amount) when is_integer(Amount) ->
+    if
+        Amount > 0 -> {ok, Amount};
+        true       -> {error, non_positive_amount}
+    end;
+check_amount(_Other) ->
+    {error, invalid_type}.
+
+validate_email(EmailBin) when is_binary(EmailBin) ->
+    case binary:split(EmailBin, <<"@">>) of
+        [User, Domain] when byte_size(User) > 0, byte_size(Domain) > 0 ->
+            case binary:match(Domain, <<".">>) of
+                nomatch -> {error, invalid_email};
+                _       -> {ok, EmailBin}
+            end;
+        _ ->
+            {error, invalid_email}
+    end;
+validate_email(_Other) ->
+    {error, invalid_email}.
+
+%% BUG: Fails to short-circuit on bad email or amount; returns dummy ok!
+process_checkout_input(EmailBin, _TotalAmount, _SplitCount) ->
+    {ok, #{email => EmailBin, per_person => 100.0}}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l02", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on broken short-circuit pipeline, but got PASSED")
+		}
+		var pipelineFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "checkout_pipeline" && st.Status == "failed" {
+				pipelineFailed = true
+				break
+			}
+		}
+		if !pipelineFailed {
+			t.Errorf("Expected checkout_pipeline to fail, stages: %+v", report.Stages)
 		}
 	})
 }

@@ -3552,6 +3552,28 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l01` and its 3 negative regression tests in `12.83s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed `ch06-l01 | 4/4 tests passed`.
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 226: Spec 04 / Spec 08 Anti-Spoiler Audit, Safe Operations & Return Values ({ok, Val} | {error, Reason}) vs. Exceptions, AST Hardening & Live Tri-Verification of Chapter 6 Lecture 2 (`ch06-l02`)
+
+- [x] **226.1: Spec 04/08 Pedagogical Anti-Spoiler Audit & Erlang/AST Hardening (`ch06-l02`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch06.ts` (`ch06-l02`, `domain_validator.erl`) against Spec 04, 07, and 08.
+  - Re-ordered Spec 04 layout so `## Official Erlang Docs & Function Reference` (`binary:split/2,3`, `binary:match/2`) precedes `## Parallel Worked Example`.
+  - Replaced 1-to-1 transliteration clone (`network_interface_validator.erl`) with domain-distinct real-time audio broadcast validator `## Parallel Worked Example` (`audio_stream_validator.erl`) across 4 execution phases (`Phase 1: Guard-Checked Arithmetic Bounds (calculate_frame_duration/2)`, `Phase 2: Discrete State Invariant Membership (validate_sample_depth/1)`, `Phase 3: Binary Delimiter Inspection (validate_stream_uri/1)`, `Phase 4: Composing Multi-Stage Validation Pipelines with Short-Circuiting (configure_audio_channel/3)`) accompanied by deep architectural notes on returning tagged tuples on the BEAM heap vs. expensive exception stack traces.
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across all 4 exported functions (`safe_divide/2`, `check_amount/1`, `validate_email/1`, `process_checkout_input/3`) with zero Erlang syntax leaks or code backticks in prompt bullets.
+  - Aligned 10/10 plain-English `%% @doc` contracts across all 4 code representations (`files[0].content`, `starterCode`, `solutionFiles['src/domain_validator.erl']`, `solutionCode`).
+  - Scaffolding starter pack with `_` prefixed parameters (`_Numerator`, `_Denominator`, `_Amount`, `_EmailBin`, `_TotalAmount`, `_SplitCount`) compiling cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0).
+  - Configured `astRules` (`forbiddenConstructs: ['try_catch']`, `forbiddenCalls: ['erlang:error/1', 'erlang:error/2', 'erlang:throw/1', 'erlang:exit/1']`).
+- [x] **226.2: Go Orchestrator Runner & Safe Return Tuple AST Verification Hardening (`ch06-l02`)**:
+  - Upgraded `buildChapterRunScript` in `services/orchestrator/internal/bridge/erl_runner_chapters.go` to evaluate all 3 visible tests (`T1_Res`: safe division success & zero division, `T2_Res`: email binary validation positive & negative, `T3_Res`: composite checkout pipeline with per-person share calculation) and return `AllResults = [T1_Res, T2_Res, T3_Res]`.
+  - Decoupled catch variables (`Err1`–`Err3`) from try-body result variables (`R1`–`R3`) to avoid Erlang `unsafe_var` scope traps.
+  - Added `S1_Ast` AST inspection stage to `buildChapterVerificationScript` using `bf_ast_verifier:verify_rules/2` enforcing `forbidden_constructs => [try_catch]` and `forbidden_calls => [{erlang, error, any}, {erlang, throw, any}, {erlang, exit, any}]` (5 total verification stages).
+  - Expanded `services/orchestrator/internal/bridge/ch06_verification_test.go` with positive verification (100% score, 5/5 stages passed, 3/3 visible tests verified) and 3 negative regression subtests (`ch06-l02_Negative_Missing_Export`, `ch06-l02_Negative_try_catch_AST_Violation`, `ch06-l02_Negative_Broken_Short_Circuit`).
+- [x] **226.3: Mandatory Live Tri-Verification & Full Test Suite Certification (`ch06-l02`)**:
+  - **Parallel Worked Example (`audio_stream_validator.erl`)**: Extracted directly from `ch06.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with all 4 phases passing cleanly (`#{depth => 24, uri => <<"rtp://audio.beamforge.net:5004">>, duration_ms => 10.0}`).
+  - **Starter Pack (`domain_validator.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0), loads cleanly on OTP, and safely fails tests without compiler or syntax crashes.
+  - **Solution Pack (`domain_validator.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/domain_validator.erl'] === solutionCode`), compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `forbidden_constructs => [try_catch]` and forbidden exception calls, and passed 100% of visible test cases (3/3 passed).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l02` and its 3 negative regression tests in `16.03s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed `ch06-l02 | 3/3 tests passed`.
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
 
 
 
