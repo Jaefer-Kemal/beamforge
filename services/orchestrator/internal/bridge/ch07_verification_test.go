@@ -172,39 +172,7 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `
 
-	tests := []struct {
-		name         string
-		exerciseID   string
-		files        map[string]string
-		wantScore    int
-		wantStages   int
-		visibleCount int
-	}{
-		{
-			name:       "ch07-l01 OTP Intro Demo",
-			exerciseID: "ch07-l01",
-			files: map[string]string{
-				"src/otp_intro_demo.erl": otpIntroDemoSolution,
-			},
-			wantScore:    100,
-			wantStages:   4,
-			visibleCount: 1,
-		},
-		{
-			name:         "ch07-l02 Wallet Server",
-			exerciseID:   "ch07-l02",
-			files: map[string]string{
-				"src/wallet_server.erl": walletServerSolution,
-			},
-			wantScore:    100,
-			wantStages:   5,
-			visibleCount: 2,
-		},
-		{
-			name:       "ch07-l03 Session TTL Server",
-			exerciseID: "ch07-l03",
-			files: map[string]string{
-				"src/session_ttl_server.erl": `-module(session_ttl_server).
+	const sessionTtlServerSolution = `-module(session_ttl_server).
 -behaviour(gen_server).
 
 -export([
@@ -215,6 +183,7 @@ code_change(_OldVsn, State, _Extra) ->
     stop/1
 ]).
 
+%% gen_server Callbacks
 -export([
     init/1,
     handle_continue/2,
@@ -225,6 +194,7 @@ code_change(_OldVsn, State, _Extra) ->
     code_change/3
 ]).
 
+%% Client API
 start_link(TtlSeconds) when is_integer(TtlSeconds), TtlSeconds > 0 ->
     gen_server:start_link(?MODULE, TtlSeconds, []).
 
@@ -240,6 +210,7 @@ get_active_count(Pid) ->
 stop(Pid) ->
     gen_server:stop(Pid).
 
+%% gen_server Callbacks
 init(TtlSeconds) ->
     {ok, #{ttl => TtlSeconds, sessions => #{}}, {continue, hydrate_defaults}}.
 
@@ -284,8 +255,45 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-`,
+`
+
+	tests := []struct {
+		name         string
+		exerciseID   string
+		files        map[string]string
+		wantScore    int
+		wantStages   int
+		visibleCount int
+	}{
+		{
+			name:       "ch07-l01 OTP Intro Demo",
+			exerciseID: "ch07-l01",
+			files: map[string]string{
+				"src/otp_intro_demo.erl": otpIntroDemoSolution,
 			},
+			wantScore:    100,
+			wantStages:   4,
+			visibleCount: 1,
+		},
+		{
+			name:         "ch07-l02 Wallet Server",
+			exerciseID:   "ch07-l02",
+			files: map[string]string{
+				"src/wallet_server.erl": walletServerSolution,
+			},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 2,
+		},
+		{
+			name:       "ch07-l03 Session TTL Server",
+			exerciseID: "ch07-l03",
+			files: map[string]string{
+				"src/session_ttl_server.erl": sessionTtlServerSolution,
+			},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 2,
 		},
 		{
 			name:       "ch07-l04 Async Report Server",
@@ -1348,6 +1356,348 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		if !overdraftFailed {
 			t.Errorf("Expected insufficient_funds_protection to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l03 Negative Missing send_after AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch07-l03"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/session_ttl_server.erl": `-module(session_ttl_server).
+-behaviour(gen_server).
+
+-export([
+    start_link/1,
+    create_session/2,
+    is_valid/2,
+    get_active_count/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_continue/2,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(TtlSeconds) when is_integer(TtlSeconds), TtlSeconds > 0 ->
+    gen_server:start_link(?MODULE, TtlSeconds, []).
+
+create_session(Pid, SessionId) ->
+    gen_server:call(Pid, {create_session, SessionId}).
+
+is_valid(Pid, SessionId) ->
+    gen_server:call(Pid, {is_valid, SessionId}).
+
+get_active_count(Pid) ->
+    gen_server:call(Pid, get_active_count).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init(TtlSeconds) ->
+    {ok, #{ttl => TtlSeconds, sessions => #{}}, {continue, hydrate_defaults}}.
+
+%% BUG: Does not call erlang:send_after/3!
+handle_continue(hydrate_defaults, State = #{sessions := Sessions}) ->
+    Now = erlang:system_time(second),
+    NewSessions = maps:put(<<"guest">>, Now, Sessions),
+    {noreply, State#{sessions := NewSessions}}.
+
+handle_call({create_session, SessionId}, _From, State = #{sessions := Sessions}) ->
+    Now = erlang:system_time(second),
+    NewSessions = maps:put(SessionId, Now, Sessions),
+    {reply, ok, State#{sessions := NewSessions}};
+
+handle_call({is_valid, SessionId}, _From, State = #{ttl := Ttl, sessions := Sessions}) ->
+    Now = erlang:system_time(second),
+    Valid = case maps:find(SessionId, Sessions) of
+        {ok, CreatedAt} -> (Now - CreatedAt) =< Ttl;
+        error -> false
+    end,
+    {reply, Valid, State};
+
+handle_call(get_active_count, _From, State = #{sessions := Sessions}) ->
+    {reply, maps:size(Sessions), State};
+
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(cleanup_tick, State = #{ttl := Ttl, sessions := Sessions}) ->
+    Now = erlang:system_time(second),
+    ActiveSessions = maps:filter(fun(_Id, CreatedAt) -> (Now - CreatedAt) =< Ttl end, Sessions),
+    {noreply, State#{sessions := ActiveSessions}};
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l03", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing send_after AST check, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_continue_and_timers" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_continue_and_timers to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l03 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-export-ch07-l03"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/session_ttl_server.erl": `-module(session_ttl_server).
+-behaviour(gen_server).
+
+%% BUG: Missing is_valid/2 export
+-export([
+    start_link/1,
+    create_session/2,
+    get_active_count/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_continue/2,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(TtlSeconds) when is_integer(TtlSeconds), TtlSeconds > 0 ->
+    gen_server:start_link(?MODULE, TtlSeconds, []).
+
+create_session(Pid, SessionId) ->
+    gen_server:call(Pid, {create_session, SessionId}).
+
+is_valid(Pid, SessionId) ->
+    gen_server:call(Pid, {is_valid, SessionId}).
+
+get_active_count(Pid) ->
+    gen_server:call(Pid, get_active_count).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init(TtlSeconds) ->
+    {ok, #{ttl => TtlSeconds, sessions => #{}}, {continue, hydrate_defaults}}.
+
+handle_continue(hydrate_defaults, State = #{sessions := Sessions}) ->
+    Now = erlang:system_time(second),
+    NewSessions = maps:put(<<"guest">>, Now, Sessions),
+    erlang:send_after(1000, self(), cleanup_tick),
+    {noreply, State#{sessions := NewSessions}}.
+
+handle_call({create_session, SessionId}, _From, State = #{sessions := Sessions}) ->
+    Now = erlang:system_time(second),
+    NewSessions = maps:put(SessionId, Now, Sessions),
+    {reply, ok, State#{sessions := NewSessions}};
+
+handle_call({is_valid, SessionId}, _From, State = #{ttl := Ttl, sessions := Sessions}) ->
+    Now = erlang:system_time(second),
+    Valid = case maps:find(SessionId, Sessions) of
+        {ok, CreatedAt} -> (Now - CreatedAt) =< Ttl;
+        error -> false
+    end,
+    {reply, Valid, State};
+
+handle_call(get_active_count, _From, State = #{sessions := Sessions}) ->
+    {reply, maps:size(Sessions), State};
+
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(cleanup_tick, State = #{ttl := Ttl, sessions := Sessions}) ->
+    Now = erlang:system_time(second),
+    ActiveSessions = maps:filter(fun(_Id, CreatedAt) -> (Now - CreatedAt) =< Ttl end, Sessions),
+    erlang:send_after(1000, self(), cleanup_tick),
+    {noreply, State#{sessions := ActiveSessions}};
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l03", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l03 Negative Missing handle_continue Hydration", func(t *testing.T) {
+		sessionID := "test-neg-continue-ch07-l03"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/session_ttl_server.erl": `-module(session_ttl_server).
+-behaviour(gen_server).
+
+-export([
+    start_link/1,
+    create_session/2,
+    is_valid/2,
+    get_active_count/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_continue/2,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(TtlSeconds) when is_integer(TtlSeconds), TtlSeconds > 0 ->
+    gen_server:start_link(?MODULE, TtlSeconds, []).
+
+create_session(Pid, SessionId) ->
+    gen_server:call(Pid, {create_session, SessionId}).
+
+is_valid(Pid, SessionId) ->
+    gen_server:call(Pid, {is_valid, SessionId}).
+
+get_active_count(Pid) ->
+    gen_server:call(Pid, get_active_count).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+%% BUG: Omits {continue, hydrate_defaults} in init/1!
+init(TtlSeconds) ->
+    {ok, #{ttl => TtlSeconds, sessions => #{}}}.
+
+handle_continue(hydrate_defaults, State = #{sessions := Sessions}) ->
+    Now = erlang:system_time(second),
+    NewSessions = maps:put(<<"guest">>, Now, Sessions),
+    erlang:send_after(1000, self(), cleanup_tick),
+    {noreply, State#{sessions := NewSessions}}.
+
+handle_call({create_session, SessionId}, _From, State = #{sessions := Sessions}) ->
+    Now = erlang:system_time(second),
+    NewSessions = maps:put(SessionId, Now, Sessions),
+    {reply, ok, State#{sessions := NewSessions}};
+
+handle_call({is_valid, SessionId}, _From, State = #{ttl := Ttl, sessions := Sessions}) ->
+    Now = erlang:system_time(second),
+    Valid = case maps:find(SessionId, Sessions) of
+        {ok, CreatedAt} -> (Now - CreatedAt) =< Ttl;
+        error -> false
+    end,
+    {reply, Valid, State};
+
+handle_call(get_active_count, _From, State = #{sessions := Sessions}) ->
+    {reply, maps:size(Sessions), State};
+
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(cleanup_tick, State = #{ttl := Ttl, sessions := Sessions}) ->
+    Now = erlang:system_time(second),
+    ActiveSessions = maps:filter(fun(_Id, CreatedAt) -> (Now - CreatedAt) =< Ttl end, Sessions),
+    erlang:send_after(1000, self(), cleanup_tick),
+    {noreply, State#{sessions := ActiveSessions}};
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l03", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing continue hydration, but got PASSED")
+		}
+		var continueFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "handle_continue_hydration" && st.Status == "failed" {
+				continueFailed = true
+				break
+			}
+		}
+		if !continueFailed {
+			t.Errorf("Expected handle_continue_hydration to fail, stages: %+v", report.Stages)
 		}
 	})
 }

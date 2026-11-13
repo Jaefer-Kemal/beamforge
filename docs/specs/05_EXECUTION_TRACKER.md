@@ -3857,6 +3857,38 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 14 subtests across Chapter 7 in `26.54s`; `TEST_CHAPTER=7 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l02 | 2/2 tests passed` in `13.76s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+## Phase 237: Chapter 7 Lecture 3 (`ch07-l03`) Deep Pedagogical Audit, Anti-Spoiler Protocol & Exercise Hardening
+
+- [x] **237.1: Curriculum Pedagogical Audit & Exercise Structuring (`ch07-l03`, `session_ttl_server.erl`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch07.ts` (`ch07-l03`, `session_ttl_server.erl`) against Spec 04, 07, and 08.
+  - Injected `## Official Erlang Docs & Function Reference` (`gen_server:start_link/3,4`, `gen_server:call/2,3`, `gen_server:stop/1,3`, `erlang:send_after/3`, `erlang:system_time/1`, `maps:filter/2`) preceding `## Parallel Worked Example`.
+  - Deepened Parallel Worked Example (`device_lease_manager.erl`) with a comprehensive 4-step architectural deep dive:
+    - *Step 1: Non-Blocking Startup & Supervisor Handshake (`init/1`)*
+    - *Step 2: Immediate Post-Init State Warmup (`handle_continue/2`)*
+    - *Step 3: Periodic Background Sweep via `erlang:send_after/3` (`handle_info/2`)*
+    - *Step 4: Synchronous State Queries with Backpressure (`handle_call/3`)*
+  - Structured `## Assignment Specification` with clean 3-part layout (`Input`, `Behavior`, `Examples`) for all exported client functions (`start_link/1`, `create_session/2`, `is_valid/2`, `get_active_count/1`, `stop/1`) and OTP callbacks (`init/1`, `handle_continue/2`, `handle_info/2`).
+  - Added `## Rules & Verification Constraints` enforcing callback exports, non-blocking post-init continuation, and periodic sweep timers.
+  - Expanded `otpDocCards` with 6 complete cards (`start_link`, `call`, `stop`, `send_after`, `system_time`, `filter`).
+  - Normalized visible test IDs to `tc-ch07-03-1` and `tc-ch07-03-2`.
+  - Audited starter scaffolding (`starterCode` and `files[0].content`): prefixed unused stub parameters with `_` (`create_session(_Pid, _SessionId)`, `is_valid(_Pid, _SessionId)`, `get_active_count(_Pid)`), ensuring starter templates compile cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0). Verified 100% parity across `starterCode` and `files[0].content`, and across `solutionCode` and `solutionFiles['src/session_ttl_server.erl']`.
+
+- [x] **237.2: Go Orchestrator Hardening (`ch07_verification_test.go`)**:
+  - In `ch07_verification_test.go`:
+    - Defined `const sessionTtlServerSolution = ...` matching `ch07.ts` line-for-line.
+    - Updated `tests` slice with `wantScore: 100, wantStages: 5, visibleCount: 2` for `ch07-l03`.
+    - Added 3 negative regression subtests for `ch07-l03`:
+      1. `ch07-l03 Negative Missing send_after AST Violation`: verifies rejection in `ast_continue_and_timers` when `erlang:send_after/3` is omitted.
+      2. `ch07-l03 Negative Missing Export`: verifies rejection in `compile_and_export_audit` when `is_valid/2` is omitted from exports.
+      3. `ch07-l03 Negative Missing handle_continue Hydration`: verifies rejection in `handle_continue_hydration` when `init/1` omits `{continue, hydrate_defaults}`.
+
+- [x] **237.3: Mandatory Live Tri-Verification Certification (`ch07-l03`)**:
+  - **Parallel Worked Example (`device_lease_manager.erl`)**: Extracted directly from `ch07.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with edge reservation, lease acquisition, active count, and clean stop passing cleanly.
+  - **Starter Pack (`session_ttl_server.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0) and loads cleanly on OTP.
+  - **Solution Pack (`session_ttl_server.erl`)**: Verified parity, compiled with `+debug_info -Wall -Werror` (0 warnings), passed `bf_ast_verifier` rules (`gen_server:start_link/3`, `gen_server:call/2`, `erlang:send_after/3`), executed 100% of visible test cases (2/2 passed), and passed all 5 stages of Go verification.
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 17 subtests across Chapter 7 in `52.41s`; `TEST_CHAPTER=7 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l03 | 2/2 tests passed` in `11.84s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
 
 
 

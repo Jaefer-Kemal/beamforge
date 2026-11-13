@@ -1339,7 +1339,18 @@ handle_info(cleanup_tick, State) ->
 > \`handle_info(_Unknown, State) -> {noreply, State}.\`
 > If an unexpected message (such as a delayed monitor \`'DOWN'\` or an OS signal) arrives and no clause matches, your \`gen_server\` will immediately crash with a \`function_clause\` runtime error!
 
-## Parallel Worked Example: The Device Lease Coordinator
+## Official Erlang Docs & Function Reference
+
+Before inspecting the parallel lease coordinator, review the key OTP lifecycle and timer primitives:
+
+- **\`gen_server:start_link/3,4\`** — Spawns and links a new \`gen_server\` process, synchronously calling \`Mod:init/1\` before returning. Atomically ties the lifecycle of the child server to the caller or supervisor.
+- **\`gen_server:call/2,3\`** — Sends a synchronous request to the server and blocks caller execution until a reply arrives (or 5,000ms timeout expires). Provides natural backpressure and monitor-based crash detection.
+- **\`gen_server:stop/1,3\`** — Synchronously requests clean termination of the server with reason \`normal\`.
+- **\`erlang:send_after/3\`** — Starts a timer that delivers \`Msg\` directly to \`Dest\`'s mailbox after \`TimeMs\` milliseconds. Arrives unwrapped in \`handle_info/2\`.
+- **\`erlang:system_time/1\`** — Returns the current OS system time in the specified time unit (\`second\`, \`millisecond\`, etc.).
+- **\`maps:filter/2\`** — Evaluates predicate fun \`Pred(Key, Value)\` for every key-value pair in \`Map\`, returning a map of matching entries.
+
+## Parallel Worked Example: The Device Lease Coordinator (device_lease_manager.erl)
 
 The following production-style \`device_lease_manager\` module manages temporary edge-node hardware leases. It demonstrates two foundational OTP architectural patterns:
 1. **Non-blocking boot**: Returning \`{ok, State, {continue, Term}}\` from \`init/1\` so the parent supervisor unblocks immediately, followed by post-boot warmup in \`handle_continue/2\`.
@@ -1484,6 +1495,20 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 \`\`\`
 
+### Architectural Deep Dive: What the BEAM is Doing
+
+1. **Step 1: Non-Blocking Startup & Supervisor Handshake (\`init/1\`)**
+   When \`device_lease_manager:start_link(10)\` is called, the caller invokes \`gen_server:start_link/3\`. The child process executes \`init(10)\`, constructs its initial state map, and returns \`{ok, InitialState, {continue, warmup_master_controller}}\`. The OTP engine immediately completes the startup handshake and returns \`{ok, ChildPid}\` to the supervisor in microseconds without waiting for edge controllers to warm up.
+
+2. **Step 2: Immediate Post-Init State Warmup (\`handle_continue/2\`)**
+   Before the \`gen_server\` engine checks its mailbox for external client calls, it immediately evaluates \`handle_continue(warmup_master_controller, State)\`. The callback registers the default \`<<"edge_master_01">>\` reservation, arms the periodic audit timer via \`erlang:send_after(1000, self(), audit_leases)\`, and transitions to ready state.
+
+3. **Step 3: Periodic Background Sweep via \`erlang:send_after/3\` (\`handle_info/2\`)**
+   When the 1,000ms timer fires, the ERTS timer wheel delivers raw atom \`audit_leases\` to the process mailbox. Because this message lacks the \`$gen_call\` or \`$gen_cast\` prefix, the OTP engine routes it directly to \`handle_info/2\`. The callback purges expired leases using \`maps:filter/2\`, re-arms the next 1,000ms timer, and returns \`{noreply, State#{leases := ValidLeases}}\`.
+
+4. **Step 4: Synchronous State Queries with Backpressure (\`handle_call/3\`)**
+   When client processes query \`is_leased(Pid, DeviceId)\` or \`active_count(Pid)\`, the caller sends a tagged synchronous call and blocks. The server evaluates validity against \`Now - AcquiredAt =< Timeout\` and returns \`{reply, Result, State}\`. Callers cannot overwhelm the server faster than the server can process calls.
+
 ## Assignment Specification
 
 Implement \`src/session_ttl_server.erl\` as a production-grade OTP \`gen_server\` that stores active user session tokens and automatically purges expired records using periodic background timers.
@@ -1569,6 +1594,33 @@ Implement \`src/session_ttl_server.erl\` as a production-grade OTP \`gen_server\
     },
     otpDocCards: [
       {
+        functionName: 'start_link',
+        module: 'gen_server',
+        signature: 'gen_server:start_link(Mod, Args, Opts) -> {ok, Pid} | {error, Reason}',
+        typesSpec: ['Mod = module()', 'Args = term()', 'Opts = list()'],
+        description: 'Spawns a gen_server linked to the caller, synchronously invoking Mod:init(Args).',
+        complexityNote: 'O(1) process creation with atomic link.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#start_link/3',
+      },
+      {
+        functionName: 'call',
+        module: 'gen_server',
+        signature: 'gen_server:call(ServerRef, Request) -> Reply',
+        typesSpec: ['ServerRef = pid() | atom()', 'Request = term()', 'Reply = term()'],
+        description: 'Performs a synchronous call to ServerRef, waiting for a reply with a default 5000ms timeout.',
+        complexityNote: 'Synchronous round-trip; provides natural flow-control backpressure.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#call/2',
+      },
+      {
+        functionName: 'stop',
+        module: 'gen_server',
+        signature: 'gen_server:stop(ServerRef) -> ok',
+        typesSpec: ['ServerRef = pid() | atom()'],
+        description: 'Synchronously requests clean termination of the gen_server process with exit reason normal.',
+        complexityNote: 'O(1) synchronous shutdown protocol.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#stop/1',
+      },
+      {
         functionName: 'send_after',
         module: 'erlang',
         signature: 'erlang:send_after(TimeMs, Dest, Msg) -> TimerRef',
@@ -1585,6 +1637,15 @@ Implement \`src/session_ttl_server.erl\` as a production-grade OTP \`gen_server\
         description: 'Returns the current OS system time in the requested time unit.',
         complexityNote: 'O(1) hardware clock read.',
         officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#system_time/1',
+      },
+      {
+        functionName: 'filter',
+        module: 'maps',
+        signature: 'maps:filter(Pred, Map) -> Map',
+        typesSpec: ['Pred = fun((Key, Value) -> boolean())', 'Map = map()'],
+        description: 'Returns a map containing entries for which Pred evaluates to true.',
+        complexityNote: 'O(N) full map traversal.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/maps.html#filter/2',
       },
     ],
     starterCode: `-module(session_ttl_server).
@@ -1614,15 +1675,15 @@ start_link(TtlSeconds) when is_integer(TtlSeconds), TtlSeconds > 0 ->
     gen_server:start_link(?MODULE, TtlSeconds, []).
 
 %% @doc Synchronously record a session timestamped at the current system time.
-create_session(Pid, SessionId) ->
+create_session(_Pid, _SessionId) ->
     ok.
 
 %% @doc Synchronously check if a session exists and has not exceeded its TTL.
-is_valid(Pid, SessionId) ->
+is_valid(_Pid, _SessionId) ->
     false.
 
 %% @doc Synchronously query the total count of active sessions.
-get_active_count(Pid) ->
+get_active_count(_Pid) ->
     0.
 
 %% @doc Gracefully terminate the server.
@@ -1774,15 +1835,15 @@ start_link(TtlSeconds) when is_integer(TtlSeconds), TtlSeconds > 0 ->
     gen_server:start_link(?MODULE, TtlSeconds, []).
 
 %% @doc Synchronously record a session timestamped at the current system time.
-create_session(Pid, SessionId) ->
+create_session(_Pid, _SessionId) ->
     ok.
 
 %% @doc Synchronously check if a session exists and has not exceeded its TTL.
-is_valid(Pid, SessionId) ->
+is_valid(_Pid, _SessionId) ->
     false.
 
 %% @doc Synchronously query the total count of active sessions.
-get_active_count(Pid) ->
+get_active_count(_Pid) ->
     0.
 
 %% @doc Gracefully terminate the server.
@@ -1909,14 +1970,14 @@ code_change(_OldVsn, State, _Extra) ->
     },
     visibleTestCases: [
       {
-        id: 'tc1',
+        id: 'tc-ch07-03-1',
         title: 'Non-Blocking Guest Session Hydration',
         erlangCall: 'begin {ok, S} = session_ttl_server:start_link(60), Valid = session_ttl_server:is_valid(S, <<"guest">>), session_ttl_server:stop(S), Valid end',
         expectedOutput: 'true',
         explanation: 'Confirms that handle_continue populated default guest session immediately.',
       },
       {
-        id: 'tc2',
+        id: 'tc-ch07-03-2',
         title: 'Active Session Count Tracking',
         erlangCall: 'begin {ok, S} = session_ttl_server:start_link(60), session_ttl_server:create_session(S, <<"user_101">>), Count = session_ttl_server:get_active_count(S), session_ttl_server:stop(S), Count end',
         expectedOutput: '2',
