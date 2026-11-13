@@ -145,6 +145,55 @@ process_checkout_input(EmailBin, TotalAmount, SplitCount) ->
     end.
 `
 
+	boundaryParserSolution := `-module(boundary_parser).
+-export([
+    safe_parse_payload/1,
+    with_resource_cleanup/3,
+    process_transaction_log/2
+]).
+
+%% @doc Safely decodes an external binary term using [safe] atom protection.
+safe_parse_payload(Binary) when is_binary(Binary) ->
+    try erlang:binary_to_term(Binary, [safe]) of
+        Term ->
+            {ok, Term}
+    catch
+        Class:Reason ->
+            {error, {Class, Reason}}
+    end;
+safe_parse_payload(_Other) ->
+    {error, {error, badarg}}.
+
+%% @doc Executes ActionFun with an acquired resource, guaranteeing ReleaseFun in after.
+with_resource_cleanup(AcquireFun, ActionFun, ReleaseFun)
+  when is_function(AcquireFun, 0), is_function(ActionFun, 1), is_function(ReleaseFun, 1) ->
+    Resource = AcquireFun(),
+    try ActionFun(Resource) of
+        Result ->
+            {ok, Result}
+    catch
+        Class:Reason ->
+            {error, {Class, Reason}}
+    after
+        ReleaseFun(Resource)
+    end.
+
+%% @doc Iterates through transaction lines, ensuring file close notification on exit.
+process_transaction_log(LinesList, CloseNotifyPid)
+  when is_list(LinesList), is_pid(CloseNotifyPid) ->
+    try
+        lists:foreach(fun(Line) ->
+            case Line of
+                <<"CORRUPT_LINE">> -> erlang:error(transaction_processing_failed);
+                _ValidLine         -> ok
+            end
+        end, LinesList),
+        ok
+    after
+        CloseNotifyPid ! file_handle_closed
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -167,6 +216,14 @@ process_checkout_input(EmailBin, TotalAmount, SplitCount) ->
 			name:         "ch06-l02 Safe Operations & Return Values",
 			exerciseID:   "ch06-l02",
 			files:        map[string]string{"src/domain_validator.erl": domainValidatorSolution},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 3,
+		},
+		{
+			name:         "ch06-l03 Guaranteed Resource Cleanup",
+			exerciseID:   "ch06-l03",
+			files:        map[string]string{"src/boundary_parser.erl": boundaryParserSolution},
 			wantScore:    100,
 			wantStages:   5,
 			visibleCount: 3,
@@ -935,6 +992,189 @@ process_checkout_input(EmailBin, _TotalAmount, _SplitCount) ->
 		}
 		if !pipelineFailed {
 			t.Errorf("Expected checkout_pipeline to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch06-l03 ──────────────────────────────
+	t.Run("ch06-l03 Negative Missing try_catch AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch06-l03"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/boundary_parser.erl": `-module(boundary_parser).
+-export([
+    safe_parse_payload/1,
+    with_resource_cleanup/3,
+    process_transaction_log/2
+]).
+
+%% VIOLATION: Does not use try...catch!
+safe_parse_payload(Binary) when is_binary(Binary) ->
+    {ok, erlang:binary_to_term(Binary, [safe])};
+safe_parse_payload(_) ->
+    {error, {error, badarg}}.
+
+with_resource_cleanup(AcquireFun, ActionFun, ReleaseFun) ->
+    Res = AcquireFun(),
+    Out = ActionFun(Res),
+    ReleaseFun(Res),
+    {ok, Out}.
+
+process_transaction_log(_Lines, CloseNotifyPid) ->
+    CloseNotifyPid ! file_handle_closed,
+    ok.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l03", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing try_catch AST violation, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_try_catch_audit" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_try_catch_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l03 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-export-ch06-l03"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/boundary_parser.erl": `-module(boundary_parser).
+-export([
+    safe_parse_payload/1,
+    process_transaction_log/2
+]).
+
+safe_parse_payload(Binary) when is_binary(Binary) ->
+    try erlang:binary_to_term(Binary, [safe]) of
+        Term -> {ok, Term}
+    catch
+        Class:Reason -> {error, {Class, Reason}}
+    end;
+safe_parse_payload(_) ->
+    {error, {error, badarg}}.
+
+process_transaction_log(_Lines, CloseNotifyPid) ->
+    CloseNotifyPid ! file_handle_closed,
+    ok.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l03", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing with_resource_cleanup export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l03 Negative Missing after Cleanup", func(t *testing.T) {
+		sessionID := "test-neg-cleanup-ch06-l03"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/boundary_parser.erl": `-module(boundary_parser).
+-export([
+    safe_parse_payload/1,
+    with_resource_cleanup/3,
+    process_transaction_log/2
+]).
+
+safe_parse_payload(Binary) when is_binary(Binary) ->
+    try erlang:binary_to_term(Binary, [safe]) of
+        Term -> {ok, Term}
+    catch
+        Class:Reason -> {error, {Class, Reason}}
+    end;
+safe_parse_payload(_) ->
+    {error, {error, badarg}}.
+
+%% BUG: ReleaseFun is called only on success, NOT in an after block!
+with_resource_cleanup(AcquireFun, ActionFun, ReleaseFun) ->
+    Resource = AcquireFun(),
+    try ActionFun(Resource) of
+        Result ->
+            ReleaseFun(Resource),
+            {ok, Result}
+    catch
+        Class:Reason ->
+            {error, {Class, Reason}}
+    end.
+
+process_transaction_log(LinesList, CloseNotifyPid) when is_list(LinesList), is_pid(CloseNotifyPid) ->
+    try
+        lists:foreach(fun(Line) ->
+            case Line of
+                <<"CORRUPT_LINE">> -> erlang:error(transaction_processing_failed);
+                _ValidLine         -> ok
+            end
+        end, LinesList),
+        ok
+    after
+        CloseNotifyPid ! file_handle_closed
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l03", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing after cleanup, but got PASSED")
+		}
+		var cleanupFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "guaranteed_resource_cleanup" && st.Status == "failed" {
+				cleanupFailed = true
+				break
+			}
+		}
+		if !cleanupFailed {
+			t.Errorf("Expected guaranteed_resource_cleanup to fail, stages: %+v", report.Stages)
 		}
 	})
 }

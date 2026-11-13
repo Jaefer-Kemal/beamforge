@@ -967,56 +967,6 @@ safe_parse(Bin) ->
     end.
 \`\`\`
 
-## Parallel Worked Example
-
-The following module manages telemetry stream channels, ensuring deterministic channel release and frame unpacking with safe atom bounds:
-
-\`\`\`erlang
--module(telemetry_stream_sink).
--export([
-    safe_unpack_frame/1,
-    with_stream_channel/3,
-    flush_metrics_stream/2
-]).
-
-%% @doc Safely decodes a binary frame, intercepting format crashes.
-safe_unpack_frame(<<Len:16/big, Payload:Len/binary>>) ->
-    try binary_to_term(Payload, [safe]) of
-        Term -> {ok, Term}
-    catch
-        Class:Reason -> {error, {Class, Reason}}
-    end;
-safe_unpack_frame(_InvalidFrame) ->
-    {error, {error, invalid_frame_header}}.
-
-%% @doc Executes a transmission action within an assured channel lifecycle.
-with_stream_channel(OpenFun, ActionFun, CloseFun) when is_function(OpenFun, 0),
-                                                       is_function(ActionFun, 1),
-                                                       is_function(CloseFun, 1) ->
-    Channel = OpenFun(),
-    try ActionFun(Channel) of
-        Result -> {ok, Result}
-    catch
-        Class:Reason -> {error, {Class, Reason}}
-    after
-        CloseFun(Channel)
-    end.
-
-%% @doc Flushes a batch of metrics records, ensuring drain notification to SinkPid.
-flush_metrics_stream(BatchList, SinkPid) when is_list(BatchList), is_pid(SinkPid) ->
-    try
-        lists:foreach(fun(Item) ->
-            case Item of
-                {anomaly, Reason} -> erlang:error({sensor_anomaly, Reason});
-                _ValidRecord      -> ok
-            end
-        end, BatchList),
-        ok
-    after
-        SinkPid ! metrics_stream_drained
-    end.
-\`\`\`
-
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
@@ -1028,45 +978,118 @@ erlang:binary_to_term(Binary, Options) -> Term
     Term = term()
 \`\`\`
 
+The \`[safe]\` option prevents malicious actors from causing atom table exhaustion by rejecting any atom not already registered in the VM runtime.
+
+## Parallel Worked Example
+
+The following module implements a secure API session gateway, decoding versioned authentication tokens and ensuring ephemeral key destruction using guaranteed \`after\` cleanup blocks:
+
+\`\`\`erlang
+-module(secure_session_gateway).
+-export([
+    decode_session_envelope/1,
+    with_ephemeral_key/2,
+    drain_audit_records/2
+]).
+
+%% @doc Phase 1: Decodes an external session binary token safely with [safe] atom protection.
+%% Intercepts format exceptions and returns normalized {error, {Class, Reason}} tuples.
+decode_session_envelope(<<1:8, Payload/binary>>) ->
+    try erlang:binary_to_term(Payload, [safe]) of
+        SessionMap when is_map(SessionMap) ->
+            {ok, SessionMap};
+        OtherTerm ->
+            {error, {error, {unexpected_session_shape, OtherTerm}}}
+    catch
+        Class:Reason ->
+            {error, {Class, Reason}}
+    end;
+decode_session_envelope(_InvalidHeader) ->
+    {error, {error, invalid_version_header}}.
+
+%% @doc Phase 2: Allocates an ephemeral crypto key, guaranteeing its destruction in after.
+%% The return value of the after block is discarded; the expression evaluates to the outcome of try or catch.
+with_ephemeral_key(KeyPrefix, WorkerFun) when is_binary(KeyPrefix), is_function(WorkerFun, 1) ->
+    EphemeralKey = <<KeyPrefix/binary, "_ephemeral_key_ref">>,
+    try WorkerFun(EphemeralKey) of
+        Outcome ->
+            {ok, Outcome}
+    catch
+        Class:Reason ->
+            {error, {Class, Reason}}
+    after
+        %% Deterministic teardown guaranteed across both normal returns and crashes!
+        shred_key(EphemeralKey)
+    end.
+
+%% @doc Internal helper simulating hardware/memory cryptographic key destruction.
+shred_key(_Key) ->
+    ok.
+
+%% @doc Phase 3: Traverses audit event logs, ensuring pipe flush signal to AuditSinkPid.
+%% Even if an unhandled security anomaly aborts iteration, the after block delivers flush signal.
+drain_audit_records(AuditRecords, AuditSinkPid) when is_list(AuditRecords), is_pid(AuditSinkPid) ->
+    try
+        lists:foreach(fun(Event) ->
+            case Event of
+                {tamper_detected, Offender} ->
+                    erlang:error({security_alert, Offender});
+                _ValidEvent ->
+                    ok
+            end
+        end, AuditRecords),
+        ok
+    after
+        AuditSinkPid ! audit_pipeline_flushed
+    end.
+\`\`\`
+
+### Architectural Breakdown:
+1. **Phase 1: Safe Boundary Deserialization (\`decode_session_envelope/1\`)**: Validates protocol version framing and unpacks payload binaries using \`erlang:binary_to_term(Payload, [safe])\` inside a \`try ... of ... catch\` block, returning tagged \`{ok, SessionMap}\` or descriptive error tuples without crashing the ingress worker.
+2. **Phase 2: Scoped Resource Lifecycle (\`with_ephemeral_key/2\`)**: Demonstrates the \`try ... of ... catch ... after\` pattern. The return value of the \`after\` block is discarded, while \`shred_key/1\` is guaranteed to execute even if \`WorkerFun\` raises an unexpected error or exits abnormally.
+3. **Phase 3: Guaranteed Cleanup During Failure (\`drain_audit_records/2\`)**: Demonstrates \`try ... after\` without \`catch\`. Unhandled domain anomalies propagate upward to supervisors, yet the \`after\` block reliably delivers \`audit_pipeline_flushed\` to prevent downstream queues from hanging.
+
 ## Assignment Specification
 
 Implement \`src/boundary_parser.erl\` exporting \`safe_parse_payload/1\`, \`with_resource_cleanup/3\`, and \`process_transaction_log/2\`:
 
 ### 1. \`safe_parse_payload/1\`
-- **Input**: \`Binary\` (binary external term representation).
-- **Behavior**: Safely decodes an untrusted serialized Erlang term using \`erlang:binary_to_term(Binary, [safe])\`.
-  - On valid binary input: returns \`{ok, Term}\`.
-  - On corrupt binary, unknown atom, or non-binary input: intercepts the exception and returns \`{error, {Class, Reason}}\` (e.g., \`{error, {error, badarg}}\`).
+- **Input**: Serialized payload binary (\`binary()\`).
+- **Behavior**: Safely decodes an untrusted external binary term using \`erlang:binary_to_term(Binary, [safe])\` inside a protected \`try ... of ... catch\` block.
+  - If the binary is valid and contains only existing atoms, returns \`{ok, Term}\`.
+  - If the binary is malformed, references non-existent atoms, or is not a binary, intercepts the exception and returns \`{error, {Class, Reason}}\` (e.g. \`{error, {error, badarg}}\`).
 - **Examples**:
   - \`boundary_parser:safe_parse_payload(term_to_binary({user, 101, <<"Alice">>}))\` returns \`{ok, {user, 101, <<"Alice">>}}\`.
   - \`boundary_parser:safe_parse_payload(<<"invalid_bytes_xyz">>)\` returns \`{error, {error, badarg}}\`.
+  - \`boundary_parser:safe_parse_payload(12345)\` returns \`{error, {error, badarg}}\`.
 
 ### 2. \`with_resource_cleanup/3\`
-- **Input**: \`AcquireFun\` (0-arity function), \`ActionFun\` (1-arity function), \`ReleaseFun\` (1-arity function).
+- **Input**: Nullary acquisition function (\`fun(() -> Resource)\`), unary action function (\`fun((Resource) -> Result)\`), unary release function (\`fun((Resource) -> term())\`).
 - **Behavior**:
-  1. Invokes \`Resource = AcquireFun()\`.
-  2. Executes \`ActionFun(Resource)\` within a protected \`try ... of ... catch ... after\` expression.
-  3. Guarantees that \`ReleaseFun(Resource)\` executes in the \`after\` block regardless of whether \`ActionFun\` returns or crashes.
-  4. On successful completion: returns \`{ok, Result}\`.
-  5. On exception: catches the exception and returns \`{error, {Class, Reason}}\`.
+  1. Invokes the acquisition function to obtain the resource term.
+  2. Passes the acquired resource to the action function inside a protected \`try ... of ... catch ... after\` expression.
+  3. Guarantees that the release function is called with the acquired resource inside the \`after\` block regardless of whether the action function succeeds or crashes.
+  4. On normal return: evaluates to \`{ok, Result}\`.
+  5. On exception: catches the exception and evaluates to \`{error, {Class, Reason}}\`.
 - **Examples**:
-  - Returns \`{ok, Result}\` when \`ActionFun\` finishes normally.
-  - Returns \`{error, {error, deliberate_crash}}\` when \`ActionFun\` raises an error, with \`ReleaseFun\` guaranteed to run.
+  - Successfully processes and returns \`{ok, Result}\`, executing release.
+  - Intercepts deliberate crash and returns \`{error, {error, deliberate_crash}}\`, guaranteeing resource release in \`after\`.
 
 ### 3. \`process_transaction_log/2\`
-- **Input**: \`LinesList\` (list of binary log lines), \`CloseNotifyPid\` (pid of the notification recipient).
+- **Input**: List of binary transaction log lines (\`[binary()]\`), process identifier for notification (\`pid()\`).
 - **Behavior**:
-  - Iterates over \`LinesList\`. If any line equals \`<<"CORRUPT_LINE">>\`, raises \`erlang:error(transaction_processing_failed)\`.
+  - Iterates through the list of log lines. If any entry equals the binary \`<<"CORRUPT_LINE">>\`, raises an error exception with the reason atom \`transaction_processing_failed\`.
   - If all lines are valid, returns \`ok\`.
-  - In all execution paths (success or crash), the \`after\` block must deliver the message \`file_handle_closed\` to \`CloseNotifyPid\` (\`CloseNotifyPid ! file_handle_closed\`).
+  - Across all execution paths (both normal completion and unhandled error unwind), the \`after\` block must deliver the message atom \`file_handle_closed\` to the process identified by the notification PID.
 - **Examples**:
   - \`boundary_parser:process_transaction_log([<<"TX1">>, <<"TX2">>], Self)\` returns \`ok\` and delivers \`file_handle_closed\`.
-  - \`boundary_parser:process_transaction_log([<<"TX1">>, <<"CORRUPT_LINE">>], Self)\` raises \`error:transaction_processing_failed\` and delivers \`file_handle_closed\`.
+  - \`boundary_parser:process_transaction_log([<<"TX1">>, <<"CORRUPT_LINE">>], Self)\` raises an error with reason \`transaction_processing_failed\` and delivers \`file_handle_closed\`.
 
 ## Rules & Verification Constraints
 
-- Must export \`safe_parse_payload/1\`, \`with_resource_cleanup/3\`, \`process_transaction_log/2\`.
-- Enforced AST rules: \`requiredConstructs: ["try_catch"]\`, \`requiredCalls: ["erlang:binary_to_term/2"]\`.
+- **Exported API**: Must export \`safe_parse_payload/1\`, \`with_resource_cleanup/3\`, and \`process_transaction_log/2\`.
+- **Enforced AST Rules**: Must utilize \`try...catch\` and make remote calls to \`erlang:binary_to_term/2\`.
+- **Guaranteed Teardown**: Resource release and file closure must execute inside \`after\` blocks.
 `,
     mentalModelCheck: {
       question: 'What happens to the return value of an `after` block in an Erlang `try ... catch ... after` expression?',
@@ -1126,7 +1149,7 @@ end.`,
       {
         id: 'tc-ch06-03-3',
         title: 'Transaction Log Processing with File Close Notification',
-        erlangCall: 'begin boundary_parser:process_transaction_log([<<"tx_1">>, <<"CORRUPT_LINE">>], self()), receive Msg -> Msg after 200 -> timeout end end',
+        erlangCall: 'begin (try boundary_parser:process_transaction_log([<<"tx_1">>, <<"CORRUPT_LINE">>], self()) catch error:transaction_processing_failed -> ok end), receive Msg -> Msg after 200 -> timeout end end',
         expectedOutput: 'file_handle_closed',
         explanation: 'Close notification sent to caller pid in after block even after corrupt line aborted processing.',
       },
@@ -1143,16 +1166,16 @@ end.`,
     process_transaction_log/2
 ]).
 
-%% @doc Safely decodes an untrusted external binary term using [safe] atom protection.
-safe_parse_payload(Binary) ->
+%% @doc Safely decodes an external binary term using [safe] atom protection.
+safe_parse_payload(_Binary) ->
     ok.
 
 %% @doc Executes ActionFun with an acquired resource, guaranteeing ReleaseFun in after.
-with_resource_cleanup(AcquireFun, ActionFun, ReleaseFun) ->
+with_resource_cleanup(_AcquireFun, _ActionFun, _ReleaseFun) ->
     ok.
 
 %% @doc Iterates through transaction lines, ensuring file close notification on exit.
-process_transaction_log(LinesList, CloseNotifyPid) ->
+process_transaction_log(_LinesList, _CloseNotifyPid) ->
     ok.
 `,
     solutionCode: `-module(boundary_parser).
@@ -1162,9 +1185,11 @@ process_transaction_log(LinesList, CloseNotifyPid) ->
     process_transaction_log/2
 ]).
 
+%% @doc Safely decodes an external binary term using [safe] atom protection.
 safe_parse_payload(Binary) when is_binary(Binary) ->
     try erlang:binary_to_term(Binary, [safe]) of
-        Term -> {ok, Term}
+        Term ->
+            {ok, Term}
     catch
         Class:Reason ->
             {error, {Class, Reason}}
@@ -1172,12 +1197,13 @@ safe_parse_payload(Binary) when is_binary(Binary) ->
 safe_parse_payload(_Other) ->
     {error, {error, badarg}}.
 
-with_resource_cleanup(AcquireFun, ActionFun, ReleaseFun) when is_function(AcquireFun, 0),
-                                                             is_function(ActionFun, 1),
-                                                             is_function(ReleaseFun, 1) ->
+%% @doc Executes ActionFun with an acquired resource, guaranteeing ReleaseFun in after.
+with_resource_cleanup(AcquireFun, ActionFun, ReleaseFun)
+  when is_function(AcquireFun, 0), is_function(ActionFun, 1), is_function(ReleaseFun, 1) ->
     Resource = AcquireFun(),
     try ActionFun(Resource) of
-        Result -> {ok, Result}
+        Result ->
+            {ok, Result}
     catch
         Class:Reason ->
             {error, {Class, Reason}}
@@ -1185,7 +1211,9 @@ with_resource_cleanup(AcquireFun, ActionFun, ReleaseFun) when is_function(Acquir
         ReleaseFun(Resource)
     end.
 
-process_transaction_log(LinesList, CloseNotifyPid) when is_list(LinesList), is_pid(CloseNotifyPid) ->
+%% @doc Iterates through transaction lines, ensuring file close notification on exit.
+process_transaction_log(LinesList, CloseNotifyPid)
+  when is_list(LinesList), is_pid(CloseNotifyPid) ->
     try
         lists:foreach(fun(Line) ->
             case Line of
@@ -1209,16 +1237,16 @@ process_transaction_log(LinesList, CloseNotifyPid) when is_list(LinesList), is_p
     process_transaction_log/2
 ]).
 
-%% @doc Safely decodes an untrusted external binary term using [safe] atom protection.
-safe_parse_payload(Binary) ->
+%% @doc Safely decodes an external binary term using [safe] atom protection.
+safe_parse_payload(_Binary) ->
     ok.
 
 %% @doc Executes ActionFun with an acquired resource, guaranteeing ReleaseFun in after.
-with_resource_cleanup(AcquireFun, ActionFun, ReleaseFun) ->
+with_resource_cleanup(_AcquireFun, _ActionFun, _ReleaseFun) ->
     ok.
 
 %% @doc Iterates through transaction lines, ensuring file close notification on exit.
-process_transaction_log(LinesList, CloseNotifyPid) ->
+process_transaction_log(_LinesList, _CloseNotifyPid) ->
     ok.
 `,
       },
@@ -1231,9 +1259,11 @@ process_transaction_log(LinesList, CloseNotifyPid) ->
     process_transaction_log/2
 ]).
 
+%% @doc Safely decodes an external binary term using [safe] atom protection.
 safe_parse_payload(Binary) when is_binary(Binary) ->
     try erlang:binary_to_term(Binary, [safe]) of
-        Term -> {ok, Term}
+        Term ->
+            {ok, Term}
     catch
         Class:Reason ->
             {error, {Class, Reason}}
@@ -1241,12 +1271,13 @@ safe_parse_payload(Binary) when is_binary(Binary) ->
 safe_parse_payload(_Other) ->
     {error, {error, badarg}}.
 
-with_resource_cleanup(AcquireFun, ActionFun, ReleaseFun) when is_function(AcquireFun, 0),
-                                                             is_function(ActionFun, 1),
-                                                             is_function(ReleaseFun, 1) ->
+%% @doc Executes ActionFun with an acquired resource, guaranteeing ReleaseFun in after.
+with_resource_cleanup(AcquireFun, ActionFun, ReleaseFun)
+  when is_function(AcquireFun, 0), is_function(ActionFun, 1), is_function(ReleaseFun, 1) ->
     Resource = AcquireFun(),
     try ActionFun(Resource) of
-        Result -> {ok, Result}
+        Result ->
+            {ok, Result}
     catch
         Class:Reason ->
             {error, {Class, Reason}}
@@ -1254,7 +1285,9 @@ with_resource_cleanup(AcquireFun, ActionFun, ReleaseFun) when is_function(Acquir
         ReleaseFun(Resource)
     end.
 
-process_transaction_log(LinesList, CloseNotifyPid) when is_list(LinesList), is_pid(CloseNotifyPid) ->
+%% @doc Iterates through transaction lines, ensuring file close notification on exit.
+process_transaction_log(LinesList, CloseNotifyPid)
+  when is_list(LinesList), is_pid(CloseNotifyPid) ->
     try
         lists:foreach(fun(Line) ->
             case Line of

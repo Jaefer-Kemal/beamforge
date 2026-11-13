@@ -2439,40 +2439,78 @@ T1_Start = erlang:system_time(millisecond),
 T1_Res = try
     case code:ensure_loaded(boundary_parser) of
         {module, boundary_parser} ->
-            Term = {user, 101, <<"Alice">>},
-            Bin = term_to_binary(Term),
-            case boundary_parser:safe_parse_payload(Bin) of
-                {ok, Term} = R1 ->
-                    #{call_str => <<"boundary_parser:safe_parse_payload(ValidBin)">>,
-                      expected => <<"{ok, {user, 101, <<\"Alice\">>}}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
-                      time_ms => erlang:system_time(millisecond) - T1_Start};
-                Other1 ->
-                    #{call_str => <<"boundary_parser:safe_parse_payload(ValidBin)">>, expected => <<"{ok, ...}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
-            end;
+            Term1 = {user, 101, <<"Alice">>},
+            Bin1 = term_to_binary(Term1),
+            R1 = boundary_parser:safe_parse_payload(Bin1),
+            Exp1 = {ok, Term1},
+            #{call_str => <<"boundary_parser:safe_parse_payload(term_to_binary({user, 101, <<\"Alice\">>}))">>,
+              expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp1]))),
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))),
+              passed => R1 =:= Exp1,
+              time_ms => erlang:system_time(millisecond) - T1_Start};
         _ ->
-            WorkerFun = fun() -> receive stop -> ok end end,
-            {ok, Sup, W1} = exit_trapper:start_supervised(WorkerFun),
-            exit_trapper:kill_worker(Sup, badarith),
-            timer:sleep(50),
-            {ok, W2} = exit_trapper:get_worker_pid(Sup),
-            SupAlive = is_process_alive(Sup),
-            W1Dead = not is_process_alive(W1),
-            W2Alive = is_process_alive(W2),
-            Sup ! stop,
-            Passed = SupAlive andalso W1Dead andalso W2Alive andalso (W1 =/= W2),
-            #{call_str => <<"exit_trapper:kill_worker(Sup, badarith)">>,
-              expected => <<"Supervisor survives, W1 dead, W2 alive">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("SupAlive:~p, W1Dead:~p, W2Alive:~p", [SupAlive, W1Dead, W2Alive]))),
-              passed => Passed,
+            #{call_str => <<"boundary_parser:safe_parse_payload(...)">>,
+              expected => <<"{ok, {user, 101, <<\"Alice\">>}}">>,
+              actual => <<"boundary_parser not loaded">>,
+              passed => false,
               time_ms => erlang:system_time(millisecond) - T1_Start}
     end
-catch C1:R1 ->
-    #{call_str => <<"boundary_parser test">>, expected => <<"{ok, ...}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+catch C1:Err1 ->
+    #{call_str => <<"boundary_parser:safe_parse_payload(...)">>,
+      expected => <<"{ok, {user, 101, <<\"Alice\">>}}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    case code:ensure_loaded(boundary_parser) of
+        {module, boundary_parser} ->
+            P2 = spawn(fun() -> receive {release, R} -> receive {get, From} -> From ! R end end end),
+            boundary_parser:with_resource_cleanup(fun() -> res_42 end, fun(_) -> erlang:error(boom) end, fun(R) -> P2 ! {release, R} end),
+            P2 ! {get, self()},
+            R2 = receive Msg2 -> Msg2 after 200 -> timeout end,
+            Exp2 = res_42,
+            #{call_str => <<"boundary_parser:with_resource_cleanup(Acquire, CrashAction, Release)">>,
+              expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp2]))),
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))),
+              passed => R2 =:= Exp2,
+              time_ms => erlang:system_time(millisecond) - T2_Start};
+        _ ->
+            #{call_str => <<"boundary_parser:with_resource_cleanup(...)">>,
+              expected => <<"res_42">>,
+              actual => <<"boundary_parser not loaded">>,
+              passed => false,
+              time_ms => erlang:system_time(millisecond) - T2_Start}
+    end
+catch C2:Err2 ->
+    #{call_str => <<"boundary_parser:with_resource_cleanup(...)">>,
+      expected => <<"res_42">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    case code:ensure_loaded(boundary_parser) of
+        {module, boundary_parser} ->
+            try boundary_parser:process_transaction_log([<<"tx_1">>, <<"CORRUPT_LINE">>], self()) catch error:transaction_processing_failed -> ok end,
+            R3 = receive Msg3 -> Msg3 after 200 -> timeout end,
+            Exp3 = file_handle_closed,
+            #{call_str => <<"begin (try boundary_parser:process_transaction_log([<<\"tx_1\">>, <<\"CORRUPT_LINE\">>], self()) catch error:transaction_processing_failed -> ok end), receive Msg -> Msg after 200 -> timeout end end">>,
+              expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp3]))),
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))),
+              passed => R3 =:= Exp3,
+              time_ms => erlang:system_time(millisecond) - T3_Start};
+        _ ->
+            #{call_str => <<"boundary_parser:process_transaction_log(...)">>,
+              expected => <<"file_handle_closed">>,
+              actual => <<"boundary_parser not loaded">>,
+              passed => false,
+              time_ms => erlang:system_time(millisecond) - T3_Start}
+    end
+catch C3:Err3 ->
+    #{call_str => <<"boundary_parser:process_transaction_log(...)">>,
+      expected => <<"file_handle_closed">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -7909,12 +7947,7 @@ CompileStage = case code:ensure_loaded(boundary_parser) of
             Missing -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
         end;
     {error, E1} ->
-        case code:ensure_loaded(exit_trapper) of
-            {module, exit_trapper} ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit (Legacy)">>, status => <<"passed">>, time_ms => 12, details => <<"exit_trapper.erl loaded cleanly.">>};
-            _ ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
-        end
+        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
 S1_Ast = try
     SrcPath = filename:join(["%s", "src", "boundary_parser.erl"]),
@@ -7933,10 +7966,10 @@ S1_Ast = try
                     #{id => <<"ast_try_catch_audit">>, title => <<"AST Analysis: try...catch...after and binary_to_term/2 [safe] Invariants">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
             end;
         false ->
-            #{id => <<"ast_try_catch_audit">>, title => <<"AST Analysis: Legacy exit_trapper">>, status => <<"passed">>, time_ms => 15, details => <<"Legacy skipped.">>}
+            #{id => <<"ast_try_catch_audit">>, title => <<"AST Analysis">>, status => <<"failed">>, time_ms => 15, details => <<"Source file missing.">>}
     end
-catch C1:R1 ->
-    #{id => <<"ast_try_catch_audit">>, title => <<"AST Analysis: try...catch...after and binary_to_term/2 [safe] Invariants">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"ast_try_catch_audit">>, title => <<"AST Analysis: try...catch...after and binary_to_term/2 [safe] Invariants">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, Err1]))}
 end,
 S2_SafeParse = try
     case code:is_loaded(boundary_parser) of
@@ -7948,10 +7981,10 @@ S2_SafeParse = try
             {error, {error, badarg}} = boundary_parser:safe_parse_payload(12345),
             #{id => <<"safe_binary_parsing">>, title => <<"Safe Term Deserialization & Corrupt Input Protection">>, status => <<"passed">>, time_ms => 14, details => <<"Valid binaries safely decoded; corrupt binaries and non-binary inputs caught gracefully.">>};
         false ->
-            #{id => <<"safe_binary_parsing">>, title => <<"Safe Binary Parsing">>, status => <<"passed">>, time_ms => 14, details => <<"Legacy skipped.">>}
+            #{id => <<"safe_binary_parsing">>, title => <<"Safe Binary Parsing">>, status => <<"failed">>, time_ms => 14, details => <<"boundary_parser not loaded.">>}
     end
-catch C2:R2 ->
-    #{id => <<"safe_binary_parsing">>, title => <<"Safe Term Deserialization & Corrupt Input Protection">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Parse error: ~p:~p", [C2, R2]))}
+catch C2:Err2 ->
+    #{id => <<"safe_binary_parsing">>, title => <<"Safe Term Deserialization & Corrupt Input Protection">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Parse error: ~p:~p", [C2, Err2]))}
 end,
 S3_ResourceCleanup = try
     case code:is_loaded(boundary_parser) of
@@ -7967,10 +8000,10 @@ S3_ResourceCleanup = try
             receive {released, resource_ref_123} -> ok after 500 -> error(missing_release_on_crash) end,
             #{id => <<"guaranteed_resource_cleanup">>, title => <<"Guaranteed Cleanup via 'after' Construct Across Errors">>, status => <<"passed">>, time_ms => 16, details => <<"Resource release callback guaranteed to execute on both success and deliberate crash.">>};
         false ->
-            #{id => <<"guaranteed_resource_cleanup">>, title => <<"Guaranteed Cleanup">>, status => <<"passed">>, time_ms => 16, details => <<"Legacy skipped.">>}
+            #{id => <<"guaranteed_resource_cleanup">>, title => <<"Guaranteed Cleanup">>, status => <<"failed">>, time_ms => 16, details => <<"boundary_parser not loaded.">>}
     end
-catch C3:R3 ->
-    #{id => <<"guaranteed_resource_cleanup">>, title => <<"Guaranteed Cleanup via 'after' Construct Across Errors">>, status => <<"failed">>, time_ms => 16, details => list_to_binary(io_lib:format("Cleanup test error: ~p:~p", [C3, R3]))}
+catch C3:Err3 ->
+    #{id => <<"guaranteed_resource_cleanup">>, title => <<"Guaranteed Cleanup via 'after' Construct Across Errors">>, status => <<"failed">>, time_ms => 16, details => list_to_binary(io_lib:format("Cleanup test error: ~p:~p", [C3, Err3]))}
 end,
 S4_TransactionLog = try
     case code:is_loaded(boundary_parser) of
@@ -7983,10 +8016,10 @@ S4_TransactionLog = try
             receive file_handle_closed -> ok after 500 -> error(missing_close_on_crash) end,
             #{id => <<"transaction_log_cleanup">>, title => <<"Transaction Log Guaranteed Close Invariant">>, status => <<"passed">>, time_ms => 16, details => <<"Close notification guaranteed in after block during normal execution and corrupt line error.">>};
         false ->
-            #{id => <<"transaction_log_cleanup">>, title => <<"Transaction Log Cleanup">>, status => <<"passed">>, time_ms => 16, details => <<"Legacy skipped.">>}
+            #{id => <<"transaction_log_cleanup">>, title => <<"Transaction Log Cleanup">>, status => <<"failed">>, time_ms => 16, details => <<"boundary_parser not loaded.">>}
     end
-catch C4:R4 ->
-    #{id => <<"transaction_log_cleanup">>, title => <<"Transaction Log Guaranteed Close Invariant">>, status => <<"failed">>, time_ms => 16, details => list_to_binary(io_lib:format("Transaction log error: ~p:~p", [C4, R4]))}
+catch C4:Err4 ->
+    #{id => <<"transaction_log_cleanup">>, title => <<"Transaction Log Guaranteed Close Invariant">>, status => <<"failed">>, time_ms => 16, details => list_to_binary(io_lib:format("Transaction log error: ~p:~p", [C4, Err4]))}
 end,
 Stages = [CompileStage, S1_Ast, S2_SafeParse, S3_ResourceCleanup, S4_TransactionLog]
 `, wsDir, wsDir), true

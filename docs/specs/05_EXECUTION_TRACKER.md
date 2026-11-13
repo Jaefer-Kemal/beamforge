@@ -3574,6 +3574,28 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l02` and its 3 negative regression tests in `16.03s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed `ch06-l02 | 3/3 tests passed`.
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 227: Spec 04 / Spec 08 Anti-Spoiler Audit, Guaranteed Resource Cleanup with try ... of ... catch ... after & Boundary Deserialization, AST Hardening & Live Tri-Verification of Chapter 6 Lecture 3 (`ch06-l03`)
+
+- [x] **227.1: Spec 04/08 Pedagogical Anti-Spoiler Audit & Erlang/AST Hardening (`ch06-l03`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch06.ts` (`ch06-l03`, `boundary_parser.erl`) against Spec 04, 07, and 08.
+  - Re-ordered Spec 04 layout so `## Official Erlang Docs & Function Reference` (`erlang:binary_to_term/2 [safe]`) precedes `## Parallel Worked Example`.
+  - Replaced 1-to-1 transliteration clone (`telemetry_stream_sink.erl`) with domain-distinct secure session gateway `## Parallel Worked Example` (`secure_session_gateway.erl`) across 3 execution phases (`Phase 1: Safe Boundary Deserialization (decode_session_envelope/1)`, `Phase 2: Scoped Resource Lifecycle (with_ephemeral_key/2)`, `Phase 3: Guaranteed Cleanup During Failure (drain_audit_records/2)`) accompanied by deep architectural notes on `[safe]` atom table DoS protection and discarding the return value of `after` blocks.
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across all 3 exported functions (`safe_parse_payload/1`, `with_resource_cleanup/3`, `process_transaction_log/2`) with zero Erlang syntax leaks or code backticks in prompt bullets.
+  - Aligned 10/10 plain-English `%% @doc` contracts across all 4 code representations (`files[0].content`, `starterCode`, `solutionFiles['src/boundary_parser.erl']`, `solutionCode`).
+  - Scaffolding starter pack with `_` prefixed parameters (`_Binary`, `_AcquireFun`, `_ActionFun`, `_ReleaseFun`, `_LinesList`, `_CloseNotifyPid`) compiling cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0).
+  - Configured `astRules` (`requiredConstructs: ['try_catch']`, `requiredCalls: ['erlang:binary_to_term/2']`).
+- [x] **227.2: Go Orchestrator Runner & AST Verification Hardening (`ch06-l03`)**:
+  - Upgraded `buildChapterRunScript` in `services/orchestrator/internal/bridge/erl_runner_chapters.go` to evaluate all 3 visible tests (`T1_Res`: safe deserialization of valid term, `T2_Res`: guaranteed release on deliberate crash, `T3_Res`: transaction log processing with file close notification) and return `AllResults = [T1_Res, T2_Res, T3_Res]`.
+  - Decoupled catch variables (`Err1`–`Err3`) from try-body result variables (`R1`–`R3`) to avoid Erlang `unsafe_var` scope traps.
+  - Hardened `buildChapterVerificationScript` with 5 stages (`compile_and_export_audit`, `ast_try_catch_audit`, `safe_binary_parsing`, `guaranteed_resource_cleanup`, `transaction_log_cleanup`) with decoupled catch variables (`Err1`–`Err4`).
+  - Expanded `services/orchestrator/internal/bridge/ch06_verification_test.go` with positive verification (100% score, 5/5 stages passed, 3/3 visible tests verified) and 3 negative regression subtests (`ch06-l03_Negative_Missing_try_catch_AST_Violation`, `ch06-l03_Negative_Missing_Export`, `ch06-l03_Negative_Missing_after_Cleanup`).
+- [x] **227.3: Mandatory Live Tri-Verification & Full Test Suite Certification (`ch06-l03`)**:
+  - **Parallel Worked Example (`secure_session_gateway.erl`)**: Extracted directly from `ch06.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with all 3 phases passing cleanly.
+  - **Starter Pack (`boundary_parser.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0), loads cleanly on OTP, and safely fails tests without compiler or syntax crashes.
+  - **Solution Pack (`boundary_parser.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/boundary_parser.erl'] === solutionCode`), compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `required_constructs => [try_catch]` and `required_calls => [{erlang, binary_to_term, 2}]`, and passed 100% of visible test cases (3/3 passed).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l03` and its 3 negative regression tests in `25.55s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed `ch06-l03 | 3/3 tests passed`.
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
 
 
 
