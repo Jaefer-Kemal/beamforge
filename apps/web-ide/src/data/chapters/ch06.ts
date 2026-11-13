@@ -2708,78 +2708,111 @@ When \`[flush]\` is passed, the BEAM runtime in C performs an atomic operation:
 > [!warning] Fault-Tolerance Trap: Forgetting [flush] on Synchronous Helpers
 > Whenever you write a synchronous helper using temporary monitors (\`MRef = monitor(process, Pid)\`), you **must always call \`erlang:demonitor(MRef, [flush])\`** once the reply has been processed. Omitting \`[flush]\` is a classic production defect.
 
+## Official Erlang Docs & Function Reference
+
+### \`erlang:demonitor/2\`
+- **Signature**: \`demonitor(MonitorRef, OptionList) -> boolean()\`
+- **OptionList**: A list containing \`flush\`, \`info\`, or both.
+- **Description**: Unregisters the monitor specified by \`MonitorRef\`. When \`flush\` is present, any pending \`{'DOWN', MonitorRef, ...}\` message residing in the caller's message queue is flushed (removed) before returning.
+- **Complexity**: $O(1)$ monitor deregistration; scans the process message queue for the specific reference.
+
+### \`erlang:spawn_monitor/1\`
+- **Signature**: \`spawn_monitor(Fun) -> {pid(), reference()}\`
+- **Description**: Atomically spawns a process executing \`Fun\` and creates a monitor on that process. Guarantees that the monitor is established before the new process can execute or terminate.
+
 ## Parallel Worked Example
 
-The following module submits an audit entry to an ephemeral worker process, flushing monitors upon completion:
+The following module implements an ephemeral cryptographic signing worker within a zero-trust vault. The gateway monitors short-lived key-derivation workers and purges monitor exit messages atomically upon completion:
 
 \`\`\`erlang
--module(audit_event_collector).
+-module(vault_ephemeral_gateway).
 -export([
-    dispatch_audit_record/2,
-    inspect_mailbox_backlog/0
+    sign_session_payload/3,
+    drain_orphaned_monitors/1,
+    measure_mailbox_depth/0
 ]).
 
-%% @doc Submits an audit entry to an ephemeral worker process, flushing monitors upon completion.
-dispatch_audit_record(CollectorFun, EventData) ->
+%% @doc Ephemeral cryptographic signing worker with atomic monitor flushing.
+sign_session_payload(SignerFun, PayloadBinary, TimeoutMs) when is_function(SignerFun, 1) ->
     Caller = self(),
     {WorkerPid, MRef} = spawn_monitor(fun() ->
-        ProcessedRecord = CollectorFun(EventData),
-        Caller ! {audit_committed, self(), ProcessedRecord},
+        Signature = SignerFun(PayloadBinary),
+        Caller ! {signature_ready, self(), Signature},
         exit(normal)
     end),
     %% Allow momentary convergence for reply and termination signal
     timer:sleep(5),
     receive
-        {audit_committed, WorkerPid, Record} ->
+        {signature_ready, WorkerPid, Signature} ->
             erlang:demonitor(MRef, [flush]),
-            ResidualDowns = inspect_mailbox_backlog(),
-            {ok, Record, #{unflushed_monitors => ResidualDowns}}
-    after 1000 ->
+            LingeringDowns = count_monitors_for_ref(MRef),
+            {ok, Signature, #{residual_downs => LingeringDowns}}
+    after TimeoutMs ->
         erlang:demonitor(MRef, [flush]),
         {error, timeout}
     end.
 
-%% @doc Non-blocking diagnostic scan counting unprocessed monitor DOWN messages.
-inspect_mailbox_backlog() ->
-    scan_backlog(0).
+%% @doc Drains any lingering monitor DOWN messages matching a specific reference.
+drain_orphaned_monitors(TargetRef) ->
+    count_monitors_for_ref(TargetRef).
 
-scan_backlog(Acc) ->
+count_monitors_for_ref(TargetRef) ->
+    drain_ref_loop(TargetRef, 0).
+
+drain_ref_loop(TargetRef, Acc) ->
     receive
-        {'DOWN', _Ref, process, _Pid, _Reason} ->
-            scan_backlog(Acc + 1)
+        {'DOWN', TargetRef, process, _Pid, _Reason} ->
+            drain_ref_loop(TargetRef, Acc + 1)
     after 0 ->
         Acc
     end.
+
+%% @doc Diagnostic scan measuring the total depth of the calling process mailbox.
+measure_mailbox_depth() ->
+    case erlang:process_info(self(), message_queue_len) of
+        {message_queue_len, Len} -> Len;
+        undefined -> 0
+    end.
 \`\`\`
+
+### Architectural Deep Dive
+
+1. **Ephemeral Worker Spawning & Atomic Monitoring**: The gateway uses \`spawn_monitor/1\` to atomically bind the worker PID and unique reference before execution begins.
+2. **The Concurrency Race (Reply vs. Exit Signal)**: The worker dispatches \`{signature_ready, self(), Signature}\` and immediately calls \`exit(normal)\`. Both events travel to the caller mailbox concurrently.
+3. **Atomic Mailbox Purging with \`erlang:demonitor(MRef, [flush])\`**: Calling \`demonitor/2\` with \`[flush]\` unregisters the monitor and removes the queued \`'DOWN'\` tuple in a single atomic VM instruction.
+4. **Targeted Reference Drainage & Mailbox Inspection**: \`drain_orphaned_monitors/1\` uses a selective pattern match on \`TargetRef\` combined with an immediate \`after 0\` clause to drain queued messages without blocking.
 
 ## Assignment Specification
 
 Implement \`src/monitor_hygiene.erl\` exporting \`call_with_clean_mailbox/2\` and \`count_lingering_downs/0\`:
 
 ### 1. \`call_with_clean_mailbox/2\`
-- **Input**: \`WorkerFun\` (a 1-arity worker function), \`Input\` (argument passed into \`WorkerFun\`).
+- **Input**:
+  - \`WorkerFun\`: A 1-arity worker function that transforms an input term.
+  - \`Input\`: An arbitrary Erlang term passed to the worker function.
 - **Behavior**:
-  - Atomically spawns and monitors an ephemeral worker process executing \`WorkerFun(Input)\`.
-  - The worker evaluates the function, dispatches a completion message containing the result to the caller, and immediately terminates with exit reason \`worker_completed\`.
-  - The caller pauses briefly (e.g. 5–10ms via \`timer:sleep/1\`) to allow both the worker's completion reply and its \`'DOWN'\` exit notification to arrive concurrently in the mailbox.
-  - Upon receiving the worker's result, the caller demonitors the reference with the \`[flush]\` option (\`erlang:demonitor(MRef, [flush])\`) to atomically purge the pending \`'DOWN'\` message from its mailbox.
-  - Inspects the mailbox using \`count_lingering_downs/0\` to verify zero \`'DOWN'\` messages remain, returning \`{ok, Result, LingeringCount}\`.
-  - If no response arrives within 1,000ms, demonitors with \`[flush]\` and returns \`{error, timeout}\`.
+  - Atomically spawns and monitors an ephemeral worker process that applies the worker function to the input argument, dispatches a completion message containing the worker process identifier and computation result back to the caller, and immediately terminates with exit reason \`worker_completed\`.
+  - Pauses for 10 milliseconds to allow both the worker completion reply and the process exit signal to arrive concurrently in the caller message queue.
+  - Awaits the worker completion reply with a 1,000 millisecond timeout window.
+  - Upon receiving the result, deregisters the monitor reference while atomically purging any pending exit notification for that reference from the mailbox.
+  - Verifies that zero unpurged exit notifications remain in the caller message queue and returns a 3-element tuple containing the ok tag, the computed result, and the integer count of remaining exit messages.
+  - If no reply arrives within the 1,000 millisecond timeout window, deregisters the monitor with atomic purging and returns an error timeout tuple.
 - **Examples**:
-  - \`monitor_hygiene:call_with_clean_mailbox(fun(X) -> X * 2 end, 42)\` -> \`{ok, 84, 0}\`
-  - \`monitor_hygiene:call_with_clean_mailbox(fun(X) -> X + 1 end, 99)\` -> \`{ok, 100, 0}\`
+  - \`monitor_hygiene:call_with_clean_mailbox(fun(X) -> X * 2 end, 21)\` returns \`{ok, 42, 0}\`.
+  - \`monitor_hygiene:call_with_clean_mailbox(fun(X) -> X + 10 end, 5)\` returns \`{ok, 15, 0}\`.
 
 ### 2. \`count_lingering_downs/0\`
-- **Input**: None.
+- **Input**: None (\`()\`).
 - **Behavior**:
-  - Non-blockingly scans the caller's mailbox using a tail-recursive \`receive ... after 0\` construct to consume and count all un-flushed \`{'DOWN', _, process, _, _}\` tuples.
-  - Returns the total count of drained \`'DOWN'\` messages as a non-negative integer.
+  - Non-blockingly scans the calling process mailbox to drain and tally all queued process monitor exit notifications.
+  - Recursively matches and consumes monitor exit tuples using an immediate 0-millisecond timeout clause until the message queue contains no further matching exit notifications.
+  - Returns the total count of drained exit messages as a non-negative integer without blocking or leaving matching exit tuples in the message queue.
 - **Examples**:
-  - \`monitor_hygiene:count_lingering_downs()\` -> \`0\` (in a clean mailbox)
+  - \`monitor_hygiene:count_lingering_downs()\` returns \`0\` when the mailbox is clean.
 
 ## Rules & Verification Constraints
 
-- Must call \`erlang:demonitor(MRef, [flush])\`.
+- Must call \`erlang:demonitor/2\` with the \`[flush]\` option.
 - Enforced AST rule: \`requiredCalls: ["erlang:demonitor/2"]\`.
 `,
     mentalModelCheck: {
@@ -2846,11 +2879,11 @@ end.`,
     count_lingering_downs/0
 ]).
 
-%% @doc Executes a worker task and demonstrates atomic DOWN purging via demonitor(MRef, [flush]).
-call_with_clean_mailbox(WorkerFun, Input) ->
+%% @doc Executes an ephemeral worker task with monitor mailbox hygiene, returning the task result and count of any unpurged monitor exit messages.
+call_with_clean_mailbox(_WorkerFun, _Input) ->
     ok.
 
-%% @doc Drains and counts lingering DOWN messages from the caller mailbox using a non-blocking timeout.
+%% @doc Non-blockingly drains and counts unhandled process monitor exit notifications from the calling process mailbox.
 count_lingering_downs() ->
     ok.
 `,
@@ -2860,6 +2893,7 @@ count_lingering_downs() ->
     count_lingering_downs/0
 ]).
 
+%% @doc Executes an ephemeral worker task with monitor mailbox hygiene, returning the task result and count of any unpurged monitor exit messages.
 call_with_clean_mailbox(WorkerFun, Input) when is_function(WorkerFun, 1) ->
     Caller = self(),
     {WorkerPid, MRef} = spawn_monitor(fun() ->
@@ -2867,7 +2901,7 @@ call_with_clean_mailbox(WorkerFun, Input) when is_function(WorkerFun, 1) ->
         Caller ! {done, self(), Res},
         exit(worker_completed)
     end),
-    %% Sleep to allow both reply and exit signals to arrive in mailbox
+    %% Allow momentary convergence for reply and termination signal
     timer:sleep(10),
     receive
         {done, WorkerPid, Result} ->
@@ -2879,6 +2913,7 @@ call_with_clean_mailbox(WorkerFun, Input) when is_function(WorkerFun, 1) ->
         {error, timeout}
     end.
 
+%% @doc Non-blockingly drains and counts unhandled process monitor exit notifications from the calling process mailbox.
 count_lingering_downs() ->
     drain_downs(0).
 
@@ -2900,11 +2935,11 @@ drain_downs(Count) ->
     count_lingering_downs/0
 ]).
 
-%% @doc Executes a worker task and demonstrates atomic DOWN purging via demonitor(MRef, [flush]).
-call_with_clean_mailbox(WorkerFun, Input) ->
+%% @doc Executes an ephemeral worker task with monitor mailbox hygiene, returning the task result and count of any unpurged monitor exit messages.
+call_with_clean_mailbox(_WorkerFun, _Input) ->
     ok.
 
-%% @doc Drains and counts lingering DOWN messages from the caller mailbox using a non-blocking timeout.
+%% @doc Non-blockingly drains and counts unhandled process monitor exit notifications from the calling process mailbox.
 count_lingering_downs() ->
     ok.
 `,
@@ -2917,6 +2952,7 @@ count_lingering_downs() ->
     count_lingering_downs/0
 ]).
 
+%% @doc Executes an ephemeral worker task with monitor mailbox hygiene, returning the task result and count of any unpurged monitor exit messages.
 call_with_clean_mailbox(WorkerFun, Input) when is_function(WorkerFun, 1) ->
     Caller = self(),
     {WorkerPid, MRef} = spawn_monitor(fun() ->
@@ -2924,7 +2960,7 @@ call_with_clean_mailbox(WorkerFun, Input) when is_function(WorkerFun, 1) ->
         Caller ! {done, self(), Res},
         exit(worker_completed)
     end),
-    %% Sleep to allow both reply and exit signals to arrive in mailbox
+    %% Allow momentary convergence for reply and termination signal
     timer:sleep(10),
     receive
         {done, WorkerPid, Result} ->
@@ -2936,6 +2972,7 @@ call_with_clean_mailbox(WorkerFun, Input) when is_function(WorkerFun, 1) ->
         {error, timeout}
     end.
 
+%% @doc Non-blockingly drains and counts unhandled process monitor exit notifications from the calling process mailbox.
 count_lingering_downs() ->
     drain_downs(0).
 

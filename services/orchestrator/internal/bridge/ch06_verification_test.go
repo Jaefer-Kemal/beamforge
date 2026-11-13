@@ -389,6 +389,45 @@ probe_pid_status(TargetPid) when is_pid(TargetPid) ->
     end.
 `
 
+	const monitorHygieneSolution = `-module(monitor_hygiene).
+-export([
+    call_with_clean_mailbox/2,
+    count_lingering_downs/0
+]).
+
+%% @doc Executes an ephemeral worker task with monitor mailbox hygiene, returning the task result and count of any unpurged monitor exit messages.
+call_with_clean_mailbox(WorkerFun, Input) when is_function(WorkerFun, 1) ->
+    Caller = self(),
+    {WorkerPid, MRef} = spawn_monitor(fun() ->
+        Res = WorkerFun(Input),
+        Caller ! {done, self(), Res},
+        exit(worker_completed)
+    end),
+    %% Allow momentary convergence for reply and termination signal
+    timer:sleep(10),
+    receive
+        {done, WorkerPid, Result} ->
+            erlang:demonitor(MRef, [flush]),
+            Lingering = count_lingering_downs(),
+            {ok, Result, Lingering}
+    after 1000 ->
+        erlang:demonitor(MRef, [flush]),
+        {error, timeout}
+    end.
+
+%% @doc Non-blockingly drains and counts unhandled process monitor exit notifications from the calling process mailbox.
+count_lingering_downs() ->
+    drain_downs(0).
+
+drain_downs(Count) ->
+    receive
+        {'DOWN', _Ref, process, _Pid, _Reason} ->
+            drain_downs(Count + 1)
+    after 0 ->
+        Count
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -448,47 +487,12 @@ probe_pid_status(TargetPid) when is_pid(TargetPid) ->
 			visibleCount: 3,
 		},
 		{
-			name:       "ch06-l07 Monitor Mailbox Hygiene",
-			exerciseID: "ch06-l07",
-			files: map[string]string{
-				"src/monitor_hygiene.erl": `-module(monitor_hygiene).
--export([
-    call_with_clean_mailbox/2,
-    count_lingering_downs/0
-]).
-
-call_with_clean_mailbox(WorkerFun, Input) ->
-    Caller = self(),
-    MRef = erlang:make_ref(),
-    WorkerPid = spawn(fun() ->
-        Res = WorkerFun(Input),
-        Caller ! {done, MRef, Res},
-        exit(worker_finished)
-    end),
-    ActualMRef = erlang:monitor(process, WorkerPid),
-    timer:sleep(5),
-    receive
-        {done, MRef, Res} ->
-            erlang:demonitor(ActualMRef, [flush]),
-            Lingering = count_lingering_downs(),
-            {ok, Res, Lingering}
-    after 1000 ->
-        erlang:demonitor(ActualMRef, [flush]),
-        {error, timeout}
-    end.
-
-count_lingering_downs() ->
-    drain_downs(0).
-
-drain_downs(Count) ->
-    receive
-        {'DOWN', _Ref, process, _Pid, _Reason} ->
-            drain_downs(Count + 1)
-    after 0 ->
-        Count
-    end.
-`,
-			},
+			name:         "ch06-l07 Monitor Mailbox Hygiene",
+			exerciseID:   "ch06-l07",
+			files:        map[string]string{"src/monitor_hygiene.erl": monitorHygieneSolution},
+			wantScore:    100,
+			wantStages:   4,
+			visibleCount: 2,
 		},
 		{
 			name:       "ch06-l09 Production Incident #102",
@@ -2106,6 +2110,179 @@ probe_pid_status(TargetPid) ->
 		}
 		if !crashFailed {
 			t.Errorf("Expected crash_isolation to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch06-l07 ──────────────────────────────
+	t.Run("ch06-l07 Negative Missing demonitor AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch06-l07"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/monitor_hygiene.erl": `-module(monitor_hygiene).
+-export([
+    call_with_clean_mailbox/2,
+    count_lingering_downs/0
+]).
+
+%% BUG: Missing erlang:demonitor/2 call entirely!
+call_with_clean_mailbox(WorkerFun, Input) ->
+    Caller = self(),
+    {WorkerPid, _MRef} = spawn_monitor(fun() ->
+        Res = WorkerFun(Input),
+        Caller ! {done, self(), Res},
+        exit(worker_completed)
+    end),
+    receive
+        {done, WorkerPid, Result} ->
+            Lingering = count_lingering_downs(),
+            {ok, Result, Lingering}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+count_lingering_downs() ->
+    0.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l07", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing demonitor AST, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_hygiene_invariants" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_hygiene_invariants to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l07 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-exp-ch06-l07"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/monitor_hygiene.erl": `-module(monitor_hygiene).
+-export([
+    call_with_clean_mailbox/2
+    %% BUG: Missing count_lingering_downs/0
+]).
+
+call_with_clean_mailbox(_WorkerFun, _Input) ->
+    {ok, 42, 0}.
+
+count_lingering_downs() ->
+    0.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l07", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l07 Negative Missing [flush] Option Causes Lingering Message Leak", func(t *testing.T) {
+		sessionID := "test-neg-flush-ch06-l07"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/monitor_hygiene.erl": `-module(monitor_hygiene).
+-export([
+    call_with_clean_mailbox/2,
+    count_lingering_downs/0
+]).
+
+%% BUG: Calls plain demonitor(MRef) without [flush], leaving the worker's DOWN message in the mailbox!
+call_with_clean_mailbox(WorkerFun, Input) when is_function(WorkerFun, 1) ->
+    Caller = self(),
+    {WorkerPid, MRef} = spawn_monitor(fun() ->
+        Res = WorkerFun(Input),
+        Caller ! {done, self(), Res},
+        exit(worker_completed)
+    end),
+    timer:sleep(10),
+    receive
+        {done, WorkerPid, Result} ->
+            erlang:demonitor(MRef), %% BUG: Omitted [flush]!
+            Lingering = count_lingering_downs(),
+            {ok, Result, Lingering}
+    after 1000 ->
+        erlang:demonitor(MRef),
+        {error, timeout}
+    end.
+
+count_lingering_downs() ->
+    drain_downs(0).
+
+drain_downs(Count) ->
+    receive
+        {'DOWN', _Ref, process, _Pid, _Reason} ->
+            drain_downs(Count + 1)
+    after 0 ->
+        Count
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l07", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing [flush] option, but got PASSED")
+		}
+		var raceFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "monitor_race_and_flush" && st.Status == "failed" {
+				raceFailed = true
+				break
+			}
+		}
+		if !raceFailed {
+			t.Errorf("Expected monitor_race_and_flush to fail, stages: %+v", report.Stages)
 		}
 	})
 }

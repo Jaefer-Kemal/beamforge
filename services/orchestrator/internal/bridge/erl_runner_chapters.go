@@ -2759,23 +2759,54 @@ init:stop().
 		return `
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
-    case code:ensure_loaded(monitor_hygiene) of
-        {module, monitor_hygiene} ->
-            {ok, ResVal, Lingering} = monitor_hygiene:call_with_clean_mailbox(fun(X) -> X * 2 end, 21),
+    case monitor_hygiene:call_with_clean_mailbox(fun(X) -> X * 2 end, 21) of
+        {ok, 42, 0} = Res1 ->
             #{call_str => <<"monitor_hygiene:call_with_clean_mailbox(fun(X) -> X * 2 end, 21)">>,
               expected => <<"{ok, 42, 0}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("{ok, ~p, ~p}", [ResVal, Lingering]))),
-              passed => (ResVal =:= 42) andalso (Lingering =:= 0),
+              actual => list_to_binary(io_lib:format("~p", [Res1])),
+              passed => true,
               time_ms => erlang:system_time(millisecond) - T1_Start};
-        _ ->
-            #{call_str => <<"code:ensure_loaded(monitor_hygiene)">>, expected => <<"{module, monitor_hygiene}">>,
-              actual => <<"not found">>, passed => false, time_ms => 0}
+        Other1 ->
+            #{call_str => <<"monitor_hygiene:call_with_clean_mailbox(fun(X) -> X * 2 end, 21)">>,
+              expected => <<"{ok, 42, 0}">>,
+              actual => list_to_binary(io_lib:format("~p", [Other1])),
+              passed => false,
+              time_ms => erlang:system_time(millisecond) - T1_Start}
     end
-catch C1:R1 ->
-    #{call_str => <<"monitor_hygiene test">>, expected => <<"{ok, 42, 0}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+catch Class1:Reason1 ->
+    #{call_str => <<"monitor_hygiene:call_with_clean_mailbox(fun(X) -> X * 2 end, 21)">>,
+      expected => <<"{ok, 42, 0}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [Class1, Reason1])),
+      passed => false,
+      time_ms => erlang:system_time(millisecond) - T1_Start}
 end,
-AllResults = [T1_Res],
+
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    self() ! {'DOWN', make_ref(), process, self(), test},
+    case monitor_hygiene:count_lingering_downs() of
+        1 = Res2 ->
+            #{call_str => <<"begin self() ! {'DOWN', make_ref(), process, self(), test}, monitor_hygiene:count_lingering_downs() end">>,
+              expected => <<"1">>,
+              actual => list_to_binary(io_lib:format("~p", [Res2])),
+              passed => true,
+              time_ms => erlang:system_time(millisecond) - T2_Start};
+        Other2 ->
+            #{call_str => <<"begin self() ! {'DOWN', make_ref(), process, self(), test}, monitor_hygiene:count_lingering_downs() end">>,
+              expected => <<"1">>,
+              actual => list_to_binary(io_lib:format("~p", [Other2])),
+              passed => false,
+              time_ms => erlang:system_time(millisecond) - T2_Start}
+    end
+catch Class2:Reason2 ->
+    #{call_str => <<"begin self() ! {'DOWN', make_ref(), process, self(), test}, monitor_hygiene:count_lingering_downs() end">>,
+      expected => <<"1">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [Class2, Reason2])),
+      passed => false,
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+end,
+
+AllResults = [T1_Res, T2_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -8448,7 +8479,20 @@ S2_RaceAndFlush = try
 catch C2:R2 ->
     #{id => <<"monitor_race_and_flush">>, title => <<"Monitor Race Condition: demonitor [flush] Mailbox Drain">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Hygiene test error: ~p:~p", [C2, R2]))}
 end,
-Stages = [CompileStage, S1_Ast, S2_RaceAndFlush]
+S3_TimeoutAndDrain = try
+    %% Verify timeout handling and demonitor on timeout
+    {error, timeout} = monitor_hygiene:call_with_clean_mailbox(fun(_) -> timer:sleep(1500) end, timeout_arg),
+    0 = monitor_hygiene:count_lingering_downs(),
+    %% Verify count_lingering_downs/0 drains synthetic messages completely
+    self() ! {'DOWN', make_ref(), process, self(), killed},
+    self() ! {'DOWN', make_ref(), process, self(), abnormal},
+    2 = monitor_hygiene:count_lingering_downs(),
+    0 = monitor_hygiene:count_lingering_downs(),
+    #{id => <<"timeout_and_drain_isolation">>, title => <<"Timeout Handling & Selective Mailbox Draining">>, status => <<"passed">>, time_ms => 25, details => <<"Verified timeout cleans up monitor reference and count_lingering_downs/0 drains synthetic exit messages.">>}
+catch C3:R3 ->
+    #{id => <<"timeout_and_drain_isolation">>, title => <<"Timeout Handling & Selective Mailbox Draining">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Timeout/Drain error: ~p:~p", [C3, R3]))}
+end,
+Stages = [CompileStage, S1_Ast, S2_RaceAndFlush, S3_TimeoutAndDrain]
 `, wsDir, wsDir), true
 
 	case "ch06-l08":

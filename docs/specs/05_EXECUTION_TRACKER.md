@@ -3669,6 +3669,32 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all 9 chapter tests + all negative regression subtests in `53.18s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed 10/10 lessons including `ch06-l06 | 3/3 tests passed` in `14.15s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+## Phase 231: Spec 04 / Spec 08 Anti-Spoiler Audit, Monitor Mailbox Hygiene & demonitor(Ref, [flush]), AST Hardening & Live Tri-Verification of Chapter 6 Lecture 7 (`ch06-l07`)
+
+- [x] **231.1: Spec 04/08 Pedagogical Anti-Spoiler Audit & Erlang/AST Hardening (`ch06-l07`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch06.ts` (`ch06-l07`, `monitor_hygiene.erl`) against Spec 04, 07, and 08.
+  - Positioned `## Official Erlang Docs & Function Reference` (`erlang:demonitor/2`, `erlang:spawn_monitor/1`) preceding `## Parallel Worked Example`.
+  - Replaced 1-to-1 transliteration clone (`audit_event_collector.erl`) with domain-distinct Cryptographic Shard Key Derivation & Vault Ephemeral Gateway `## Parallel Worked Example` (`vault_ephemeral_gateway.erl`) exporting `sign_session_payload/3`, `drain_orphaned_monitors/1`, and `measure_mailbox_depth/0`. Accompanied by a 4-step architectural deep dive:
+    1. *Ephemeral Worker Spawning & Atomic Monitoring*
+    2. *The Concurrency Race (Reply vs. Exit Signal)*
+    3. *Atomic Mailbox Purging with erlang:demonitor(MRef, [flush])*
+    4. *Targeted Reference Drainage & Mailbox Inspection*
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across both exported functions (`call_with_clean_mailbox/2`, `count_lingering_downs/0`) with zero Erlang syntax leaks or code backticks in prompt bullets.
+  - Aligned 10/10 plain-English `%% @doc` contracts across all 4 code representations (`files[0].content`, `starterCode`, `solutionFiles['src/monitor_hygiene.erl']`, `solutionCode`).
+  - Scaffolding starter pack with `_` prefixed parameters (`_WorkerFun`, `_Input`) compiling cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0).
+  - Configured `astRules` (`requiredCalls: ['erlang:demonitor/2']`).
+- [x] **231.2: Go Orchestrator Runner & AST Verification Hardening (`ch06-l07`)**:
+  - Upgraded `buildChapterRunScript` in `services/orchestrator/internal/bridge/erl_runner_chapters.go` to evaluate both visible tests (`T1_Res`: synchronous call with clean mailbox `{ok, 42, 0}`, `T2_Res`: synthetic message draining via `count_lingering_downs/0` returning `1`). Fixed `erl_eval` unsafe variable collisions (`Res1`, `Res2` vs `Class1:Reason1`, `Class2:Reason2`).
+  - Hardened `buildChapterVerificationScript` with 4 stages (`compile_and_export_audit`, `ast_hygiene_invariants`, `monitor_race_and_flush`, `timeout_and_drain_isolation`) checking `{erlang, demonitor, 2}` AST invariants, concurrent exit/reply race conditions, timeout demonitoring, and complete mailbox draining.
+  - Expanded `services/orchestrator/internal/bridge/ch06_verification_test.go` with positive verification (100% score, 4/4 stages passed, 2/2 visible tests verified) and 3 negative regression subtests (`ch06-l07_Negative_Missing_demonitor_AST_Violation`, `ch06-l07_Negative_Missing_Export`, `ch06-l07_Negative_Missing_[flush]_Option_Causes_Lingering_Message_Leak`).
+- [x] **231.3: Mandatory Live Tri-Verification & Full Test Suite Certification (`ch06-l07`)**:
+  - **Parallel Worked Example (`vault_ephemeral_gateway.erl`)**: Extracted directly from `ch06.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with all cryptographic signing, timeout, and mailbox depth measurement scenarios passing cleanly.
+  - **Starter Pack (`monitor_hygiene.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0), loads cleanly on OTP, and safely fails tests without compiler or syntax crashes.
+  - **Solution Pack (`monitor_hygiene.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/monitor_hygiene.erl'] === solutionCode`), compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `required_remote_calls => [{erlang, demonitor, 2}]`, and passed 100% of visible test cases (2/2 passed) plus timeout cleanup.
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l07` and its 3 negative regression tests in `62.92s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed 10/10 lessons including `ch06-l07 | 2/2 tests passed` in `15.30s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
+
 
 
 
