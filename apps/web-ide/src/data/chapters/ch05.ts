@@ -3230,6 +3230,12 @@ This pattern preserves all valid operations in constant stack space ($O(1)$ memo
 > [!warning] Production Concurrency Trap: Forgetting Timeouts on Synchronous Requests
 > Client queries to an actor should never hang indefinitely. If an actor crashes, becomes overloaded, or fails to reply, a client without a timeout will block forever, cascading connection pool exhaustion across upstream services. Always pair \`erlang:make_ref/0\` with a bounded \`after Timeout -> {error, timeout}\` clause!
 
+## Official Erlang Docs & Function Reference
+
+- **\`erlang:spawn/1\`**: \`spawn(Fun) -> pid()\` — Creates a concurrent BEAM process with its own private heap and returns its unique process identifier (PID).
+- **\`erlang:make_ref/0\`**: \`erlang:make_ref() -> reference()\` — Returns an almost unique 128-bit reference token used for caller correlation in request-reply protocols.
+- **\`erlang:self/0\`**: \`self() -> pid()\` — Returns the process identifier of the calling process, used as the return address for synchronous actor replies.
+
 ## Parallel Worked Example
 
 Consider a cloud compute cluster resource manager that allocates and rebalances CPU cores across worker nodes:
@@ -3245,10 +3251,12 @@ Consider a cloud compute cluster resource manager that allocates and rebalances 
     loop/1
 ]).
 
+%% Phase 1: Spawning the Stateful Allocator Actor
 %% @doc Spawns the cluster allocator actor with an initial node capacity list.
 start(InitialNodes) ->
     spawn(fun() -> loop(InitialNodes) end).
 
+%% Phase 2: Synchronous Client API with make_ref() Correlation & Timeout Guards
 %% @doc Queries available CPU cores on a given cluster node with a timeout guard.
 query_capacity(Pid, NodeId) ->
     Ref = make_ref(),
@@ -3289,6 +3297,7 @@ terminate(Pid) ->
         {error, timeout}
     end.
 
+%% Phase 3: Tail-Recursive Actor Loop & Message Multiplexing
 %% @doc Main actor loop maintaining node capacity state across sequential requests.
 loop(Nodes) ->
     receive
@@ -3320,6 +3329,7 @@ loop(Nodes) ->
             ok
     end.
 
+%% Phase 4: Atomic State Mutation, Validation & Dual-Accumulator Batch Processing
 %% ── Internal State Helpers ───────────────────────────────────────────────────
 
 find_node(_Id, []) -> error;
@@ -3389,6 +3399,12 @@ run_schedule([Task | Rest], Nodes, Succeeded, Skipped) ->
     end.
 \`\`\`
 
+### Key Architectural Mechanics Demonstrated:
+
+1. **State Isolation & Lock-Free Serialization**: The actor process completely encapsulates its private node list. Because the mailbox is evaluated strictly sequentially, multiple clients can query, provision, or rebalance capacity simultaneously without mutexes, semaphores, or deadlocks.
+2. **Atomic Multi-Entity Coordination**: The \`rebalance\` operation coordinates two distinct nodes within a single message receive clause. If either node is missing or the source node lacks sufficient cores, the transaction safely aborts without modifying either node, guaranteeing atomic all-or-nothing execution.
+3. **Tail-Recursive Dual Accumulators**: \`run_schedule/4\` iterates through arbitrary batches of tasks in constant stack space ($O(1)$ memory), tracking successful and skipped task counts while producing the final state.
+
 ## Assignment Specification
 
 Implement \`src/ledger_actor.erl\` exporting \`start/1\`, \`get_balance/2\`, \`process_transaction/2\`, \`process_batch/2\`, \`stop/1\`, and \`loop/1\`:
@@ -3397,13 +3413,14 @@ Implement \`src/ledger_actor.erl\` exporting \`start/1\`, \`get_balance/2\`, \`p
 - **Input**: \`InitialAccounts\` — a list of account tuples formatted as \`{account, AccountId, OwnerName, Balance}\`, where \`AccountId\` is an integer, \`OwnerName\` is a binary, and \`Balance\` is an integer.
 - **Behavior**: Spawns an actor executing \`loop(InitialAccounts)\` and returns its \`pid()\`.
 - **Examples**:
-  - \`Pid = ledger_actor:start([{account, 1, <<"Alice">>, 100}]).\`
+  - \`Pid = ledger_actor:start([{account, 1, <<"Alice">>, 100}]).\` returns process PID.
 
 ### 2. \`get_balance/2\`
 - **Input**: \`Pid\` (actor PID), \`AccountId\` (integer account identifier).
 - **Behavior**: Queries the ledger actor for the balance of \`AccountId\`. Returns \`{ok, Balance}\` if the account exists, \`{error, not_found}\` if missing, or \`{error, timeout}\` if no reply is received within 1,000ms.
 - **Examples**:
   - \`ledger_actor:get_balance(Pid, 1)\` returns \`{ok, 100}\`.
+  - \`ledger_actor:get_balance(Pid, 999)\` returns \`{error, not_found}\`.
 
 ### 3. \`process_transaction/2\`
 - **Input**: \`Pid\` (actor PID), \`TxTuple\` (one of the following three transaction variants):
@@ -3420,7 +3437,7 @@ Implement \`src/ledger_actor.erl\` exporting \`start/1\`, \`get_balance/2\`, \`p
 - **Examples**:
   - \`ledger_actor:process_transaction(Pid, {deposit, 1, 50})\` returns \`{ok, 150}\`.
   - \`ledger_actor:process_transaction(Pid, {withdraw, 1, 500})\` returns \`{error, insufficient_funds}\`.
-  - \`ledger_actor:process_transaction(Pid, {transfer, 1, 2, 30})\` returns \`{ok, 120}\`.
+  - \`ledger_actor:process_transaction(Pid, {transfer, 1, 2, 30})\` returns \`{ok, 70}\`.
 
 ### 4. \`process_batch/2\`
 - **Input**: \`Pid\` (actor PID), \`TransactionsList\` (a list of transaction tuples).
@@ -3431,16 +3448,20 @@ Implement \`src/ledger_actor.erl\` exporting \`start/1\`, \`get_balance/2\`, \`p
 ### 5. \`stop/1\`
 - **Input**: \`Pid\` (actor PID).
 - **Behavior**: Requests clean actor termination, awaiting reply within 1,000ms. Returns \`ok\` or \`{error, timeout}\`.
+- **Examples**:
+  - \`ledger_actor:stop(Pid)\` returns \`ok\`.
 
 ### 6. \`loop/1\`
 - **Input**: \`Accounts\` (list of account tuples).
 - **Behavior**: Tail-recursive message loop receiving and servicing requests, replying to callers with correlation references, and recurring with updated account state.
+- **Examples**:
+  - \`loop(Accounts)\` evaluates messages sequentially, transitioning state via \`loop(NewAccounts)\`.
 
 ## Rules & Verification Constraints
 
 - \`loop/1\` and all list update helpers must be strictly tail-recursive.
 - Enforced by AST rule: \`requireTailRecursion: ["loop/1"]\`.
-- All client functions must use \`make_ref/0\` and \`receive ... after\` timeouts (\`requiredConstructs: ["receive_after"]\`).
+- All client functions must use \`make_ref/0\` and \`receive ... after\` timeouts (\`requiredConstructs: ["receive_after"]\`, \`requiredCalls: ["erlang:make_ref/0", "erlang:self/0"]\`).
 - Automated verification executes concurrent double-spend attacks with 10 parallel client processes to ensure zero race conditions!`,
     mentalModelCheck: {
       question: 'Why is an in-memory Erlang ledger actor immune to double-spend race conditions even when 1,000 concurrent client processes attempt to withdraw the same $100 balance simultaneously?',
@@ -3521,6 +3542,7 @@ Implement \`src/ledger_actor.erl\` exporting \`start/1\`, \`get_balance/2\`, \`p
     astRules: {
       requireTailRecursion: ['loop/1'],
       requiredConstructs: ['receive_after'],
+      requiredCalls: ['erlang:make_ref/0', 'erlang:self/0'],
     },
     solutionExplanation: 'Implements an in-memory concurrent banking ledger actor with tail-recursive loop, atomic deposit/withdraw/transfer, and dual-accumulator batch execution.',
     files: [
@@ -3537,28 +3559,34 @@ Implement \`src/ledger_actor.erl\` exporting \`start/1\`, \`get_balance/2\`, \`p
     loop/1
 ]).
 
-%% @doc Spawns the ledger actor initialized with a list of account tuples.
-start(InitialAccounts) ->
+%% @doc Spawns the concurrent ledger actor process initialized with a list of account tuples.
+%% Returns the process identifier (PID) of the spawned actor.
+start(_InitialAccounts) ->
     ok.
 
-%% @doc Queries the current balance for an account with a timeout guard.
-get_balance(Pid, AccountId) ->
+%% @doc Queries the current balance for an account identified by AccountId with a 1,000ms timeout guard.
+%% Returns {ok, Balance} if the account exists, {error, not_found} if missing, or {error, timeout} on deadline expiration.
+get_balance(_Pid, _AccountId) ->
     ok.
 
-%% @doc Atomically executes a single deposit, withdrawal, or transfer transaction.
-process_transaction(Pid, TxTuple) ->
+%% @doc Atomically executes a single deposit, withdrawal, or transfer transaction with a 1,000ms timeout guard.
+%% Validates account existence and sufficiency of funds, returning updated balances or structured error tuples.
+process_transaction(_Pid, _TxTuple) ->
     ok.
 
-%% @doc Sequentially processes a list of transactions, returning success and rejection counts.
-process_batch(Pid, TransactionsList) ->
+%% @doc Sequentially processes a list of transaction tuples against the ledger with a 2,000ms timeout guard.
+%% Applies valid operations while skipping invalid ones, returning {ok, AppliedCount, RejectedCount}.
+process_batch(_Pid, _TransactionsList) ->
     ok.
 
-%% @doc Terminates the ledger actor cleanly.
-stop(Pid) ->
+%% @doc Requests clean termination of the ledger actor process with a 1,000ms timeout guard.
+%% Returns ok upon confirmed shutdown, or {error, timeout} if the actor fails to respond.
+stop(_Pid) ->
     ok.
 
-%% @doc Main actor loop maintaining account state across sequential transactions.
-loop(Accounts) ->
+%% @doc Tail-recursive actor message loop serializing incoming financial requests through its mailbox.
+%% Dispatches replies using caller correlation tokens and recurses with updated account state.
+loop(_Accounts) ->
     ok.
 `,
       },
@@ -3574,9 +3602,13 @@ loop(Accounts) ->
     loop/1
 ]).
 
+%% @doc Spawns the concurrent ledger actor process initialized with a list of account tuples.
+%% Returns the process identifier (PID) of the spawned actor.
 start(InitialAccounts) ->
     spawn(fun() -> loop(InitialAccounts) end).
 
+%% @doc Queries the current balance for an account identified by AccountId with a 1,000ms timeout guard.
+%% Returns {ok, Balance} if the account exists, {error, not_found} if missing, or {error, timeout} on deadline expiration.
 get_balance(Pid, AccountId) ->
     Ref = make_ref(),
     Pid ! {get_balance, self(), Ref, AccountId},
@@ -3586,6 +3618,8 @@ get_balance(Pid, AccountId) ->
         {error, timeout}
     end.
 
+%% @doc Atomically executes a single deposit, withdrawal, or transfer transaction with a 1,000ms timeout guard.
+%% Validates account existence and sufficiency of funds, returning updated balances or structured error tuples.
 process_transaction(Pid, TxTuple) ->
     Ref = make_ref(),
     Pid ! {transaction, self(), Ref, TxTuple},
@@ -3595,6 +3629,8 @@ process_transaction(Pid, TxTuple) ->
         {error, timeout}
     end.
 
+%% @doc Sequentially processes a list of transaction tuples against the ledger with a 2,000ms timeout guard.
+%% Applies valid operations while skipping invalid ones, returning {ok, AppliedCount, RejectedCount}.
 process_batch(Pid, TransactionsList) ->
     Ref = make_ref(),
     Pid ! {process_batch, self(), Ref, TransactionsList},
@@ -3604,6 +3640,8 @@ process_batch(Pid, TransactionsList) ->
         {error, timeout}
     end.
 
+%% @doc Requests clean termination of the ledger actor process with a 1,000ms timeout guard.
+%% Returns ok upon confirmed shutdown, or {error, timeout} if the actor fails to respond.
 stop(Pid) ->
     Ref = make_ref(),
     Pid ! {stop, self(), Ref},
@@ -3613,7 +3651,8 @@ stop(Pid) ->
         {error, timeout}
     end.
 
-%% ── Internal Actor Loop ──────────────────────────────────────────────────────
+%% @doc Tail-recursive actor message loop serializing incoming financial requests through its mailbox.
+%% Dispatches replies using caller correlation tokens and recurses with updated account state.
 loop(Accounts) ->
     receive
         {get_balance, From, Ref, AccountId} ->
@@ -3725,28 +3764,34 @@ run_batch([Tx | Rest], Accounts, Applied, Rejected) ->
     loop/1
 ]).
 
-%% @doc Spawns the ledger actor initialized with a list of account tuples.
-start(InitialAccounts) ->
+%% @doc Spawns the concurrent ledger actor process initialized with a list of account tuples.
+%% Returns the process identifier (PID) of the spawned actor.
+start(_InitialAccounts) ->
     ok.
 
-%% @doc Queries the current balance for an account with a timeout guard.
-get_balance(Pid, AccountId) ->
+%% @doc Queries the current balance for an account identified by AccountId with a 1,000ms timeout guard.
+%% Returns {ok, Balance} if the account exists, {error, not_found} if missing, or {error, timeout} on deadline expiration.
+get_balance(_Pid, _AccountId) ->
     ok.
 
-%% @doc Atomically executes a single deposit, withdrawal, or transfer transaction.
-process_transaction(Pid, TxTuple) ->
+%% @doc Atomically executes a single deposit, withdrawal, or transfer transaction with a 1,000ms timeout guard.
+%% Validates account existence and sufficiency of funds, returning updated balances or structured error tuples.
+process_transaction(_Pid, _TxTuple) ->
     ok.
 
-%% @doc Sequentially processes a list of transactions, returning success and rejection counts.
-process_batch(Pid, TransactionsList) ->
+%% @doc Sequentially processes a list of transaction tuples against the ledger with a 2,000ms timeout guard.
+%% Applies valid operations while skipping invalid ones, returning {ok, AppliedCount, RejectedCount}.
+process_batch(_Pid, _TransactionsList) ->
     ok.
 
-%% @doc Terminates the ledger actor cleanly.
-stop(Pid) ->
+%% @doc Requests clean termination of the ledger actor process with a 1,000ms timeout guard.
+%% Returns ok upon confirmed shutdown, or {error, timeout} if the actor fails to respond.
+stop(_Pid) ->
     ok.
 
-%% @doc Main actor loop maintaining account state across sequential transactions.
-loop(Accounts) ->
+%% @doc Tail-recursive actor message loop serializing incoming financial requests through its mailbox.
+%% Dispatches replies using caller correlation tokens and recurses with updated account state.
+loop(_Accounts) ->
     ok.
 `,
     solutionCode: `-module(ledger_actor).
@@ -3759,9 +3804,13 @@ loop(Accounts) ->
     loop/1
 ]).
 
+%% @doc Spawns the concurrent ledger actor process initialized with a list of account tuples.
+%% Returns the process identifier (PID) of the spawned actor.
 start(InitialAccounts) ->
     spawn(fun() -> loop(InitialAccounts) end).
 
+%% @doc Queries the current balance for an account identified by AccountId with a 1,000ms timeout guard.
+%% Returns {ok, Balance} if the account exists, {error, not_found} if missing, or {error, timeout} on deadline expiration.
 get_balance(Pid, AccountId) ->
     Ref = make_ref(),
     Pid ! {get_balance, self(), Ref, AccountId},
@@ -3771,6 +3820,8 @@ get_balance(Pid, AccountId) ->
         {error, timeout}
     end.
 
+%% @doc Atomically executes a single deposit, withdrawal, or transfer transaction with a 1,000ms timeout guard.
+%% Validates account existence and sufficiency of funds, returning updated balances or structured error tuples.
 process_transaction(Pid, TxTuple) ->
     Ref = make_ref(),
     Pid ! {transaction, self(), Ref, TxTuple},
@@ -3780,6 +3831,8 @@ process_transaction(Pid, TxTuple) ->
         {error, timeout}
     end.
 
+%% @doc Sequentially processes a list of transaction tuples against the ledger with a 2,000ms timeout guard.
+%% Applies valid operations while skipping invalid ones, returning {ok, AppliedCount, RejectedCount}.
 process_batch(Pid, TransactionsList) ->
     Ref = make_ref(),
     Pid ! {process_batch, self(), Ref, TransactionsList},
@@ -3789,6 +3842,8 @@ process_batch(Pid, TransactionsList) ->
         {error, timeout}
     end.
 
+%% @doc Requests clean termination of the ledger actor process with a 1,000ms timeout guard.
+%% Returns ok upon confirmed shutdown, or {error, timeout} if the actor fails to respond.
 stop(Pid) ->
     Ref = make_ref(),
     Pid ! {stop, self(), Ref},
@@ -3798,7 +3853,8 @@ stop(Pid) ->
         {error, timeout}
     end.
 
-%% ── Internal Actor Loop ──────────────────────────────────────────────────────
+%% @doc Tail-recursive actor message loop serializing incoming financial requests through its mailbox.
+%% Dispatches replies using caller correlation tokens and recurses with updated account state.
 loop(Accounts) ->
     receive
         {get_balance, From, Ref, AccountId} ->

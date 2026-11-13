@@ -405,6 +405,164 @@ loop(State = #{count := Count, total := Total}) ->
     end.
 `
 
+	ledgerActorSolution := `-module(ledger_actor).
+-export([
+    start/1,
+    get_balance/2,
+    process_transaction/2,
+    process_batch/2,
+    stop/1,
+    loop/1
+]).
+
+%% @doc Spawns the concurrent ledger actor process initialized with a list of account tuples.
+%% Returns the process identifier (PID) of the spawned actor.
+start(InitialAccounts) ->
+    spawn(fun() -> loop(InitialAccounts) end).
+
+%% @doc Queries the current balance for an account identified by AccountId with a 1,000ms timeout guard.
+%% Returns {ok, Balance} if the account exists, {error, not_found} if missing, or {error, timeout} on deadline expiration.
+get_balance(Pid, AccountId) ->
+    Ref = make_ref(),
+    Pid ! {get_balance, self(), Ref, AccountId},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Atomically executes a single deposit, withdrawal, or transfer transaction with a 1,000ms timeout guard.
+%% Validates account existence and sufficiency of funds, returning updated balances or structured error tuples.
+process_transaction(Pid, TxTuple) ->
+    Ref = make_ref(),
+    Pid ! {transaction, self(), Ref, TxTuple},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Sequentially processes a list of transaction tuples against the ledger with a 2,000ms timeout guard.
+%% Applies valid operations while skipping invalid ones, returning {ok, AppliedCount, RejectedCount}.
+process_batch(Pid, TransactionsList) ->
+    Ref = make_ref(),
+    Pid ! {process_batch, self(), Ref, TransactionsList},
+    receive
+        {reply, Ref, Result} -> Result
+    after 2000 ->
+        {error, timeout}
+    end.
+
+%% @doc Requests clean termination of the ledger actor process with a 1,000ms timeout guard.
+%% Returns ok upon confirmed shutdown, or {error, timeout} if the actor fails to respond.
+stop(Pid) ->
+    Ref = make_ref(),
+    Pid ! {stop, self(), Ref},
+    receive
+        {reply, Ref, ok} -> ok
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Tail-recursive actor message loop serializing incoming financial requests through its mailbox.
+%% Dispatches replies using caller correlation tokens and recurses with updated account state.
+loop(Accounts) ->
+    receive
+        {get_balance, From, Ref, AccountId} ->
+            Result = case find_account(AccountId, Accounts) of
+                {ok, {account, _, _, Balance}} -> {ok, Balance};
+                error -> {error, not_found}
+            end,
+            From ! {reply, Ref, Result},
+            loop(Accounts);
+
+        {transaction, From, Ref, Tx} ->
+            case apply_tx(Tx, Accounts) of
+                {ok, ReplyVal, NewAccounts} ->
+                    From ! {reply, Ref, {ok, ReplyVal}},
+                    loop(NewAccounts);
+                {error, Reason} ->
+                    From ! {reply, Ref, {error, Reason}},
+                    loop(Accounts)
+            end;
+
+        {process_batch, From, Ref, TxList} ->
+            {AppliedCount, RejectedCount, NewAccounts} = run_batch(TxList, Accounts, 0, 0),
+            From ! {reply, Ref, {ok, AppliedCount, RejectedCount}},
+            loop(NewAccounts);
+
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+find_account(_Id, []) -> error;
+find_account(Id, [{account, Id, Name, Bal} | _]) -> {ok, {account, Id, Name, Bal}};
+find_account(Id, [_ | Rest]) -> find_account(Id, Rest).
+
+apply_tx({deposit, AccountId, Amount}, Accounts) when Amount > 0 ->
+    case find_account(AccountId, Accounts) of
+        {ok, {account, Id, Name, Bal}} ->
+            NewBal = Bal + Amount,
+            NewAccounts = update_account({account, Id, Name, NewBal}, Accounts),
+            {ok, NewBal, NewAccounts};
+        error ->
+            {error, not_found}
+    end;
+apply_tx({withdraw, AccountId, Amount}, Accounts) when Amount > 0 ->
+    case find_account(AccountId, Accounts) of
+        {ok, {account, Id, Name, Bal}} when Bal >= Amount ->
+            NewBal = Bal - Amount,
+            NewAccounts = update_account({account, Id, Name, NewBal}, Accounts),
+            {ok, NewBal, NewAccounts};
+        {ok, _} ->
+            {error, insufficient_funds};
+        error ->
+            {error, not_found}
+    end;
+apply_tx({transfer, FromId, ToId, Amount}, Accounts) when Amount > 0 ->
+    case {find_account(FromId, Accounts), find_account(ToId, Accounts)} of
+        {{ok, {account, FromId, FromName, FromBal}}, {ok, {account, ToId, ToName, ToBal}}} ->
+            if
+                FromBal >= Amount ->
+                    NewFromBal = FromBal - Amount,
+                    NewToBal = ToBal + Amount,
+                    Acc1 = update_account({account, FromId, FromName, NewFromBal}, Accounts),
+                    Acc2 = update_account({account, ToId, ToName, NewToBal}, Acc1),
+                    {ok, NewFromBal, Acc2};
+                true ->
+                    {error, insufficient_funds}
+            end;
+        _ ->
+            {error, not_found}
+    end;
+apply_tx(_Invalid, _Accounts) ->
+    {error, invalid_transaction}.
+
+update_account(NewAcc, Accounts) ->
+    update_account_tail(NewAcc, Accounts, []).
+
+update_account_tail({account, Id, _, _} = NewAcc, [{account, Id, _, _} | Rest], Acc) ->
+    reverse_append(Acc, [NewAcc | Rest]);
+update_account_tail(NewAcc, [Head | Rest], Acc) ->
+    update_account_tail(NewAcc, Rest, [Head | Acc]);
+update_account_tail(_NewAcc, [], Acc) ->
+    reverse_append(Acc, []).
+
+reverse_append([], Acc) -> Acc;
+reverse_append([H | T], Acc) -> reverse_append(T, [H | Acc]).
+
+run_batch([], Accounts, Applied, Rejected) ->
+    {Applied, Rejected, Accounts};
+run_batch([Tx | Rest], Accounts, Applied, Rejected) ->
+    case apply_tx(Tx, Accounts) of
+        {ok, _ReplyVal, NewAccounts} ->
+            run_batch(Rest, NewAccounts, Applied + 1, Rejected);
+        {error, _Reason} ->
+            run_batch(Rest, Accounts, Applied, Rejected + 1)
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -482,6 +640,16 @@ loop(State = #{count := Count, total := Total}) ->
 			wantScore:    100,
 			wantStages:   4,
 			visibleCount: 3,
+		},
+		{
+			name:       "ch05-l08 Chapter 5 Problem Set: Concurrent Bank Ledger & Order Actor",
+			exerciseID: "ch05-l08",
+			files: map[string]string{
+				"src/ledger_actor.erl": ledgerActorSolution,
+			},
+			wantScore:    100,
+			wantStages:   6,
+			visibleCount: 4,
 		},
 	}
 
@@ -1825,6 +1993,541 @@ loop(State = #{count := Count, total := Total}) ->
 		}
 		if !foundFailedCompile {
 			t.Errorf("Expected compile_and_export_audit to fail on missing export")
+		}
+	})
+
+	// ch05-l08 Negative test 1: body recursion on loop/1 violates AST tail-recursion requirement
+	t.Run("ch05-l08 Negative Body Recursion on loop/1", func(t *testing.T) {
+		sessID := "test-sess-ch05-l08-neg-body"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		bodyRecursiveCode := `-module(ledger_actor).
+-export([
+    start/1,
+    get_balance/2,
+    process_transaction/2,
+    process_batch/2,
+    stop/1,
+    loop/1
+]).
+
+start(InitialAccounts) ->
+    spawn(fun() -> loop(InitialAccounts) end).
+
+get_balance(Pid, AccountId) ->
+    Ref = make_ref(),
+    Pid ! {get_balance, self(), Ref, AccountId},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        {error, timeout}
+    end.
+
+process_transaction(Pid, TxTuple) ->
+    Ref = make_ref(),
+    Pid ! {transaction, self(), Ref, TxTuple},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        {error, timeout}
+    end.
+
+process_batch(Pid, TransactionsList) ->
+    Ref = make_ref(),
+    Pid ! {process_batch, self(), Ref, TransactionsList},
+    receive
+        {reply, Ref, Result} -> Result
+    after 2000 ->
+        {error, timeout}
+    end.
+
+stop(Pid) ->
+    Ref = make_ref(),
+    Pid ! {stop, self(), Ref},
+    receive
+        {reply, Ref, ok} -> ok
+    after 1000 ->
+        {error, timeout}
+    end.
+
+loop(Accounts) ->
+    receive
+        {get_balance, From, Ref, AccountId} ->
+            Result = case find_account(AccountId, Accounts) of
+                {ok, {account, _, _, Balance}} -> {ok, Balance};
+                error -> {error, not_found}
+            end,
+            From ! {reply, Ref, Result},
+            [not_tail_call | loop(Accounts)];
+
+        {transaction, From, Ref, Tx} ->
+            case apply_tx(Tx, Accounts) of
+                {ok, ReplyVal, NewAccounts} ->
+                    From ! {reply, Ref, {ok, ReplyVal}},
+                    loop(NewAccounts);
+                {error, Reason} ->
+                    From ! {reply, Ref, {error, Reason}},
+                    loop(Accounts)
+            end;
+
+        {process_batch, From, Ref, TxList} ->
+            {AppliedCount, RejectedCount, NewAccounts} = run_batch(TxList, Accounts, 0, 0),
+            From ! {reply, Ref, {ok, AppliedCount, RejectedCount}},
+            loop(NewAccounts);
+
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+find_account(_Id, []) -> error;
+find_account(Id, [{account, Id, Name, Bal} | _]) -> {ok, {account, Id, Name, Bal}};
+find_account(Id, [_ | Rest]) -> find_account(Id, Rest).
+
+apply_tx({deposit, AccountId, Amount}, Accounts) when Amount > 0 ->
+    case find_account(AccountId, Accounts) of
+        {ok, {account, Id, Name, Bal}} ->
+            NewBal = Bal + Amount,
+            NewAccounts = update_account({account, Id, Name, NewBal}, Accounts),
+            {ok, NewBal, NewAccounts};
+        error ->
+            {error, not_found}
+    end;
+apply_tx({withdraw, AccountId, Amount}, Accounts) when Amount > 0 ->
+    case find_account(AccountId, Accounts) of
+        {ok, {account, Id, Name, Bal}} when Bal >= Amount ->
+            NewBal = Bal - Amount,
+            NewAccounts = update_account({account, Id, Name, NewBal}, Accounts),
+            {ok, NewBal, NewAccounts};
+        {ok, _} ->
+            {error, insufficient_funds};
+        error ->
+            {error, not_found}
+    end;
+apply_tx({transfer, FromId, ToId, Amount}, Accounts) when Amount > 0 ->
+    case {find_account(FromId, Accounts), find_account(ToId, Accounts)} of
+        {{ok, {account, FromId, FromName, FromBal}}, {ok, {account, ToId, ToName, ToBal}}} ->
+            if
+                FromBal >= Amount ->
+                    NewFromBal = FromBal - Amount,
+                    NewToBal = ToBal + Amount,
+                    Acc1 = update_account({account, FromId, FromName, NewFromBal}, Accounts),
+                    Acc2 = update_account({account, ToId, ToName, NewToBal}, Acc1),
+                    {ok, NewFromBal, Acc2};
+                true ->
+                    {error, insufficient_funds}
+            end;
+        _ ->
+            {error, not_found}
+    end;
+apply_tx(_Invalid, _Accounts) ->
+    {error, invalid_transaction}.
+
+update_account(NewAcc, Accounts) ->
+    update_account_tail(NewAcc, Accounts, []).
+
+update_account_tail({account, Id, _, _} = NewAcc, [{account, Id, _, _} | Rest], Acc) ->
+    reverse_append(Acc, [NewAcc | Rest]);
+update_account_tail(NewAcc, [Head | Rest], Acc) ->
+    update_account_tail(NewAcc, Rest, [Head | Acc]);
+update_account_tail(_NewAcc, [], Acc) ->
+    reverse_append(Acc, []).
+
+reverse_append([], Acc) -> Acc;
+reverse_append([H | T], Acc) -> reverse_append(T, [H | Acc]).
+
+run_batch([], Accounts, Applied, Rejected) ->
+    {Applied, Rejected, Accounts};
+run_batch([Tx | Rest], Accounts, Applied, Rejected) ->
+    case apply_tx(Tx, Accounts) of
+        {ok, _ReplyVal, NewAccounts} ->
+            run_batch(Rest, NewAccounts, Applied + 1, Rejected);
+        {error, _Reason} ->
+            run_batch(Rest, Accounts, Applied, Rejected + 1)
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l08", map[string]string{
+			"src/ledger_actor.erl": bodyRecursiveCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for body recursion on loop/1, got %d", report.Score)
+		}
+
+		foundFailedAst := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_and_tco_invariants" && st.Status == "failed" {
+				foundFailedAst = true
+			}
+		}
+		if !foundFailedAst {
+			t.Errorf("Expected ast_and_tco_invariants stage to fail on body recursion")
+		}
+	})
+
+	// ch05-l08 Negative test 2: missing process_batch/2 export violates compile_and_export_audit
+	t.Run("ch05-l08 Negative Missing Export", func(t *testing.T) {
+		sessID := "test-sess-ch05-l08-neg-export"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		missingExportCode := `-module(ledger_actor).
+-export([
+    start/1,
+    get_balance/2,
+    process_transaction/2,
+    stop/1,
+    loop/1
+]).
+
+start(InitialAccounts) ->
+    spawn(fun() -> loop(InitialAccounts) end).
+
+get_balance(Pid, AccountId) ->
+    Ref = make_ref(),
+    Pid ! {get_balance, self(), Ref, AccountId},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        {error, timeout}
+    end.
+
+process_transaction(Pid, TxTuple) ->
+    Ref = make_ref(),
+    Pid ! {transaction, self(), Ref, TxTuple},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        {error, timeout}
+    end.
+
+process_batch(Pid, TransactionsList) ->
+    Ref = make_ref(),
+    Pid ! {process_batch, self(), Ref, TransactionsList},
+    receive
+        {reply, Ref, Result} -> Result
+    after 2000 ->
+        {error, timeout}
+    end.
+
+stop(Pid) ->
+    Ref = make_ref(),
+    Pid ! {stop, self(), Ref},
+    receive
+        {reply, Ref, ok} -> ok
+    after 1000 ->
+        {error, timeout}
+    end.
+
+loop(Accounts) ->
+    receive
+        {get_balance, From, Ref, AccountId} ->
+            Result = case find_account(AccountId, Accounts) of
+                {ok, {account, _, _, Balance}} -> {ok, Balance};
+                error -> {error, not_found}
+            end,
+            From ! {reply, Ref, Result},
+            loop(Accounts);
+
+        {transaction, From, Ref, Tx} ->
+            case apply_tx(Tx, Accounts) of
+                {ok, ReplyVal, NewAccounts} ->
+                    From ! {reply, Ref, {ok, ReplyVal}},
+                    loop(NewAccounts);
+                {error, Reason} ->
+                    From ! {reply, Ref, {error, Reason}},
+                    loop(Accounts)
+            end;
+
+        {process_batch, From, Ref, TxList} ->
+            {AppliedCount, RejectedCount, NewAccounts} = run_batch(TxList, Accounts, 0, 0),
+            From ! {reply, Ref, {ok, AppliedCount, RejectedCount}},
+            loop(NewAccounts);
+
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+find_account(_Id, []) -> error;
+find_account(Id, [{account, Id, Name, Bal} | _]) -> {ok, {account, Id, Name, Bal}};
+find_account(Id, [_ | Rest]) -> find_account(Id, Rest).
+
+apply_tx({deposit, AccountId, Amount}, Accounts) when Amount > 0 ->
+    case find_account(AccountId, Accounts) of
+        {ok, {account, Id, Name, Bal}} ->
+            NewBal = Bal + Amount,
+            NewAccounts = update_account({account, Id, Name, NewBal}, Accounts),
+            {ok, NewBal, NewAccounts};
+        error ->
+            {error, not_found}
+    end;
+apply_tx({withdraw, AccountId, Amount}, Accounts) when Amount > 0 ->
+    case find_account(AccountId, Accounts) of
+        {ok, {account, Id, Name, Bal}} when Bal >= Amount ->
+            NewBal = Bal - Amount,
+            NewAccounts = update_account({account, Id, Name, NewBal}, Accounts),
+            {ok, NewBal, NewAccounts};
+        {ok, _} ->
+            {error, insufficient_funds};
+        error ->
+            {error, not_found}
+    end;
+apply_tx({transfer, FromId, ToId, Amount}, Accounts) when Amount > 0 ->
+    case {find_account(FromId, Accounts), find_account(ToId, Accounts)} of
+        {{ok, {account, FromId, FromName, FromBal}}, {ok, {account, ToId, ToName, ToBal}}} ->
+            if
+                FromBal >= Amount ->
+                    NewFromBal = FromBal - Amount,
+                    NewToBal = ToBal + Amount,
+                    Acc1 = update_account({account, FromId, FromName, NewFromBal}, Accounts),
+                    Acc2 = update_account({account, ToId, ToName, NewToBal}, Acc1),
+                    {ok, NewFromBal, Acc2};
+                true ->
+                    {error, insufficient_funds}
+            end;
+        _ ->
+            {error, not_found}
+    end;
+apply_tx(_Invalid, _Accounts) ->
+    {error, invalid_transaction}.
+
+update_account(NewAcc, Accounts) ->
+    update_account_tail(NewAcc, Accounts, []).
+
+update_account_tail({account, Id, _, _} = NewAcc, [{account, Id, _, _} | Rest], Acc) ->
+    reverse_append(Acc, [NewAcc | Rest]);
+update_account_tail(NewAcc, [Head | Rest], Acc) ->
+    update_account_tail(NewAcc, Rest, [Head | Acc]);
+update_account_tail(_NewAcc, [], Acc) ->
+    reverse_append(Acc, []).
+
+reverse_append([], Acc) -> Acc;
+reverse_append([H | T], Acc) -> reverse_append(T, [H | Acc]).
+
+run_batch([], Accounts, Applied, Rejected) ->
+    {Applied, Rejected, Accounts};
+run_batch([Tx | Rest], Accounts, Applied, Rejected) ->
+    case apply_tx(Tx, Accounts) of
+        {ok, _ReplyVal, NewAccounts} ->
+            run_batch(Rest, NewAccounts, Applied + 1, Rejected);
+        {error, _Reason} ->
+            run_batch(Rest, Accounts, Applied, Rejected + 1)
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l08", map[string]string{
+			"src/ledger_actor.erl": missingExportCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for missing export, got %d", report.Score)
+		}
+
+		foundFailedCompile := false
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				foundFailedCompile = true
+			}
+		}
+		if !foundFailedCompile {
+			t.Errorf("Expected compile_and_export_audit to fail on missing export")
+		}
+	})
+
+	// ch05-l08 Negative test 3: double spend flaw permits negative balances & fails race condition audit
+	t.Run("ch05-l08 Negative Double Spend Flaw", func(t *testing.T) {
+		sessID := "test-sess-ch05-l08-neg-race"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		flawedCode := `-module(ledger_actor).
+-export([
+    start/1,
+    get_balance/2,
+    process_transaction/2,
+    process_batch/2,
+    stop/1,
+    loop/1
+]).
+
+start(InitialAccounts) ->
+    spawn(fun() -> loop(InitialAccounts) end).
+
+get_balance(Pid, AccountId) ->
+    Ref = make_ref(),
+    Pid ! {get_balance, self(), Ref, AccountId},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        {error, timeout}
+    end.
+
+process_transaction(Pid, TxTuple) ->
+    Ref = make_ref(),
+    Pid ! {transaction, self(), Ref, TxTuple},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        {error, timeout}
+    end.
+
+process_batch(Pid, TransactionsList) ->
+    Ref = make_ref(),
+    Pid ! {process_batch, self(), Ref, TransactionsList},
+    receive
+        {reply, Ref, Result} -> Result
+    after 2000 ->
+        {error, timeout}
+    end.
+
+stop(Pid) ->
+    Ref = make_ref(),
+    Pid ! {stop, self(), Ref},
+    receive
+        {reply, Ref, ok} -> ok
+    after 1000 ->
+        {error, timeout}
+    end.
+
+loop(Accounts) ->
+    receive
+        {get_balance, From, Ref, AccountId} ->
+            Result = case find_account(AccountId, Accounts) of
+                {ok, {account, _, _, Balance}} -> {ok, Balance};
+                error -> {error, not_found}
+            end,
+            From ! {reply, Ref, Result},
+            loop(Accounts);
+
+        {transaction, From, Ref, Tx} ->
+            case apply_tx(Tx, Accounts) of
+                {ok, ReplyVal, NewAccounts} ->
+                    From ! {reply, Ref, {ok, ReplyVal}},
+                    loop(NewAccounts);
+                {error, Reason} ->
+                    From ! {reply, Ref, {error, Reason}},
+                    loop(Accounts)
+            end;
+
+        {process_batch, From, Ref, TxList} ->
+            {AppliedCount, RejectedCount, NewAccounts} = run_batch(TxList, Accounts, 0, 0),
+            From ! {reply, Ref, {ok, AppliedCount, RejectedCount}},
+            loop(NewAccounts);
+
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+find_account(_Id, []) -> error;
+find_account(Id, [{account, Id, Name, Bal} | _]) -> {ok, {account, Id, Name, Bal}};
+find_account(Id, [_ | Rest]) -> find_account(Id, Rest).
+
+apply_tx({deposit, AccountId, Amount}, Accounts) when Amount > 0 ->
+    case find_account(AccountId, Accounts) of
+        {ok, {account, Id, Name, Bal}} ->
+            NewBal = Bal + Amount,
+            NewAccounts = update_account({account, Id, Name, NewBal}, Accounts),
+            {ok, NewBal, NewAccounts};
+        error ->
+            {error, not_found}
+    end;
+apply_tx({withdraw, AccountId, Amount}, Accounts) when Amount > 0 ->
+    case find_account(AccountId, Accounts) of
+        {ok, {account, Id, Name, Bal}} ->
+            % FLAW: Blindly deducts balance without checking Bal >= Amount!
+            NewBal = Bal - Amount,
+            NewAccounts = update_account({account, Id, Name, NewBal}, Accounts),
+            {ok, NewBal, NewAccounts};
+        error ->
+            {error, not_found}
+    end;
+apply_tx({transfer, FromId, ToId, Amount}, Accounts) when Amount > 0 ->
+    case {find_account(FromId, Accounts), find_account(ToId, Accounts)} of
+        {{ok, {account, FromId, FromName, FromBal}}, {ok, {account, ToId, ToName, ToBal}}} ->
+            if
+                FromBal >= Amount ->
+                    NewFromBal = FromBal - Amount,
+                    NewToBal = ToBal + Amount,
+                    Acc1 = update_account({account, FromId, FromName, NewFromBal}, Accounts),
+                    Acc2 = update_account({account, ToId, ToName, NewToBal}, Acc1),
+                    {ok, NewFromBal, Acc2};
+                true ->
+                    {error, insufficient_funds}
+            end;
+        _ ->
+            {error, not_found}
+    end;
+apply_tx(_Invalid, _Accounts) ->
+    {error, invalid_transaction}.
+
+update_account(NewAcc, Accounts) ->
+    update_account_tail(NewAcc, Accounts, []).
+
+update_account_tail({account, Id, _, _} = NewAcc, [{account, Id, _, _} | Rest], Acc) ->
+    reverse_append(Acc, [NewAcc | Rest]);
+update_account_tail(NewAcc, [Head | Rest], Acc) ->
+    update_account_tail(NewAcc, Rest, [Head | Acc]);
+update_account_tail(_NewAcc, [], Acc) ->
+    reverse_append(Acc, []).
+
+reverse_append([], Acc) -> Acc;
+reverse_append([H | T], Acc) -> reverse_append(T, [H | Acc]).
+
+run_batch([], Accounts, Applied, Rejected) ->
+    {Applied, Rejected, Accounts};
+run_batch([Tx | Rest], Accounts, Applied, Rejected) ->
+    case apply_tx(Tx, Accounts) of
+        {ok, _ReplyVal, NewAccounts} ->
+            run_batch(Rest, NewAccounts, Applied + 1, Rejected);
+        {error, _Reason} ->
+            run_batch(Rest, Accounts, Applied, Rejected + 1)
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l08", map[string]string{
+			"src/ledger_actor.erl": flawedCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for double spend flaw, got %d", report.Score)
+		}
+
+		foundFailedStage := false
+		for _, st := range report.Stages {
+			if (st.ID == "concurrency_race_audit" || st.ID == "atomic_deposit_withdraw") && st.Status == "failed" {
+				foundFailedStage = true
+			}
+		}
+		if !foundFailedStage {
+			t.Errorf("Expected concurrency_race_audit or atomic_deposit_withdraw to fail on double spend flaw")
 		}
 	})
 }

@@ -3508,6 +3508,28 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 26 subtests across CH05; `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l07 | 3/3 tests passed`).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 224: Spec 04 / Spec 08 Anti-Spoiler Audit, Concurrent Bank Ledger & Order Actor Problem Set, 10-Worker Race Audit & Live Tri-Verification of Chapter 5 Lecture 8 (`ch05-l08`)
+
+- [x] **224.1: Spec 04/08 Pedagogical Anti-Spoiler Audit & Erlang/AST Hardening (`ch05-l08`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch05.ts` (`ch05-l08`, `ledger_actor.erl`) against Spec 04, 07, and 08.
+  - Re-ordered Spec 04 layout so `## Official Erlang Docs & Function Reference` (`erlang:spawn/1`, `erlang:make_ref/0`, `erlang:self/0`) precedes `## Parallel Worked Example`.
+  - Authored domain-distinct `## Parallel Worked Example` (`fleet_allocator.erl`) across 4 clear execution phases (`Phase 1: Starting State and Client API`, `Phase 2: Synchronous Call Pipeline with make_ref/0 and Timeout`, `Phase 3: Asynchronous Stop Cast`, `Phase 4: Tail-Recursive State Machine Loop with Batch Recursion`) with deep architectural breakdown explaining lock-free actor serialization, multi-entity atomic coordination, and dual-accumulator batch recursion.
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across all 6 exported functions (`start/1`, `get_balance/2`, `process_transaction/2`, `process_batch/2`, `stop/1`, `loop/1`) with zero Erlang code leaks or syntax spoilers in prompt text.
+  - Aligned 10/10 plain-English `%% @doc` contracts across all 4 code representations (`files[0].content`, `starterCode`, `solutionFiles['src/ledger_actor.erl']`, `solutionCode`).
+  - Scaffolding starter pack with `_` prefixed parameters compiling cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0) while returning neutral stubs that fail assertions safely at runtime.
+  - Configured `astRules` (`requireTailRecursion: ['loop/1']`, `requiredConstructs: ['receive_after']`, `requiredCalls: ['erlang:make_ref/0', 'erlang:self/0']`).
+- [x] **224.2: Go Orchestrator Runner & 10-Worker Concurrency Audit (`ch05-l08`)**:
+  - Upgraded `buildChapterRunScript` in `services/orchestrator/internal/bridge/erl_runner_chapters.go` to evaluate all 4 visible tests (`T1_Res`: balance queries, `T2_Res`: deposit & withdrawal, `T3_Res`: inter-account transfer, `T4_Res`: batch transactions) and return `AllResults = [T1_Res, T2_Res, T3_Res, T4_Res]`.
+  - Added `{loop, 1}` to `Req` exports audit in `buildChapterVerificationScript` for `ch05-l08`.
+  - Relaxed `ch05-l04` client query watchdog timeout in `erl_runner_chapters.go` from `after 1200` to `after 1500` to eliminate scheduling jitter under parallel test execution on Windows.
+  - Expanded `services/orchestrator/internal/bridge/ch05_verification_test.go` with positive verification (100% score, 6/6 stages passed, 4/4 visible tests passed) and 3 negative regression subtests (`ch05-l08_Negative_Body_Recursion_on_loop/1`, `ch05-l08_Negative_Missing_Export`, `ch05-l08_Negative_Double_Spend_Flaw`).
+- [x] **224.3: Mandatory Live Tri-Verification & Full Test Suite Certification (`ch05-l08`)**:
+  - **Parallel Worked Example (`fleet_allocator.erl`)**: Extracted directly from `ch05.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with all 4 phases passing cleanly (`PWE_OTP_OK`).
+  - **Starter Pack (`ledger_actor.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (exit code 0), loads cleanly on OTP, and safely fails tests without compiler or syntax crashes.
+  - **Solution Pack (`ledger_actor.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/ledger_actor.erl'] === solutionCode`), compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `require_tail_recursion => [{loop, 1}]`, `required_constructs => [receive_after]`, and `required_calls => [{erlang, make_ref, 0}, {erlang, self, 0}]`, and passed 100% of visible test cases (4/4 passed).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 30 subtests across CH05 in `98.53s`; `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l08 | 4/4 tests passed`) in `16.76s`.
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
 
 
 

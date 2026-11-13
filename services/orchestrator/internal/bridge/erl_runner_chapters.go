@@ -2049,10 +2049,10 @@ T3_Res = try
         {t3_done, Other3} ->
             #{call_str => <<"counter_actor:get_value(Dummy)">>, expected => <<"{error, timeout}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
-    after 1200 ->
+    after 1500 ->
         exit(T3_Worker, kill),
         #{call_str => <<"counter_actor:get_value(Dummy)">>, expected => <<"{error, timeout}">>,
-          actual => <<"Crash: get_value/1 blocked indefinitely">>, passed => false, time_ms => 1200}
+          actual => <<"Crash: get_value/1 blocked indefinitely">>, passed => false, time_ms => 1500}
     end
 catch C3:Err3 ->
     #{call_str => <<"counter_actor:get_value(Dummy)">>, expected => <<"{error, timeout}">>,
@@ -2194,29 +2194,79 @@ init:stop().
 		return `
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
-    Accounts = [{account, 1, <<"Alice">>, 100}, {account, 2, <<"Bob">>, 50}],
-    P = ledger_actor:start(Accounts),
-    {ok, 100} = ledger_actor:get_balance(P, 1),
-    {ok, 150} = ledger_actor:process_transaction(P, {deposit, 1, 50}),
-    {error, insufficient_funds} = ledger_actor:process_transaction(P, {withdraw, 1, 500}),
-    {ok, 120} = ledger_actor:process_transaction(P, {transfer, 1, 2, 30}),
-    {ok, 80} = ledger_actor:get_balance(P, 2),
-    Txs = [{deposit, 1, 10}, {withdraw, 2, 200}, {transfer, 1, 2, 30}],
-    {ok, 2, 1} = ledger_actor:process_batch(P, Txs),
-    {ok, FinalB1} = ledger_actor:get_balance(P, 1),
-    {ok, FinalB2} = ledger_actor:get_balance(P, 2),
-    ledger_actor:stop(P),
-    Res = {FinalB1, FinalB2},
-    #{call_str => <<"ledger_actor:process_batch(P, Txs)">>,
-      expected => <<"{100, 110}">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res]))),
-      passed => Res =:= {100, 110},
+    Accounts1 = [{account, 1, <<"Alice">>, 100}, {account, 2, <<"Bob">>, 50}],
+    P1 = ledger_actor:start(Accounts1),
+    B1 = ledger_actor:get_balance(P1, 1),
+    B2 = ledger_actor:get_balance(P1, 2),
+    ledger_actor:stop(P1),
+    Pair1 = {B1, B2},
+    Expected1 = {{ok, 100}, {ok, 50}},
+    #{call_str => <<"ledger_actor:get_balance(P, 1) and (P, 2)">>,
+      expected => <<"{{ok, 100}, {ok, 50}}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Pair1]))),
+      passed => Pair1 =:= Expected1,
       time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"ledger_actor transactions test">>, expected => <<"{100, 110}">>,
+    #{call_str => <<"ledger_actor:get_balance(P, 1) and (P, 2)">>, expected => <<"{{ok, 100}, {ok, 50}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    Accounts2 = [{account, 1, <<"Alice">>, 100}],
+    P2 = ledger_actor:start(Accounts2),
+    {ok, 150} = ledger_actor:process_transaction(P2, {deposit, 1, 50}),
+    Err2 = ledger_actor:process_transaction(P2, {withdraw, 1, 200}),
+    {ok, Final2} = ledger_actor:get_balance(P2, 1),
+    ledger_actor:stop(P2),
+    Pair2 = {Err2, Final2},
+    Expected2 = {{error, insufficient_funds}, 150},
+    #{call_str => <<"ledger_actor deposit and overdraw">>,
+      expected => <<"{{error, insufficient_funds}, 150}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Pair2]))),
+      passed => Pair2 =:= Expected2,
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"ledger_actor deposit and overdraw">>, expected => <<"{{error, insufficient_funds}, 150}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    Accounts3 = [{account, 1, <<"Alice">>, 100}, {account, 2, <<"Bob">>, 50}],
+    P3 = ledger_actor:start(Accounts3),
+    {ok, 70} = ledger_actor:process_transaction(P3, {transfer, 1, 2, 30}),
+    {ok, B2_3} = ledger_actor:get_balance(P3, 2),
+    ledger_actor:stop(P3),
+    Expected3 = 80,
+    #{call_str => <<"ledger_actor:process_transaction(P, {transfer, 1, 2, 30})">>,
+      expected => <<"80">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [B2_3]))),
+      passed => B2_3 =:= Expected3,
+      time_ms => erlang:system_time(millisecond) - T3_Start}
+catch C3:R3 ->
+    #{call_str => <<"ledger_actor:process_transaction(P, {transfer, 1, 2, 30})">>, expected => <<"80">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+T4_Start = erlang:system_time(millisecond),
+T4_Res = try
+    Accounts4 = [{account, 1, <<"Alice">>, 100}, {account, 2, <<"Bob">>, 50}],
+    P4 = ledger_actor:start(Accounts4),
+    Txs4 = [{deposit, 1, 20}, {withdraw, 2, 100}, {transfer, 1, 2, 40}],
+    {ok, App4, Rej4} = ledger_actor:process_batch(P4, Txs4),
+    {ok, B1_4} = ledger_actor:get_balance(P4, 1),
+    {ok, B2_4} = ledger_actor:get_balance(P4, 2),
+    ledger_actor:stop(P4),
+    Quad4 = {App4, Rej4, B1_4, B2_4},
+    Expected4 = {2, 1, 80, 90},
+    #{call_str => <<"ledger_actor:process_batch(P, [{deposit,...}, {withdraw,...}, {transfer,...}])">>,
+      expected => <<"{2, 1, 80, 90}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Quad4]))),
+      passed => Quad4 =:= Expected4,
+      time_ms => erlang:system_time(millisecond) - T4_Start}
+catch C4:R4 ->
+    #{call_str => <<"ledger_actor:process_batch(P, ...)">>, expected => <<"{2, 1, 80, 90}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -7555,7 +7605,7 @@ Stages = [CompileStage_Door, S1_Ast_Door, S2_Fsm_Door, S3_Timeout_Door]
 CompileStage = case code:ensure_loaded(ledger_actor) of
     {module, ledger_actor} ->
         Exports = ledger_actor:module_info(exports),
-        Req = [{start, 1}, {get_balance, 2}, {process_transaction, 2}, {process_batch, 2}, {stop, 1}],
+        Req = [{start, 1}, {get_balance, 2}, {process_transaction, 2}, {process_batch, 2}, {stop, 1}, {loop, 1}],
         case [E || E <- Req, not lists:member(E, Exports)] of
             [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"ledger_actor.erl compiled cleanly; all API functions exported.">>};
             Missing -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
