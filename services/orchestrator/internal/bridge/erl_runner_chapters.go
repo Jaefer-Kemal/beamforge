@@ -2678,58 +2678,79 @@ init:stop().
 		return `
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
-    case code:ensure_loaded(worker_watcher) of
-        {module, worker_watcher} ->
-            case worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000) of
-                {ok, 42} = R1 ->
-                    #{call_str => <<"worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000)">>,
-                      expected => <<"{ok, 42}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
-                      time_ms => erlang:system_time(millisecond) - T1_Start};
-                Other1 ->
-                    #{call_str => <<"worker_watcher:run_monitored_task(...)">>, expected => <<"{ok, 42}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
-            end;
-        _ ->
-            PoisonWorker = fun(crash) -> error(poison_pill); (X) when is_number(X) -> X * 10 end,
-            Jobs = [{job, 1, 5, 2}, {job, 2, crash, 2}, {job, 3, 7, 2}],
-            case job_coordinator:execute_batch(Jobs, PoisonWorker) of
-                {[{completed, 1, 50}, {completed, 3, 70}], [{dead_letter, 2, poison_pill}]} = R1 ->
-                    #{call_str => <<"job_coordinator:execute_batch(Jobs, PoisonWorker)">>,
-                      expected => <<"{[{completed, 1, 50}, {completed, 3, 70}], [{dead_letter, 2, poison_pill}]}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
-                      time_ms => erlang:system_time(millisecond) - T1_Start};
-                Other1 ->
-                    #{call_str => <<"job_coordinator:execute_batch(...)">>, expected => <<"{[...], [...]}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
-            end
+    case worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000) of
+        {ok, 42} = Res1 ->
+            #{call_str => <<"worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000)">>,
+              expected => <<"{ok, 42}">>,
+              actual => list_to_binary(io_lib:format("~p", [Res1])),
+              passed => true,
+              time_ms => erlang:system_time(millisecond) - T1_Start};
+        Other1 ->
+            #{call_str => <<"worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000)">>,
+              expected => <<"{ok, 42}">>,
+              actual => list_to_binary(io_lib:format("~p", [Other1])),
+              passed => false,
+              time_ms => erlang:system_time(millisecond) - T1_Start}
     end
-catch C1:R1 ->
-    #{call_str => <<"worker_watcher:run_monitored_task(...)">>, expected => <<"{ok, 42}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+catch Class1:Reason1 ->
+    #{call_str => <<"worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000)">>,
+      expected => <<"{ok, 42}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [Class1, Reason1])),
+      passed => false,
+      time_ms => erlang:system_time(millisecond) - T1_Start}
 end,
+
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try
-    case code:ensure_loaded(worker_watcher) of
-        {module, worker_watcher} ->
-            case worker_watcher:run_monitored_task(fun() -> 1 / 0 end, 1000) of
-                {error, {crashed, badarith}} = R2 ->
-                    #{call_str => <<"worker_watcher:run_monitored_task(fun() -> 1/0 end, 1000)">>,
-                      expected => <<"{error, {crashed, badarith}}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
-                      time_ms => erlang:system_time(millisecond) - T2_Start};
-                Other2 ->
-                    #{call_str => <<"worker_watcher:run_monitored_task(...)">>, expected => <<"{error, {crashed, badarith}}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
-            end;
-        _ ->
-            #{call_str => <<"legacy">>, expected => <<"ok">>, actual => <<"ok">>, passed => true, time_ms => 0}
+    case worker_watcher:run_monitored_task(fun() -> 1 / 0 end, 1000) of
+        {error, {crashed, badarith}} = Res2 ->
+            #{call_str => <<"worker_watcher:run_monitored_task(fun() -> 1 / 0 end, 1000)">>,
+              expected => <<"{error, {crashed, badarith}}">>,
+              actual => list_to_binary(io_lib:format("~p", [Res2])),
+              passed => true,
+              time_ms => erlang:system_time(millisecond) - T2_Start};
+        Other2 ->
+            #{call_str => <<"worker_watcher:run_monitored_task(fun() -> 1 / 0 end, 1000)">>,
+              expected => <<"{error, {crashed, badarith}}">>,
+              actual => list_to_binary(io_lib:format("~p", [Other2])),
+              passed => false,
+              time_ms => erlang:system_time(millisecond) - T2_Start}
     end
-catch C2:R2 ->
-    #{call_str => <<"worker_watcher:run_monitored_task(...)">>, expected => <<"{error, {crashed, badarith}}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+catch Class2:Reason2 ->
+    #{call_str => <<"worker_watcher:run_monitored_task(fun() -> 1 / 0 end, 1000)">>,
+      expected => <<"{error, {crashed, badarith}}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [Class2, Reason2])),
+      passed => false,
+      time_ms => erlang:system_time(millisecond) - T2_Start}
 end,
-AllResults = [T1_Res, T2_Res],
+
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    Dead = spawn(fun() -> ok end),
+    timer:sleep(30),
+    case worker_watcher:probe_pid_status(Dead) of
+        {dead, noproc} = Res3 ->
+            #{call_str => <<"begin Dead = spawn(fun() -> ok end), timer:sleep(30), worker_watcher:probe_pid_status(Dead) end">>,
+              expected => <<"{dead, noproc}">>,
+              actual => list_to_binary(io_lib:format("~p", [Res3])),
+              passed => true,
+              time_ms => erlang:system_time(millisecond) - T3_Start};
+        Other3 ->
+            #{call_str => <<"begin Dead = spawn(fun() -> ok end), timer:sleep(30), worker_watcher:probe_pid_status(Dead) end">>,
+              expected => <<"{dead, noproc}">>,
+              actual => list_to_binary(io_lib:format("~p", [Other3])),
+              passed => false,
+              time_ms => erlang:system_time(millisecond) - T3_Start}
+    end
+catch Class3:Reason3 ->
+    #{call_str => <<"worker_watcher:probe_pid_status(Dead)">>,
+      expected => <<"{dead, noproc}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [Class3, Reason3])),
+      passed => false,
+      time_ms => erlang:system_time(millisecond) - T3_Start}
+end,
+
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -8306,21 +8327,13 @@ Stages = [CompileStage, S1_Ast, S2_Supervised, S3_KillSignal, S4_TruthTable]
 CompileStage = case code:ensure_loaded(worker_watcher) of
     {module, worker_watcher} ->
         Exports = worker_watcher:module_info(exports),
-        case lists:member({run_monitored_task, 2}, Exports) andalso lists:member({probe_pid_status, 1}, Exports) of
-            true -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"worker_watcher.erl compiled cleanly; run_monitored_task/2 and probe_pid_status/1 exported.">>};
-            false ->
-                case lists:member({run_monitored_task, 2}, Exports) of
-                    true -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"worker_watcher.erl compiled cleanly.">>};
-                    false -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => <<"Missing export: run_monitored_task/2">>}
-                end
+        Req = [{run_monitored_task, 2}, {probe_pid_status, 1}],
+        case [E || E <- Req, not lists:member(E, Exports)] of
+            [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"worker_watcher.erl compiled cleanly; all API functions exported.">>};
+            Missing -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
         end;
     {error, E1} ->
-        case code:ensure_loaded(job_coordinator) of
-            {module, job_coordinator} ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit (Legacy)">>, status => <<"passed">>, time_ms => 12, details => <<"job_coordinator.erl loaded cleanly.">>};
-            _ ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
-        end
+        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
 S1_Ast = try
     SrcPath = filename:join(["%s", "src", "worker_watcher.erl"]),
@@ -8329,20 +8342,20 @@ S1_Ast = try
         true ->
             {ok, BeamBin} = file:read_file(BeamPath),
             Rules = #{
-                required_remote_calls => [{erlang, spawn_monitor, 1}, {erlang, demonitor, 2}],
+                required_remote_calls => [{erlang, spawn_monitor, 1}, {erlang, monitor, 2}, {erlang, demonitor, 2}],
                 required_constructs => [receive_after]
             },
             case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
                 {ok, _} ->
-                    #{id => <<"ast_monitor_invariants">>, title => <<"AST Analysis: spawn_monitor/1, demonitor/2, and receive...after">>, status => <<"passed">>, time_ms => 15, details => <<"spawn_monitor/1, demonitor/2, and receive...after verified.">>};
+                    #{id => <<"ast_monitor_invariants">>, title => <<"AST Analysis: spawn_monitor/1, monitor/2, demonitor/2, and receive...after">>, status => <<"passed">>, time_ms => 15, details => <<"spawn_monitor/1, monitor/2, demonitor/2, and receive...after verified.">>};
                 {error, Violations} ->
-                    #{id => <<"ast_monitor_invariants">>, title => <<"AST Analysis: spawn_monitor/1, demonitor/2, and receive...after">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
+                    #{id => <<"ast_monitor_invariants">>, title => <<"AST Analysis: spawn_monitor/1, monitor/2, demonitor/2, and receive...after">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
             end;
         false ->
-            #{id => <<"ast_monitor_invariants">>, title => <<"AST Analysis">>, status => <<"passed">>, time_ms => 15, details => <<"Legacy skipped.">>}
+            #{id => <<"ast_monitor_invariants">>, title => <<"AST Analysis: spawn_monitor/1, monitor/2, demonitor/2, and receive...after">>, status => <<"failed">>, time_ms => 15, details => <<"worker_watcher.erl not found.">>}
     end
 catch C1:R1 ->
-    #{id => <<"ast_monitor_invariants">>, title => <<"AST Analysis: spawn_monitor/1, demonitor/2, and receive...after">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
+    #{id => <<"ast_monitor_invariants">>, title => <<"AST Analysis: spawn_monitor/1, monitor/2, demonitor/2, and receive...after">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
 end,
 S2_Success = try
     case code:is_loaded(worker_watcher) of
@@ -8350,7 +8363,7 @@ S2_Success = try
             {ok, 42} = worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000),
             #{id => <<"successful_execution">>, title => <<"Successful Monitored Execution & Mailbox Flush">>, status => <<"passed">>, time_ms => 12, details => <<"Monitored task executed cleanly; monitor flushed.">>};
         false ->
-            #{id => <<"successful_execution">>, title => <<"Successful Execution">>, status => <<"passed">>, time_ms => 12, details => <<"Legacy skipped.">>}
+            #{id => <<"successful_execution">>, title => <<"Successful Monitored Execution & Mailbox Flush">>, status => <<"failed">>, time_ms => 12, details => <<"worker_watcher module not loaded.">>}
     end
 catch C2:R2 ->
     #{id => <<"successful_execution">>, title => <<"Successful Monitored Execution & Mailbox Flush">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Success test error: ~p:~p", [C2, R2]))}
@@ -8362,7 +8375,7 @@ S3_Crash = try
             true = is_process_alive(self()),
             #{id => <<"crash_isolation">>, title => <<"Crash Isolation (Caller Survives Worker Division by Zero)">>, status => <<"passed">>, time_ms => 14, details => <<"Worker crash caught via 'DOWN' message; calling process survived unhurt.">>};
         false ->
-            #{id => <<"crash_isolation">>, title => <<"Crash Isolation">>, status => <<"passed">>, time_ms => 14, details => <<"Legacy skipped.">>}
+            #{id => <<"crash_isolation">>, title => <<"Crash Isolation (Caller Survives Worker Division by Zero)">>, status => <<"failed">>, time_ms => 14, details => <<"worker_watcher module not loaded.">>}
     end
 catch C3:R3 ->
     #{id => <<"crash_isolation">>, title => <<"Crash Isolation (Caller Survives Worker Division by Zero)">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Crash isolation error: ~p:~p", [C3, R3]))}
@@ -8373,7 +8386,7 @@ S4_Timeout = try
             {error, timeout} = worker_watcher:run_monitored_task(fun() -> receive after infinity -> ok end end, 80),
             #{id => <<"timeout_and_worker_kill">>, title => <<"Runaway Task Timeout & Forced Termination">>, status => <<"passed">>, time_ms => 100, details => <<"Stuck infinite-loop worker terminated via exit(Pid, kill) and monitor flushed.">>};
         false ->
-            #{id => <<"timeout_and_worker_kill">>, title => <<"Timeout & Worker Kill">>, status => <<"passed">>, time_ms => 100, details => <<"Legacy skipped.">>}
+            #{id => <<"timeout_and_worker_kill">>, title => <<"Runaway Task Timeout & Forced Termination">>, status => <<"failed">>, time_ms => 100, details => <<"worker_watcher module not loaded.">>}
     end
 catch C4:R4 ->
     #{id => <<"timeout_and_worker_kill">>, title => <<"Runaway Task Timeout & Forced Termination">>, status => <<"failed">>, time_ms => 100, details => list_to_binary(io_lib:format("Timeout test error: ~p:~p", [C4, R4]))}
@@ -8381,21 +8394,15 @@ end,
 S5_NoprocProbe = try
     case code:is_loaded(worker_watcher) of
         {file, _} ->
-            Exports2 = worker_watcher:module_info(exports),
-            case lists:member({probe_pid_status, 1}, Exports2) of
-                true ->
-                    DeadPid = spawn(fun() -> ok end),
-                    timer:sleep(30),
-                    {dead, noproc} = worker_watcher:probe_pid_status(DeadPid),
-                    LivePid = spawn(fun() -> receive stop -> ok end end),
-                    alive = worker_watcher:probe_pid_status(LivePid),
-                    LivePid ! stop,
-                    #{id => <<"noproc_invariant">>, title => <<"Dead PID 'noproc' Down Invariant Probe">>, status => <<"passed">>, time_ms => 25, details => <<"Demonstrated that monitoring an already-dead PID immediately returns {dead, noproc}.">>};
-                false ->
-                    #{id => <<"noproc_invariant">>, title => <<"Dead PID Invariant">>, status => <<"passed">>, time_ms => 10, details => <<"probe_pid_status not exported; skipped.">>}
-            end;
+            DeadPid = spawn(fun() -> ok end),
+            timer:sleep(30),
+            {dead, noproc} = worker_watcher:probe_pid_status(DeadPid),
+            LivePid = spawn(fun() -> receive stop -> ok end end),
+            alive = worker_watcher:probe_pid_status(LivePid),
+            LivePid ! stop,
+            #{id => <<"noproc_invariant">>, title => <<"Dead PID 'noproc' Down Invariant Probe">>, status => <<"passed">>, time_ms => 25, details => <<"Demonstrated that monitoring an already-dead PID immediately returns {dead, noproc}.">>};
         false ->
-            #{id => <<"noproc_invariant">>, title => <<"Dead PID Invariant">>, status => <<"passed">>, time_ms => 10, details => <<"Legacy skipped.">>}
+            #{id => <<"noproc_invariant">>, title => <<"Dead PID 'noproc' Down Invariant Probe">>, status => <<"failed">>, time_ms => 25, details => <<"worker_watcher module not loaded.">>}
     end
 catch C5:R5 ->
     #{id => <<"noproc_invariant">>, title => <<"Dead PID 'noproc' Down Invariant Probe">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Probe test error: ~p:~p", [C5, R5]))}

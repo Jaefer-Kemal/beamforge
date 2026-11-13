@@ -2338,12 +2338,12 @@ To solve this, Erlang provides **Monitors**. A monitor is **strictly unidirectio
 
 ## Deep Concept Breakdown & Under the Hood
 
-### 1. Monitoring Primitives
+### 1. Monitoring Primitives & The 5-Element 'DOWN' Tuple
 \`\`\`erlang
 %% Single BIF call:
 {WorkerPid, MRef} = spawn_monitor(fun() -> do_work() end).
 \`\`\`
-When the monitored process terminates, the BEAM posts a 5-element tuple into the monitor owner's mailbox:
+When the monitored process terminates, the BEAM runtime posts a 5-element notification tuple directly into the monitor owner's mailbox:
 \`\`\`erlang
 {'DOWN', MRef, process, WorkerPid, ExitReason}
 \`\`\`
@@ -2360,81 +2360,111 @@ In the BEAM:
   and places it into your mailbox!
 - This guarantees there are **zero check-then-monitor race conditions**. You never need to call \`is_process_alive(Pid)\` before monitoring!
 
+### 3. Monitor Mailbox Hygiene & Demonitoring
+When a monitored worker finishes its task and replies normally, or when a timeout deadline expires, the monitor remains active until the target process dies or the owner explicitly cancels it. If the target later exits, a stale \`'DOWN'\` notification will be delivered into the caller's mailbox.
+
+To prevent mailbox contamination, always call:
+\`\`\`erlang
+erlang:demonitor(MRef, [flush])
+\`\`\`
+The \`[flush]\` option removes the monitor and purges any matching \`'DOWN'\` message that may already have been enqueued.
+
+## Official Erlang Docs & Function Reference
+
+| Function | Module | Description | Official Manual |
+| :--- | :--- | :--- | :--- |
+| \`spawn_monitor(Fun)\` | \`erlang\` | Atomically spawns process executing \`Fun\` and starts unidirectional monitor, returning \`{Pid, Ref}\`. | [Erlang Docs: spawn_monitor/1](https://www.erlang.org/doc/apps/erts/erlang.html#spawn_monitor/1) |
+| \`erlang:monitor(process, Target)\` | \`erlang\` | Starts monitoring target process identifier. If process is already dead, delivers \`noproc\` down message. | [Erlang Docs: monitor/2](https://www.erlang.org/doc/apps/erts/erlang.html#monitor/2) |
+| \`erlang:demonitor(Ref, [flush])\` | \`erlang\` | Disables monitor and removes any matching \`'DOWN'\` notification from calling process mailbox. | [Erlang Docs: demonitor/2](https://www.erlang.org/doc/apps/erts/erlang.html#demonitor/2) |
+
 ## Parallel Worked Example
 
-The following module executes a remote RPC service call with monitor isolation and hard deadline enforcement:
+The following module executes batch document indexing tasks under monitor isolation with deadline cancellation and shard health probing:
 
 \`\`\`erlang
--module(service_endpoint_watcher).
+-module(batch_indexer_monitor).
 -export([
-    dispatch_timed_call/3,
-    check_service_health/1
+    index_document_chunk/2,
+    audit_replica_shard/1,
+    cancel_in_flight_index/2
 ]).
 
-%% @doc Dispatches a remote RPC service call with monitor isolation and hard deadline.
-dispatch_timed_call(EndpointUrl, Payload, DeadlineMs) ->
+%% @doc Executes a document indexing batch under an isolated monitor with timeout protection.
+index_document_chunk(ChunkFun, DeadlineMs) when is_function(ChunkFun, 0), is_integer(DeadlineMs) ->
     Caller = self(),
     {WorkerPid, MRef} = spawn_monitor(fun() ->
-        Response = mock_http_post(EndpointUrl, Payload),
-        Caller ! {rpc_reply, MRef, Response}
+        IndexedCount = ChunkFun(),
+        Caller ! {batch_complete, self(), IndexedCount}
     end),
     receive
-        {rpc_reply, MRef, Response} ->
+        {batch_complete, WorkerPid, IndexedCount} ->
             erlang:demonitor(MRef, [flush]),
-            {ok, Response};
+            {ok, IndexedCount};
         {'DOWN', MRef, process, WorkerPid, Reason} ->
-            {error, {service_failed, Reason}}
+            Normalized = case Reason of
+                {R, _} -> R;
+                R      -> R
+            end,
+            {error, {batch_failed, Normalized}}
     after DeadlineMs ->
         exit(WorkerPid, kill),
         erlang:demonitor(MRef, [flush]),
-        {error, deadline_exceeded}
+        {error, indexing_timeout}
     end.
 
-%% @doc Probes whether a service worker process is active or already dead.
-check_service_health(ServicePid) ->
-    MRef = erlang:monitor(process, ServicePid),
+%% @doc Probes whether a replica shard process is responsive or already terminated (demonstrating noproc).
+audit_replica_shard(ShardPid) when is_pid(ShardPid) ->
+    MRef = erlang:monitor(process, ShardPid),
     receive
-        {'DOWN', MRef, process, ServicePid, Reason} ->
-            {down, Reason}
-    after 50 ->
+        {'DOWN', MRef, process, ShardPid, Reason} ->
+            {shard_offline, Reason}
+    after 25 ->
         erlang:demonitor(MRef, [flush]),
-        up
+        shard_ready
     end.
 
-mock_http_post(_Url, Payload) ->
-    #{status => 200, echoed => Payload}.
+%% @doc Cancels an active indexing worker and cleans up any potential monitor notifications in mailbox.
+cancel_in_flight_index(WorkerPid, MRef) when is_pid(WorkerPid), is_reference(MRef) ->
+    exit(WorkerPid, kill),
+    erlang:demonitor(MRef, [flush]),
+    cancelled.
 \`\`\`
+
+### 1. Unidirectional Isolation in Ingestion Pipelines
+In \`index_document_chunk/2\`, the batch coordinator initiates indexing work without coupling its own lifecycle to worker stability. If a memory limit is exceeded or malformed text crashes the worker, the coordinator receives a \`'DOWN'\` notification while maintaining uninterrupted cluster availability.
+
+### 2. Synthesizing the Atomic spawn_monitor/1 Primitive
+Using \`spawn_monitor/1\` guarantees that the monitor reference exists before the new process begins executing. This eliminates any possibility of a race where the worker finishes or crashes before a subsequent monitor call could be registered.
+
+### 3. The Zero-Race noproc Shard Audit Invariant
+In \`audit_replica_shard/1\`, the coordinator checks replica health without calling pre-flight status checks. If the shard PID terminated prior to the call, the BEAM runtime immediately synthesizes a down notification with reason \`noproc\`, ensuring instant, non-blocking fault detection.
+
+### 4. Preventing Phantom Ingestion Messages with demonitor(Ref, [flush])
+Upon successful completion or deadline timeout, invoking \`erlang:demonitor(MRef, [flush])\` guarantees that any pending down signal emitted during worker termination is flushed from the mailbox, preserving pristine message ordering for subsequent requests.
 
 ## Assignment Specification
 
 Implement \`src/worker_watcher.erl\` exporting \`run_monitored_task/2\` and \`probe_pid_status/1\`:
 
 ### 1. \`run_monitored_task/2\`
-- **Input**: \`TaskFun\` (a 0-arity function executing the computation), \`TimeoutMs\` (non-negative integer millisecond deadline).
-- **Behavior**:
-  - Spawns a dedicated worker process running \`TaskFun\` and establishes an atomic unidirectional monitor via \`spawn_monitor/1\`.
-  - When the worker finishes and sends back its result before \`TimeoutMs\`, flushes the monitor via \`erlang:demonitor(MRef, [flush])\` and returns \`{ok, Result}\`.
-  - If the worker crashes (e.g. division by zero, throw, or abnormal exit), receives the \`'DOWN'\` notification, normalizes the exit reason (extracting the raw tag from \`{Reason, Stack}\` tuples if formatted as an error), and returns \`{error, {crashed, NormalizedReason}}\`. The caller survives completely unharmed without needing to trap exits.
-  - If \`TimeoutMs\` elapses before completion, terminates the runaway worker process with an untrappable \`kill\` signal (\`exit(WorkerPid, kill)\`), flushes the monitor, and returns \`{error, timeout}\`.
+- **Input**: Computation function of arity 0, and non-negative integer millisecond timeout deadline.
+- **Behavior**: Spawns a dedicated worker process executing the task function under an atomic unidirectional monitor. If the worker completes successfully before the timeout deadline, flushes the monitor and returns an ok tuple containing the computed result. If the worker encounters an abnormal termination or exception, receives the down notification, extracts the normalized reason term, and returns an error tuple containing the crash reason, while the caller survives unhurt. If the timeout duration elapses before completion, terminates the runaway worker process with an untrappable kill signal, flushes the monitor, and returns an error timeout tuple.
 - **Examples**:
-  - \`worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000)\` -> \`{ok, 42}\`
-  - \`worker_watcher:run_monitored_task(fun() -> 1 / 0 end, 1000)\` -> \`{error, {crashed, badarith}}\`
-  - \`worker_watcher:run_monitored_task(fun() -> receive after infinity -> ok end end, 80)\` -> \`{error, timeout}\`
+  - \`worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000)\` returns \`{ok, 42}\`.
+  - \`worker_watcher:run_monitored_task(fun() -> 1 / 0 end, 1000)\` returns \`{error, {crashed, badarith}}\`.
+  - \`worker_watcher:run_monitored_task(fun() -> receive after infinity -> ok end end, 80)\` returns \`{error, timeout}\`.
 
 ### 2. \`probe_pid_status/1\`
-- **Input**: \`TargetPid\` (pid of the process to inspect).
-- **Behavior**:
-  - Dynamically monitors \`TargetPid\` using \`erlang:monitor(process, TargetPid)\`.
-  - If the process has already terminated (or crashes within a 20ms window), captures the \`'DOWN'\` notification and returns \`{dead, Reason}\` (returning \`{dead, noproc}\` if the process was already dead prior to monitoring).
-  - If no \`'DOWN'\` notification arrives within 20ms, demonitors \`TargetPid\` using \`erlang:demonitor(MRef, [flush])\` and returns \`alive\`.
+- **Input**: Target process identifier to inspect.
+- **Behavior**: Establishes a unidirectional process monitor on the target process identifier. If the target has already terminated prior to monitoring, or terminates within a 20 millisecond window, captures the down notification and returns a dead tuple containing the exit reason (returning noproc if the process was already dead). If no down message arrives within 20 milliseconds, removes and flushes the monitor, returning the atom alive.
 - **Examples**:
-  - \`worker_watcher:probe_pid_status(DeadPid)\` -> \`{dead, noproc}\`
-  - \`worker_watcher:probe_pid_status(LivePid)\` -> \`alive\`
+  - \`worker_watcher:probe_pid_status(DeadPid)\` returns \`{dead, noproc}\`.
+  - \`worker_watcher:probe_pid_status(LivePid)\` returns \`alive\`.
 
 ## Rules & Verification Constraints
 
 - Must export \`run_monitored_task/2\` and \`probe_pid_status/1\`.
-- Enforced AST rules: \`requiredCalls: ["erlang:spawn_monitor/1", "erlang:monitor/2", "erlang:demonitor/2"]\`.
+- Enforced AST rules: \`requiredCalls: ["erlang:spawn_monitor/1", "erlang:monitor/2", "erlang:demonitor/2"]\`, \`requiredConstructs: ["receive_after"]\`.
 `,
     mentalModelCheck: {
       question: 'What message does the BEAM deliver if you call `erlang:monitor(process, DeadPid)` on a process that already terminated?',
@@ -2525,12 +2555,12 @@ MRef = erlang:monitor(process, DeadPid).`,
     probe_pid_status/1
 ]).
 
-%% @doc Executes a task under a unidirectional monitor with crash isolation and timeout.
-run_monitored_task(TaskFun, TimeoutMs) ->
+%% @doc Executes a computation under an atomic monitor with crash isolation and timeout protection.
+run_monitored_task(_TaskFun, _TimeoutMs) ->
     ok.
 
-%% @doc Probes whether a process is alive or dead, demonstrating the noproc invariant.
-probe_pid_status(TargetPid) ->
+%% @doc Probes whether a process is alive or dead, demonstrating the race-free noproc invariant.
+probe_pid_status(_TargetPid) ->
     ok.
 `,
     solutionCode: `-module(worker_watcher).
@@ -2539,6 +2569,7 @@ probe_pid_status(TargetPid) ->
     probe_pid_status/1
 ]).
 
+%% @doc Executes a computation under an atomic monitor with crash isolation and timeout protection.
 run_monitored_task(TaskFun, TimeoutMs) when is_function(TaskFun, 0), is_integer(TimeoutMs) ->
     Caller = self(),
     {WorkerPid, MRef} = spawn_monitor(fun() ->
@@ -2561,6 +2592,7 @@ run_monitored_task(TaskFun, TimeoutMs) when is_function(TaskFun, 0), is_integer(
         {error, timeout}
     end.
 
+%% @doc Probes whether a process is alive or dead, demonstrating the race-free noproc invariant.
 probe_pid_status(TargetPid) when is_pid(TargetPid) ->
     MRef = erlang:monitor(process, TargetPid),
     receive
@@ -2581,12 +2613,12 @@ probe_pid_status(TargetPid) when is_pid(TargetPid) ->
     probe_pid_status/1
 ]).
 
-%% @doc Executes a task under a unidirectional monitor with crash isolation and timeout.
-run_monitored_task(TaskFun, TimeoutMs) ->
+%% @doc Executes a computation under an atomic monitor with crash isolation and timeout protection.
+run_monitored_task(_TaskFun, _TimeoutMs) ->
     ok.
 
-%% @doc Probes whether a process is alive or dead, demonstrating the noproc invariant.
-probe_pid_status(TargetPid) ->
+%% @doc Probes whether a process is alive or dead, demonstrating the race-free noproc invariant.
+probe_pid_status(_TargetPid) ->
     ok.
 `,
       },
@@ -2598,6 +2630,7 @@ probe_pid_status(TargetPid) ->
     probe_pid_status/1
 ]).
 
+%% @doc Executes a computation under an atomic monitor with crash isolation and timeout protection.
 run_monitored_task(TaskFun, TimeoutMs) when is_function(TaskFun, 0), is_integer(TimeoutMs) ->
     Caller = self(),
     {WorkerPid, MRef} = spawn_monitor(fun() ->
@@ -2620,6 +2653,7 @@ run_monitored_task(TaskFun, TimeoutMs) when is_function(TaskFun, 0), is_integer(
         {error, timeout}
     end.
 
+%% @doc Probes whether a process is alive or dead, demonstrating the race-free noproc invariant.
 probe_pid_status(TargetPid) when is_pid(TargetPid) ->
     MRef = erlang:monitor(process, TargetPid),
     receive

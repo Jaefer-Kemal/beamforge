@@ -348,6 +348,47 @@ simulate_exit_truth_table(TrappingBool, SignalReason) when is_boolean(TrappingBo
     end.
 `
 
+	workerWatcherSolution := `-module(worker_watcher).
+-export([
+    run_monitored_task/2,
+    probe_pid_status/1
+]).
+
+%% @doc Executes a computation under an atomic monitor with crash isolation and timeout protection.
+run_monitored_task(TaskFun, TimeoutMs) when is_function(TaskFun, 0), is_integer(TimeoutMs) ->
+    Caller = self(),
+    {WorkerPid, MRef} = spawn_monitor(fun() ->
+        Result = TaskFun(),
+        Caller ! {task_result, self(), Result}
+    end),
+    receive
+        {task_result, WorkerPid, Result} ->
+            erlang:demonitor(MRef, [flush]),
+            {ok, Result};
+        {'DOWN', MRef, process, WorkerPid, Reason} ->
+            Normalized = case Reason of
+                {R, _} -> R;
+                R      -> R
+            end,
+            {error, {crashed, Normalized}}
+    after TimeoutMs ->
+        exit(WorkerPid, kill),
+        erlang:demonitor(MRef, [flush]),
+        {error, timeout}
+    end.
+
+%% @doc Probes whether a process is alive or dead, demonstrating the race-free noproc invariant.
+probe_pid_status(TargetPid) when is_pid(TargetPid) ->
+    MRef = erlang:monitor(process, TargetPid),
+    receive
+        {'DOWN', MRef, process, TargetPid, Reason} ->
+            {dead, Reason}
+    after 20 ->
+        erlang:demonitor(MRef, [flush]),
+        alive
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -399,48 +440,12 @@ simulate_exit_truth_table(TrappingBool, SignalReason) when is_boolean(TrappingBo
 			visibleCount: 3,
 		},
 		{
-			name:       "ch06-l06 Unidirectional Monitors & noproc",
-			exerciseID: "ch06-l06",
-			files: map[string]string{
-				"src/worker_watcher.erl": `-module(worker_watcher).
--export([
-    run_monitored_task/2,
-    probe_pid_status/1
-]).
-
-run_monitored_task(TaskFun, TimeoutMs) when is_function(TaskFun, 0), is_integer(TimeoutMs) ->
-    Caller = self(),
-    {WorkerPid, MRef} = spawn_monitor(fun() ->
-        Result = TaskFun(),
-        Caller ! {task_result, self(), Result}
-    end),
-    receive
-        {task_result, WorkerPid, Result} ->
-            erlang:demonitor(MRef, [flush]),
-            {ok, Result};
-        {'DOWN', MRef, process, WorkerPid, Reason} ->
-            Normalized = case Reason of
-                {R, _} -> R;
-                R      -> R
-            end,
-            {error, {crashed, Normalized}}
-    after TimeoutMs ->
-        exit(WorkerPid, kill),
-        erlang:demonitor(MRef, [flush]),
-        {error, timeout}
-    end.
-
-probe_pid_status(TargetPid) ->
-    MRef = erlang:monitor(process, TargetPid),
-    receive
-        {'DOWN', MRef, process, TargetPid, Reason} ->
-            {dead, Reason}
-    after 20 ->
-        erlang:demonitor(MRef, [flush]),
-        alive
-    end.
-`,
-			},
+			name:         "ch06-l06 Unidirectional Monitors & noproc",
+			exerciseID:   "ch06-l06",
+			files:        map[string]string{"src/worker_watcher.erl": workerWatcherSolution},
+			wantScore:    100,
+			wantStages:   6,
+			visibleCount: 3,
 		},
 		{
 			name:       "ch06-l07 Monitor Mailbox Hygiene",
@@ -1907,6 +1912,200 @@ simulate_exit_truth_table(TrappingBool, SignalReason) ->
 		}
 		if !respawnFailed {
 			t.Errorf("Expected self_healing_respawn to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch06-l06 ──────────────────────────────
+	t.Run("ch06-l06 Negative Missing spawn_monitor AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch06-l06"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/worker_watcher.erl": `-module(worker_watcher).
+-export([
+    run_monitored_task/2,
+    probe_pid_status/1
+]).
+
+%% BUG: Uses bare spawn instead of spawn_monitor! Violates AST invariants.
+run_monitored_task(TaskFun, TimeoutMs) ->
+    Caller = self(),
+    WorkerPid = spawn(fun() ->
+        Result = TaskFun(),
+        Caller ! {task_result, self(), Result}
+    end),
+    receive
+        {task_result, WorkerPid, Result} ->
+            {ok, Result}
+    after TimeoutMs ->
+        exit(WorkerPid, kill),
+        {error, timeout}
+    end.
+
+probe_pid_status(TargetPid) ->
+    MRef = erlang:monitor(process, TargetPid),
+    receive
+        {'DOWN', MRef, process, TargetPid, Reason} ->
+            {dead, Reason}
+    after 20 ->
+        erlang:demonitor(MRef, [flush]),
+        alive
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l06", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing spawn_monitor AST rule, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_monitor_invariants" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_monitor_invariants to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l06 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-exp-ch06-l06"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/worker_watcher.erl": `-module(worker_watcher).
+%% BUG: probe_pid_status/1 intentionally omitted from exports!
+-export([
+    run_monitored_task/2
+]).
+
+run_monitored_task(TaskFun, TimeoutMs) ->
+    Caller = self(),
+    {WorkerPid, MRef} = spawn_monitor(fun() ->
+        Result = TaskFun(),
+        Caller ! {task_result, self(), Result}
+    end),
+    receive
+        {task_result, WorkerPid, Result} ->
+            erlang:demonitor(MRef, [flush]),
+            {ok, Result};
+        {'DOWN', MRef, process, WorkerPid, Reason} ->
+            {error, {crashed, Reason}}
+    after TimeoutMs ->
+        exit(WorkerPid, kill),
+        erlang:demonitor(MRef, [flush]),
+        {error, timeout}
+    end.
+
+probe_pid_status(_TargetPid) ->
+    ok.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l06", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l06 Negative Broken Crash Isolation", func(t *testing.T) {
+		sessionID := "test-neg-crash-ch06-l06"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/worker_watcher.erl": `-module(worker_watcher).
+-export([
+    run_monitored_task/2,
+    probe_pid_status/1
+]).
+
+%% BUG: Links to worker, so when worker crashes, calling process dies with it!
+run_monitored_task(TaskFun, TimeoutMs) ->
+    Caller = self(),
+    {WorkerPid, MRef} = spawn_monitor(fun() ->
+        link(Caller),
+        Result = TaskFun(),
+        Caller ! {task_result, self(), Result}
+    end),
+    receive
+        {task_result, WorkerPid, Result} ->
+            erlang:demonitor(MRef, [flush]),
+            {ok, Result};
+        {'DOWN', MRef, process, WorkerPid, Reason} ->
+            {error, {crashed, Reason}}
+    after TimeoutMs ->
+        exit(WorkerPid, kill),
+        erlang:demonitor(MRef, [flush]),
+        {error, timeout}
+    end.
+
+probe_pid_status(TargetPid) ->
+    MRef = erlang:monitor(process, TargetPid),
+    receive
+        {'DOWN', MRef, process, TargetPid, Reason} ->
+            {dead, Reason}
+    after 20 ->
+        erlang:demonitor(MRef, [flush]),
+        alive
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l06", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on broken crash isolation, but got PASSED")
+		}
+		var crashFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "crash_isolation" && st.Status == "failed" {
+				crashFailed = true
+				break
+			}
+		}
+		if !crashFailed {
+			t.Errorf("Expected crash_isolation to fail, stages: %+v", report.Stages)
 		}
 	})
 }

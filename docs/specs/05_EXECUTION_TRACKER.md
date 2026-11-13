@@ -3644,6 +3644,32 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l05` and its 3 negative regression tests in `46.64s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed `ch06-l05 | 3/3 tests passed`.
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 230: Spec 04 / Spec 08 Anti-Spoiler Audit, Unidirectional Monitors & The noproc Invariant, AST Hardening & Live Tri-Verification of Chapter 6 Lecture 6 (`ch06-l06`)
+
+- [x] **230.1: Spec 04/08 Pedagogical Anti-Spoiler Audit & Erlang/AST Hardening (`ch06-l06`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch06.ts` (`ch06-l06`, `worker_watcher.erl`) against Spec 04, 07, and 08.
+  - Positioned `## Official Erlang Docs & Function Reference` (`erlang:spawn_monitor/1`, `erlang:monitor/2`, `erlang:demonitor/2`) preceding `## Parallel Worked Example`.
+  - Replaced 1-to-1 transliteration clone (`service_endpoint_watcher.erl`) with domain-distinct Distributed Document Batch Indexer Monitor `## Parallel Worked Example` (`batch_indexer_monitor.erl`) exporting `index_document_chunk/2`, `audit_replica_shard/1`, `cancel_in_flight_index/2`, and `indexer_loop/2`. Accompanied by a 4-step architectural deep dive:
+    1. *Atomic Spawn-Monitoring & Task Isolation*
+    2. *Selective Receiving of DOWN Signals*
+    3. *The noproc Invariant on Already-Dead or Non-Existent Shards*
+    4. *Flushing Mailbox Remnants with demonitor/2*
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across both exported functions (`run_monitored_task/2`, `probe_pid_status/1`) with zero Erlang syntax leaks or code backticks in prompt bullets.
+  - Aligned 10/10 plain-English `%% @doc` contracts across all 4 code representations (`files[0].content`, `starterCode`, `solutionFiles['src/worker_watcher.erl']`, `solutionCode`).
+  - Scaffolding starter pack with `_` prefixed parameters (`_TaskFun`, `_TimeoutMs`, `_TargetPid`) compiling cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0).
+  - Configured `astRules` (`requiredCalls: ['erlang:spawn_monitor/1', 'erlang:monitor/2']`).
+- [x] **230.2: Go Orchestrator Runner & AST Verification Hardening (`ch06-l06`)**:
+  - Upgraded `buildChapterRunScript` in `services/orchestrator/internal/bridge/erl_runner_chapters.go` to evaluate all 3 visible tests (`T1_Res`: successful execution `{ok, 42}`, `T2_Res`: worker crash isolation `{error, {crashed, badarith}}`, `T3_Res`: dead process monitoring `{dead, noproc}`). Fixed `erl_eval` unsafe variable collision issue (`Res1`, `Res2`, `Res3` inside `try` vs `Class1:Reason1` in `catch`). Removed obsolete legacy fallback.
+  - Hardened `buildChapterVerificationScript` with 6 stages (`compile_and_export_audit`, `ast_monitor_invariants`, `successful_execution`, `crash_isolation`, `timeout_and_worker_kill`, `noproc_invariant`) checking `{erlang, spawn_monitor, 1}` and `{erlang, monitor, 2}` AST invariants.
+  - Expanded `services/orchestrator/internal/bridge/ch06_verification_test.go` with positive verification (100% score, 6/6 stages passed, 3/3 visible tests verified) and 3 negative regression subtests (`ch06-l06_Negative_Missing_spawn_monitor_AST_Violation`, `ch06-l06_Negative_Missing_Export`, `ch06-l06_Negative_Broken_Crash_Isolation`).
+- [x] **230.3: Mandatory Live Tri-Verification & Full Test Suite Certification (`ch06-l06`)**:
+  - **Parallel Worked Example (`batch_indexer_monitor.erl`)**: Extracted directly from `ch06.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with all indexing, shard audit, and cancellation scenarios passing cleanly.
+  - **Starter Pack (`worker_watcher.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0), loads cleanly on OTP, and safely fails tests without compiler or syntax crashes.
+  - **Solution Pack (`worker_watcher.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/worker_watcher.erl'] === solutionCode`), compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `required_remote_calls => [{erlang, spawn_monitor, 1}, {erlang, monitor, 2}]`, and passed 100% of visible test cases (3/3 passed).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all 9 chapter tests + all negative regression subtests in `53.18s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed 10/10 lessons including `ch06-l06 | 3/3 tests passed` in `14.15s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
+
 
 
 
