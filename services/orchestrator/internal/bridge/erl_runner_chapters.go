@@ -1935,26 +1935,35 @@ T1_Res = try
             #{call_str => <<"priority_mailbox:receive_urgent_first(3)">>, expected => <<"[99, 1, 2]">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
     end
-catch C1:R1 ->
+catch C1:Err1 ->
     #{call_str => <<"priority_mailbox:receive_urgent_first(...)">>, expected => <<"[99, 1, 2]">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try
-    Dummy = spawn(fun() -> receive after 500 -> ok end end),
-    case priority_mailbox:request_with_timeout(Dummy, ping, 40) of
-        {error, timeout} ->
+    Self2 = self(),
+    T2_Worker = spawn(fun() ->
+        Dummy = spawn(fun() -> receive after 500 -> ok end end),
+        Res2 = priority_mailbox:request_with_timeout(Dummy, ping, 40),
+        Self2 ! {t2_done, Res2}
+    end),
+    receive
+        {t2_done, {error, timeout}} ->
             #{call_str => <<"priority_mailbox:request_with_timeout(Dummy, ping, 40)">>,
               expected => <<"{error, timeout}">>,
               actual => <<"{error, timeout}">>, passed => true,
               time_ms => erlang:system_time(millisecond) - T2_Start};
-        Other2 ->
+        {t2_done, Other2} ->
             #{call_str => <<"priority_mailbox:request_with_timeout(...)">>, expected => <<"{error, timeout}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
+    after 250 ->
+        exit(T2_Worker, kill),
+        #{call_str => <<"priority_mailbox:request_with_timeout(...)">>, expected => <<"{error, timeout}">>,
+          actual => <<"Crash: timeout blocked indefinitely (missing receive...after)">>, passed => false, time_ms => 250}
     end
-catch C2:R2 ->
+catch C2:Err2 ->
     #{call_str => <<"priority_mailbox:request_with_timeout(...)">>, expected => <<"{error, timeout}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2])), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
 T3_Res = try
@@ -1971,9 +1980,9 @@ T3_Res = try
             #{call_str => <<"priority_mailbox:flush_mailbox()">>, expected => <<"[a, b, c]">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
     end
-catch C3:R3 ->
+catch C3:Err3 ->
     #{call_str => <<"priority_mailbox:flush_mailbox(...)">>, expected => <<"[a, b, c]">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
@@ -7163,9 +7172,10 @@ Stages = [CompileStage, S1_Ast, S2_PingPong, S3_Broadcast]
 CompileStage = case code:ensure_loaded(priority_mailbox) of
     {module, priority_mailbox} ->
         Exports = priority_mailbox:module_info(exports),
-        case lists:member({receive_urgent_first, 1}, Exports) andalso lists:member({request_with_timeout, 3}, Exports) of
-            true -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"priority_mailbox.erl compiled cleanly; receive_urgent_first/1 and request_with_timeout/3 exported.">>};
-            false -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => <<"Missing required exports: receive_urgent_first/1 or request_with_timeout/3">>}
+        Req = [{receive_urgent_first, 1}, {request_with_timeout, 3}, {flush_mailbox, 0}],
+        case [E || E <- Req, not lists:member(E, Exports)] of
+            [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"priority_mailbox.erl compiled cleanly; all required API functions exported.">>};
+            Missing -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing required exports: ~p", [Missing]))}
         end;
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
@@ -7175,16 +7185,17 @@ S1_Ast = try
     BeamPath = filename:join(["%s", "ebin", "priority_mailbox.beam"]),
     {ok, BeamBin} = file:read_file(BeamPath),
     Rules = #{
-        required_constructs => [receive_after]
+        required_constructs => [receive_after],
+        required_calls => [{erlang, self, 0}]
     },
     case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
         {ok, _} ->
-            #{id => <<"ast_receive_after_audit">>, title => <<"AST Analysis: receive...after Construct Verification">>, status => <<"passed">>, time_ms => 15, details => <<"Verified receive...after construct to guarantee zero hangs.">>};
+            #{id => <<"ast_receive_after_audit">>, title => <<"AST Analysis: receive...after Construct Verification">>, status => <<"passed">>, time_ms => 15, details => <<"Verified receive...after construct and self/0 caller reference.">>};
         {error, Violations} ->
             #{id => <<"ast_receive_after_audit">>, title => <<"AST Analysis: receive...after Construct Verification">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
     end
-catch C1:R1 ->
-    #{id => <<"ast_receive_after_audit">>, title => <<"AST Analysis: receive...after Construct Verification">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"ast_receive_after_audit">>, title => <<"AST Analysis: receive...after Construct Verification">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, Err1]))}
 end,
 S2_Priority = try
     self() ! {normal, "low1"},
@@ -7197,26 +7208,34 @@ S2_Priority = try
         GotP ->
             #{id => <<"selective_receive_priority">>, title => <<"Mailbox Selective Receive & Priority Queue Reordering">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Priority sequence mismatch: ~p", [GotP]))}
     end
-catch C2:R2 ->
-    #{id => <<"selective_receive_priority">>, title => <<"Mailbox Selective Receive & Priority Queue Reordering">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2]))}
+catch C2:Err2 ->
+    #{id => <<"selective_receive_priority">>, title => <<"Mailbox Selective Receive & Priority Queue Reordering">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2]))}
 end,
 S3_Timeout = try
-    SilentWorker = spawn(fun() -> receive after 1000 -> ok end end),
-    T0 = erlang:monotonic_time(millisecond),
-    case priority_mailbox:request_with_timeout(SilentWorker, test_ping, 50) of
-        {error, timeout} ->
-            Elapsed = erlang:monotonic_time(millisecond) - T0,
+    Self3 = self(),
+    TestPid3 = spawn(fun() ->
+        SilentWorker = spawn(fun() -> receive after 1000 -> ok end end),
+        T0 = erlang:monotonic_time(millisecond),
+        Res = priority_mailbox:request_with_timeout(SilentWorker, test_ping, 50),
+        Elapsed = erlang:monotonic_time(millisecond) - T0,
+        Self3 ! {s3_done, Res, Elapsed}
+    end),
+    receive
+        {s3_done, {error, timeout}, Elapsed3} ->
             if
-                Elapsed >= 40 andalso Elapsed =< 250 ->
-                    #{id => <<"timeout_guarantee">>, title => <<"after Timeout Fallback & Non-Blocking Guarantees">>, status => <<"passed">>, time_ms => Elapsed, details => list_to_binary(io_lib:format("Timeout fired accurately in ~p ms without blocking caller.", [Elapsed]))};
+                Elapsed3 >= 40 andalso Elapsed3 =< 250 ->
+                    #{id => <<"timeout_guarantee">>, title => <<"after Timeout Fallback & Non-Blocking Guarantees">>, status => <<"passed">>, time_ms => Elapsed3, details => list_to_binary(io_lib:format("Timeout fired accurately in ~p ms without blocking caller.", [Elapsed3]))};
                 true ->
-                    #{id => <<"timeout_guarantee">>, title => <<"after Timeout Fallback & Non-Blocking Guarantees">>, status => <<"failed">>, time_ms => Elapsed, details => list_to_binary(io_lib:format("Timeout elapsed unexpected duration: ~p ms", [Elapsed]))}
+                    #{id => <<"timeout_guarantee">>, title => <<"after Timeout Fallback & Non-Blocking Guarantees">>, status => <<"failed">>, time_ms => Elapsed3, details => list_to_binary(io_lib:format("Timeout elapsed unexpected duration: ~p ms", [Elapsed3]))}
             end;
-        OtherT ->
-            #{id => <<"timeout_guarantee">>, title => <<"after Timeout Fallback & Non-Blocking Guarantees">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Expected {error, timeout}, got: ~p", [OtherT]))}
+        {s3_done, OtherT3, _} ->
+            #{id => <<"timeout_guarantee">>, title => <<"after Timeout Fallback & Non-Blocking Guarantees">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Expected {error, timeout}, got: ~p", [OtherT3]))}
+    after 400 ->
+        exit(TestPid3, kill),
+        #{id => <<"timeout_guarantee">>, title => <<"after Timeout Fallback & Non-Blocking Guarantees">>, status => <<"failed">>, time_ms => 400, details => <<"request_with_timeout blocked indefinitely; missing receive...after timeout clause.">>}
     end
-catch C3:R3 ->
-    #{id => <<"timeout_guarantee">>, title => <<"after Timeout Fallback & Non-Blocking Guarantees">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3]))}
+catch C3:Err3 ->
+    #{id => <<"timeout_guarantee">>, title => <<"after Timeout Fallback & Non-Blocking Guarantees">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3]))}
 end,
 S4_Flush = try
     self() ! token_a,
@@ -7227,8 +7246,8 @@ S4_Flush = try
         GotFlush ->
             #{id => <<"mailbox_flush_audit">>, title => <<"after 0 Non-Blocking Mailbox Flush Audit">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Flush mismatch: ~p", [GotFlush]))}
     end
-catch C4:R4 ->
-    #{id => <<"mailbox_flush_audit">>, title => <<"after 0 Non-Blocking Mailbox Flush Audit">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, R4]))}
+catch C4:Err4 ->
+    #{id => <<"mailbox_flush_audit">>, title => <<"after 0 Non-Blocking Mailbox Flush Audit">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, Err4]))}
 end,
 Stages = [CompileStage, S1_Ast, S2_Priority, S3_Timeout, S4_Flush]
 `, wsDir, wsDir), true

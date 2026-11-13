@@ -799,15 +799,32 @@ This zero-wait idiom has two critical production applications:
 > [!warning] Production Concurrency Trap: Quadratic Mailbox Scanning
 > Selective receive is powerful, but scanning a mailbox containing 50,000 unmatched messages searching for a specific pattern requires traversing 50,000 linked pointers for every single receive operation ($O(N)$ scan overhead). Always ensure your mailboxes are drained or use correlation references (\`make_ref()\`), as covered in Lesson 5.5!
 
+## Official Erlang Docs & Function Reference
+
+\`\`\`erlang
+%% Official OTP Syntax (system / expressions)
+receive
+    Pattern1 [when Guard1] -> Body1;
+    Pattern2 [when Guard2] -> Body2
+after TimeoutExpr ->
+    TimeoutBody
+end
+
+erlang:send(Dest, Msg) -> Msg
+erlang:self() -> pid()
+\`\`\`
+
+The \`receive ... after\` construct scans the mailbox queue for messages matching the defined patterns. Unmatched messages are placed into an internal Save Queue. If no message matches before \`TimeoutExpr\` milliseconds elapse, the \`after\` block evaluates. A timeout of \`after 0\` executes immediately without suspending the caller process.
+
 ## Parallel Worked Example
 
-Consider a hardware gateway that prioritizes critical alerts over telemetry samples and queries peripheral devices:
+The following sensor gateway actor illustrates non-blocking priority polling, request deadlines, and non-blocking buffer draining:
 
 \`\`\`erlang
 -module(sensor_gateway).
 -export([poll_event_queue/0, query_device_sync/3, purge_buffer/0]).
 
-%% Consumes critical hardware alerts ahead of ambient telemetry samples
+%% Phase 1: Non-blocking priority check consuming hardware alerts ahead of ambient telemetry
 poll_event_queue() ->
     receive
         {hardware_fault, DeviceId, ErrCode} ->
@@ -821,7 +838,7 @@ poll_event_queue() ->
         end
     end.
 
-%% Synchronously queries a peripheral device process with timeout protection
+%% Phase 2: Synchronous RPC with self() return address and bounded receive deadline
 query_device_sync(DevicePid, Command, TimeoutLimit) ->
     DevicePid ! {exec_cmd, self(), Command},
     receive
@@ -831,7 +848,7 @@ query_device_sync(DevicePid, Command, TimeoutLimit) ->
         {error, device_timeout}
     end.
 
-%% Drains pending packet events without blocking
+%% Phase 3: Non-blocking batch packet accumulator draining buffer into FIFO order
 purge_buffer() ->
     drain_buffer([]).
 
@@ -844,38 +861,31 @@ drain_buffer(BufferAcc) ->
     end.
 \`\`\`
 
-## Official Erlang Docs & Function Reference
-
-\`\`\`erlang
-%% Official OTP Syntax (system / expressions)
-receive
-    Pattern1 [when Guard1] -> Body1;
-    Pattern2 [when Guard2] -> Body2
-after TimeoutExpr ->
-    TimeoutBody
-end
-\`\`\`
+### Architectural Notes:
+1. **Two-Stage Non-Blocking Inspection**: In \`poll_event_queue/0\`, the first \`receive\` block checks solely for \`{hardware_fault, ...}\`. If none exists, \`after 0\` falls through to check \`{metric_sample, ...}\`. If neither exists, the gateway evaluates to \`empty_queue\` in 0ms without suspending.
+2. **Deterministic RPC Timeouts**: In \`query_device_sync/3\`, the client guards against unresponsive peripherals by enforcing a \`TimeoutLimit\` deadline, returning \`{error, device_timeout}\` if the peripheral drops the command.
+3. **Save Queue FIFO Preservation**: In \`purge_buffer/0\`, each iteration pulls a packet from the mailbox. When the mailbox is empty, \`after 0\` triggers and \`lists:reverse/1\` restores original arrival ordering.
 
 ## Assignment Specification
 
 Implement \`src/priority_mailbox.erl\` exporting \`receive_urgent_first/1\`, \`request_with_timeout/3\`, and \`flush_mailbox/0\`:
 
 ### 1. \`receive_urgent_first/1\`
-- **Input**: \`ExpectedCount\` (non-negative integer).
+- **Input**: \`ExpectedCount :: non_neg_integer()\`.
 - **Behavior**: Extracts up to \`ExpectedCount\` messages from the calling process's mailbox according to priority. For each message retrieved, it prioritizes extracting messages tagged with the atom \`urgent\` ahead of messages tagged with \`normal\`. If neither an urgent nor a normal message is currently available in the mailbox, it terminates draining without blocking. Returns a list containing the unpacked payload values of all extracted messages in priority-sorted order.
 - **Examples**:
   - If mailbox contains \`{normal, 1}\`, \`{urgent, 99}\`, \`{normal, 2}\`, calling \`priority_mailbox:receive_urgent_first(3)\` returns \`[99, 1, 2]\`.
   - Calling \`priority_mailbox:receive_urgent_first(0)\` returns \`[]\`.
 
 ### 2. \`request_with_timeout/3\`
-- **Input**: \`TargetPid\` (valid process identifier), \`RequestMsg\` (arbitrary Erlang term), \`TimeoutMs\` (integer milliseconds).
+- **Input**: \`TargetPid :: pid()\`, \`RequestMsg :: term()\`, \`TimeoutMs :: non_neg_integer()\`.
 - **Behavior**: Asynchronously transmits a request tuple containing the atom \`request\`, the caller PID (\`self()\`), and \`RequestMsg\` to \`TargetPid\`. Awaits a matching reply tuple tagged with \`reply\`, the echoing \`RequestMsg\`, and the worker's result value. If a matching reply arrives before \`TimeoutMs\` milliseconds elapse, returns \`{ok, Result}\`. If the timer expires before a matching reply is received, returns \`{error, timeout}\` without crashing or hanging the caller.
 - **Examples**:
   - \`priority_mailbox:request_with_timeout(WorkerPid, ping, 1000)\` returns \`{ok, pong}\` upon successful reply.
   - \`priority_mailbox:request_with_timeout(UnresponsivePid, ping, 50)\` returns \`{error, timeout}\` after 50ms.
 
 ### 3. \`flush_mailbox/0\`
-- **Input**: None.
+- **Input**: None (\`()\`).
 - **Behavior**: Drains all pending messages currently queued in the calling process's mailbox in a single non-blocking pass without suspending. Returns a list containing all extracted messages in their original FIFO arrival order. Once evaluated, the process mailbox is guaranteed to be completely empty.
 - **Examples**:
   - If mailbox holds \`token_a\` followed by \`token_b\`, calling \`priority_mailbox:flush_mailbox()\` returns \`[token_a, token_b]\`.
@@ -883,9 +893,11 @@ Implement \`src/priority_mailbox.erl\` exporting \`receive_urgent_first/1\`, \`r
 
 ## Rules & Verification Constraints
 
-- Must use the \`receive ... after\` construct (enforced by AST rule \`requiredConstructs: ["receive_after"]\`).
-- \`receive_urgent_first/1\` must never block if fewer than \`ExpectedCount\` messages exist (fall back to whatever is available or use \`after 0\`).
-- Must preserve FIFO order within the same priority level.`,
+- Must use the \`receive ... after\` construct (enforced by AST rule \`requiredConstructs: ['receive_after']\`).
+- Must invoke \`erlang:self/0\` to include the caller's PID in request tuples.
+- \`receive_urgent_first/1\` must never block if fewer than \`ExpectedCount\` messages exist in the mailbox.
+- Must preserve FIFO order within the same priority level.
+- Must cleanly export \`receive_urgent_first/1\`, \`request_with_timeout/3\`, and \`flush_mailbox/0\`.`,
     mentalModelCheck: {
       question: 'What happens to messages in an actor’s mailbox that fail to match any pattern in the currently executing `receive` block?',
       codeSnippet: `%% Mailbox contains: [{normal, 1}, {urgent, 99}]
@@ -914,6 +926,24 @@ end.`,
       ],
     },
     otpDocCards: [
+      {
+        functionName: 'receive...after',
+        module: 'erts',
+        signature: 'receive Pattern [when Guard] -> Body after TimeoutExpr -> TimeoutBody end',
+        typesSpec: ['TimeoutExpr = non_neg_integer() | infinity'],
+        description: 'Scans the process mailbox queue for pattern matches, deferring unmatched terms to the Save Queue, and evaluating TimeoutBody if the deadline expires.',
+        complexityNote: 'O(N) mailbox scan traversal, O(1) dequeue upon match.',
+        officialUrl: 'https://www.erlang.org/doc/reference_manual/expressions.html#receive',
+      },
+      {
+        functionName: 'self',
+        module: 'erlang',
+        signature: 'self() -> pid()',
+        typesSpec: ['pid() = process identifier'],
+        description: 'Returns the process identifier (PID) of the currently executing process.',
+        complexityNote: 'O(1) register lookup.',
+        officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#self/0',
+      },
       {
         functionName: 'send',
         module: 'erlang',
@@ -949,6 +979,7 @@ end.`,
     ],
     astRules: {
       requiredConstructs: ['receive_after'],
+      requiredCalls: ['erlang:self/0'],
     },
     solutionExplanation: 'Uses receive ... after 0 to selectively prioritize {urgent, Payload} over {normal, Payload}, implements timeout guards, and flushes mailboxes using after 0 loops.',
     files: [
@@ -958,15 +989,15 @@ end.`,
         content: `-module(priority_mailbox).
 -export([receive_urgent_first/1, request_with_timeout/3, flush_mailbox/0]).
 
-%% @doc Drains up to ExpectedCount messages prioritizing urgent tags over normal tags.
+%% @doc Extract up to ExpectedCount messages from the caller mailbox, prioritizing urgent tagged tuples over normal tagged tuples.
 receive_urgent_first(_ExpectedCount) ->
     ok.
 
-%% @doc Sends request tuple to TargetPid and awaits correlated reply with timeout fallback.
+%% @doc Dispatch an asynchronous request tuple containing caller PID and RequestMsg to TargetPid, returning the worker result on reply or a timeout error if TimeoutMs elapses.
 request_with_timeout(_TargetPid, _RequestMsg, _TimeoutMs) ->
     ok.
 
-%% @doc Flushes and returns all pending messages from the process mailbox in FIFO order.
+%% @doc Drain all pending messages currently queued in the caller process mailbox in a single non-blocking pass and return them in FIFO arrival order.
 flush_mailbox() ->
     ok.
 `,
@@ -976,6 +1007,7 @@ flush_mailbox() ->
       'src/priority_mailbox.erl': `-module(priority_mailbox).
 -export([receive_urgent_first/1, request_with_timeout/3, flush_mailbox/0]).
 
+%% @doc Extract up to ExpectedCount messages from the caller mailbox, prioritizing urgent tagged tuples over normal tagged tuples.
 receive_urgent_first(ExpectedCount) ->
     receive_urgent_loop(ExpectedCount, []).
 
@@ -994,6 +1026,7 @@ receive_urgent_loop(N, Acc) ->
         end
     end.
 
+%% @doc Dispatch an asynchronous request tuple containing caller PID and RequestMsg to TargetPid, returning the worker result on reply or a timeout error if TimeoutMs elapses.
 request_with_timeout(TargetPid, RequestMsg, TimeoutMs) ->
     TargetPid ! {request, self(), RequestMsg},
     receive
@@ -1003,6 +1036,7 @@ request_with_timeout(TargetPid, RequestMsg, TimeoutMs) ->
         {error, timeout}
     end.
 
+%% @doc Drain all pending messages currently queued in the caller process mailbox in a single non-blocking pass and return them in FIFO arrival order.
 flush_mailbox() ->
     flush_loop([]).
 
@@ -1017,21 +1051,22 @@ flush_loop(Acc) ->
     starterCode: `-module(priority_mailbox).
 -export([receive_urgent_first/1, request_with_timeout/3, flush_mailbox/0]).
 
-%% @doc Drains up to ExpectedCount messages prioritizing urgent tags over normal tags.
+%% @doc Extract up to ExpectedCount messages from the caller mailbox, prioritizing urgent tagged tuples over normal tagged tuples.
 receive_urgent_first(_ExpectedCount) ->
     ok.
 
-%% @doc Sends request tuple to TargetPid and awaits correlated reply with timeout fallback.
+%% @doc Dispatch an asynchronous request tuple containing caller PID and RequestMsg to TargetPid, returning the worker result on reply or a timeout error if TimeoutMs elapses.
 request_with_timeout(_TargetPid, _RequestMsg, _TimeoutMs) ->
     ok.
 
-%% @doc Flushes and returns all pending messages from the process mailbox in FIFO order.
+%% @doc Drain all pending messages currently queued in the caller process mailbox in a single non-blocking pass and return them in FIFO arrival order.
 flush_mailbox() ->
     ok.
 `,
     solutionCode: `-module(priority_mailbox).
 -export([receive_urgent_first/1, request_with_timeout/3, flush_mailbox/0]).
 
+%% @doc Extract up to ExpectedCount messages from the caller mailbox, prioritizing urgent tagged tuples over normal tagged tuples.
 receive_urgent_first(ExpectedCount) ->
     receive_urgent_loop(ExpectedCount, []).
 
@@ -1050,6 +1085,7 @@ receive_urgent_loop(N, Acc) ->
         end
     end.
 
+%% @doc Dispatch an asynchronous request tuple containing caller PID and RequestMsg to TargetPid, returning the worker result on reply or a timeout error if TimeoutMs elapses.
 request_with_timeout(TargetPid, RequestMsg, TimeoutMs) ->
     TargetPid ! {request, self(), RequestMsg},
     receive
@@ -1059,6 +1095,7 @@ request_with_timeout(TargetPid, RequestMsg, TimeoutMs) ->
         {error, timeout}
     end.
 
+%% @doc Drain all pending messages currently queued in the caller process mailbox in a single non-blocking pass and return them in FIFO arrival order.
 flush_mailbox() ->
     flush_loop([]).
 

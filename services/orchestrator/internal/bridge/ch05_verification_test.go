@@ -84,6 +84,50 @@ broadcast(PidsList, Msg) ->
     {sent, length(PidsList)}.
 `
 
+	priorityMailboxSolution := `-module(priority_mailbox).
+-export([receive_urgent_first/1, request_with_timeout/3, flush_mailbox/0]).
+
+%% @doc Extract up to ExpectedCount messages from the caller mailbox, prioritizing urgent tagged tuples over normal tagged tuples.
+receive_urgent_first(ExpectedCount) ->
+    receive_urgent_loop(ExpectedCount, []).
+
+receive_urgent_loop(0, Acc) ->
+    lists:reverse(Acc);
+receive_urgent_loop(N, Acc) ->
+    receive
+        {urgent, Payload} ->
+            receive_urgent_loop(N - 1, [Payload | Acc])
+    after 0 ->
+        receive
+            {normal, Payload} ->
+                receive_urgent_loop(N - 1, [Payload | Acc])
+        after 0 ->
+            lists:reverse(Acc)
+        end
+    end.
+
+%% @doc Dispatch an asynchronous request tuple containing caller PID and RequestMsg to TargetPid, returning the worker result on reply or a timeout error if TimeoutMs elapses.
+request_with_timeout(TargetPid, RequestMsg, TimeoutMs) ->
+    TargetPid ! {request, self(), RequestMsg},
+    receive
+        {reply, RequestMsg, Result} ->
+            {ok, Result}
+    after TimeoutMs ->
+        {error, timeout}
+    end.
+
+%% @doc Drain all pending messages currently queued in the caller process mailbox in a single non-blocking pass and return them in FIFO arrival order.
+flush_mailbox() ->
+    flush_loop([]).
+
+flush_loop(Acc) ->
+    receive
+        Msg -> flush_loop([Msg | Acc])
+    after 0 ->
+        lists:reverse(Acc)
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -110,6 +154,16 @@ broadcast(PidsList, Msg) ->
 			},
 			wantScore:    100,
 			wantStages:   4,
+			visibleCount: 3,
+		},
+		{
+			name:       "ch05-l03 Selective Receive, Timeouts & Mailbox Flush",
+			exerciseID: "ch05-l03",
+			files: map[string]string{
+				"src/priority_mailbox.erl": priorityMailboxSolution,
+			},
+			wantScore:    100,
+			wantStages:   5,
 			visibleCount: 3,
 		},
 	}
@@ -380,6 +434,163 @@ broadcast(PidsList, Msg) ->
 		}
 		if !foundFailedCompile {
 			t.Errorf("Expected compile_and_export_audit to fail on missing export")
+		}
+	})
+
+	// Negative test: missing export flush_mailbox/0
+	t.Run("ch05-l03 Negative Missing Export", func(t *testing.T) {
+		sessID := "test-sess-ch05-l03-neg-export"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		badExportCode := `-module(priority_mailbox).
+-export([receive_urgent_first/1, request_with_timeout/3]).
+
+receive_urgent_first(_ExpectedCount) -> [].
+request_with_timeout(_TargetPid, _RequestMsg, _TimeoutMs) -> {error, timeout}.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l03", map[string]string{
+			"src/priority_mailbox.erl": badExportCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for missing export, got %d", report.Score)
+		}
+
+		foundFailedCompile := false
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				foundFailedCompile = true
+			}
+		}
+		if !foundFailedCompile {
+			t.Errorf("Expected compile_and_export_audit to fail on missing export")
+		}
+	})
+
+	// Negative test: missing receive_after construct
+	t.Run("ch05-l03 Negative Missing Receive After", func(t *testing.T) {
+		sessID := "test-sess-ch05-l03-neg-ast"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		noAfterCode := `-module(priority_mailbox).
+-export([receive_urgent_first/1, request_with_timeout/3, flush_mailbox/0]).
+
+receive_urgent_first(_ExpectedCount) -> [].
+request_with_timeout(TargetPid, RequestMsg, _TimeoutMs) ->
+    TargetPid ! {request, self(), RequestMsg},
+    receive
+        {reply, RequestMsg, Result} -> {ok, Result}
+    end.
+flush_mailbox() -> [].
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l03", map[string]string{
+			"src/priority_mailbox.erl": noAfterCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for missing receive_after, got %d", report.Score)
+		}
+
+		foundFailedAst := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_receive_after_audit" && st.Status == "failed" {
+				foundFailedAst = true
+			}
+		}
+		if !foundFailedAst {
+			t.Errorf("Expected ast_receive_after_audit to fail on missing receive_after")
+		}
+	})
+
+	// Negative test: inverted priority (normal ahead of urgent)
+	t.Run("ch05-l03 Negative Inverted Priority", func(t *testing.T) {
+		sessID := "test-sess-ch05-l03-neg-priority"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		invertedPriorityCode := `-module(priority_mailbox).
+-export([receive_urgent_first/1, request_with_timeout/3, flush_mailbox/0]).
+
+receive_urgent_first(ExpectedCount) ->
+    receive_loop(ExpectedCount, []).
+
+receive_loop(0, Acc) -> lists:reverse(Acc);
+receive_loop(N, Acc) ->
+    receive
+        {normal, Payload} ->
+            receive_loop(N - 1, [Payload | Acc])
+    after 0 ->
+        receive
+            {urgent, Payload} ->
+                receive_loop(N - 1, [Payload | Acc])
+        after 0 ->
+            lists:reverse(Acc)
+        end
+    end.
+
+request_with_timeout(TargetPid, RequestMsg, TimeoutMs) ->
+    TargetPid ! {request, self(), RequestMsg},
+    receive
+        {reply, RequestMsg, Result} -> {ok, Result}
+    after TimeoutMs ->
+        {error, timeout}
+    end.
+
+flush_mailbox() ->
+    flush_loop([]).
+
+flush_loop(Acc) ->
+    receive
+        Msg -> flush_loop([Msg | Acc])
+    after 0 ->
+        lists:reverse(Acc)
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l03", map[string]string{
+			"src/priority_mailbox.erl": invertedPriorityCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for inverted priority, got %d", report.Score)
+		}
+
+		foundFailedPriority := false
+		for _, st := range report.Stages {
+			if st.ID == "selective_receive_priority" && st.Status == "failed" {
+				foundFailedPriority = true
+			}
+		}
+		if !foundFailedPriority {
+			t.Errorf("Expected selective_receive_priority to fail on inverted priority")
 		}
 	})
 }

@@ -3432,6 +3432,22 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 6 subtests in `14.08s` (`14.117s` total); `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l02 | 3/3 tests passed`) in `13.57s` (`13.654s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 219: Spec 04 / Spec 08 Anti-Spoiler Audit, Selective Receive & Timeout AST Hardening & Live Tri-Verification of Chapter 5 Lecture 3 (`ch05-l03`)
+- [x] **219.1: Spec 04/08 Anti-Spoiler Audit & Erlang/AST Hardening (`ch05-l03`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch05.ts` (`ch05-l03`, `priority_mailbox.erl`, `lines 734–1085`) against Spec 04, 07, and 08.
+  - Re-ordered Spec 04 layout so `## Official Erlang Docs & Function Reference` precedes `## Parallel Worked Example`.
+  - Annotated `## Parallel Worked Example` (`sensor_gateway.erl`) with 3 clear execution phases (`Phase 1: Non-blocking priority check`, `Phase 2: Synchronous RPC with self() return address and bounded deadline`, `Phase 3: Non-blocking batch packet accumulator`) and deep architectural commentary.
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across `receive_urgent_first/1`, `request_with_timeout/3`, and `flush_mailbox/0`.
+  - Expanded `visibleTestCases` to 3 comprehensive test cases (`tc-ch05-03-1` priority reordering, `tc-ch05-03-2` timeout fallback, `tc-ch05-03-3` non-blocking mailbox flush).
+  - Configured `astRules` (`requiredConstructs: ['receive_after']`, `requiredCalls: ['erlang:self/0']`), aligned 10/10 plain-English `%% @doc` contracts across all 4 copies (`files`, `solutionFiles`, `starterCode`, `solutionCode`), stripped pre-solved logic down to neutral `ok.` stubs, and verified zero syntax leaks.
+  - Expanded `Run` (`services/orchestrator/internal/bridge/erl_runner_chapters.go`) to evaluate all 3 visible tests (`T1_Res`–`T3_Res`) with isolated catch bindings and non-blocking watchdog timeouts, and hardened `Submit` with 5 automated stages (`compile_and_export_audit`, `ast_receive_after_audit`, `selective_receive_priority`, `timeout_guarantee` with watchdog process, and `mailbox_flush_audit`).
+  - Expanded `services/orchestrator/internal/bridge/ch05_verification_test.go` with positive verification (100% score, 5/5 stages passed, 3/3 visible tests passed) and 3 negative regression tests (`ch05-l03_Negative_Missing_Export`, `ch05-l03_Negative_Missing_Receive_After`, and `ch05-l03_Negative_Inverted_Priority`).
+- [x] **219.2: Mandatory Live Tri-Verification & Verification Suites (`ch05-l03`)**:
+  - **Parallel Worked Example (`sensor_gateway.erl`)**: Extracted from `ch05.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings), and verified live on OTP 29 (`PWE_SUCCESS`).
+  - **Starter & Solution Pack (`priority_mailbox.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/priority_mailbox.erl'] === solutionCode`), compiled starter with `erlc.exe` (exit code 0, `STARTER_SUCCESS`), compiled solution with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `required_constructs => [receive_after]` and `required_calls => [{erlang, self, 0}]` (`AST_VERIFIER_SUCCESS`).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 10 subtests across CH05 in `20.43s` (`20.458s` total); `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l03 | 3/3 tests passed`) in `13.33s` (`13.357s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
 
 
 
