@@ -3844,6 +3844,15 @@ The root OTP supervisor aborted startup with the following error log:
 Inspecting \`src/incident_blocking_init.erl\` reveals that the server attempts to compile, normalize, and parse all firewall rules synchronously inside \`init/1\`.
 Because \`gen_server:start_link/3\` blocks the parent supervisor process until \`init/1\` returns, heavy rule sets exceeding 5,000 entries cause the supervisor to hit its default 5,000ms child startup timeout and abort the node boot!
 
+## Official Erlang Docs & Function Reference
+
+The OTP \`gen_server\` behaviour provides non-blocking initialization semantics via the \`{continue, Continue}\` tuple:
+
+- **\`gen_server:start_link/3,4\`**: Spawns and links a \`gen_server\` process. Blocks the calling process (such as a supervisor) until \`init/1\` returns.
+- **\`init/1\` return with continue**: Returning \`{ok, State, {continue, Continue}}\` unblocks the supervisor immediately in microseconds. The process transitions from initialization to its main loop, scheduling \`handle_continue/2\` before processing any mailbox messages.
+- **\`Module:handle_continue(Continue, State)\`**: Mandatory callback executed immediately after \`init/1\` or any callback that returned a \`continue\` action. Returns \`{noreply, NewState}\` or \`{stop, Reason, NewState}\`.
+- **\`sys:get_state/1,2\`**: Retrieves the internal state of a process without disturbing its message queue, allowing live inspection of server hydration.
+
 ## Parallel Worked Example: The Geo IP Database
 
 The following \`geo_ip_database\` module demonstrates how a high-volume service resolves slow startup blocking by decoupling initial registration from heavy parsing using OTP's non-blocking \`{continue, Term}\` protocol:
@@ -3939,6 +3948,20 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 \`\`\`
 
+### Architectural Breakdown: Root Supervisor Boot Isolation
+
+1. **Step 1: The Supervisor Startup Deadlock Invariant**:
+   When a supervisor launches a child worker via \`gen_server:start_link/3\`, the supervisor thread synchronously waits for \`init/1\` to return. If \`init/1\` executes expensive I/O, parses large data files, or normalizes thousands of configuration rules, the supervisor startup stalls. If this exceeds the supervisor's child startup timeout (typically 5,000ms), the supervisor crashes and tears down the entire application tree.
+
+2. **Step 2: Non-Blocking Init Handshake via \`{continue, Term}\`**:
+   By returning \`{ok, #{status => booting, ...}, {continue, {hydrate, Rules}}}\`, \`init/1\` finishes in sub-millisecond time. The supervisor receives \`{ok, Pid}\`, registers the child successfully, and proceeds to start the next worker in the supervision tree without delay.
+
+3. **Step 3: Mailbox Priority of \`handle_continue/2\`**:
+   The BEAM runtime guarantees that \`handle_continue/2\` is executed before any message already waiting in the process mailbox is consumed. This ensures heavy state hydration completes before external clients can trigger race conditions.
+
+4. **Step 4: Booting Guards & Request Defense**:
+   If a client process issues a synchronous \`gen_server:call/3\` while the server is still compiling rules in \`booting\` status, pattern matching on \`#{status := booting}\` allows the server to immediately reject the request with \`{reply, {error, still_booting}, State}\` rather than crashing on uninitialized state.
+
 ## Assignment Specification
 
 Refactor \`src/incident_blocking_init.erl\` using the modern OTP 21+ \`{continue, Term}\` pattern to eliminate supervisor boot timeouts during cluster deployments.
@@ -4012,6 +4035,15 @@ Refactor \`src/incident_blocking_init.erl\` using the modern OTP 21+ \`{continue
     },
     otpDocCards: [
       {
+        functionName: 'init',
+        module: 'gen_server',
+        signature: 'init(Args) -> {ok, State, {continue, Continue}}',
+        typesSpec: ['Args = term()', 'State = term()', 'Continue = term()'],
+        description: 'Initializes server state and schedules an immediate handle_continue callback before processing mailbox messages.',
+        complexityNote: 'O(1) unblocking supervisor child startup handshake.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#init/1',
+      },
+      {
         functionName: 'handle_continue',
         module: 'gen_server',
         signature: 'Mod:handle_continue(Continue, State) -> {noreply, NewState}',
@@ -4019,6 +4051,24 @@ Refactor \`src/incident_blocking_init.erl\` using the modern OTP 21+ \`{continue
         description: 'Invoked by gen_server immediately after init/1 or handle_call/cast returns {..., {continue, Continue}}.',
         complexityNote: 'Executed before any message in the process mailbox is dispatched.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#Module:handle_continue/2',
+      },
+      {
+        functionName: 'start_link',
+        module: 'gen_server',
+        signature: 'gen_server:start_link(Module, Args, Options) -> {ok, pid()} | {error, term()}',
+        typesSpec: ['Module = module()', 'Args = term()', 'Options = [term()]'],
+        description: 'Creates a standalone gen_server process linked to the calling process, blocking until init/1 returns.',
+        complexityNote: 'Synchronous child process initialization.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#start_link/3',
+      },
+      {
+        functionName: 'get_state',
+        module: 'sys',
+        signature: 'sys:get_state(NameOrPid) -> State',
+        typesSpec: ['NameOrPid = pid() | atom()', 'State = term()'],
+        description: 'Retrieves the internal state of a process implementing OTP behaviours without disturbing its mailbox.',
+        complexityNote: 'O(1) system debug message round-trip.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/sys.html#get_state/1',
       },
     ],
     starterCode: `-module(incident_blocking_init).
@@ -4379,14 +4429,14 @@ code_change(_OldVsn, State, _Extra) ->
     },
     visibleTestCases: [
       {
-        id: 'tc1',
+        id: 'tc-ch07-07-1',
         title: 'Non-Blocking Init 3-Tuple Return Contract',
         erlangCall: 'begin {ok, State, Cont} = incident_blocking_init:init([{"item1", 100}]), {maps:get(status, State), Cont} end',
         expectedOutput: '{booting, {continue, {hydrate, [{"item1", 100}]}}}',
         explanation: 'Verifies init/1 returns 3-element tuple with continue without blocking supervisor.',
       },
       {
-        id: 'tc2',
+        id: 'tc-ch07-07-2',
         title: 'Asynchronous Hydration & Status Verification',
         erlangCall: 'begin {ok, S} = incident_blocking_init:start_link([{"alpha", 99}]), Status = incident_blocking_init:get_status(S), gen_server:stop(S), Status end',
         expectedOutput: 'ready',

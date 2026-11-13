@@ -3984,6 +3984,38 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 26 subtests across Chapter 7 in `66.62s`; `TEST_CHAPTER=7 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l06 | 2/2 tests passed` in `11.49s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+## Phase 241: Chapter 7 Lecture 7 (`ch07-l07`) Pedagogical Audit, Incident Triage Hardening & Live Tri-Verification
+- [x] **241.1: Spec 04/08 Pedagogical Hardening & Anti-Spoiler Shielding (`ch07-l07`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch07.ts` for Lecture 7 (*Incident #103: Slow gen_server:init/1 Blocking Supervisor Startup*, `src/incident_blocking_init.erl`).
+  - Single-Lecture Context Shielding preserved: touched only `ch07-l07` in `ch07.ts`.
+  - Added comprehensive `## Official Erlang Docs & Function Reference` section covering `gen_server:start_link/3,4`, `init/1` continue return tuple, `handle_continue/2`, and `sys:get_state/1,2`.
+  - Injected an in-depth 4-step architectural deep dive under the Parallel Worked Example (`geo_ip_database.erl`):
+    - *Step 1: The Supervisor Startup Deadlock Invariant*: Details synchronous blocking in `init/1` and the supervisor crash cascade.
+    - *Step 2: Non-Blocking Init Handshake via {continue, Term}*: Explains immediate return of unhydrated state and handoff to `handle_continue/2`.
+    - *Step 3: Mailbox Priority of handle_continue/2*: Analyzes BEAM scheduling guarantees where `handle_continue/2` executes before any queued client calls/casts/info.
+    - *Step 4: Booting Guards & Request Defense*: Explains state-guarded request handling (`{error, booting}`) while hydration is in flight.
+  - Expanded `otpDocCards` with 4 official OTP reference cards (`init`, `handle_continue`, `start_link`, `get_state`).
+  - Standardized visible test IDs to `tc-ch07-07-1` and `tc-ch07-07-2`.
+  - Enforced exact parity: `starterCode === files[0].content` and `solutionCode === solutionFiles['src/incident_blocking_init.erl']`.
+  - Zero ASCII art diagrams across all markdown and visual fields.
+
+- [x] **241.2: Go Orchestrator Multi-Test Harness & Negative Regression Suite (`ch07-l07`)**:
+  - Updated `services/orchestrator/internal/bridge/erl_runner_incidents.go` (`buildIncidentRunScript`) for `ch07-l07` to return both `T1_Res` and `T2_Res` in `AllResults = [T1_Res, T2_Res]`.
+  - Updated `services/orchestrator/internal/bridge/ch07_verification_test.go`:
+    - Extracted and pinned `const incidentBlockingInitSolution`.
+    - Updated `ch07-l07` verification entry: `wantScore: 100, wantStages: 3, visibleCount: 2`.
+    - Added 3 negative regression subtests for `ch07-l07`:
+      1. `ch07-l07 Negative Missing handle_continue Export`: verifies rejection in `compile_and_export_audit` when `handle_continue/2` is not exported.
+      2. `ch07-l07 Negative Blocking Init Without Continue Contract`: verifies rejection in `non_blocking_init_contract` when `init/1` does not return the `{continue, {hydrate, ...}}` tuple.
+      3. `ch07-l07 Negative Stalled Hydration In Booting Status`: verifies rejection in `async_hydration_verification` when the server fails to transition to `ready`.
+
+- [x] **241.3: Mandatory Live Tri-Verification Certification (`ch07-l07`)**:
+  - **Parallel Worked Example (`geo_ip_database.erl`)**: Extracted directly from `ch07.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with non-blocking init, hydration via `handle_continue/2`, and item queries passing in 0 ms.
+  - **Starter Pack (`incident_blocking_init.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0) and loads cleanly on OTP.
+  - **Solution Pack (`incident_blocking_init.erl`)**: Verified parity, compiled with `+debug_info -Wall -Werror` (0 warnings), passed `bf_ast_verifier` rules, executed 100% of visible test cases (2/2 passed), and passed all 3 stages of Go incident verification.
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 29 subtests across Chapter 7 in `61.95s`; `TEST_CHAPTER=07 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l07 | 2/2 tests passed` in `9.35s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
 
 
 

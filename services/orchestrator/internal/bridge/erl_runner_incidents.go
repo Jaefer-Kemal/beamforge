@@ -133,6 +133,17 @@ T1_Res = try
         {ok, #{status := booting}, {continue, {hydrate, [{"item1", 100}]}}} -> true;
         _ -> false
     end,
+    #{call_str => <<"incident_blocking_init:init([{\"item1\", 100}])">>,
+      expected => <<"{ok, #{status => booting, ...}, {continue, {hydrate, ...}}}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [InitRes]))),
+      passed => PassedInit,
+      time_ms => erlang:system_time(millisecond) - T1_Start}
+catch C1:R1 ->
+    #{call_str => <<"incident_blocking_init:init(...)">>, expected => <<"{continue, ...}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+end,
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
     {ok, S} = incident_blocking_init:start_link([{"alpha", 99}]),
     Status = incident_blocking_init:get_status(S),
     ItemRes = case erlang:function_exported(incident_blocking_init, lookup_rule, 2) of
@@ -140,17 +151,17 @@ T1_Res = try
         false -> incident_blocking_init:get_item(S, "alpha")
     end,
     gen_server:stop(S),
-    Passed = PassedInit andalso (Status =:= ready) andalso (ItemRes =:= {ok, 99}),
-    #{call_str => <<"incident_blocking_init:init/1 & start_link/1">>,
-      expected => <<"{continue, {hydrate, ...}} & status => ready">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("init: ~p, status: ~p, item: ~p", [InitRes, Status, ItemRes]))),
-      passed => Passed,
-      time_ms => erlang:system_time(millisecond) - T1_Start}
-catch C1:R1 ->
-    #{call_str => <<"incident_blocking_init test">>, expected => <<"{ok, ..., {continue, ...}}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+    Passed2 = (Status =:= ready) andalso (ItemRes =:= {ok, 99}),
+    #{call_str => <<"incident_blocking_init:start_link(...) -> get_status(S)">>,
+      expected => <<"ready & {ok, 99}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("status: ~p, item: ~p", [Status, ItemRes]))),
+      passed => Passed2,
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"incident_blocking_init:start_link(...)">>, expected => <<"ready">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+AllResults = [T1_Res, T2_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true

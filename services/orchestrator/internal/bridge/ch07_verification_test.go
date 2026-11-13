@@ -472,6 +472,82 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `
 
+	const incidentBlockingInitSolution = `-module(incident_blocking_init).
+-behaviour(gen_server).
+
+-export([
+    start_link/1,
+    lookup_rule/2,
+    get_item/2,
+    get_status/1,
+    stop/1
+]).
+
+%% gen_server Callbacks
+-export([
+    init/1,
+    handle_continue/2,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(SeedRules) ->
+    gen_server:start_link(?MODULE, SeedRules, []).
+
+lookup_rule(Pid, Port) ->
+    gen_server:call(Pid, {lookup_rule, Port}).
+
+get_item(Pid, Key) ->
+    gen_server:call(Pid, {get_item, Key}).
+
+get_status(Pid) ->
+    gen_server:call(Pid, get_status).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init(SeedRules) ->
+    {ok, #{status => booting, raw => SeedRules, rules => #{}, items => #{}}, {continue, {hydrate, SeedRules}}}.
+
+handle_continue({hydrate, SeedRules}, State) ->
+    Compiled = maps:from_list(SeedRules),
+    {noreply, State#{status := ready, rules := Compiled, items := Compiled}}.
+
+handle_call({lookup_rule, _Port}, _From, #{status := booting} = State) ->
+    {reply, {error, still_booting}, State};
+handle_call({lookup_rule, Port}, _From, #{status := ready, rules := Rules} = State) ->
+    case maps:find(Port, Rules) of
+        {ok, Action} -> {reply, {ok, Action}, State};
+        error        -> {reply, {error, not_found}, State}
+    end;
+handle_call({get_item, _Key}, _From, #{status := booting} = State) ->
+    {reply, {error, still_booting}, State};
+handle_call({get_item, Key}, _From, #{status := ready, rules := Rules} = State) ->
+    case maps:find(Key, Rules) of
+        {ok, Val} -> {reply, {ok, Val}, State};
+        error     -> {reply, {error, not_found}, State}
+    end;
+handle_call(get_status, _From, #{status := Status} = State) ->
+    {reply, Status, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -544,81 +620,11 @@ code_change(_OldVsn, State, _Extra) ->
 			name:       "ch07-l07 Incident #103",
 			exerciseID: "ch07-l07",
 			files: map[string]string{
-				"src/incident_blocking_init.erl": `-module(incident_blocking_init).
--behaviour(gen_server).
-
--export([
-    start_link/1,
-    lookup_rule/2,
-    get_item/2,
-    get_status/1,
-    stop/1
-]).
-
--export([
-    init/1,
-    handle_continue/2,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
-
-start_link(SeedRules) ->
-    gen_server:start_link(?MODULE, SeedRules, []).
-
-lookup_rule(Pid, Port) ->
-    gen_server:call(Pid, {lookup_rule, Port}).
-
-get_item(Pid, Key) ->
-    gen_server:call(Pid, {get_item, Key}).
-
-get_status(Pid) ->
-    gen_server:call(Pid, get_status).
-
-stop(Pid) ->
-    gen_server:stop(Pid).
-
-init(SeedRules) ->
-    {ok, #{status => booting, raw => SeedRules, rules => #{}, items => #{}}, {continue, {hydrate, SeedRules}}}.
-
-handle_continue({hydrate, SeedRules}, State) ->
-    Compiled = maps:from_list(SeedRules),
-    {noreply, State#{status := ready, rules := Compiled, items := Compiled}}.
-
-handle_call({lookup_rule, _Port}, _From, #{status := booting} = State) ->
-    {reply, {error, still_booting}, State};
-handle_call({lookup_rule, Port}, _From, #{status := ready, rules := Rules} = State) ->
-    case maps:find(Port, Rules) of
-        {ok, Action} -> {reply, {ok, Action}, State};
-        error        -> {reply, {error, not_found}, State}
-    end;
-handle_call({get_item, _Key}, _From, #{status := booting} = State) ->
-    {reply, {error, still_booting}, State};
-handle_call({get_item, Key}, _From, #{status := ready, rules := Rules} = State) ->
-    case maps:find(Key, Rules) of
-        {ok, Val} -> {reply, {ok, Val}, State};
-        error     -> {reply, {error, not_found}, State}
-    end;
-handle_call(get_status, _From, #{status := Status} = State) ->
-    {reply, Status, State};
-handle_call(_Req, _From, State) ->
-    {reply, {error, unknown_call}, State}.
-
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-`,
+				"src/incident_blocking_init.erl": incidentBlockingInitSolution,
 			},
+			wantScore:    100,
+			wantStages:   3,
+			visibleCount: 2,
 		},
 		{
 			name:       "ch07-l08 Rate Limiter Server",
@@ -2628,6 +2634,326 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		if !resetFailed {
 			t.Errorf("Expected success_reset_event to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch07-l07 ──────────────────────────────
+	t.Run("ch07-l07 Negative Missing handle_continue Export", func(t *testing.T) {
+		sessionID := "test-neg-export-ch07-l07"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/incident_blocking_init.erl": `-module(incident_blocking_init).
+-behaviour(gen_server).
+
+-export([
+    start_link/1,
+    lookup_rule/2,
+    get_item/2,
+    get_status/1,
+    stop/1
+]).
+
+%% BUG: Missing handle_continue/2 export
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(SeedRules) ->
+    gen_server:start_link(?MODULE, SeedRules, []).
+
+lookup_rule(Pid, Port) ->
+    gen_server:call(Pid, {lookup_rule, Port}).
+
+get_item(Pid, Key) ->
+    gen_server:call(Pid, {get_item, Key}).
+
+get_status(Pid) ->
+    gen_server:call(Pid, get_status).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init(SeedRules) ->
+    {ok, #{status => booting, raw => SeedRules, rules => #{}, items => #{}}, {continue, {hydrate, SeedRules}}}.
+
+handle_continue({hydrate, SeedRules}, State) ->
+    Compiled = maps:from_list(SeedRules),
+    {noreply, State#{status := ready, rules := Compiled, items := Compiled}}.
+
+handle_call({lookup_rule, _Port}, _From, #{status := booting} = State) ->
+    {reply, {error, still_booting}, State};
+handle_call({lookup_rule, Port}, _From, #{status := ready, rules := Rules} = State) ->
+    case maps:find(Port, Rules) of
+        {ok, Action} -> {reply, {ok, Action}, State};
+        error        -> {reply, {error, not_found}, State}
+    end;
+handle_call({get_item, _Key}, _From, #{status := booting} = State) ->
+    {reply, {error, still_booting}, State};
+handle_call({get_item, Key}, _From, #{status := ready, rules := Rules} = State) ->
+    case maps:find(Key, Rules) of
+        {ok, Val} -> {reply, {ok, Val}, State};
+        error     -> {reply, {error, not_found}, State}
+    end;
+handle_call(get_status, _From, #{status := Status} = State) ->
+    {reply, Status, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l07", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing handle_continue export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l07 Negative Blocking Init Without Continue Contract", func(t *testing.T) {
+		sessionID := "test-neg-blocking-init-ch07-l07"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/incident_blocking_init.erl": `-module(incident_blocking_init).
+-behaviour(gen_server).
+
+-export([
+    start_link/1,
+    lookup_rule/2,
+    get_item/2,
+    get_status/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_continue/2,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(SeedRules) ->
+    gen_server:start_link(?MODULE, SeedRules, []).
+
+lookup_rule(Pid, Port) ->
+    gen_server:call(Pid, {lookup_rule, Port}).
+
+get_item(Pid, Key) ->
+    gen_server:call(Pid, {get_item, Key}).
+
+get_status(Pid) ->
+    gen_server:call(Pid, get_status).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+%% BUG: Synchronous rule compilation blocking supervisor boot without {continue, ...}
+init(SeedRules) ->
+    Compiled = maps:from_list(SeedRules),
+    {ok, #{status => ready, rules => Compiled, items => Compiled}}.
+
+handle_continue(_Continue, State) ->
+    {noreply, State}.
+
+handle_call({lookup_rule, Port}, _From, #{status := ready, rules := Rules} = State) ->
+    case maps:find(Port, Rules) of
+        {ok, Action} -> {reply, {ok, Action}, State};
+        error        -> {reply, {error, not_found}, State}
+    end;
+handle_call({get_item, Key}, _From, #{status := ready, rules := Rules} = State) ->
+    case maps:find(Key, Rules) of
+        {ok, Val} -> {reply, {ok, Val}, State};
+        error     -> {reply, {error, not_found}, State}
+    end;
+handle_call(get_status, _From, #{status := Status} = State) ->
+    {reply, Status, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l07", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on blocking init without continue, but got PASSED")
+		}
+		var initFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "non_blocking_init_contract" && st.Status == "failed" {
+				initFailed = true
+				break
+			}
+		}
+		if !initFailed {
+			t.Errorf("Expected non_blocking_init_contract to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l07 Negative Stalled Hydration In Booting Status", func(t *testing.T) {
+		sessionID := "test-neg-stalled-hydrate-ch07-l07"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/incident_blocking_init.erl": `-module(incident_blocking_init).
+-behaviour(gen_server).
+
+-export([
+    start_link/1,
+    lookup_rule/2,
+    get_item/2,
+    get_status/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_continue/2,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(SeedRules) ->
+    gen_server:start_link(?MODULE, SeedRules, []).
+
+lookup_rule(Pid, Port) ->
+    gen_server:call(Pid, {lookup_rule, Port}).
+
+get_item(Pid, Key) ->
+    gen_server:call(Pid, {get_item, Key}).
+
+get_status(Pid) ->
+    gen_server:call(Pid, get_status).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init(SeedRules) ->
+    {ok, #{status => booting, raw => SeedRules, rules => #{}, items => #{}}, {continue, {hydrate, SeedRules}}}.
+
+%% BUG: Fails to transition status from booting to ready
+handle_continue({hydrate, SeedRules}, State) ->
+    Compiled = maps:from_list(SeedRules),
+    {noreply, State#{rules := Compiled, items := Compiled}}.
+
+handle_call({lookup_rule, _Port}, _From, #{status := booting} = State) ->
+    {reply, {error, still_booting}, State};
+handle_call({lookup_rule, Port}, _From, #{status := ready, rules := Rules} = State) ->
+    case maps:find(Port, Rules) of
+        {ok, Action} -> {reply, {ok, Action}, State};
+        error        -> {reply, {error, not_found}, State}
+    end;
+handle_call({get_item, _Key}, _From, #{status := booting} = State) ->
+    {reply, {error, still_booting}, State};
+handle_call({get_item, Key}, _From, #{status := ready, rules := Rules} = State) ->
+    case maps:find(Key, Rules) of
+        {ok, Val} -> {reply, {ok, Val}, State};
+        error     -> {reply, {error, not_found}, State}
+    end;
+handle_call(get_status, _From, #{status := Status} = State) ->
+    {reply, Status, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l07", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on stalled hydration, but got PASSED")
+		}
+		var hydrateFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "async_hydration_verification" && st.Status == "failed" {
+				hydrateFailed = true
+				break
+			}
+		}
+		if !hydrateFailed {
+			t.Errorf("Expected async_hydration_verification to fail, stages: %+v", report.Stages)
 		}
 	})
 }
