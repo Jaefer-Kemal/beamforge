@@ -416,6 +416,62 @@ code_change(_OldVsn, State, Data, _Extra) ->
     {ok, State, Data}.
 `
 
+	const securityAuditHandlerSolution = `-module(security_audit_handler).
+-behaviour(gen_event).
+
+-export([
+    add_to_manager/2,
+    get_ip_status/2
+]).
+
+-export([
+    init/1,
+    handle_event/2,
+    handle_call/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+add_to_manager(ManagerPid, MaxAttempts) ->
+    gen_event:add_handler(ManagerPid, ?MODULE, MaxAttempts).
+
+get_ip_status(ManagerPid, IpBinary) ->
+    gen_event:call(ManagerPid, ?MODULE, {get_status, IpBinary}).
+
+init(MaxAttempts) ->
+    {ok, #{max => MaxAttempts, tracker => #{}}}.
+
+handle_event({login_failed, Ip}, State = #{max := Max, tracker := Tracker}) ->
+    Current = maps:get(Ip, Tracker, #{attempts => 0, alert => false}),
+    NewAttempts = maps:get(attempts, Current) + 1,
+    Alert = NewAttempts >= Max,
+    NewTracker = maps:put(Ip, #{attempts => NewAttempts, alert => Alert}, Tracker),
+    {ok, State#{tracker := NewTracker}};
+
+handle_event({login_success, Ip}, State = #{tracker := Tracker}) ->
+    NewTracker = maps:put(Ip, #{attempts => 0, alert => false}, Tracker),
+    {ok, State#{tracker := NewTracker}};
+
+handle_event(_OtherEvent, State) ->
+    {ok, State}.
+
+handle_call({get_status, Ip}, State = #{tracker := Tracker}) ->
+    Status = maps:get(Ip, Tracker, #{attempts => 0, alert => false}),
+    {ok, {ok, Status}, State};
+handle_call(_Req, State) ->
+    {ok, {error, unknown_call}, State}.
+
+handle_info(_Info, State) ->
+    {ok, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -478,62 +534,11 @@ code_change(_OldVsn, State, Data, _Extra) ->
 			name:       "ch07-l06 Security Audit Handler",
 			exerciseID: "ch07-l06",
 			files: map[string]string{
-				"src/security_audit_handler.erl": `-module(security_audit_handler).
--behaviour(gen_event).
-
--export([
-    add_to_manager/2,
-    get_ip_status/2
-]).
-
--export([
-    init/1,
-    handle_event/2,
-    handle_call/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
-
-add_to_manager(ManagerPid, MaxAttempts) ->
-    gen_event:add_handler(ManagerPid, ?MODULE, MaxAttempts).
-
-get_ip_status(ManagerPid, IpBinary) ->
-    gen_event:call(ManagerPid, ?MODULE, {get_status, IpBinary}).
-
-init(MaxAttempts) ->
-    {ok, #{max => MaxAttempts, tracker => #{}}}.
-
-handle_event({login_failed, Ip}, State = #{max := Max, tracker := Tracker}) ->
-    Current = maps:get(Ip, Tracker, #{attempts => 0, alert => false}),
-    NewAttempts = maps:get(attempts, Current) + 1,
-    Alert = NewAttempts >= Max,
-    NewTracker = maps:put(Ip, #{attempts => NewAttempts, alert => Alert}, Tracker),
-    {ok, State#{tracker := NewTracker}};
-
-handle_event({login_success, Ip}, State = #{tracker := Tracker}) ->
-    NewTracker = maps:put(Ip, #{attempts => 0, alert => false}, Tracker),
-    {ok, State#{tracker := NewTracker}};
-
-handle_event(_OtherEvent, State) ->
-    {ok, State}.
-
-handle_call({get_status, Ip}, State = #{tracker := Tracker}) ->
-    Status = maps:get(Ip, Tracker, #{attempts => 0, alert => false}),
-    {ok, {ok, Status}, State};
-handle_call(_Req, State) ->
-    {ok, {error, unknown_call}, State}.
-
-handle_info(_Info, State) ->
-    {ok, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-`,
+				"src/security_audit_handler.erl": securityAuditHandlerSolution,
 			},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 2,
 		},
 		{
 			name:       "ch07-l07 Incident #103",
@@ -2357,6 +2362,272 @@ code_change(_OldVsn, State, Data, _Extra) ->
 		}
 		if !tripFailed {
 			t.Errorf("Expected tripping_and_fast_fail to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch07-l06 ──────────────────────────────
+	t.Run("ch07-l06 Negative Missing gen_event call AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-call-ast-ch07-l06"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/security_audit_handler.erl": `-module(security_audit_handler).
+-behaviour(gen_event).
+
+-export([
+    add_to_manager/2,
+    get_ip_status/2
+]).
+
+-export([
+    init/1,
+    handle_event/2,
+    handle_call/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+add_to_manager(ManagerPid, MaxAttempts) ->
+    gen_event:add_handler(ManagerPid, ?MODULE, MaxAttempts).
+
+%% BUG: Does not use gen_event:call/3, violating AST contract
+get_ip_status(_ManagerPid, _IpBinary) ->
+    {ok, #{attempts => 0, alert => false}}.
+
+init(MaxAttempts) ->
+    {ok, #{max => MaxAttempts, tracker => #{}}}.
+
+handle_event({login_failed, Ip}, State = #{max := Max, tracker := Tracker}) ->
+    Current = maps:get(Ip, Tracker, #{attempts => 0, alert => false}),
+    NewAttempts = maps:get(attempts, Current) + 1,
+    Alert = NewAttempts >= Max,
+    NewTracker = maps:put(Ip, #{attempts => NewAttempts, alert => Alert}, Tracker),
+    {ok, State#{tracker := NewTracker}};
+
+handle_event({login_success, Ip}, State = #{tracker := Tracker}) ->
+    NewTracker = maps:put(Ip, #{attempts => 0, alert => false}, Tracker),
+    {ok, State#{tracker := NewTracker}};
+
+handle_event(_OtherEvent, State) ->
+    {ok, State}.
+
+handle_call({get_status, Ip}, State = #{tracker := Tracker}) ->
+    Status = maps:get(Ip, Tracker, #{attempts => 0, alert => false}),
+    {ok, {ok, Status}, State};
+handle_call(_Req, State) ->
+    {ok, {error, unknown_call}, State}.
+
+handle_info(_Info, State) ->
+    {ok, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l06", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing gen_event:call AST rule, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_gen_event_behaviour" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_gen_event_behaviour to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l06 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-export-ch07-l06"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/security_audit_handler.erl": `-module(security_audit_handler).
+-behaviour(gen_event).
+
+%% BUG: Missing get_ip_status/2 export
+-export([
+    add_to_manager/2
+]).
+
+-export([
+    init/1,
+    handle_event/2,
+    handle_call/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+add_to_manager(ManagerPid, MaxAttempts) ->
+    gen_event:add_handler(ManagerPid, ?MODULE, MaxAttempts).
+
+get_ip_status(ManagerPid, IpBinary) ->
+    gen_event:call(ManagerPid, ?MODULE, {get_status, IpBinary}).
+
+init(MaxAttempts) ->
+    {ok, #{max => MaxAttempts, tracker => #{}}}.
+
+handle_event({login_failed, Ip}, State = #{max := Max, tracker := Tracker}) ->
+    Current = maps:get(Ip, Tracker, #{attempts => 0, alert => false}),
+    NewAttempts = maps:get(attempts, Current) + 1,
+    Alert = NewAttempts >= Max,
+    NewTracker = maps:put(Ip, #{attempts => NewAttempts, alert => Alert}, Tracker),
+    {ok, State#{tracker := NewTracker}};
+
+handle_event({login_success, Ip}, State = #{tracker := Tracker}) ->
+    NewTracker = maps:put(Ip, #{attempts => 0, alert => false}, Tracker),
+    {ok, State#{tracker := NewTracker}};
+
+handle_event(_OtherEvent, State) ->
+    {ok, State}.
+
+handle_call({get_status, Ip}, State = #{tracker := Tracker}) ->
+    Status = maps:get(Ip, Tracker, #{attempts => 0, alert => false}),
+    {ok, {ok, Status}, State};
+handle_call(_Req, State) ->
+    {ok, {error, unknown_call}, State}.
+
+handle_info(_Info, State) ->
+    {ok, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l06", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l06 Negative No Reset on Login Success", func(t *testing.T) {
+		sessionID := "test-neg-no-reset-ch07-l06"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/security_audit_handler.erl": `-module(security_audit_handler).
+-behaviour(gen_event).
+
+-export([
+    add_to_manager/2,
+    get_ip_status/2
+]).
+
+-export([
+    init/1,
+    handle_event/2,
+    handle_call/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+add_to_manager(ManagerPid, MaxAttempts) ->
+    gen_event:add_handler(ManagerPid, ?MODULE, MaxAttempts).
+
+get_ip_status(ManagerPid, IpBinary) ->
+    gen_event:call(ManagerPid, ?MODULE, {get_status, IpBinary}).
+
+init(MaxAttempts) ->
+    {ok, #{max => MaxAttempts, tracker => #{}}}.
+
+handle_event({login_failed, Ip}, State = #{max := Max, tracker := Tracker}) ->
+    Current = maps:get(Ip, Tracker, #{attempts => 0, alert => false}),
+    NewAttempts = maps:get(attempts, Current) + 1,
+    Alert = NewAttempts >= Max,
+    NewTracker = maps:put(Ip, #{attempts => NewAttempts, alert => Alert}, Tracker),
+    {ok, State#{tracker := NewTracker}};
+
+%% BUG: Does not clear previous failures on login_success
+handle_event({login_success, _Ip}, State) ->
+    {ok, State};
+
+handle_event(_OtherEvent, State) ->
+    {ok, State}.
+
+handle_call({get_status, Ip}, State = #{tracker := Tracker}) ->
+    Status = maps:get(Ip, Tracker, #{attempts => 0, alert => false}),
+    {ok, {ok, Status}, State};
+handle_call(_Req, State) ->
+    {ok, {error, unknown_call}, State}.
+
+handle_info(_Info, State) ->
+    {ok, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l06", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on no reset on login success, but got PASSED")
+		}
+		var resetFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "success_reset_event" && st.Status == "failed" {
+				resetFailed = true
+				break
+			}
+		}
+		if !resetFailed {
+			t.Errorf("Expected success_reset_event to fail, stages: %+v", report.Stages)
 		}
 	})
 }

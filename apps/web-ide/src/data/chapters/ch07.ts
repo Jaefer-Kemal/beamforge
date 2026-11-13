@@ -3321,7 +3321,7 @@ The OTP framework solves this with **\`gen_event\`**: a central event bus proces
 Unlike a \`gen_server\` (which maps 1 process to 1 callback module), a \`gen_event\` architecture separates the **Event Manager process** from the **Handler modules**:
 1. You start the manager process: \`{ok, ManagerPid} = gen_event:start_link()\`.
 2. Different subsystems dynamically attach their callback handlers: \`gen_event:add_handler(ManagerPid, security_handler, Args)\`.
-3. Producers broadcast events with **\`gen_event:notify(ManagerPid, Event)\`**.
+3. Producers broadcast events with **\`gen_event:notify(ManagerPid, Event)\`** or **\`gen_event:sync_notify(ManagerPid, Event)\`**.
 4. The manager process iterates through all attached handlers, executing each handler's \`handle_event(Event, HandlerState)\` callback in order.
 
 ### Fault Isolation: What Happens When a Handler Crashes?
@@ -3349,7 +3349,18 @@ code_change(OldVsn, State, Extra) -> {ok, NewState}.
 > [!warning] Production OTP Trap: Silent Removal of Crashing Event Handlers
 > Because \`gen_event\` automatically unregisters handlers that crash without taking down the manager process, a bug in a handler can silently stop all event processing for that subsystem while your server appears completely healthy. In production, always monitor your SASL crash logs or use \`gen_event:add_sup_handler/3\` (which links the handler to the caller).
 
-## Parallel Worked Example
+## Official Erlang Docs & Function Reference
+
+The \`gen_event\` behaviour in OTP STDLIB provides decoupled, publish-subscribe event pipelines and dynamic handler attachment:
+
+- **\`gen_event:start_link/0,1\`**: Spawns an event manager process linked to the caller. Returns \`{ok, Pid}\` or \`{error, Reason}\`.
+- **\`gen_event:add_handler/3\`**: Dynamically attaches a callback handler module to an event manager: \`gen_event:add_handler(MgrRef, HandlerModule, Args)\`. The manager invokes \`HandlerModule:init(Args)\` to initialize private handler state. Returns \`ok\` or \`{'EXIT', Reason}\`.
+- **\`gen_event:notify/2\`**: Asynchronously broadcasts an event notification to all installed handlers: \`gen_event:notify(MgrRef, Event)\`. The call returns \`ok\` immediately without waiting for handlers.
+- **\`gen_event:sync_notify/2\`**: Synchronously broadcasts an event notification to all installed handlers. Blocks until every handler has finished executing \`handle_event(Event, State)\`.
+- **\`gen_event:call/3,4\`**: Makes a synchronous query directly to a specific handler module on the event manager: \`gen_event:call(MgrRef, HandlerModule, Request)\`. The manager invokes \`HandlerModule:handle_call(Request, State)\` and returns the handler's reply.
+- **\`gen_event:stop/1,3\`**: Stops an event manager process, notifying all registered handlers with \`terminate/2\`.
+- **\`handle_event(Event, State)\`**: Mandatory callback invoked sequentially for every event broadcast to the manager. Returns \`{ok, NewState}\`, \`{swap_handler, Args1, NewState, Handler2, Args2}\`, or \`remove_handler\`.
+- **\`handle_call(Request, State)\`**: Mandatory callback invoked when a caller directs a synchronous query to this specific handler via \`gen_event:call/3\`. Returns \`{ok, Reply, NewState}\`.
 
 ## Parallel Worked Example: The Latency Monitor Event Handler
 
@@ -3421,6 +3432,20 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 \`\`\`
 
+### Architectural Breakdown: Under the Hood of \`gen_event\`
+
+1. **Step 1: Event Manager Lifecycle & Handler Registration**:
+   The event manager process is spawned once via \`gen_event:start_link/0\`. Subsystems register their handler modules at runtime using \`gen_event:add_handler(ManagerPid, HandlerModule, Args)\`. The manager invokes \`HandlerModule:init(Args)\` inside the manager's process context and stores the resulting state in an internal handler table.
+
+2. **Step 2: Decoupled Asynchronous Event Notification**:
+   Event producers broadcast events using \`gen_event:notify(ManagerPid, Event)\` (or \`gen_event:sync_notify/2\` when synchronization is required). The event producer does not know or care which handlers are attached. The manager process iterates through each attached handler in sequence, passing the event to \`handle_event(Event, HandlerState)\` and saving the returned \`NewState\`.
+
+3. **Step 3: Synchronous State Queries via \`gen_event:call/3\`**:
+   To inspect the state of a single handler without interfering with other handlers, callers invoke \`gen_event:call(ManagerPid, HandlerModule, Query)\`. The manager identifies the state associated with \`HandlerModule\` and invokes \`handle_call(Query, HandlerState)\`, returning \`Reply\` to the caller while other handlers remain completely unaware.
+
+4. **Step 4: Fault Isolation & Handler Removal Lifecycle**:
+   If a handler's \`handle_event/2\` crashes (e.g. from a bad pattern match or arithmetic fault), the event manager traps the exception, invokes \`terminate({error, Reason}, HandlerState)\`, and cleanly removes only that faulty handler. The manager itself does not crash, and all remaining handlers continue processing notifications unimpeded.
+
 ## Assignment Specification
 
 Implement \`src/security_audit_handler.erl\` as a decoupled \`gen_event\` handler module that tracks repeated login failures per IP address and triggers security alerts when brute-force thresholds are exceeded.
@@ -3488,12 +3513,21 @@ Implement \`src/security_audit_handler.erl\` as a decoupled \`gen_event\` handle
     },
     otpDocCards: [
       {
+        functionName: 'start_link',
+        module: 'gen_event',
+        signature: 'gen_event:start_link() -> {ok, pid()} | {error, term()}',
+        typesSpec: ['Result = {ok, pid()} | {error, term()}'],
+        description: 'Creates an event manager process as part of a supervision tree.',
+        complexityNote: 'O(1) process spawn and link.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_event.html#start_link/0',
+      },
+      {
         functionName: 'add_handler',
         module: 'gen_event',
         signature: 'gen_event:add_handler(EventMgrRef, Handler, Args) -> ok | {\'EXIT\', Reason} | term()',
         typesSpec: ['EventMgrRef = pid() | atom()', 'Handler = module() | {module(), Id :: term()}', 'Args = term()'],
-        description: 'Adds a new event handler to the event manager EventMgrRef.',
-        complexityNote: 'O(1) handler registration.',
+        description: 'Adds a new event handler to the event manager EventMgrRef by calling Handler:init(Args).',
+        complexityNote: 'O(1) handler table registration.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_event.html#add_handler/3',
       },
       {
@@ -3501,9 +3535,27 @@ Implement \`src/security_audit_handler.erl\` as a decoupled \`gen_event\` handle
         module: 'gen_event',
         signature: 'gen_event:notify(EventMgrRef, Event) -> ok',
         typesSpec: ['EventMgrRef = pid() | atom()', 'Event = term()'],
-        description: 'Sends an event notification to an event manager, notifying all installed handlers.',
-        complexityNote: 'Iterates through N registered handlers sequentially.',
+        description: 'Sends an asynchronous event notification to an event manager, notifying all installed handlers sequentially.',
+        complexityNote: 'O(N) iteration over N registered handlers.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_event.html#notify/2',
+      },
+      {
+        functionName: 'sync_notify',
+        module: 'gen_event',
+        signature: 'gen_event:sync_notify(EventMgrRef, Event) -> ok',
+        typesSpec: ['EventMgrRef = pid() | atom()', 'Event = term()'],
+        description: 'Sends a synchronous event notification to an event manager, returning only after all handlers have processed the event.',
+        complexityNote: 'O(N) synchronous dispatch across all handlers.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_event.html#sync_notify/2',
+      },
+      {
+        functionName: 'call',
+        module: 'gen_event',
+        signature: 'gen_event:call(EventMgrRef, Handler, Request) -> Reply',
+        typesSpec: ['EventMgrRef = pid() | atom()', 'Handler = module() | {module(), Id :: term()}', 'Request = term()', 'Reply = term()'],
+        description: 'Makes a synchronous call to the specified event handler on the event manager by invoking Handler:handle_call(Request, State).',
+        complexityNote: 'O(1) handler lookup and round-trip reply.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_event.html#call/3',
       },
     ],
     starterCode: `-module(security_audit_handler).
@@ -3525,11 +3577,11 @@ Implement \`src/security_audit_handler.erl\` as a decoupled \`gen_event\` handle
 ]).
 
 %% @doc Register the security audit handler with an event manager process.
-add_to_manager(ManagerPid, MaxAttempts) ->
+add_to_manager(_ManagerPid, _MaxAttempts) ->
     ok.
 
 %% @doc Synchronously retrieve the current security status map for an IP address.
-get_ip_status(ManagerPid, IpBinary) ->
+get_ip_status(_ManagerPid, _IpBinary) ->
     ok.
 
 %% gen_event Callbacks
@@ -3639,11 +3691,11 @@ code_change(_OldVsn, State, _Extra) ->
 ]).
 
 %% @doc Register the security audit handler with an event manager process.
-add_to_manager(ManagerPid, MaxAttempts) ->
+add_to_manager(_ManagerPid, _MaxAttempts) ->
     ok.
 
 %% @doc Synchronously retrieve the current security status map for an IP address.
-get_ip_status(ManagerPid, IpBinary) ->
+get_ip_status(_ManagerPid, _IpBinary) ->
     ok.
 
 %% gen_event Callbacks
@@ -3736,11 +3788,18 @@ code_change(_OldVsn, State, _Extra) ->
     },
     visibleTestCases: [
       {
-        id: 'tc1',
+        id: 'tc-ch07-06-1',
         title: 'Threshold Alert Triggering on Brute-Force Pattern',
         erlangCall: 'begin {ok, Mgr} = gen_event:start_link(), ok = security_audit_handler:add_to_manager(Mgr, 3), gen_event:sync_notify(Mgr, {login_failed, <<"192.168.1.5">>}), gen_event:sync_notify(Mgr, {login_failed, <<"192.168.1.5">>}), gen_event:sync_notify(Mgr, {login_failed, <<"192.168.1.5">>}), Res = security_audit_handler:get_ip_status(Mgr, <<"192.168.1.5">>), gen_event:stop(Mgr), Res end',
         expectedOutput: '{ok, #{alert => true, attempts => 3}}',
         explanation: 'Three consecutive failed logins toggle alert flag to true.',
+      },
+      {
+        id: 'tc-ch07-06-2',
+        title: 'Login Success Clears Accumulated Failures & Alert',
+        erlangCall: 'begin {ok, Mgr2} = gen_event:start_link(), ok = security_audit_handler:add_to_manager(Mgr2, 3), gen_event:sync_notify(Mgr2, {login_failed, <<"10.0.0.9">>}), gen_event:sync_notify(Mgr2, {login_failed, <<"10.0.0.9">>}), gen_event:sync_notify(Mgr2, {login_success, <<"10.0.0.9">>}), Res2 = security_audit_handler:get_ip_status(Mgr2, <<"10.0.0.9">>), gen_event:stop(Mgr2), Res2 end',
+        expectedOutput: '{ok, #{alert => false, attempts => 0}}',
+        explanation: 'A successful login resets the recorded attempts to zero and clears any triggered alert.',
       },
     ],
     solutionExplanation: 'Implements an isolated, dynamically attachable security audit event handler using gen_event to track failed logins and trigger brute-force alerts.',

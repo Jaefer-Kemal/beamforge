@@ -3951,6 +3951,39 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 23 subtests across Chapter 7 in `61.21s`; `TEST_CHAPTER=7 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l05 | 2/2 tests passed` in `13.64s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+## Phase 240: Chapter 7 Lecture 6 (`ch07-l06`) Deep Pedagogical Audit, Anti-Spoiler Protocol & Exercise Hardening
+
+- [x] **240.1: Curriculum Pedagogical Audit & Exercise Structuring (`ch07-l06`, `security_audit_handler.erl`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch07.ts` (`ch07-l06`, `security_audit_handler.erl`) against Spec 04, 07, and 08.
+  - Injected `## Official Erlang Docs & Function Reference` (`gen_event:start_link/0,1`, `gen_event:add_handler/3`, `gen_event:notify/2`, `gen_event:sync_notify/2`, `gen_event:call/3,4`, `gen_event:stop/1,3`, `handle_event/2`, `handle_call/2`) preceding `## Parallel Worked Example`.
+  - Deepened Parallel Worked Example (`latency_monitor_handler.erl`) with a comprehensive 4-step architectural deep dive:
+    - *Step 1: Event Manager Lifecycle & Handler Registration (`gen_event:start_link/0` & `gen_event:add_handler/3`)*
+    - *Step 2: Decoupled Asynchronous Event Notification (`gen_event:notify/2` & `gen_event:sync_notify/2`)*
+    - *Step 3: Synchronous State Queries via `gen_event:call/3` (`handle_call/2`)*
+    - *Step 4: Fault Isolation & Handler Removal Lifecycle (`terminate/2` trap on crash)*
+  - Structured `## Assignment Specification` with clean 3-part layout (`Input`, `Behavior`, `Examples`) for all exported client functions (`add_to_manager/2`, `get_ip_status/2`) and `gen_event` callbacks (`init/1`, `handle_event/2`, `handle_call/2`, `handle_info/2`, `terminate/2`, `code_change/3`).
+  - Audited starter stubs: prefixed unused variables with `_` (`add_to_manager(_ManagerPid, _MaxAttempts)`, `get_ip_status(_ManagerPid, _IpBinary)`), ensuring `erlc -Wall -Werror` passes with zero warnings.
+  - Upgraded `otpDocCards` with 5 complete cards (`start_link`, `add_handler`, `notify`, `sync_notify`, `call`).
+  - Standardized visible test IDs (`tc-ch07-06-1`, `tc-ch07-06-2`) covering both brute-force threshold alert triggering and login success failure count cleansing.
+
+- [x] **240.2: Go Orchestrator Hardening & Negative Regression Subtests (`ch07-l06`)**:
+  - In `services/orchestrator/internal/bridge/erl_runner_chapters.go`:
+    - Updated `case "ch07-l06":` run script to execute both T1 (brute-force alert) and T2 (login success reset), matching `len(runRes.VisibleTests) == len(lesson.VisibleTests) == 2`.
+  - In `services/orchestrator/internal/bridge/ch07_verification_test.go`:
+    - Defined `const securityAuditHandlerSolution = ...` matching `ch07.ts` line-for-line.
+    - Updated `tests` slice with `wantScore: 100, wantStages: 5, visibleCount: 2` for `ch07-l06`.
+    - Added 3 negative regression subtests for `ch07-l06`:
+      1. `ch07-l06 Negative Missing gen_event call AST Violation`: verifies rejection in `ast_gen_event_behaviour` when `gen_event:call/3` is bypassed.
+      2. `ch07-l06 Negative Missing Export`: verifies rejection in `compile_and_export_audit` when `get_ip_status/2` is omitted from exports.
+      3. `ch07-l06 Negative No Reset on Login Success`: verifies rejection in `success_reset_event` when `login_success` fails to clear accumulated failures.
+
+- [x] **240.3: Mandatory Live Tri-Verification Certification (`ch07-l06`)**:
+  - **Parallel Worked Example (`latency_monitor_handler.erl`)**: Extracted directly from `ch07.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with latency timing events and synchronous spike count query passing in 0 ms.
+  - **Starter Pack (`security_audit_handler.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0) and loads cleanly on OTP.
+  - **Solution Pack (`security_audit_handler.erl`)**: Verified parity, compiled with `+debug_info -Wall -Werror` (0 warnings), passed `bf_ast_verifier` rules (`gen_event:add_handler/3`, `gen_event:call/3`), executed 100% of visible test cases (2/2 passed), and passed all 5 stages of Go verification.
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 26 subtests across Chapter 7 in `66.62s`; `TEST_CHAPTER=7 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l06 | 2/2 tests passed` in `11.49s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
 
 
 

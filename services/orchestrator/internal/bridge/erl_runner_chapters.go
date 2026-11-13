@@ -3169,9 +3169,9 @@ AllResults = case IsRateLimiter of
         T1_Res = try
             {ok, Mgr} = gen_event:start_link(),
             ok = security_audit_handler:add_to_manager(Mgr, 3),
-            gen_event:notify(Mgr, {login_failed, <<"192.168.1.5">>}),
-            gen_event:notify(Mgr, {login_failed, <<"192.168.1.5">>}),
-            gen_event:notify(Mgr, {login_failed, <<"192.168.1.5">>}),
+            gen_event:sync_notify(Mgr, {login_failed, <<"192.168.1.5">>}),
+            gen_event:sync_notify(Mgr, {login_failed, <<"192.168.1.5">>}),
+            gen_event:sync_notify(Mgr, {login_failed, <<"192.168.1.5">>}),
             Status = security_audit_handler:get_ip_status(Mgr, <<"192.168.1.5">>),
             gen_event:stop(Mgr),
             Expected = {ok, #{alert => true, attempts => 3}},
@@ -3183,7 +3183,25 @@ AllResults = case IsRateLimiter of
             #{call_str => <<"security_audit_handler:notify(...)">>, expected => <<"alert status">>,
               actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
         end,
-        [T1_Res]
+        T2_Start = erlang:system_time(millisecond),
+        T2_Res = try
+            {ok, Mgr2} = gen_event:start_link(),
+            ok = security_audit_handler:add_to_manager(Mgr2, 3),
+            gen_event:sync_notify(Mgr2, {login_failed, <<"10.0.0.9">>}),
+            gen_event:sync_notify(Mgr2, {login_failed, <<"10.0.0.9">>}),
+            gen_event:sync_notify(Mgr2, {login_success, <<"10.0.0.9">>}),
+            Status2 = security_audit_handler:get_ip_status(Mgr2, <<"10.0.0.9">>),
+            gen_event:stop(Mgr2),
+            Expected2 = {ok, #{alert => false, attempts => 0}},
+            #{call_str => <<"security_audit_handler:get_ip_status(Mgr2, <<\"10.0.0.9\">>)">>,
+              expected => <<"{ok, #{alert => false, attempts => 0}}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Status2]))),
+              passed => (Status2 =:= Expected2), time_ms => erlang:system_time(millisecond) - T2_Start}
+        catch C3:R3 ->
+            #{call_str => <<"security_audit_handler:notify reset">>, expected => <<"{ok, #{alert => false, attempts => 0}}">>,
+              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+        end,
+        [T1_Res, T2_Res]
 end,
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
