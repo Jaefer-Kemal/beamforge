@@ -3791,6 +3791,40 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all 41 subtests including all 10 Chapter 6 lessons and all negative regressions in `123.85s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed 10/10 lessons including `ch06-l10 | 3/3 tests passed` in `12.64s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+## Phase 235: Chapter 7 Lecture 1 (`ch07-l01`) Deep Pedagogical Audit, Anti-Spoiler Protocol & Guided Demo Hardening
+
+- [x] **235.1: Curriculum Pedagogical Audit & Guided Demo Structuring (`ch07-l01`, `otp_intro_demo.erl`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch07.ts` (`ch07-l01`, `otp_intro_demo.erl`) against Spec 04, 07, and 08.
+  - Injected `## Official Erlang Docs & Function Reference` (`gen_server:start_link/3,4`, `gen_server:call/2,3`, `gen_server:cast/2`, `sys:get_state/1,2`) preceding `## Parallel Worked Example`.
+  - Deepened Parallel Worked Example (`device_telemetry.erl`) with a comprehensive 4-step architectural deep dive:
+    - *Step 1: Inversion of Control & Process Initialization (`init/1`)*
+    - *Step 2: Non-Blocking Asynchronous Telemetry Ingestion (`handle_cast/2`)*
+    - *Step 3: Synchronous Request-Reply Lifecycle (`handle_call/3`)*
+    - *Step 4: Live System Introspection via System Protocol Messages (`sys:get_state/1`)*
+  - Structured `## Assignment Specification` with clean 3-part layout (`Input`, `Behavior`, `Examples`) for all 5 exported functions (`start_link/0`, `increment/2`, `get_count/1`, `stop/1`, `run_demo/0`).
+  - Added `## Rules & Verification Constraints` bullet list enforcing callback exports, AST call invariants, and live `sys:get_state/1` verification.
+  - Expanded `otpDocCards` with complete entries for `start_link/3`, `call/2`, `cast/2`, and `get_state/1`.
+  - Normalized visible test ID to `tc-ch07-01-1`.
+  - Verified 100% parity across `starterCode`, `files[0].content`, `solutionCode`, and `solutionFiles['src/otp_intro_demo.erl']` with 11/11 clean `@doc` contracts.
+
+- [x] **235.2: Go Orchestrator Hardening (`erl_runner_chapters.go` & `ch07_verification_test.go`)**:
+  - In `erl_runner_chapters.go` (`case "ch07-l01":`), aligned `expected` with exact expected binary `<<"#{final_count => 35, live_state => #{counter => 35, ops => 3}}">>`.
+  - In `ch07_verification_test.go`:
+    - Defined `const otpIntroDemoSolution = ...` matching `ch07.ts` line-for-line.
+    - Updated `tests` slice with `wantScore: 100, wantStages: 4, visibleCount: 1` for `ch07-l01`.
+    - Updated test runner loop to assert `wantScore`, `wantStages`, and verify visible test execution via `runner.RunCode`.
+    - Added 3 negative regression subtests for `ch07-l01`:
+      1. `ch07-l01 Negative Missing gen_server Call AST Violation`: verifies rejection in `ast_gen_server_structure` when `gen_server:call/2` is bypassed with raw send/receive.
+      2. `ch07-l01 Negative Missing Export`: verifies rejection in `compile_and_export_audit` when required API functions are omitted.
+      3. `ch07-l01 Negative Broken Demo Execution Result`: verifies rejection in `demo_execution_audit` when `run_demo/0` returns corrupt data.
+
+- [x] **235.3: Mandatory Live Tri-Verification Certification (`ch07-l01`)**:
+  - **Parallel Worked Example (`device_telemetry.erl`)**: Extracted directly from `ch07.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with all telemetry metrics and live `sys:get_state/1` queries passing in 0 ms.
+  - **Starter Pack (`otp_intro_demo.erl`)**: Compiles cleanly with `erlc.exe +debug_info -Wall -Werror` (0 warnings, exit code 0) and loads cleanly on OTP.
+  - **Solution Pack (`otp_intro_demo.erl`)**: Verified parity, compiled with `+debug_info -Wall -Werror` (0 warnings), passed `bf_ast_verifier` rules (`gen_server:start_link/3`, `gen_server:call/2`, `gen_server:cast/2`), executed 100% of visible test cases (1/1 passed), and passed all 4 stages of Go verification.
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 4 subtests (positive + 3 negatives) in `7.48s`; `TEST_CHAPTER=7 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l01 | 1/1 tests passed` in `11.05s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
 
 
 

@@ -9,16 +9,7 @@ import (
 func TestChapter7Verification(t *testing.T) {
 	runner, poolMgr := setupTestRunner(t)
 
-	tests := []struct {
-		name       string
-		exerciseID string
-		files      map[string]string
-	}{
-		{
-			name:       "ch07-l01 OTP Intro Demo",
-			exerciseID: "ch07-l01",
-			files: map[string]string{
-				"src/otp_intro_demo.erl": `-module(otp_intro_demo).
+	const otpIntroDemoSolution = `-module(otp_intro_demo).
 -behaviour(gen_server).
 
 -export([
@@ -29,6 +20,7 @@ func TestChapter7Verification(t *testing.T) {
     run_demo/0
 ]).
 
+%% gen_server Callbacks
 -export([
     init/1,
     handle_call/3,
@@ -38,51 +30,79 @@ func TestChapter7Verification(t *testing.T) {
     code_change/3
 ]).
 
+%% @doc Starts and links the OTP intro demo gen_server.
 start_link() ->
     gen_server:start_link(?MODULE, [], []).
 
+%% @doc Asynchronously casts an increment amount to the server.
 increment(Pid, Amount) when is_integer(Amount) ->
     gen_server:cast(Pid, {increment, Amount}).
 
+%% @doc Synchronously queries the current counter value.
 get_count(Pid) ->
     gen_server:call(Pid, get_count).
 
+%% @doc Synchronously requests clean termination of the gen_server.
 stop(Pid) ->
     gen_server:stop(Pid).
 
+%% @doc Demonstrates the full server lifecycle and live sys:get_state/1 introspection.
 run_demo() ->
     {ok, Pid} = start_link(),
-    ok = increment(Pid, 10),
-    ok = increment(Pid, 25),
-    timer:sleep(20),
-    FinalCount = get_count(Pid),
+    increment(Pid, 10),
+    increment(Pid, 25),
+    timer:sleep(15),
+    Count = get_count(Pid),
     LiveState = sys:get_state(Pid),
-    ok = stop(Pid),
-    #{final_count => FinalCount, live_state => LiveState}.
+    stop(Pid),
+    #{final_count => Count, live_state => LiveState}.
 
+%% @doc Initializes the server with counter and operations tally set to zero.
 init([]) ->
     {ok, #{counter => 0, ops => 0}}.
 
+%% @doc Handles synchronous call requests.
 handle_call(get_count, _From, State = #{counter := Count, ops := Ops}) ->
     {reply, Count, State#{ops := Ops + 1}};
-handle_call(_Req, _From, State) ->
+handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+%% @doc Handles asynchronous cast messages.
 handle_cast({increment, Amount}, State = #{counter := Count, ops := Ops}) ->
     {noreply, State#{counter := Count + Amount, ops := Ops + 1}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @doc Handles out-of-band signals and raw messages.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @doc Cleans up server resources upon termination.
 terminate(_Reason, _State) ->
     ok.
 
+%% @doc Handles state transformations across hot code upgrades.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-`,
+`
+
+	tests := []struct {
+		name         string
+		exerciseID   string
+		files        map[string]string
+		wantScore    int
+		wantStages   int
+		visibleCount int
+	}{
+		{
+			name:       "ch07-l01 OTP Intro Demo",
+			exerciseID: "ch07-l01",
+			files: map[string]string{
+				"src/otp_intro_demo.erl": otpIntroDemoSolution,
 			},
+			wantScore:    100,
+			wantStages:   4,
+			visibleCount: 1,
 		},
 		{
 			name:       "ch07-l02 Wallet Server",
@@ -672,11 +692,332 @@ code_change(_OldVsn, State, _Extra) ->
 					t.Logf("  Stage %s (%s): status=%s, details=%s", st.ID, st.Title, st.Status, st.Details)
 				}
 			} else {
+				if tc.wantScore > 0 && report.Score != tc.wantScore {
+					t.Errorf("[%s] Score mismatch: got %d, want %d", tc.exerciseID, report.Score, tc.wantScore)
+				}
+				if tc.wantStages > 0 && len(report.Stages) != tc.wantStages {
+					t.Errorf("[%s] Stages count mismatch: got %d, want %d", tc.exerciseID, len(report.Stages), tc.wantStages)
+				}
 				t.Logf("[%s] VERIFIED 100%% PASSED (score=%d, %d stages)", tc.exerciseID, report.Score, len(report.Stages))
 				for _, st := range report.Stages {
 					t.Logf("  + Stage %s: %s", st.ID, st.Status)
 				}
 			}
+
+			if tc.visibleCount > 0 {
+				runRes, errRun := runner.RunCode(ctx, session, tc.exerciseID, tc.files, nil)
+				if errRun != nil {
+					t.Fatalf("[%s] RunCode failed: %v", tc.exerciseID, errRun)
+				}
+				if !runRes.CompileOk {
+					t.Fatalf("[%s] RunCode compilation failed:\n%s", tc.exerciseID, runRes.Stdout)
+				}
+				if len(runRes.VisibleTests) != tc.visibleCount {
+					t.Errorf("[%s] Visible test count mismatch: got %d, want %d", tc.exerciseID, len(runRes.VisibleTests), tc.visibleCount)
+				}
+				for idx, vt := range runRes.VisibleTests {
+					if !vt.Passed {
+						t.Errorf("[%s] Visible test #%d failed:\n  Call:     %s\n  Expected: %s\n  Actual:   %s",
+							tc.exerciseID, idx+1, vt.CallStr, vt.Expected, vt.Actual)
+					}
+				}
+			}
 		})
 	}
+
+	// ── Negative Regression Subtests for ch07-l01 ──────────────────────────────
+	t.Run("ch07-l01 Negative Missing gen_server Call AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch07-l01"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/otp_intro_demo.erl": `-module(otp_intro_demo).
+-behaviour(gen_server).
+
+-export([
+    start_link/0,
+    increment/2,
+    get_count/1,
+    stop/1,
+    run_demo/0
+]).
+
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link() ->
+    gen_server:start_link(?MODULE, [], []).
+
+increment(Pid, Amount) when is_integer(Amount) ->
+    gen_server:cast(Pid, {increment, Amount}).
+
+%% BUG: Bypasses gen_server:call/2 with a raw send and receive loop!
+get_count(Pid) ->
+    Ref = make_ref(),
+    Pid ! {'$gen_call', {self(), Ref}, get_count},
+    receive
+        {Ref, Reply} -> Reply
+    after 1000 ->
+        {error, timeout}
+    end.
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+run_demo() ->
+    {ok, Pid} = start_link(),
+    increment(Pid, 10),
+    increment(Pid, 25),
+    timer:sleep(15),
+    Count = get_count(Pid),
+    LiveState = sys:get_state(Pid),
+    stop(Pid),
+    #{final_count => Count, live_state => LiveState}.
+
+init([]) ->
+    {ok, #{counter => 0, ops => 0}}.
+
+handle_call(get_count, _From, State = #{counter := Count, ops := Ops}) ->
+    {reply, Count, State#{ops := Ops + 1}};
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast({increment, Amount}, State = #{counter := Count, ops := Ops}) ->
+    {noreply, State#{counter := Count + Amount, ops := Ops + 1}};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l01", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing gen_server:call AST rule, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_gen_server_structure" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_gen_server_structure to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l01 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-exp-ch07-l01"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/otp_intro_demo.erl": `-module(otp_intro_demo).
+-behaviour(gen_server).
+
+%% BUG: run_demo/0 intentionally omitted from export list!
+-export([
+    start_link/0,
+    increment/2,
+    get_count/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link() ->
+    gen_server:start_link(?MODULE, [], []).
+
+increment(Pid, Amount) when is_integer(Amount) ->
+    gen_server:cast(Pid, {increment, Amount}).
+
+get_count(Pid) ->
+    gen_server:call(Pid, get_count).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+run_demo() ->
+    {ok, Pid} = start_link(),
+    increment(Pid, 10),
+    increment(Pid, 25),
+    timer:sleep(15),
+    Count = get_count(Pid),
+    LiveState = sys:get_state(Pid),
+    stop(Pid),
+    #{final_count => Count, live_state => LiveState}.
+
+init([]) ->
+    {ok, #{counter => 0, ops => 0}}.
+
+handle_call(get_count, _From, State = #{counter := Count, ops := Ops}) ->
+    {reply, Count, State#{ops := Ops + 1}};
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast({increment, Amount}, State = #{counter := Count, ops := Ops}) ->
+    {noreply, State#{counter := Count + Amount, ops := Ops + 1}};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l01", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export, but got PASSED")
+		}
+		var expFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				expFailed = true
+				break
+			}
+		}
+		if !expFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l01 Negative Broken Demo Execution Result", func(t *testing.T) {
+		sessionID := "test-neg-demo-ch07-l01"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/otp_intro_demo.erl": `-module(otp_intro_demo).
+-behaviour(gen_server).
+
+-export([
+    start_link/0,
+    increment/2,
+    get_count/1,
+    stop/1,
+    run_demo/0
+]).
+
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link() ->
+    gen_server:start_link(?MODULE, [], []).
+
+increment(Pid, Amount) when is_integer(Amount) ->
+    gen_server:cast(Pid, {increment, Amount}).
+
+get_count(Pid) ->
+    gen_server:call(Pid, get_count).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+%% BUG: Returns wrong result map lacking final_count and live_state keys!
+run_demo() ->
+    {ok, Pid} = start_link(),
+    increment(Pid, 10),
+    stop(Pid),
+    #{status => broken_demo}.
+
+init([]) ->
+    {ok, #{counter => 0, ops => 0}}.
+
+handle_call(get_count, _From, State = #{counter := Count, ops := Ops}) ->
+    {reply, Count, State#{ops := Ops + 1}};
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast({increment, Amount}, State = #{counter := Count, ops := Ops}) ->
+    {noreply, State#{counter := Count + Amount, ops := Ops + 1}};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l01", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on broken demo execution, but got PASSED")
+		}
+		var demoFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "demo_execution_audit" && st.Status == "failed" {
+				demoFailed = true
+				break
+			}
+		}
+		if !demoFailed {
+			t.Errorf("Expected demo_execution_audit to fail, stages: %+v", report.Stages)
+		}
+	})
 }

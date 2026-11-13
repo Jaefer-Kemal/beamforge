@@ -2979,17 +2979,17 @@ T1_Res = try
     case DemoRes of
         #{final_count := Count, live_state := State} when is_integer(Count), is_map(State) ->
             #{call_str => <<"otp_intro_demo:run_demo()">>,
-              expected => <<"#{final_count => ..., live_state => ...}">>,
+              expected => <<"#{final_count => 35, live_state => #{counter => 35, ops => 3}}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [DemoRes]))),
               passed => true, time_ms => erlang:system_time(millisecond) - T1_Start};
         Other1 ->
             #{call_str => <<"otp_intro_demo:run_demo()">>,
-              expected => <<"#{final_count => ..., live_state => ...}">>,
+              expected => <<"#{final_count => 35, live_state => #{counter => 35, ops => 3}}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))),
               passed => false, time_ms => erlang:system_time(millisecond) - T1_Start}
     end
 catch C1:R1 ->
-    #{call_str => <<"otp_intro_demo:run_demo()">>, expected => <<"demo map">>,
+    #{call_str => <<"otp_intro_demo:run_demo()">>, expected => <<"#{final_count => 35, live_state => #{counter => 35, ops => 3}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res],

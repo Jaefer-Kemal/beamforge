@@ -82,6 +82,15 @@ The \`gen_server\` engine intercepts the system message, extracts its current in
 > [!warning] Production OTP Trap: Never Block Inside gen_server Callbacks
 > Because a \`gen_server\` processes its mailbox sequentially, calling a slow external API (e.g. \`httpc:request\`) or sleeping with \`timer:sleep/1\` inside \`handle_call/3\` freezes the entire server. All subsequent client calls get stuck in the mailbox and will eventually crash with \`{timeout, {gen_server, call, ...}}\` after 5,000ms!
 
+## Official Erlang Docs & Function Reference
+
+Before inspecting the parallel monitor implementation, familiarize yourself with the official OTP core interfaces:
+
+- **\`gen_server:start_link/3,4\`** — Spawns and links a new \`gen_server\` process, synchronously calling \`Mod:init/1\` before returning. Ensures the caller receives exit signals if the server crashes during startup.
+- **\`gen_server:call/2,3\`** — Sends a synchronous request to the \`gen_server\` and suspends caller execution until a reply arrives (or default 5,000ms timeout expires). Uses internal monitors to fail immediately if the target process dies.
+- **\`gen_server:cast/2\`** — Sends an asynchronous, non-blocking fire-and-forget message to the \`gen_server\` mailbox and returns \`ok\` immediately.
+- **\`sys:get_state/1,2\`** — Synchronously retrieves the internal state term of an OTP process via the system message protocol without disrupting normal message dispatching.
+
 ## Parallel Worked Example: The IoT Telemetry Monitor (device_telemetry.erl)
 
 To see how an OTP behaviour separates client API wrappers from internal callback evaluation, consider \`device_telemetry.erl\`. This server monitors an IoT edge node: tracking battery percentage, counting transmitted packets asynchronously, and allowing synchronous status queries and live operator inspection with \`sys:get_state/1\`.
@@ -153,6 +162,20 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 \`\`\`
+
+### Architectural Deep Dive: What the BEAM is Doing
+
+1. **Step 1: Inversion of Control & Process Initialization (\`init/1\`)**
+   When \`device_telemetry:start_link(100)\` is called, the calling process invokes \`gen_server:start_link/3\`. The OTP engine allocates a new BEAM process, atomically links it to the caller, and synchronously invokes \`device_telemetry:init([100])\` in the child process. The child constructs its initial state map (\`#{battery_pct => 100, packets_sent => 0, total_bytes => 0}\`) and returns \`{ok, InitialState}\`. The OTP engine completes the handshake and returns \`{ok, ChildPid}\` to the caller.
+
+2. **Step 2: Non-Blocking Asynchronous Telemetry Ingestion (\`handle_cast/2\`)**
+   Calling \`device_telemetry:record_packet(Pid, 64)\` evaluates \`gen_server:cast(Pid, {record_packet, 64})\`. The OTP engine delivers a special tagged tuple \`{'$gen_cast', {record_packet, 64}}\` directly into \`Pid\`'s mailbox and immediately returns \`ok\` to the caller. When the server process reaches this message in its mailbox, the OTP engine invokes \`handle_cast/2\`. The callback updates its byte count and packet tally, returning \`{noreply, NewState}\`.
+
+3. **Step 3: Synchronous Request-Reply Lifecycle (\`handle_call/3\`)**
+   Calling \`device_telemetry:query_status(Pid)\` evaluates \`gen_server:call(Pid, get_status)\`. The caller sets up a monitor on \`Pid\`, generates a unique reference \`MRef\`, transmits \`{'$gen_call', {self(), MRef}, get_status}\`, and suspends in a selective receive. The server receives the call, invokes \`handle_call(get_status, From, State)\`, and returns \`{reply, {ok, State}, State}\`. The OTP engine sends \`{MRef, {ok, State}}\` back to the caller and flushes the monitor.
+
+4. **Step 4: Live System Introspection via System Protocol Messages (\`sys:get_state/1\`)**
+   When an operator or monitoring tool calls \`sys:get_state(Pid)\`, the system library transmits a tagged system message \`{system, From, get_state}\`. The OTP \`gen_server\` engine intercepts this message before invoking normal domain callbacks, queries its internal \`State\` variable, and sends the raw state map back to the caller without stopping or modifying the process.
 
 ### Inspecting Live State in Production
 Because \`device_telemetry\` implements the standard \`gen_server\` behaviour, operators in an Erlang shell or telemetry dashboard can inspect its live metrics at any time without disturbing active packet streams:
@@ -251,6 +274,24 @@ loop(State) ->
         description: 'Spawns a gen_server linked to the caller, synchronously invoking Mod:init(Args).',
         complexityNote: 'O(1) process creation with atomic link.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#start_link/3',
+      },
+      {
+        functionName: 'call',
+        module: 'gen_server',
+        signature: 'gen_server:call(ServerRef, Request) -> Reply',
+        typesSpec: ['ServerRef = pid() | atom()', 'Request = term()', 'Reply = term()'],
+        description: 'Makes a synchronous call to the ServerRef by sending a request and waiting for a reply.',
+        complexityNote: 'O(1) message round-trip with monitor guarantee.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#call/2',
+      },
+      {
+        functionName: 'cast',
+        module: 'gen_server',
+        signature: 'gen_server:cast(ServerRef, Request) -> ok',
+        typesSpec: ['ServerRef = pid() | atom()', 'Request = term()'],
+        description: 'Sends an asynchronous request to the ServerRef and returns ok immediately, without waiting for a reply.',
+        complexityNote: 'O(1) asynchronous message send.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#cast/2',
       },
       {
         functionName: 'get_state',
@@ -576,7 +617,7 @@ code_change(_OldVsn, State, _Extra) ->
     },
     visibleTestCases: [
       {
-        id: 'tc1',
+        id: 'tc-ch07-01-1',
         title: 'Run Guided Demo & Verify Final State',
         erlangCall: 'otp_intro_demo:run_demo()',
         expectedOutput: '#{final_count => 35, live_state => #{counter => 35, ops => 3}}',
