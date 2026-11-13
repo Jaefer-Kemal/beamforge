@@ -3530,6 +3530,28 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 30 subtests across CH05 in `98.53s`; `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l08 | 4/4 tests passed`) in `16.76s`.
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 225: Spec 04 / Spec 08 Anti-Spoiler Audit, Sequential Exceptions (throw, error, exit), Class Matching try...catch AST Hardening & Live Tri-Verification of Chapter 6 Lecture 1 (`ch06-l01`)
+
+- [x] **225.1: Spec 04/08 Pedagogical Anti-Spoiler Audit & Erlang/AST Hardening (`ch06-l01`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch06.ts` (`ch06-l01`, `exception_classifier.erl`) against Spec 04, 07, and 08.
+  - Re-ordered Spec 04 layout so `## Official Erlang Docs & Function Reference` (`throw/1`, `erlang:error/1`, `exit/1`) precedes `## Parallel Worked Example`.
+  - Replaced 1-to-1 transliteration clone (`telemetry_codec.erl`) with domain-distinct RPC ingress router `## Parallel Worked Example` (`gateway_dispatch.erl`) across 4 execution phases (`Phase 1: Validating RPC Envelope and Dispatching Exceptions`, `Phase 2: Protected Boundary via try...catch with Class Pattern Matching`, `Phase 3: Direct Exception Generation with Exception Primitives`, `Phase 4: Stacktrace Capture with Class:Reason:Stacktrace`) accompanied by deep architectural notes on expected rejections vs. contract violations, stacktrace inspection, and the default `throw` catch class trap.
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across all 3 exported functions (`check_payment/1`, `safe_check/1`, `trigger_class/2`) with zero Erlang syntax leaks or code backticks in prompt bullets.
+  - Aligned 10/10 plain-English `%% @doc` contracts across all 4 code representations (`files[0].content`, `starterCode`, `solutionFiles['src/exception_classifier.erl']`, `solutionCode`).
+  - Scaffolding starter pack with `_` prefixed parameters (`_PaymentTuple`, `_ClassAtom`, `_Reason`) compiling cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0).
+  - Configured `astRules` (`requiredConstructs: ['try_catch']`, `requiredCalls: ['erlang:error/1']`).
+- [x] **225.2: Go Orchestrator Runner & Sequential Exception Verification Hardening (`ch06-l01`)**:
+  - Upgraded `buildChapterRunScript` in `services/orchestrator/internal/bridge/erl_runner_chapters.go` to evaluate all 4 visible tests (`T1_Res`: approved payment, `T2_Res`: caught throw rejection, `T3_Res`: caught error type bug, `T4_Res`: caught exit zero payment abort) and return `AllResults = [T1_Res, T2_Res, T3_Res, T4_Res]`.
+  - Fixed Erlang `unsafe_var` scope bug by decoupling catch variables (`Err1`–`Err4`) from try-body result variables (`R1`–`R4`).
+  - Added `required_calls => [{erlang, error, 1}]` and bad-tuple payload check to `buildChapterVerificationScript`.
+  - Expanded `services/orchestrator/internal/bridge/ch06_verification_test.go` with positive verification (100% score, 4/4 stages passed, 4/4 visible tests verified) and 3 negative regression subtests (`ch06-l01_Negative_Missing_try_catch`, `ch06-l01_Negative_Missing_Export`, `ch06-l01_Negative_Bare_Catch_Class_Prefix_Trap`).
+- [x] **225.3: Mandatory Live Tri-Verification & Full Test Suite Certification (`ch06-l01`)**:
+  - **Parallel Worked Example (`gateway_dispatch.erl`)**: Extracted directly from `ch06.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with all 4 phases passing cleanly (`PWE_OTP_OK`).
+  - **Starter Pack (`exception_classifier.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0), loads cleanly on OTP, and safely fails tests without compiler or syntax crashes.
+  - **Solution Pack (`exception_classifier.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/exception_classifier.erl'] === solutionCode`), compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `required_constructs => [try_catch]` and `required_calls => [{erlang, error, 1}]`, and passed 100% of visible test cases (4/4 passed).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l01` and its 3 negative regression tests in `12.83s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed `ch06-l01 | 4/4 tests passed`.
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
 
 
 

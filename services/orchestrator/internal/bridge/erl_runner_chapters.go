@@ -2288,47 +2288,71 @@ T1_Res = try
             Term = {user, 101, <<"Alice">>},
             Bin = term_to_binary(Term),
             case boundary_parser:safe_parse_payload(Bin) of
-                {ok, Term} = R1 ->
+                {ok, Term} = R1_Legacy ->
                     #{call_str => <<"boundary_parser:safe_parse_payload(ValidBin)">>,
                       expected => <<"{ok, {user, 101, <<\"Alice\">>}}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
+                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1_Legacy]))), passed => true,
                       time_ms => erlang:system_time(millisecond) - T1_Start};
                 Other1 ->
                     #{call_str => <<"boundary_parser:safe_parse_payload(ValidBin)">>, expected => <<"{ok, ...}">>,
                       actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
             end
     end
-catch C1:R1 ->
-    #{call_str => <<"safe_check test">>, expected => <<"success">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+catch C1:Err1 ->
+    #{call_str => <<"safe_check test 1">>, expected => <<"{approved, 150, usd}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try
     case code:ensure_loaded(exception_classifier) of
         {module, exception_classifier} ->
-            R2 = exception_classifier:safe_check({payment, -50, usd}),
-            #{call_str => <<"exception_classifier:safe_check({payment, -50, usd})">>,
+            R2 = exception_classifier:safe_check({payment, -50, eur}),
+            #{call_str => <<"exception_classifier:safe_check({payment, -50, eur})">>,
               expected => <<"{rejected, negative_amount}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))),
               passed => R2 =:= {rejected, negative_amount},
               time_ms => erlang:system_time(millisecond) - T2_Start};
         _ ->
             case boundary_parser:safe_parse_payload(<<"corrupted_bytes_123">>) of
-                {error, {error, badarg}} = R2 ->
+                {error, {error, badarg}} = R2_Legacy ->
                     #{call_str => <<"boundary_parser:safe_parse_payload(CorruptedBin)">>,
                       expected => <<"{error, {error, badarg}}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))), passed => true,
+                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2_Legacy]))), passed => true,
                       time_ms => erlang:system_time(millisecond) - T2_Start};
                 Other2 ->
                     #{call_str => <<"boundary_parser:safe_parse_payload(CorruptedBin)">>, expected => <<"{error, {error, badarg}}">>,
                       actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
             end
     end
-catch C2:R2 ->
-    #{call_str => <<"rejection test">>, expected => <<"rejected">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+catch C2:Err2 ->
+    #{call_str => <<"safe_check test 2">>, expected => <<"{rejected, negative_amount}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res, T2_Res],
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    R3 = exception_classifier:safe_check({payment, "150", usd}),
+    #{call_str => <<"exception_classifier:safe_check({payment, \"150\", usd})">>,
+      expected => <<"{bug_detected, bad_amount_type}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))),
+      passed => R3 =:= {bug_detected, bad_amount_type},
+      time_ms => erlang:system_time(millisecond) - T3_Start}
+catch C3:Err3 ->
+    #{call_str => <<"safe_check test 3">>, expected => <<"{bug_detected, bad_amount_type}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3])), passed => false, time_ms => 0}
+end,
+T4_Start = erlang:system_time(millisecond),
+T4_Res = try
+    R4 = exception_classifier:safe_check({payment, 0, etb}),
+    #{call_str => <<"exception_classifier:safe_check({payment, 0, etb})">>,
+      expected => <<"{process_aborted, zero_payment_abort}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [R4]))),
+      passed => R4 =:= {process_aborted, zero_payment_abort},
+      time_ms => erlang:system_time(millisecond) - T4_Start}
+catch C4:Err4 ->
+    #{call_str => <<"safe_check test 4">>, expected => <<"{process_aborted, zero_payment_abort}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C4, Err4])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res, T4_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -7735,11 +7759,12 @@ S1_Ast = try
     BeamPath = filename:join(["%s", "ebin", "exception_classifier.beam"]),
     {ok, BeamBin} = file:read_file(BeamPath),
     Rules = #{
-        required_constructs => [try_catch]
+        required_constructs => [try_catch],
+        required_calls => [{erlang, error, 1}]
     },
     case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
         {ok, _} ->
-            #{id => <<"ast_try_catch_audit">>, title => <<"AST Analysis: try...catch Construct Invariants">>, status => <<"passed">>, time_ms => 15, details => <<"Verified try...catch constructs.">>};
+            #{id => <<"ast_try_catch_audit">>, title => <<"AST Analysis: try...catch Construct Invariants">>, status => <<"passed">>, time_ms => 15, details => <<"Verified try...catch constructs and erlang:error/1 calls.">>};
         {error, Violations} ->
             #{id => <<"ast_try_catch_audit">>, title => <<"AST Analysis: try...catch Construct Invariants">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
     end
@@ -7752,6 +7777,7 @@ S2_DomainChecks = try
     {process_aborted, zero_payment_abort} = exception_classifier:safe_check({payment, 0, usd}),
     {rejected, {unsupported_currency, gbp}} = exception_classifier:safe_check({payment, 50, gbp}),
     {bug_detected, bad_amount_type} = exception_classifier:safe_check({payment, "not_int", usd}),
+    {bug_detected, invalid_payment_tuple} = exception_classifier:safe_check(invalid_tuple_payload),
     #{id => <<"domain_exception_classification">>, title => <<"Domain Exception Classification (throw, error, exit)">>, status => <<"passed">>, time_ms => 14, details => <<"All payment domain conditions mapped cleanly to approved, rejected, bug_detected, or process_aborted.">>}
 catch C2:R2 ->
     #{id => <<"domain_exception_classification">>, title => <<"Domain Exception Classification (throw, error, exit)">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Domain check error: ~p:~p", [C2, R2]))}

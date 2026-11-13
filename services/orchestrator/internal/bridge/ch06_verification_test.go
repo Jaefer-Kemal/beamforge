@@ -38,22 +38,14 @@ func setupTestRunner(t *testing.T) (*bridge.Runner, *pool.Manager) {
 func TestChapter6Verification(t *testing.T) {
 	runner, poolMgr := setupTestRunner(t)
 
-	tests := []struct {
-		name       string
-		exerciseID string
-		files      map[string]string
-	}{
-		{
-			name:       "ch06-l01 Sequential Exceptions",
-			exerciseID: "ch06-l01",
-			files: map[string]string{
-				"src/exception_classifier.erl": `-module(exception_classifier).
+	exceptionClassifierSolution := `-module(exception_classifier).
 -export([
     check_payment/1,
     safe_check/1,
     trigger_class/2
 ]).
 
+%% @doc Validates payment parameters against transaction rules, raising throw, error, or exit on anomalies.
 check_payment({payment, Amount, Currency}) ->
     if
         not is_integer(Amount) ->
@@ -70,6 +62,7 @@ check_payment({payment, Amount, Currency}) ->
 check_payment(_InvalidTuple) ->
     erlang:error(invalid_payment_tuple).
 
+%% @doc Evaluates payment validation inside a protected try-catch block, normalizing exceptions into tagged tuples.
 safe_check(PaymentTuple) ->
     try check_payment(PaymentTuple) of
         {approved, Amount, Currency} ->
@@ -83,14 +76,32 @@ safe_check(PaymentTuple) ->
             {process_aborted, Reason}
     end.
 
+%% @doc Directly invokes the specified Erlang exception primitive with the provided reason term.
 trigger_class(throw, Reason) ->
     throw(Reason);
 trigger_class(error, Reason) ->
     erlang:error(Reason);
 trigger_class(exit, Reason) ->
     exit(Reason).
-`,
+`
+
+	tests := []struct {
+		name         string
+		exerciseID   string
+		files        map[string]string
+		wantScore    int
+		wantStages   int
+		visibleCount int
+	}{
+		{
+			name:       "ch06-l01 Sequential Exceptions",
+			exerciseID: "ch06-l01",
+			files: map[string]string{
+				"src/exception_classifier.erl": exceptionClassifierSolution,
 			},
+			wantScore:    100,
+			wantStages:   4,
+			visibleCount: 4,
 		},
 		{
 			name:       "ch06-l02 Safe Operations & Return Values",
@@ -530,11 +541,207 @@ worker_loop() ->
 					t.Logf("  Stage %s (%s): status=%s, details=%s", st.ID, st.Title, st.Status, st.Details)
 				}
 			} else {
+				if tc.wantScore > 0 && report.Score != tc.wantScore {
+					t.Errorf("[%s] Score mismatch: got %d, want %d", tc.exerciseID, report.Score, tc.wantScore)
+				}
+				if tc.wantStages > 0 && len(report.Stages) != tc.wantStages {
+					t.Errorf("[%s] Stages count mismatch: got %d, want %d", tc.exerciseID, len(report.Stages), tc.wantStages)
+				}
 				t.Logf("[%s] VERIFIED 100%% PASSED (score=%d, %d stages)", tc.exerciseID, report.Score, len(report.Stages))
 				for _, st := range report.Stages {
 					t.Logf("  + Stage %s: %s", st.ID, st.Status)
 				}
 			}
+
+			if tc.visibleCount > 0 {
+				runRes, errRun := runner.RunCode(ctx, session, tc.exerciseID, tc.files, nil)
+				if errRun != nil {
+					t.Fatalf("[%s] RunCode failed: %v", tc.exerciseID, errRun)
+				}
+				if !runRes.CompileOk {
+					t.Fatalf("[%s] RunCode compilation failed:\n%s", tc.exerciseID, runRes.Stdout)
+				}
+				if len(runRes.VisibleTests) != tc.visibleCount {
+					t.Errorf("[%s] VisibleTests count mismatch: got %d, want %d\nStdout:\n%s", tc.exerciseID, len(runRes.VisibleTests), tc.visibleCount, runRes.Stdout)
+				}
+				for i, vt := range runRes.VisibleTests {
+					if !vt.Passed {
+						t.Errorf("[%s] Visible test #%d (%s) failed: expected %s, got %s", tc.exerciseID, i+1, vt.CallStr, vt.Expected, vt.Actual)
+					}
+				}
+				t.Logf("[%s] Verified %d/%d visible tests passed cleanly", tc.exerciseID, len(runRes.VisibleTests), tc.visibleCount)
+			}
 		})
 	}
+
+	// ── Negative Regression Subtests for ch06-l01 ──────────────────────────────
+	t.Run("ch06-l01 Negative Missing try_catch", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch06-l01"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/exception_classifier.erl": `-module(exception_classifier).
+-export([check_payment/1, safe_check/1, trigger_class/2]).
+
+check_payment({payment, Amount, Currency}) ->
+    if
+        not is_integer(Amount) -> erlang:error(bad_amount_type);
+        Amount < 0 -> throw(negative_amount);
+        Amount =:= 0 -> exit(zero_payment_abort);
+        Currency =/= usd andalso Currency =/= eur andalso Currency =/= etb -> throw({unsupported_currency, Currency});
+        true -> {approved, Amount, Currency}
+    end;
+check_payment(_Invalid) -> erlang:error(invalid_payment_tuple).
+
+safe_check(P) ->
+    check_payment(P).
+
+trigger_class(throw, R) -> throw(R);
+trigger_class(error, R) -> erlang:error(R);
+trigger_class(exit, R) -> exit(R).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l01", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing try_catch, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_try_catch_audit" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_try_catch_audit stage to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l01 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-export-ch06-l01"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/exception_classifier.erl": `-module(exception_classifier).
+-export([check_payment/1, safe_check/1]).
+
+check_payment({payment, Amount, Currency}) ->
+    if
+        not is_integer(Amount) -> erlang:error(bad_amount_type);
+        Amount < 0 -> throw(negative_amount);
+        Amount =:= 0 -> exit(zero_payment_abort);
+        Currency =/= usd andalso Currency =/= eur andalso Currency =/= etb -> throw({unsupported_currency, Currency});
+        true -> {approved, Amount, Currency}
+    end;
+check_payment(_Invalid) -> erlang:error(invalid_payment_tuple).
+
+safe_check(P) ->
+    try check_payment(P) of
+        {approved, A, C} -> {approved, A, C}
+    catch
+        throw:R -> {rejected, R};
+        error:R -> {bug_detected, R};
+        exit:R -> {process_aborted, R}
+    end.
+
+trigger_class(throw, R) -> throw(R);
+trigger_class(error, R) -> erlang:error(R);
+trigger_class(exit, R) -> exit(R).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l01", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing trigger_class export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l01 Negative Bare Catch Class Prefix Trap", func(t *testing.T) {
+		sessionID := "test-neg-bare-catch-ch06-l01"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/exception_classifier.erl": `-module(exception_classifier).
+-export([check_payment/1, safe_check/1, trigger_class/2]).
+
+check_payment({payment, Amount, Currency}) ->
+    if
+        not is_integer(Amount) -> erlang:error(bad_amount_type);
+        Amount < 0 -> throw(negative_amount);
+        Amount =:= 0 -> exit(zero_payment_abort);
+        Currency =/= usd andalso Currency =/= eur andalso Currency =/= etb -> throw({unsupported_currency, Currency});
+        true -> {approved, Amount, Currency}
+    end;
+check_payment(_Invalid) -> erlang:error(invalid_payment_tuple).
+
+%% BARE CATCH TRAP: Only catches throws, causing error:bad_amount_type to crash!
+safe_check(P) ->
+    try check_payment(P) of
+        {approved, A, C} -> {approved, A, C}
+    catch
+        Reason -> {rejected, Reason}
+    end.
+
+trigger_class(throw, R) -> throw(R);
+trigger_class(error, R) -> erlang:error(R);
+trigger_class(exit, R) -> exit(R).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l01", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on bare catch class trap, but got PASSED")
+		}
+		var domainFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "domain_exception_classification" && st.Status == "failed" {
+				domainFailed = true
+				break
+			}
+		}
+		if !domainFailed {
+			t.Errorf("Expected domain_exception_classification to fail, stages: %+v", report.Stages)
+		}
+	})
 }
