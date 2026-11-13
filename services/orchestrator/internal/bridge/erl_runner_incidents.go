@@ -85,25 +85,40 @@ StartWorker = fun() ->
 end,
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
-    {ok, W} = StartWorker(),
-    {ok, 49.99} = incident_hanging_call:call_pricing_worker(W, widget_a),
+    {ok, W1} = StartWorker(),
+    Res1 = incident_hanging_call:call_pricing_worker(W1, widget_a),
+    W1 ! stop,
+    Passed1 = Res1 =:= {ok, 49.99},
+    #{call_str => <<"incident_hanging_call:call_pricing_worker(W, widget_a)">>,
+      expected => <<"{ok, 49.99}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res1]))),
+      passed => Passed1,
+      time_ms => erlang:system_time(millisecond) - T1_Start}
+catch C1:R1 ->
+    #{call_str => <<"incident_hanging_call:call_pricing_worker(W, widget_a)">>, expected => <<"{ok, 49.99}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+end,
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    {ok, W2} = StartWorker(),
     T_CrashStart = erlang:system_time(millisecond),
-    CrashRes = incident_hanging_call:call_pricing_worker(W, poison_item),
+    CrashRes = incident_hanging_call:call_pricing_worker(W2, poison_item),
     Elapsed = erlang:system_time(millisecond) - T_CrashStart,
-    Passed = case CrashRes of
-        {error, {worker_down, _}} -> Elapsed < 500;
+    Passed2 = case CrashRes of
+        {error, {worker_down, badarith}} when Elapsed < 150 -> true;
+        {error, {worker_down, _}} when Elapsed < 150 -> true;
         _ -> false
     end,
     #{call_str => <<"incident_hanging_call:call_pricing_worker(W, poison_item)">>,
-      expected => <<"{error, {worker_down, badarith}} in < 500ms">>,
-      actual => list_to_binary(lists:flatten(io_lib:format("~p in ~p ms", [CrashRes, Elapsed]))),
-      passed => Passed,
-      time_ms => erlang:system_time(millisecond) - T1_Start}
-catch C1:R1 ->
-    #{call_str => <<"incident_hanging_call test">>, expected => <<"{error, {worker_down, ...}}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+      expected => <<"{error, {worker_down, badarith}}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [CrashRes]))),
+      passed => Passed2,
+      time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"incident_hanging_call:call_pricing_worker(W, poison_item)">>, expected => <<"{error, {worker_down, badarith}}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+AllResults = [T1_Res, T2_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true

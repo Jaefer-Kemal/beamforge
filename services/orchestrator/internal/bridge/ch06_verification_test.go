@@ -515,6 +515,58 @@ loop(CallbackMod, State) ->
     end.
 `
 
+	const incidentHangingCallSolution = `-module(incident_hanging_call).
+-export([
+    start_pricing_worker/0,
+    start_worker/0,
+    call_pricing_worker/2,
+    worker_loop/0
+]).
+
+%% @doc Spawns an isolated pricing worker process executing the worker message loop.
+start_pricing_worker() ->
+    Pid = spawn(fun() -> worker_loop() end),
+    {ok, Pid}.
+
+%% @doc Backward-compatible alias for start_pricing_worker/0.
+start_worker() ->
+    start_pricing_worker().
+
+%% @doc Dispatches a synchronous pricing query to the worker actor protected by an ephemeral monitor.
+call_pricing_worker(WorkerPid, Item) ->
+    MRef = erlang:monitor(process, WorkerPid),
+    WorkerPid ! {get_price, self(), MRef, Item},
+    receive
+        {price, MRef, Price} ->
+            erlang:demonitor(MRef, [flush]),
+            {ok, Price};
+        {'DOWN', MRef, process, WorkerPid, Reason} ->
+            NormReason = case Reason of
+                {R, _} -> R;
+                R      -> R
+            end,
+            {error, {worker_down, NormReason}}
+    after 5000 ->
+        erlang:demonitor(MRef, [flush]),
+        {error, timeout}
+    end.
+
+%% @doc Recursive worker message loop processing catalog item price queries.
+worker_loop() ->
+    receive
+        {get_price, From, Ref, widget_a} ->
+            From ! {price, Ref, 49.99},
+            worker_loop();
+        {get_price, From, Ref, widget_b} ->
+            From ! {price, Ref, 19.99},
+            worker_loop();
+        {get_price, _From, _Ref, poison_item} ->
+            erlang:error(badarith);
+        stop ->
+            ok
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -590,54 +642,12 @@ loop(CallbackMod, State) ->
 			visibleCount: 2,
 		},
 		{
-			name:       "ch06-l09 Production Incident #102",
-			exerciseID: "ch06-l09",
-			files: map[string]string{
-				"src/incident_hanging_call.erl": `-module(incident_hanging_call).
--export([
-    start_pricing_worker/0,
-    start_worker/0,
-    call_pricing_worker/2,
-    worker_loop/0
-]).
-
-start_pricing_worker() ->
-    Pid = spawn(fun() -> worker_loop() end),
-    {ok, Pid}.
-
-start_worker() ->
-    start_pricing_worker().
-
-call_pricing_worker(WorkerPid, Sku) ->
-    MRef = erlang:monitor(process, WorkerPid),
-    WorkerPid ! {quote_request, self(), MRef, Sku},
-    receive
-        {quote_reply, MRef, Price} ->
-            erlang:demonitor(MRef, [flush]),
-            {ok, Price};
-        {'DOWN', MRef, process, WorkerPid, Reason} ->
-            {error, {worker_down, Reason}}
-    after 5000 ->
-        erlang:demonitor(MRef, [flush]),
-        {error, timeout}
-    end.
-
-worker_loop() ->
-    receive
-        {quote_request, From, Ref, widget_a} ->
-            From ! {quote_reply, Ref, 49.99},
-            worker_loop();
-        {quote_request, From, Ref, widget_b} ->
-            From ! {quote_reply, Ref, 19.50},
-            worker_loop();
-        {quote_request, _From, _Ref, poison_item} ->
-            _Bug = 1 / 0,
-            worker_loop();
-        stop ->
-            ok
-    end.
-`,
-			},
+			name:         "ch06-l09 Production Incident #102",
+			exerciseID:   "ch06-l09",
+			files:        map[string]string{"src/incident_hanging_call.erl": incidentHangingCallSolution},
+			wantScore:    100,
+			wantStages:   3,
+			visibleCount: 2,
 		},
 		{
 			name:       "ch06-l10 Payment System Mini-Capstone",
@@ -2706,6 +2716,241 @@ loop(CallbackMod, State) ->
 		}
 		if !crashDetectFailed {
 			t.Errorf("Expected zero_latency_crash_detection to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch06-l09 ──────────────────────────────
+	t.Run("ch06-l09 Negative Unfixed Hanging Call Causes Timeout Failure", func(t *testing.T) {
+		sessionID := "test-neg-hanging-ch06-l09"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/incident_hanging_call.erl": `-module(incident_hanging_call).
+-export([
+    start_pricing_worker/0,
+    start_worker/0,
+    call_pricing_worker/2,
+    worker_loop/0
+]).
+
+start_pricing_worker() ->
+    Pid = spawn(fun() -> worker_loop() end),
+    {ok, Pid}.
+
+start_worker() ->
+    start_pricing_worker().
+
+%% BUG: Unmonitored call using make_ref() hangs for 5,000ms on worker crash!
+call_pricing_worker(WorkerPid, Item) ->
+    Ref = make_ref(),
+    WorkerPid ! {get_price, self(), Ref, Item},
+    receive
+        {price, Ref, Price} ->
+            {ok, Price}
+    after 5000 ->
+        {error, timeout}
+    end.
+
+worker_loop() ->
+    receive
+        {get_price, From, Ref, widget_a} ->
+            From ! {price, Ref, 49.99},
+            worker_loop();
+        {get_price, From, Ref, widget_b} ->
+            From ! {price, Ref, 19.99},
+            worker_loop();
+        {get_price, _From, _Ref, poison_item} ->
+            erlang:error(badarith);
+        stop ->
+            ok
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l09", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on unfixed hanging call, but got PASSED")
+		}
+		var fastFailFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "monitor_fast_fail_audit" && st.Status == "failed" {
+				fastFailFailed = true
+				break
+			}
+		}
+		if !fastFailFailed {
+			t.Errorf("Expected monitor_fast_fail_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l09 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-exp-ch06-l09"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/incident_hanging_call.erl": `-module(incident_hanging_call).
+%% Missing call_pricing_worker/2 export
+-export([
+    start_pricing_worker/0,
+    start_worker/0,
+    worker_loop/0
+]).
+
+start_pricing_worker() ->
+    Pid = spawn(fun() -> worker_loop() end),
+    {ok, Pid}.
+
+start_worker() ->
+    start_pricing_worker().
+
+call_pricing_worker(WorkerPid, Item) ->
+    MRef = erlang:monitor(process, WorkerPid),
+    WorkerPid ! {get_price, self(), MRef, Item},
+    receive
+        {price, MRef, Price} ->
+            erlang:demonitor(MRef, [flush]),
+            {ok, Price};
+        {'DOWN', MRef, process, WorkerPid, Reason} ->
+            NormReason = case Reason of
+                {R, _} -> R;
+                R      -> R
+            end,
+            {error, {worker_down, NormReason}}
+    after 5000 ->
+        erlang:demonitor(MRef, [flush]),
+        {error, timeout}
+    end.
+
+worker_loop() ->
+    receive
+        {get_price, From, Ref, widget_a} ->
+            From ! {price, Ref, 49.99},
+            worker_loop();
+        {get_price, From, Ref, widget_b} ->
+            From ! {price, Ref, 19.99},
+            worker_loop();
+        {get_price, _From, _Ref, poison_item} ->
+            erlang:error(badarith);
+        stop ->
+            ok
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l09", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export call_pricing_worker/2, but got PASSED")
+		}
+		var expFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				expFailed = true
+				break
+			}
+		}
+		if !expFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l09 Negative Broken Quote Price Value", func(t *testing.T) {
+		sessionID := "test-neg-price-ch06-l09"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/incident_hanging_call.erl": `-module(incident_hanging_call).
+-export([
+    start_pricing_worker/0,
+    start_worker/0,
+    call_pricing_worker/2,
+    worker_loop/0
+]).
+
+start_pricing_worker() ->
+    Pid = spawn(fun() -> worker_loop() end),
+    {ok, Pid}.
+
+start_worker() ->
+    start_pricing_worker().
+
+call_pricing_worker(WorkerPid, Item) ->
+    MRef = erlang:monitor(process, WorkerPid),
+    WorkerPid ! {get_price, self(), MRef, Item},
+    receive
+        {price, MRef, Price} ->
+            erlang:demonitor(MRef, [flush]),
+            {ok, Price};
+        {'DOWN', MRef, process, WorkerPid, Reason} ->
+            NormReason = case Reason of
+                {R, _} -> R;
+                R      -> R
+            end,
+            {error, {worker_down, NormReason}}
+    after 5000 ->
+        erlang:demonitor(MRef, [flush]),
+        {error, timeout}
+    end.
+
+worker_loop() ->
+    receive
+        {get_price, From, Ref, widget_a} ->
+            %% BUG: Returns wrong price 99.99 instead of 49.99!
+            From ! {price, Ref, 99.99},
+            worker_loop();
+        {get_price, From, Ref, widget_b} ->
+            From ! {price, Ref, 19.99},
+            worker_loop();
+        {get_price, _From, _Ref, poison_item} ->
+            erlang:error(badarith);
+        stop ->
+            ok
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l09", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on wrong quote price, but got PASSED")
+		}
+		var priceFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "valid_quote_call" && st.Status == "failed" {
+				priceFailed = true
+				break
+			}
+		}
+		if !priceFailed {
+			t.Errorf("Expected valid_quote_call to fail, stages: %+v", report.Stages)
 		}
 	})
 }

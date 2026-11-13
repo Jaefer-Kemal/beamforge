@@ -3727,6 +3727,38 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l08` and its 3 negative regression tests in `86.65s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed 10/10 lessons including `ch06-l08 | 2/2 tests passed` in `14.10s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+## Phase 233: Chapter 6 Lecture 9 (`ch06-l09`) Deep Pedagogical Audit, Anti-Spoiler Protocol & Incident Triage Lab Hardening
+
+- [x] **233.1: Curriculum Pedagogical Audit & Anti-Spoiler Overhaul (`ch06-l09`, `incident_hanging_call.erl`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch06.ts` (`ch06-l09`, `incident_hanging_call.erl`) against Spec 04, 07, and 08.
+  - Positioned `## Official Erlang Docs & Function Reference` (`erlang:monitor/2`, `erlang:demonitor/2`) preceding `## Parallel Worked Example`.
+  - Replaced stub PWE with a complete, runnable Fraud Check Client (`fraud_check_client.erl`) exporting `start_fraud_worker/0`, `call_fraud_worker/2`, `stop_fraud_worker/1`, and `fraud_worker_loop/0` accompanied by a 4-step architectural deep dive:
+    - *Step 1: Ephemeral Worker Spawning & Direct Reference Correlation*
+    - *Step 2: Unidirectional Monitor Attachment*
+    - *Step 3: Fast-Fail Crash Interception vs. Normal Reply*
+    - *Step 4: Silent Timeout Handling & Worker Termination*
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) for `call_pricing_worker/2`, `start_pricing_worker/0`, `start_worker/0`, and `worker_loop/0`, eliminating imperative code statements (`MRef = erlang:monitor(...)`, `erlang:demonitor(MRef, [flush])`) from prompt bullets.
+  - Replaced static division-by-zero compiler warning trigger `1 / 0` with `erlang:error(badarith)` in both starter and solution worker loops so code compiles with 0 warnings under `erlc.exe -Wall -Werror`.
+  - Aligned 10/10 plain-English `@doc` contracts across starter, solution, and files. Starter preserves the intentional incident bug (unmonitored `make_ref()` call) that compiles cleanly and safely replicates the incident timeout in the triage lab.
+
+- [x] **233.2: Go Orchestrator Test Suite Hardening (`erl_runner_chapters.go`, `erl_runner_incidents.go`, `ch06_verification_test.go`)**:
+  - In `erl_runner_chapters.go` (`case "ch06-l09":`), aligned both visible tests (`T1_Res` for `widget_a` -> `{ok, 49.99}` and `T2_Res` for `poison_item` -> `{error, {worker_down, badarith}}` in <150ms).
+  - In `erl_runner_incidents.go` (`case "ch06-l09", "incident_hanging_call":`), aligned both visible tests (`AllResults = [T1_Res, T2_Res]`).
+  - In `ch06_verification_test.go`:
+    - Defined `const incidentHangingCallSolution = ...`.
+    - Added test case entry for `ch06-l09 Production Incident #102` (`wantScore: 100, wantStages: 3, visibleCount: 2`).
+    - Added 3 negative regression subtests for `ch06-l09`:
+      1. `ch06-l09 Negative Unfixed Hanging Call Causes Timeout Failure`: verifies that the unfixed starter code times out and fails the fast-fail stage.
+      2. `ch06-l09 Negative Missing Export`: verifies compile and export audit rejection when `call_pricing_worker/2` is not exported.
+      3. `ch06-l09 Negative Broken Quote Price Value`: verifies failure when quote calculation produces corrupted pricing.
+
+- [x] **233.3: Mandatory Live Tri-Verification & Full Test Suite Certification (`ch06-l09`)**:
+  - **Parallel Worked Example (`fraud_check_client.erl`)**: Extracted directly from `ch06.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with all fraud check calls, normal responses, worker crash fast-fails, and worker stops passing cleanly in 0 ms.
+  - **Starter Pack (`incident_hanging_call.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0), loads cleanly on OTP, and safely triggers the intended incident behavior (timing out on worker crash).
+  - **Solution Pack (`incident_hanging_call.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/incident_hanging_call.erl'] === solutionCode`), compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `required_remote_calls => [{erlang, monitor, 2}, {erlang, demonitor, 2}]`, and passed 100% of visible test cases (2/2 passed).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all 38 subtests including `ch06-l09` and its 3 negative regression tests in `110.18s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed 10/10 lessons including `ch06-l09 | 2/2 tests passed` in `18.24s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
 
 
 

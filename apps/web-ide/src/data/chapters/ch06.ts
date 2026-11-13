@@ -3517,29 +3517,33 @@ The post-mortem revealed that an inventory price sync bug caused \`pricing_worke
 ## Deep Concept Breakdown & Under the Hood
 
 ### Root Cause: Blind Receive Without Process Monitoring
-\`\`\`erlang
-%% BUGGY IMPLEMENTATION:
-call_pricing_worker(WorkerPid, Item) ->
-    Ref = make_ref(),
-    WorkerPid ! {get_price, self(), Ref, Item},
-    receive
-        {price, Ref, Price} -> {ok, Price}
-    after 5000 ->
-        {error, timeout}
-    end.
-\`\`\`
-1. Client sends request to \`WorkerPid\`.
-2. \`WorkerPid\` crashes 0.1ms later due to invalid data.
+
+In a naive request-response actor call:
+1. Client generates an unmonitored correlation reference and dispatches the request to the worker.
+2. The worker crashes 0.1ms later due to invalid data.
 3. No reply tuple is ever sent.
-4. Client has no link and no monitor attached to \`WorkerPid\`. The client is completely blind to the crash!
-5. Client remains suspended until the 5,000ms timeout expires.
+4. Client has neither a link nor a monitor attached to the worker process. The caller is completely blind to the failure!
+5. Client remains suspended until the 5,000ms deadline expires.
 
 ### The Remedy: Ephemeral Monitor Integration
+
 To eliminate blind timeouts in synchronous actor communication:
-1. **Unidirectional Observation**: The caller establishes a temporary monitor on \`WorkerPid\` immediately before sending the request.
+1. **Unidirectional Observation**: The caller establishes a temporary monitor on the worker immediately before sending the request.
 2. **Correlated Dispatches**: Passing the monitor reference as the message correlation tag ensures the worker replies with that exact reference.
-3. **Immediate Crash Signal**: If \`WorkerPid\` crashes mid-request, the BEAM delivers a \`'DOWN'\` notification to the caller's mailbox within microseconds, allowing the client to unblock instantly with an error.
+3. **Immediate Crash Signal**: If the worker crashes mid-request, the BEAM delivers a \`'DOWN'\` notification to the caller's mailbox within microseconds, allowing the client to unblock instantly with an error.
 4. **Mailbox Hygiene**: When the worker replies successfully, the caller invokes \`erlang:demonitor(MRef, [flush])\` to purge any potential race-condition exit messages from its mailbox.
+
+## Official Erlang Docs & Function Reference
+
+The following BIFs provide the core primitives for building robust request-response mechanisms and process monitoring:
+
+| Function | Signature | Return Value | Complexity |
+| :--- | :--- | :--- | :--- |
+| \`erlang:monitor/2\` | \`erlang:monitor(process, WorkerPid) -> reference()\` | Unique reference identifying the monitor | $O(1)$ |
+| \`erlang:demonitor/2\` | \`erlang:demonitor(MRef, [flush]) -> boolean()\` | \`true\` if monitor existed, \`false\` if not | $O(1)$ table + scan |
+
+- **\`erlang:monitor(process, WorkerPid)\`**: Establishes a temporary unidirectional monitor. If \`WorkerPid\` crashes or does not exist, a \`'DOWN'\` message is delivered immediately to the caller's mailbox.
+- **\`erlang:demonitor(MRef, [flush])\`**: Cancels the monitor and purges any pending \`'DOWN'\` message for \`MRef\` that may have arrived before cancellation.
 
 ## Parallel Worked Example
 
@@ -3547,10 +3551,20 @@ The following module coordinates requests against a fraud assessment worker, pai
 
 \`\`\`erlang
 -module(fraud_check_client).
--export([evaluate_transaction/2]).
+-export([
+    start_fraud_worker/0,
+    call_fraud_worker/2,
+    stop_fraud_worker/1,
+    fraud_worker_loop/0
+]).
+
+%% @doc Spawns an isolated fraud evaluation worker process.
+start_fraud_worker() ->
+    Pid = spawn(fun() -> fraud_worker_loop() end),
+    {ok, Pid}.
 
 %% @doc Submits transaction telemetry to a fraud worker with monitor crash protection.
-evaluate_transaction(WorkerPid, TxData) ->
+call_fraud_worker(WorkerPid, TxData) ->
     MRef = erlang:monitor(process, WorkerPid),
     WorkerPid ! {assess_fraud, self(), MRef, TxData},
     receive
@@ -3558,41 +3572,78 @@ evaluate_transaction(WorkerPid, TxData) ->
             erlang:demonitor(MRef, [flush]),
             {ok, Score};
         {'DOWN', MRef, process, WorkerPid, Reason} ->
-            {error, {fraud_detector_crashed, Reason}}
+            NormReason = case Reason of
+                {R, _} -> R;
+                R      -> R
+            end,
+            {error, {fraud_detector_crashed, NormReason}}
     after 5000 ->
         erlang:demonitor(MRef, [flush]),
         {error, timeout}
     end.
+
+%% @doc Synchronously requests termination of the fraud assessment worker.
+stop_fraud_worker(WorkerPid) ->
+    WorkerPid ! stop,
+    ok.
+
+%% @doc Evaluator process loop analyzing transaction risk levels.
+fraud_worker_loop() ->
+    receive
+        {assess_fraud, From, MRef, standard_tx} ->
+            From ! {assessment_score, MRef, 0.05},
+            fraud_worker_loop();
+        {assess_fraud, From, MRef, flagged_tx} ->
+            From ! {assessment_score, MRef, 0.92},
+            fraud_worker_loop();
+        {assess_fraud, _From, _MRef, poisoned_payload} ->
+            erlang:error(corrupted_checksum);
+        stop ->
+            ok
+    end.
 \`\`\`
+
+### Architectural Deep Dive
+
+1. **Step 1: Unprotected Mailbox Vulnerability & Outage Cascades**: When client calls lack process monitors, any unexpected crash in the worker leaves the caller hanging until the full timeout duration elapses, starving HTTP worker pools.
+2. **Step 2: Atomic Monitor Binding & Dynamic Request Tagging**: In \`call_fraud_worker/2\`, attaching \`erlang:monitor(process, WorkerPid)\` prior to message transmission guarantees that the caller is registered for crash signals before any payload reaches the worker.
+3. **Step 3: Microsecond Failure Signal Harvest & Reason Normalization**: If the worker crashes due to an exception like \`corrupted_checksum\`, the BEAM runtime immediately delivers a \`'DOWN'\` message with sub-millisecond latency. Unwrapping the exit reason tuple ensures caller error contracts remain consistent across OTP versions.
+4. **Step 4: Demonitor Mailbox Flushing & Leak Prevention**: Upon receiving a valid reply, \`erlang:demonitor(MRef, [flush])\` guarantees that no orphaned down notification lingers in the caller mailbox if the worker crashed immediately after replying.
 
 ## Assignment Specification
 
 Triage and remediate the production outage in \`src/incident_hanging_call.erl\`:
 
 ### 1. \`call_pricing_worker/2\`
-- **Input**: \`WorkerPid\` (pid of pricing worker), \`Item\` (atom or tuple identifier of product item).
-- **Diagnostic**: Dispatches requests with a raw \`make_ref()\` and waits in an unprotected \`receive ... after 5000\` block. When \`WorkerPid\` encounters \`poison_item\` and terminates with \`badarith\`, no reply is dispatched, forcing the caller to hang for 5 full seconds.
-- **Triage Objective**:
-  - Dynamically monitor \`WorkerPid\` via \`MRef = erlang:monitor(process, WorkerPid)\` before dispatching \`{get_price, self(), MRef, Item}\`.
-  - On normal reply: match \`{price, MRef, Price}\`, flush the monitor via \`erlang:demonitor(MRef, [flush])\`, and return \`{ok, Price}\`.
-  - On worker crash: intercept \`{'DOWN', MRef, process, WorkerPid, Reason}\` with zero latency, normalize the exit reason (unwrapping single-element reason tuples if necessary), and return \`{error, {worker_down, Reason}}\` in < 100ms.
-  - On timeout: demonitor with \`[flush]\` and return \`{error, timeout}\`.
+- **Input**: \`WorkerPid\` (pid of the pricing worker process), \`Item\` (atom product identifier).
+- **Behavior**: Executes a synchronous pricing request against the worker process protected by a temporary unidirectional monitor. Attaches a monitor to the worker before message transmission and tags the query envelope with the unique monitor reference in the format \`{get_price, self(), MRef, Item}\`. If the worker replies with \`{price, MRef, Price}\`, demonitors the worker with mailbox flushing and returns an ok tuple containing the float price. If the worker crashes during request processing, intercepts the runtime down signal \`{'DOWN', MRef, process, WorkerPid, Reason}\` immediately, normalizes the exit reason, and returns an error tuple \`{error, {worker_down, Reason}}\` in under 100 milliseconds. If the 5,000 millisecond deadline passes without a reply or down signal, demonitors with flushing and returns an error timeout tuple.
 - **Examples**:
   - \`incident_hanging_call:call_pricing_worker(W, widget_a)\` returns \`{ok, 49.99}\`.
-  - \`incident_hanging_call:call_pricing_worker(W, poison_item)\` returns \`{error, {worker_down, badarith}}\` in < 100ms.
+  - \`incident_hanging_call:call_pricing_worker(W, poison_item)\` returns \`{error, {worker_down, badarith}}\` in under 100ms.
 
-### 2. \`start_pricing_worker/0\` & \`start_worker/0\`
-- **Behavior**: Spawns an ephemeral pricing worker running \`worker_loop/0\` and returns \`{ok, WorkerPid}\`. \`start_worker/0\` provides a backward-compatible alias.
+### 2. \`start_pricing_worker/0\`
+- **Input**: None (0 arguments).
+- **Behavior**: Spawns an isolated pricing worker process executing \`worker_loop/0\` and returns an ok tuple containing the worker process identifier.
 - **Examples**:
   - \`incident_hanging_call:start_pricing_worker()\` returns \`{ok, WorkerPid}\`.
 
-### 3. \`worker_loop/0\`
-- **Behavior**: Tail-recursive loop handling item pricing queries (\`widget_a\` -> \`49.99\`, \`widget_b\` -> \`19.99\`, \`poison_item\` -> deliberate crash \`1 / 0\`, \`stop\` -> clean exit).
+### 3. \`start_worker/0\`
+- **Input**: None (0 arguments).
+- **Behavior**: Backward-compatible convenience function that delegates directly to \`start_pricing_worker/0\`.
+- **Examples**:
+  - \`incident_hanging_call:start_worker()\` returns \`{ok, WorkerPid}\`.
+
+### 4. \`worker_loop/0\`
+- **Input**: None (0 arguments).
+- **Behavior**: Recursive server loop handling pricing requests. Replies with \`49.99\` for \`widget_a\`, replies with \`19.99\` for \`widget_b\`, triggers a deliberate \`badarith\` exception when \`poison_item\` is requested, and terminates cleanly when \`stop\` is received.
+- **Examples**:
+  - \`incident_hanging_call:worker_loop()\` processes incoming queries until stopped.
 
 ## Rules & Verification Constraints
 
 - Crashed requests must return \`{error, {worker_down, ...}}\` in under 100ms.
 - Valid requests must return \`{ok, Price}\`.
+- AST rules enforced: \`requiredCalls: ["erlang:monitor/2", "erlang:demonitor/2"]\`, \`requiredConstructs: ["receive_after"]\`.
 `,
     mentalModelCheck: {
       question: 'What is the root cause of client calls freezing for 5,000ms when a worker crashes mid-request?',
@@ -3631,6 +3682,15 @@ Triage and remediate the production outage in \`src/incident_hanging_call.erl\`:
         complexityNote: 'O(1) operation.',
         officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#monitor/2',
       },
+      {
+        functionName: 'demonitor',
+        module: 'erlang',
+        signature: 'erlang:demonitor(MRef, [flush]) -> boolean()',
+        typesSpec: ['MRef = reference()'],
+        description: 'Demonitors the reference and flushes any pending DOWN messages from the mailbox.',
+        complexityNote: 'O(1) table lookup + mailbox traversal bounded by flush scan.',
+        officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#demonitor/2',
+      },
     ],
     visibleTestCases: [
       {
@@ -3661,16 +3721,17 @@ Triage and remediate the production outage in \`src/incident_hanging_call.erl\`:
     worker_loop/0
 ]).
 
+%% @doc Spawns an isolated pricing worker process executing the worker message loop.
 start_pricing_worker() ->
     Pid = spawn(fun() -> worker_loop() end),
     {ok, Pid}.
 
-%% Backward-compatible alias
+%% @doc Backward-compatible alias for start_pricing_worker/0.
 start_worker() ->
     start_pricing_worker().
 
 %% @doc Dispatches a synchronous pricing query to the worker actor.
-%% Remediates Incident INC-102: eliminates blind timeouts by monitoring the worker.
+%% INCIDENT BUG (INC-102): Uses unmonitored raw reference dispatch causing callers to freeze for 5,000ms on worker crash.
 call_pricing_worker(WorkerPid, Item) ->
     Ref = make_ref(),
     WorkerPid ! {get_price, self(), Ref, Item},
@@ -3681,6 +3742,7 @@ call_pricing_worker(WorkerPid, Item) ->
         {error, timeout}
     end.
 
+%% @doc Recursive worker message loop processing catalog item price queries.
 worker_loop() ->
     receive
         {get_price, From, Ref, widget_a} ->
@@ -3691,7 +3753,7 @@ worker_loop() ->
             worker_loop();
         {get_price, _From, _Ref, poison_item} ->
             %% Deliberate production crash simulation!
-            1 / 0;
+            erlang:error(badarith);
         stop ->
             ok
     end.
@@ -3704,13 +3766,16 @@ worker_loop() ->
     worker_loop/0
 ]).
 
+%% @doc Spawns an isolated pricing worker process executing the worker message loop.
 start_pricing_worker() ->
     Pid = spawn(fun() -> worker_loop() end),
     {ok, Pid}.
 
+%% @doc Backward-compatible alias for start_pricing_worker/0.
 start_worker() ->
     start_pricing_worker().
 
+%% @doc Dispatches a synchronous pricing query to the worker actor protected by an ephemeral monitor.
 call_pricing_worker(WorkerPid, Item) ->
     MRef = erlang:monitor(process, WorkerPid),
     WorkerPid ! {get_price, self(), MRef, Item},
@@ -3729,6 +3794,7 @@ call_pricing_worker(WorkerPid, Item) ->
         {error, timeout}
     end.
 
+%% @doc Recursive worker message loop processing catalog item price queries.
 worker_loop() ->
     receive
         {get_price, From, Ref, widget_a} ->
@@ -3738,7 +3804,7 @@ worker_loop() ->
             From ! {price, Ref, 19.99},
             worker_loop();
         {get_price, _From, _Ref, poison_item} ->
-            1 / 0;
+            erlang:error(badarith);
         stop ->
             ok
     end.
@@ -3755,16 +3821,17 @@ worker_loop() ->
     worker_loop/0
 ]).
 
+%% @doc Spawns an isolated pricing worker process executing the worker message loop.
 start_pricing_worker() ->
     Pid = spawn(fun() -> worker_loop() end),
     {ok, Pid}.
 
-%% Backward-compatible alias
+%% @doc Backward-compatible alias for start_pricing_worker/0.
 start_worker() ->
     start_pricing_worker().
 
 %% @doc Dispatches a synchronous pricing query to the worker actor.
-%% Remediates Incident INC-102: eliminates blind timeouts by monitoring the worker.
+%% INCIDENT BUG (INC-102): Uses unmonitored raw reference dispatch causing callers to freeze for 5,000ms on worker crash.
 call_pricing_worker(WorkerPid, Item) ->
     Ref = make_ref(),
     WorkerPid ! {get_price, self(), Ref, Item},
@@ -3775,6 +3842,7 @@ call_pricing_worker(WorkerPid, Item) ->
         {error, timeout}
     end.
 
+%% @doc Recursive worker message loop processing catalog item price queries.
 worker_loop() ->
     receive
         {get_price, From, Ref, widget_a} ->
@@ -3785,7 +3853,7 @@ worker_loop() ->
             worker_loop();
         {get_price, _From, _Ref, poison_item} ->
             %% Deliberate production crash simulation!
-            1 / 0;
+            erlang:error(badarith);
         stop ->
             ok
     end.
@@ -3801,13 +3869,16 @@ worker_loop() ->
     worker_loop/0
 ]).
 
+%% @doc Spawns an isolated pricing worker process executing the worker message loop.
 start_pricing_worker() ->
     Pid = spawn(fun() -> worker_loop() end),
     {ok, Pid}.
 
+%% @doc Backward-compatible alias for start_pricing_worker/0.
 start_worker() ->
     start_pricing_worker().
 
+%% @doc Dispatches a synchronous pricing query to the worker actor protected by an ephemeral monitor.
 call_pricing_worker(WorkerPid, Item) ->
     MRef = erlang:monitor(process, WorkerPid),
     WorkerPid ! {get_price, self(), MRef, Item},
@@ -3826,6 +3897,7 @@ call_pricing_worker(WorkerPid, Item) ->
         {error, timeout}
     end.
 
+%% @doc Recursive worker message loop processing catalog item price queries.
 worker_loop() ->
     receive
         {get_price, From, Ref, widget_a} ->
@@ -3835,7 +3907,7 @@ worker_loop() ->
             From ! {price, Ref, 19.99},
             worker_loop();
         {get_price, _From, _Ref, poison_item} ->
-            1 / 0;
+            erlang:error(badarith);
         stop ->
             ok
     end.
