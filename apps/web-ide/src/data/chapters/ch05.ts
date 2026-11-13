@@ -1166,22 +1166,42 @@ A critical software engineering discipline in Erlang is separating **Client API 
 > [!warning] Production Concurrency Trap: Forgetting Tail Position Breaks O(1) Memory
 > If you write \`io:format("Done~n"), loop(NextState)\` inside a clause, \`loop/1\` is STILL in tail position because \`io:format\` executes first. But if you write \`loop(NextState) + 1\`, the recursive call is NO LONGER in tail position! The BEAM must allocate a new stack frame for every single message, causing a memory exhaustion crash after a few thousand messages.
 
+## Official Erlang Docs & Function Reference
+
+\`\`\`erlang
+%% Official OTP Concept (stdlib / gen_server precursor)
+%% State loop tail-call invariant:
+loop(State) ->
+    receive
+        Msg ->
+            NewState = handle_msg(Msg, State),
+            loop(NewState)
+    end.
+
+spawn(Fun) -> pid()
+self() -> pid()
+\`\`\`
+
+A process maintains state across time by passing the updated state value as the argument to its recursive loop function. Because the recursive call is the final expression in the clause (tail position), the BEAM applies **Tail-Call Optimization (TCO)**, reusing the active stack frame with $O(1)$ memory.
+
 ## Parallel Worked Example
 
-The following module implements a streaming telemetry actor tracking transferred bytes:
+The following module implements a streaming network telemetry actor tracking transferred bytes:
 
 \`\`\`erlang
 -module(network_stream).
 -export([start_stream/1, append_chunk/2, query_transferred/1, terminate_stream/1, stream_loop/1]).
 
-%% ── Client API (Executes in Caller Process) ───────────────────────────────────
+%% Phase 1: Client API Spawning Stateful Stream Actor (Executes in Caller Process)
 start_stream(InitialBytes) ->
     spawn(fun() -> stream_loop(InitialBytes) end).
 
+%% Phase 2: Asynchronous Cast Pipeline Passing Stream Chunks
 append_chunk(StreamPid, ByteCount) when ByteCount > 0 ->
     StreamPid ! {chunk_in, ByteCount},
     ok.
 
+%% Phase 3: Synchronous Call with Caller self() Return Address and Timeout Guard
 query_transferred(StreamPid) ->
     StreamPid ! {query_bytes, self()},
     receive
@@ -1195,7 +1215,7 @@ terminate_stream(StreamPid) ->
     StreamPid ! stream_close,
     ok.
 
-%% ── Server Loop (Executes in Actor Process) ───────────────────────────────────
+%% Phase 4: Actor Tail-Recursive State Loop (Executes in Spawned Actor Process)
 stream_loop(TotalBytes) ->
     receive
         {chunk_in, ChunkSize} ->
@@ -1208,55 +1228,48 @@ stream_loop(TotalBytes) ->
     end.
 \`\`\`
 
-## Official Erlang Docs & Function Reference
-
-\`\`\`erlang
-%% Official OTP Concept (stdlib / gen_server precursor)
-%% State loop tail-call invariant:
-loop(State) ->
-    receive
-        Msg ->
-            NewState = handle_msg(Msg, State),
-            loop(NewState)
-    end.
-\`\`\`
+### Architectural Notes:
+1. **The Client-Server Abstraction Barrier**: \`start_stream/1\`, \`append_chunk/2\`, \`query_transferred/1\`, and \`terminate_stream/1\` execute in the caller process. The caller never constructs raw internal protocol tuples directly.
+2. **Tail-Call Optimization (TCO)**: In \`stream_loop/1\`, every recursive call is strictly in tail position. The BEAM reuses the same stack frame via the \`call_last\` instruction, ensuring the actor runs indefinitely with constant memory.
+3. **Clean Process Termination**: Receiving \`stream_close\` evaluates to \`ok\` and exits the loop without recursing, allowing the process to terminate cleanly and its heap memory to be reclaimed.
 
 ## Assignment Specification
 
 Implement \`src/counter_actor.erl\` exporting \`start/1\`, \`increment/2\`, \`decrement/2\`, \`get_value/1\`, \`stop/1\`, and \`loop/1\`:
 
 ### 1. \`start/1\`
-- **Input**: \`InitialValue\` (integer).
-- **Behavior**: Spawns a concurrent stateful actor running \`loop(InitialValue)\` and returns its process identifier.
+- **Input**: \`InitialValue :: integer()\`.
+- **Behavior**: Spawns a concurrent stateful actor running \`loop(InitialValue)\` and returns its process identifier (\`pid()\`).
 - **Examples**:
   - \`is_pid(counter_actor:start(100))\` returns \`true\`.
 
 ### 2. \`increment/2\`
-- **Input**: \`Pid\` (process identifier), \`Delta\` (integer).
+- **Input**: \`Pid :: pid()\`, \`Delta :: integer()\`.
 - **Behavior**: Asynchronously dispatches an increment message tagged with the atom \`increment\` and \`Delta\` to \`Pid\` without blocking the caller. Evaluates immediately to \`ok\`.
 - **Examples**:
   - \`counter_actor:increment(P, 50)\` returns \`ok\`.
 
 ### 3. \`decrement/2\`
-- **Input**: \`Pid\` (process identifier), \`Delta\` (integer).
+- **Input**: \`Pid :: pid()\`, \`Delta :: integer()\`.
 - **Behavior**: Asynchronously dispatches a decrement message tagged with the atom \`decrement\` and \`Delta\` to \`Pid\` without blocking the caller. Evaluates immediately to \`ok\`.
 - **Examples**:
   - \`counter_actor:decrement(P, 20)\` returns \`ok\`.
 
 ### 4. \`get_value/1\`
-- **Input**: \`Pid\` (process identifier).
-- **Behavior**: Synchronously queries \`Pid\` by sending a request tuple containing the atom \`get\` and the caller's PID (\`self()\`). Awaits a matching reply tuple tagged with the atom \`value\` and the current state integer for up to 1,000 milliseconds. Returns \`{ok, CurrentVal}\` upon receipt, or \`{error, timeout}\` if no response arrives within 1,000 milliseconds.
+- **Input**: \`Pid :: pid()\`.
+- **Behavior**: Synchronously queries \`Pid\` by sending a request tuple containing the atom \`get\` and the caller PID (\`self()\`). Awaits a matching reply tuple tagged with the atom \`value\` and the current state integer for up to 1,000 milliseconds. Returns \`{ok, CurrentVal}\` upon receipt, or \`{error, timeout}\` if no response arrives within 1,000 milliseconds.
 - **Examples**:
   - \`counter_actor:get_value(P)\` returns \`{ok, 130}\`.
+  - \`counter_actor:get_value(UnresponsivePid)\` returns \`{error, timeout}\`.
 
 ### 5. \`stop/1\`
-- **Input**: \`Pid\` (process identifier).
+- **Input**: \`Pid :: pid()\`.
 - **Behavior**: Asynchronously dispatches the atom \`stop\` to \`Pid\` and evaluates to \`ok\`.
 - **Examples**:
   - \`counter_actor:stop(P)\` returns \`ok\`.
 
 ### 6. \`loop/1\`
-- **Input**: \`CurrentVal\` (integer).
+- **Input**: \`CurrentVal :: integer()\`.
 - **Behavior**: Executes an infinite tail-recursive message loop handling four distinct message shapes:
   - On receipt of \`{increment, Delta}\`: adds \`Delta\` to \`CurrentVal\` and tail-recursively resumes \`loop/1\` with the sum.
   - On receipt of \`{decrement, Delta}\`: subtracts \`Delta\` from \`CurrentVal\` and tail-recursively resumes \`loop/1\` with the difference.
@@ -1267,7 +1280,10 @@ Implement \`src/counter_actor.erl\` exporting \`start/1\`, \`increment/2\`, \`de
 
 ## Rules & Verification Constraints
 
-- The \`loop/1\` function must be strictly tail-recursive (enforced by AST rule \`requireTailRecursion: ["loop/1"]\`).
+- The \`loop/1\` function must be strictly tail-recursive (enforced by AST rule \`requireTailRecursion: ['loop/1']\`).
+- Must invoke \`erlang:self/0\` in \`get_value/1\` to include the caller PID in request tuples.
+- Callers must not know internal tuple message formats; all operations must pass through exported client functions.
+- Must cleanly export \`start/1\`, \`increment/2\`, \`decrement/2\`, \`get_value/1\`, \`stop/1\`, and \`loop/1\`.
 - Callers must not know internal tuple message formats; all operations must pass through exported client functions.`,
     mentalModelCheck: {
       question: 'When caller process `<0.100.0>` invokes `counter_actor:get_value(ServerPid)`, in which process does the code of `get_value/1` execute?',
@@ -1304,6 +1320,24 @@ Implement \`src/counter_actor.erl\` exporting \`start/1\`, \`increment/2\`, \`de
         complexityNote: 'O(1) allocation (~2.5 KB base heap).',
         officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#spawn/1',
       },
+      {
+        functionName: 'self',
+        module: 'erlang',
+        signature: 'self() -> pid()',
+        typesSpec: ['pid() = process identifier'],
+        description: 'Returns the process identifier (PID) of the currently executing process.',
+        complexityNote: 'O(1) register lookup.',
+        officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#self/0',
+      },
+      {
+        functionName: 'receive...after',
+        module: 'erts',
+        signature: 'receive Pattern [when Guard] -> Body after TimeoutExpr -> TimeoutBody end',
+        typesSpec: ['TimeoutExpr = non_neg_integer() | infinity'],
+        description: 'Awaits incoming message tuples matching Pattern, executing TimeoutBody if TimeoutExpr milliseconds elapse.',
+        complexityNote: 'O(N) mailbox scan traversal, O(1) dequeue upon match.',
+        officialUrl: 'https://www.erlang.org/doc/reference_manual/expressions.html#receive',
+      },
     ],
     visibleTestCases: [
       {
@@ -1320,9 +1354,17 @@ Implement \`src/counter_actor.erl\` exporting \`start/1\`, \`increment/2\`, \`de
         expectedOutput: '{ok, 30}',
         explanation: 'Applies increment of 50 followed by decrement of 20, verifying final value 30.',
       },
+      {
+        id: 'tc-ch05-04-3',
+        title: 'Client Query Timeout on Unresponsive Worker',
+        erlangCall: 'begin Dummy = spawn(fun() -> receive after 500 -> ok end end), counter_actor:get_value(Dummy) end',
+        expectedOutput: '{error, timeout}',
+        explanation: 'Verifies that get_value/1 waits up to 1,000 milliseconds and safely returns {error, timeout} if the worker drops the query.',
+      },
     ],
     astRules: {
       requireTailRecursion: ['loop/1'],
+      requiredCalls: ['erlang:self/0'],
     },
     solutionExplanation: 'Implements tail-recursive loop/1 with O(1) stack memory and provides clean Client API functions that encapsulate message formats and request-reply synchronization.',
     files: [
@@ -1332,27 +1374,27 @@ Implement \`src/counter_actor.erl\` exporting \`start/1\`, \`increment/2\`, \`de
         content: `-module(counter_actor).
 -export([start/1, increment/2, decrement/2, get_value/1, stop/1, loop/1]).
 
-%% @doc Spawns a concurrent stateful counter actor initialized with InitialValue.
+%% @doc Spawn a concurrent stateful counter actor initialized with InitialValue and return its process identifier.
 start(_InitialValue) ->
     ok.
 
-%% @doc Asynchronously dispatches an increment delta to the counter actor.
+%% @doc Asynchronously dispatch an increment delta to the counter actor process.
 increment(_Pid, _Delta) ->
     ok.
 
-%% @doc Asynchronously dispatches a decrement delta to the counter actor.
+%% @doc Asynchronously dispatch a decrement delta to the counter actor process.
 decrement(_Pid, _Delta) ->
     ok.
 
-%% @doc Synchronously queries the current counter value with timeout fallback.
+%% @doc Synchronously query the counter actor value with caller PID return address, awaiting reply up to one second.
 get_value(_Pid) ->
     ok.
 
-%% @doc Asynchronously stops the counter actor process.
+%% @doc Asynchronously dispatch a stop command to terminate the counter actor process.
 stop(_Pid) ->
     ok.
 
-%% @doc Tail-recursive state loop maintaining current integer value.
+%% @doc Tail-recursive state loop handling increment, decrement, query, and termination messages in constant stack space.
 loop(_CurrentVal) ->
     ok.
 `,
@@ -1362,17 +1404,21 @@ loop(_CurrentVal) ->
       'src/counter_actor.erl': `-module(counter_actor).
 -export([start/1, increment/2, decrement/2, get_value/1, stop/1, loop/1]).
 
+%% @doc Spawn a concurrent stateful counter actor initialized with InitialValue and return its process identifier.
 start(InitialValue) ->
     spawn(fun() -> loop(InitialValue) end).
 
+%% @doc Asynchronously dispatch an increment delta to the counter actor process.
 increment(Pid, Delta) ->
     Pid ! {increment, Delta},
     ok.
 
+%% @doc Asynchronously dispatch a decrement delta to the counter actor process.
 decrement(Pid, Delta) ->
     Pid ! {decrement, Delta},
     ok.
 
+%% @doc Synchronously query the counter actor value with caller PID return address, awaiting reply up to one second.
 get_value(Pid) ->
     Pid ! {get, self()},
     receive
@@ -1382,10 +1428,12 @@ get_value(Pid) ->
         {error, timeout}
     end.
 
+%% @doc Asynchronously dispatch a stop command to terminate the counter actor process.
 stop(Pid) ->
     Pid ! stop,
     ok.
 
+%% @doc Tail-recursive state loop handling increment, decrement, query, and termination messages in constant stack space.
 loop(CurrentVal) ->
     receive
         {increment, Delta} ->
@@ -1403,44 +1451,48 @@ loop(CurrentVal) ->
     starterCode: `-module(counter_actor).
 -export([start/1, increment/2, decrement/2, get_value/1, stop/1, loop/1]).
 
-%% @doc Spawns a concurrent stateful counter actor initialized with InitialValue.
+%% @doc Spawn a concurrent stateful counter actor initialized with InitialValue and return its process identifier.
 start(_InitialValue) ->
     ok.
 
-%% @doc Asynchronously dispatches an increment delta to the counter actor.
+%% @doc Asynchronously dispatch an increment delta to the counter actor process.
 increment(_Pid, _Delta) ->
     ok.
 
-%% @doc Asynchronously dispatches a decrement delta to the counter actor.
+%% @doc Asynchronously dispatch a decrement delta to the counter actor process.
 decrement(_Pid, _Delta) ->
     ok.
 
-%% @doc Synchronously queries the current counter value with timeout fallback.
+%% @doc Synchronously query the counter actor value with caller PID return address, awaiting reply up to one second.
 get_value(_Pid) ->
     ok.
 
-%% @doc Asynchronously stops the counter actor process.
+%% @doc Asynchronously dispatch a stop command to terminate the counter actor process.
 stop(_Pid) ->
     ok.
 
-%% @doc Tail-recursive state loop maintaining current integer value.
+%% @doc Tail-recursive state loop handling increment, decrement, query, and termination messages in constant stack space.
 loop(_CurrentVal) ->
     ok.
 `,
     solutionCode: `-module(counter_actor).
 -export([start/1, increment/2, decrement/2, get_value/1, stop/1, loop/1]).
 
+%% @doc Spawn a concurrent stateful counter actor initialized with InitialValue and return its process identifier.
 start(InitialValue) ->
     spawn(fun() -> loop(InitialValue) end).
 
+%% @doc Asynchronously dispatch an increment delta to the counter actor process.
 increment(Pid, Delta) ->
     Pid ! {increment, Delta},
     ok.
 
+%% @doc Asynchronously dispatch a decrement delta to the counter actor process.
 decrement(Pid, Delta) ->
     Pid ! {decrement, Delta},
     ok.
 
+%% @doc Synchronously query the counter actor value with caller PID return address, awaiting reply up to one second.
 get_value(Pid) ->
     Pid ! {get, self()},
     receive
@@ -1450,10 +1502,12 @@ get_value(Pid) ->
         {error, timeout}
     end.
 
+%% @doc Asynchronously dispatch a stop command to terminate the counter actor process.
 stop(Pid) ->
     Pid ! stop,
     ok.
 
+%% @doc Tail-recursive state loop handling increment, decrement, query, and termination messages in constant stack space.
 loop(CurrentVal) ->
     receive
         {increment, Delta} ->

@@ -128,6 +128,53 @@ flush_loop(Acc) ->
     end.
 `
 
+	counterActorSolution := `-module(counter_actor).
+-export([start/1, increment/2, decrement/2, get_value/1, stop/1, loop/1]).
+
+%% @doc Spawn a concurrent stateful counter actor initialized with InitialValue and return its process identifier.
+start(InitialValue) ->
+    spawn(fun() -> loop(InitialValue) end).
+
+%% @doc Asynchronously dispatch an increment delta to the counter actor process.
+increment(Pid, Delta) ->
+    Pid ! {increment, Delta},
+    ok.
+
+%% @doc Asynchronously dispatch a decrement delta to the counter actor process.
+decrement(Pid, Delta) ->
+    Pid ! {decrement, Delta},
+    ok.
+
+%% @doc Synchronously query the counter actor value with caller PID return address, awaiting reply up to one second.
+get_value(Pid) ->
+    Pid ! {get, self()},
+    receive
+        {value, Val} ->
+            {ok, Val}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Asynchronously dispatch a stop command to terminate the counter actor process.
+stop(Pid) ->
+    Pid ! stop,
+    ok.
+
+%% @doc Tail-recursive state loop handling increment, decrement, query, and termination messages in constant stack space.
+loop(CurrentVal) ->
+    receive
+        {increment, Delta} ->
+            loop(CurrentVal + Delta);
+        {decrement, Delta} ->
+            loop(CurrentVal - Delta);
+        {get, Caller} ->
+            Caller ! {value, CurrentVal},
+            loop(CurrentVal);
+        stop ->
+            ok
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -164,6 +211,16 @@ flush_loop(Acc) ->
 			},
 			wantScore:    100,
 			wantStages:   5,
+			visibleCount: 3,
+		},
+		{
+			name:       "ch05-l04 Client-Server Barrier & Tail-Recursive State Loops",
+			exerciseID: "ch05-l04",
+			files: map[string]string{
+				"src/counter_actor.erl": counterActorSolution,
+			},
+			wantScore:    100,
+			wantStages:   4,
 			visibleCount: 3,
 		},
 	}
@@ -591,6 +648,175 @@ flush_loop(Acc) ->
 		}
 		if !foundFailedPriority {
 			t.Errorf("Expected selective_receive_priority to fail on inverted priority")
+		}
+	})
+
+	// Negative test: body recursion in loop/1 rejected by AST verifier
+	t.Run("ch05-l04 Negative Body Recursion", func(t *testing.T) {
+		sessID := "test-sess-ch05-l04-neg-rec"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		bodyRecCode := `-module(counter_actor).
+-export([start/1, increment/2, decrement/2, get_value/1, stop/1, loop/1]).
+
+start(InitialValue) -> spawn(fun() -> loop(InitialValue) end).
+increment(Pid, Delta) -> Pid ! {increment, Delta}, ok.
+decrement(Pid, Delta) -> Pid ! {decrement, Delta}, ok.
+get_value(Pid) ->
+    Pid ! {get, self()},
+    receive {value, Val} -> {ok, Val} after 1000 -> {error, timeout} end.
+stop(Pid) -> Pid ! stop, ok.
+
+loop(CurrentVal) ->
+    receive
+        {increment, Delta} ->
+            loop(CurrentVal + Delta),
+            ok;
+        {decrement, Delta} ->
+            loop(CurrentVal - Delta);
+        {get, Caller} ->
+            Caller ! {value, CurrentVal},
+            loop(CurrentVal);
+        stop ->
+            ok
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l04", map[string]string{
+			"src/counter_actor.erl": bodyRecCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for body recursion, got %d", report.Score)
+		}
+
+		foundFailedAst := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_tco_loop_audit" && st.Status == "failed" {
+				foundFailedAst = true
+			}
+		}
+		if !foundFailedAst {
+			t.Errorf("Expected ast_tco_loop_audit to fail on body recursion")
+		}
+	})
+
+	// Negative test: missing export loop/1
+	t.Run("ch05-l04 Negative Missing Export", func(t *testing.T) {
+		sessID := "test-sess-ch05-l04-neg-export"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		badExportCode := `-module(counter_actor).
+-export([start/1, increment/2, decrement/2, get_value/1, stop/1]).
+
+start(InitialValue) -> spawn(fun() -> loop(InitialValue) end).
+increment(Pid, Delta) -> Pid ! {increment, Delta}, ok.
+decrement(Pid, Delta) -> Pid ! {decrement, Delta}, ok.
+get_value(Pid) ->
+    Pid ! {get, self()},
+    receive {value, Val} -> {ok, Val} after 1000 -> {error, timeout} end.
+stop(Pid) -> Pid ! stop, ok.
+
+loop(CurrentVal) ->
+    receive
+        {increment, Delta} -> loop(CurrentVal + Delta);
+        {decrement, Delta} -> loop(CurrentVal - Delta);
+        {get, Caller} ->
+            Caller ! {value, CurrentVal},
+            loop(CurrentVal);
+        stop -> ok
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l04", map[string]string{
+			"src/counter_actor.erl": badExportCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for missing export, got %d", report.Score)
+		}
+
+		foundFailedCompile := false
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				foundFailedCompile = true
+			}
+		}
+		if !foundFailedCompile {
+			t.Errorf("Expected compile_and_export_audit to fail on missing export")
+		}
+	})
+
+	// Negative test: arithmetic logic bug in state accumulation
+	t.Run("ch05-l04 Negative Calculation Mismatch", func(t *testing.T) {
+		sessID := "test-sess-ch05-l04-neg-calc"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		buggyCalcCode := `-module(counter_actor).
+-export([start/1, increment/2, decrement/2, get_value/1, stop/1, loop/1]).
+
+start(InitialValue) -> spawn(fun() -> loop(InitialValue) end).
+increment(Pid, Delta) -> Pid ! {increment, Delta}, ok.
+decrement(Pid, Delta) -> Pid ! {decrement, Delta}, ok.
+get_value(Pid) ->
+    Pid ! {get, self()},
+    receive {value, Val} -> {ok, Val} after 1000 -> {error, timeout} end.
+stop(Pid) -> Pid ! stop, ok.
+
+loop(CurrentVal) ->
+    receive
+        {increment, Delta} -> loop(CurrentVal + Delta);
+        {decrement, Delta} -> loop(CurrentVal + Delta); %% BUG: adds instead of subtracting
+        {get, Caller} ->
+            Caller ! {value, CurrentVal},
+            loop(CurrentVal);
+        stop -> ok
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l04", map[string]string{
+			"src/counter_actor.erl": buggyCalcCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for calculation bug, got %d", report.Score)
+		}
+
+		foundFailedCalc := false
+		for _, st := range report.Stages {
+			if st.ID == "actor_state_accumulation" && st.Status == "failed" {
+				foundFailedCalc = true
+			}
+		}
+		if !foundFailedCalc {
+			t.Errorf("Expected actor_state_accumulation to fail on calculation bug")
 		}
 	})
 }

@@ -3448,6 +3448,22 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 10 subtests across CH05 in `20.43s` (`20.458s` total); `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l03 | 3/3 tests passed`) in `13.33s` (`13.357s` total).
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 220: Spec 04 / Spec 08 Anti-Spoiler Audit, Client-Server Barrier, Tail-Recursion State Loop AST Hardening & Live Tri-Verification of Chapter 5 Lecture 4 (`ch05-l04`)
+- [x] **220.1: Spec 04/08 Anti-Spoiler Audit & Erlang/AST Hardening (`ch05-l04`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch05.ts` (`ch05-l04`, `counter_actor.erl`) against Spec 04, 07, and 08.
+  - Re-ordered Spec 04 layout so `## Official Erlang Docs & Function Reference` precedes `## Parallel Worked Example`.
+  - Annotated `## Parallel Worked Example` (`network_stream.erl`) with 4 clear execution phases (`Phase 1: Client API Spawning Stateful Stream Actor`, `Phase 2: Asynchronous Cast Pipeline`, `Phase 3: Synchronous Call with Caller self() Return Address and Timeout Guard`, `Phase 4: Actor Tail-Recursive State Loop`) and architectural notes covering abstraction barriers, `call_last` TCO, and lifecycle termination.
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across `start/1`, `increment/2`, `decrement/2`, `get_value/1`, `stop/1`, and `loop/1`.
+  - Added 3rd visible test case `tc-ch05-04-3` testing `get_value/1` timeout handling on an unresponsive worker.
+  - Configured `astRules` (`requireTailRecursion: ['loop/1']`, `requiredCalls: ['erlang:self/0']`), aligned 10/10 plain-English `%% @doc` contracts across all 4 copies (`files`, `solutionFiles`, `starterCode`, `solutionCode`), stripped pre-solved logic down to neutral `ok.` stubs, and verified zero syntax leaks.
+  - Hardened `Run` in `services/orchestrator/internal/bridge/erl_runner_chapters.go` with safe catch variables (`Err1`, `Err2`, `Err3`) and a 1200ms watchdog for `T3_Res`, and hardened `Submit` with 6 exported function audits, AST verification (`require_tail_recursion => [{loop, 1}]`, `required_calls => [{erlang, self, 0}]`), state accumulation, decrement, stop lifecycle, and an isolated 1500ms watchdog for `S3_Timeout`.
+  - Expanded `services/orchestrator/internal/bridge/ch05_verification_test.go` with positive verification (100% score, 5/5 stages passed, 3/3 visible tests passed) and 3 negative regression tests (`ch05-l04_Negative_Body_Recursion`, `ch05-l04_Negative_Missing_Export`, `ch05-l04_Negative_Calculation_Mismatch`).
+- [x] **220.2: Mandatory Live Tri-Verification & Verification Suites (`ch05-l04`)**:
+  - **Parallel Worked Example (`network_stream.erl`)**: Extracted from `ch05.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and verified live on OTP 29 (`PWE_SUCCESS`).
+  - **Starter & Solution Pack (`counter_actor.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/counter_actor.erl'] === solutionCode`), compiled starter with `erlc.exe` (exit code 0, `STARTER_SUCCESS`), compiled solution with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `require_tail_recursion => [{loop, 1}]` and `required_calls => [{erlang, self, 0}]` (`AST_VERIFIER_SUCCESS`).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter5Verification` passed all 14 subtests across CH05 in `37.49s` (`37.543s` total); `TEST_CHAPTER=5 TestDynamicVisibleTestsCurriculum` passed all 8/8 CH05 lessons (`ch05-l04 | 3/3 tests passed`) in `12.89s` (`12.911s` total).
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
 
 
 

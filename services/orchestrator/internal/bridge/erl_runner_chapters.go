@@ -2007,9 +2007,9 @@ T1_Res = try
             #{call_str => <<"counter_actor:get_value(P)">>, expected => <<"{ok, 15}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
     end
-catch C1:R1 ->
+catch C1:Err1 ->
     #{call_str => <<"counter_actor:get_value(...)">>, expected => <<"{ok, 15}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try
@@ -2028,11 +2028,37 @@ T2_Res = try
             #{call_str => <<"counter_actor:increment/decrement">>, expected => <<"{ok, 30}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
     end
-catch C2:R2 ->
+catch C2:Err2 ->
     #{call_str => <<"counter_actor:decrement test">>, expected => <<"{ok, 30}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res, T2_Res],
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    Self3 = self(),
+    T3_Worker = spawn(fun() ->
+        Dummy = spawn(fun() -> receive after 500 -> ok end end),
+        Res3 = counter_actor:get_value(Dummy),
+        Self3 ! {t3_done, Res3}
+    end),
+    receive
+        {t3_done, {error, timeout}} ->
+            #{call_str => <<"counter_actor:get_value(Dummy)">>,
+              expected => <<"{error, timeout}">>,
+              actual => <<"{error, timeout}">>, passed => true,
+              time_ms => erlang:system_time(millisecond) - T3_Start};
+        {t3_done, Other3} ->
+            #{call_str => <<"counter_actor:get_value(Dummy)">>, expected => <<"{error, timeout}">>,
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))), passed => false, time_ms => 0}
+    after 1200 ->
+        exit(T3_Worker, kill),
+        #{call_str => <<"counter_actor:get_value(Dummy)">>, expected => <<"{error, timeout}">>,
+          actual => <<"Crash: get_value/1 blocked indefinitely">>, passed => false, time_ms => 1200}
+    end
+catch C3:Err3 ->
+    #{call_str => <<"counter_actor:get_value(Dummy)">>, expected => <<"{error, timeout}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -7270,7 +7296,8 @@ S1_Ast = try
     BeamPath = filename:join(["%s", "ebin", "counter_actor.beam"]),
     {ok, BeamBin} = file:read_file(BeamPath),
     Rules = #{
-        require_tail_recursion => [{loop, 1}]
+        require_tail_recursion => [{loop, 1}],
+        required_calls => [{erlang, self, 0}]
     },
     case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
         {ok, _} ->
@@ -7278,8 +7305,8 @@ S1_Ast = try
         {error, Violations} ->
             #{id => <<"ast_tco_loop_audit">>, title => <<"AST Analysis: Tail-Recursive loop/1 (O(1) Stack Memory)">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
     end
-catch C1:R1 ->
-    #{id => <<"ast_tco_loop_audit">>, title => <<"AST Analysis: Tail-Recursive loop/1 (O(1) Stack Memory)">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"ast_tco_loop_audit">>, title => <<"AST Analysis: Tail-Recursive loop/1 (O(1) Stack Memory)">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, Err1]))}
 end,
 S2_State = try
     P = counter_actor:start(100),
@@ -7294,10 +7321,36 @@ S2_State = try
             counter_actor:stop(P),
             #{id => <<"actor_state_accumulation">>, title => <<"Immutable State Accumulation across Concurrent Increments">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Value mismatch: ~p", [GotVal]))}
     end
-catch C2:R2 ->
-    #{id => <<"actor_state_accumulation">>, title => <<"Immutable State Accumulation across Concurrent Increments">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2]))}
+catch C2:Err2 ->
+    #{id => <<"actor_state_accumulation">>, title => <<"Immutable State Accumulation across Concurrent Increments">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2]))}
 end,
-Stages = [CompileStage, S1_Ast, S2_State]
+S3_Timeout = try
+    Self3 = self(),
+    T3_Worker = spawn(fun() ->
+        SilentWorker = spawn(fun() -> receive after 1500 -> ok end end),
+        T0 = erlang:monotonic_time(millisecond),
+        Res = counter_actor:get_value(SilentWorker),
+        Elapsed = erlang:monotonic_time(millisecond) - T0,
+        Self3 ! {s3_done, Res, Elapsed}
+    end),
+    receive
+        {s3_done, {error, timeout}, Elapsed3} ->
+            if
+                Elapsed3 >= 900 andalso Elapsed3 =< 1400 ->
+                    #{id => <<"query_timeout_guard">>, title => <<"Client Query Timeout Guard (1,000ms)">>, status => <<"passed">>, time_ms => Elapsed3, details => list_to_binary(io_lib:format("get_value/1 accurately timed out in ~p ms.", [Elapsed3]))};
+                true ->
+                    #{id => <<"query_timeout_guard">>, title => <<"Client Query Timeout Guard (1,000ms)">>, status => <<"failed">>, time_ms => Elapsed3, details => list_to_binary(io_lib:format("Unexpected timeout duration: ~p ms", [Elapsed3]))}
+            end;
+        {s3_done, OtherT3, _} ->
+            #{id => <<"query_timeout_guard">>, title => <<"Client Query Timeout Guard (1,000ms)">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Expected {error, timeout}, got: ~p", [OtherT3]))}
+    after 1500 ->
+        exit(T3_Worker, kill),
+        #{id => <<"query_timeout_guard">>, title => <<"Client Query Timeout Guard (1,000ms)">>, status => <<"failed">>, time_ms => 1500, details => <<"get_value/1 blocked indefinitely; missing receive...after clause.">>}
+    end
+catch C3:Err3 ->
+    #{id => <<"query_timeout_guard">>, title => <<"Client Query Timeout Guard (1,000ms)">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3]))}
+end,
+Stages = [CompileStage, S1_Ast, S2_State, S3_Timeout]
 `, wsDir, wsDir), true
 
 	case "ch05-l05":
