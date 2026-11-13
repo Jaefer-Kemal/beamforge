@@ -3759,6 +3759,38 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all 38 subtests including `ch06-l09` and its 3 negative regression tests in `110.18s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed 10/10 lessons including `ch06-l09 | 2/2 tests passed` in `18.24s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+## Phase 234: Chapter 6 Lecture 10 (`ch06-l10`) Deep Pedagogical Audit, Anti-Spoiler Protocol & Mini-Capstone Hardening (Chapter 6 Full Completion)
+
+- [x] **234.1: Curriculum Pedagogical Audit & Anti-Spoiler Overhaul (`ch06-l10`, `payment_system.erl`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch06.ts` (`ch06-l10`, `payment_system.erl`) against Spec 04, 07, and 08.
+  - Positioned `## Official Erlang Docs & Function Reference` (`erlang:spawn_monitor/1`, `maps:find/2`, `maps:put/3`) preceding `## Parallel Worked Example`.
+  - Deepened Parallel Worked Example (`job_sentinel.erl`) with a complete 4-step architectural breakdown:
+    - *Step 1: Long-Lived Coordinator & Volatile Worker Separation*
+    - *Step 2: Atomic Process Monitoring (`spawn_monitor/1`)*
+    - *Step 3: Idempotency Gate (Lookup Before Delegation)*
+    - *Step 4: Monitored Worker Crash Recovery & State Preservation*
+  - Formatted `## Assignment Specification` with clean 3-part layout (`Input`, `Behavior`, `Examples`) for all 8 functions (`start_system/1`, `charge/4`, `trigger_crash_test/1`, `get_active_worker/1`, `get_processed_txs/1`, `stop_system/1`, `watcher_loop/1`, `worker_loop/0`), eliminating imperative code statements from prompt bullets.
+  - Added `## Rules & Verification Constraints` bullet list enforcing atomic monitoring, idempotency cache lookup, crash recovery state preservation, restart budget limits, and tail recursion.
+  - Upgraded `otpDocCards` with cards for `spawn_monitor/1`, `maps:find/2`, and `maps:put/3`.
+  - Aligned 10/10 plain-English `@doc` contracts across starter, solution, and files. Starter has underscore-prefixed unused parameters (`_MaxRestarts`, `_WatcherPid`, `_RequestId`, `_Amount`, `_Currency`, `_State`) so it compiles under `erlc.exe -Wall -Werror` with 0 warnings.
+
+- [x] **234.2: Go Orchestrator Test Suite Hardening (`erl_runner_chapters.go` & `ch06_verification_test.go`)**:
+  - In `erl_runner_chapters.go` (`case "ch06-l10":`), added `T3_Res` for the crash recovery & state survival test, asserting all 3 visible tests (`AllResults = [T1_Res, T2_Res, T3_Res]`).
+  - In `ch06_verification_test.go`:
+    - Defined `const paymentSystemSolution = ...`.
+    - Updated `ch06-l10` entry in `tests` slice with `wantScore: 100, wantStages: 7, visibleCount: 3`.
+    - Added 3 negative regression subtests for `ch06-l10`:
+      1. `ch06-l10 Negative Missing spawn_monitor AST Violation`: verifies failure in `ast_watcher_invariants` when calls to `spawn_monitor/1` are missing.
+      2. `ch06-l10 Negative Missing Export`: verifies rejection in `compile_and_export_audit` when required API functions are omitted.
+      3. `ch06-l10 Negative Broken Idempotency Double Charge`: verifies rejection in `idempotent_replay` when duplicate charges bypass the idempotency gate.
+
+- [x] **234.3: Mandatory Live Tri-Verification & Chapter 6 Full Completion Certification (`ch06-l10`)**:
+  - **Parallel Worked Example (`job_sentinel.erl`)**: Extracted directly from `ch06.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with all job submission, idempotency caching, archive query, and graceful stop tests passing cleanly in 0 ms.
+  - **Starter Pack (`payment_system.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0) and loads cleanly on OTP.
+  - **Solution Pack (`payment_system.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/payment_system.erl'] === solutionCode`), compiled with `+debug_info -Wall -Werror` (0 warnings), passed `bf_ast_verifier` (`spawn_monitor/1`, tail recursion on `watcher_loop/1` and `worker_loop/0`), and passed 100% of visible test cases (3/3 passed).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all 41 subtests including all 10 Chapter 6 lessons and all negative regressions in `123.85s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed 10/10 lessons including `ch06-l10 | 3/3 tests passed` in `12.64s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
 
 
 

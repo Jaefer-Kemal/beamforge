@@ -567,6 +567,235 @@ worker_loop() ->
     end.
 `
 
+	paymentSystemSolution := `-module(payment_system).
+-export([
+    start_system/1,
+    charge/4,
+    trigger_crash_test/1,
+    get_active_worker/1,
+    get_processed_txs/1,
+    stop_system/1,
+    watcher_loop/1,
+    worker_loop/0
+]).
+
+%% @doc Spawns the coordinator watcher and initial monitored worker process.
+start_system(MaxRestarts) when is_integer(MaxRestarts), MaxRestarts >= 0 ->
+    InitRef = make_ref(),
+    Parent = self(),
+    _WatcherPid = spawn(fun() ->
+        {WorkerPid, MRef} = spawn_monitor(fun() -> worker_loop() end),
+        State = #{
+            worker_pid => WorkerPid,
+            worker_mref => MRef,
+            restarts_left => MaxRestarts,
+            restart_count => 0,
+            tx_store => #{}
+        },
+        Parent ! {InitRef, ok, self()},
+        watcher_loop(State)
+    end),
+    receive
+        {InitRef, ok, Pid} -> {ok, Pid}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Submits an idempotent charge request to the payment gateway.
+charge(WatcherPid, RequestId, Amount, Currency) ->
+    Ref = make_ref(),
+    WatcherPid ! {charge, self(), Ref, RequestId, Amount, Currency},
+    receive
+        {reply, Ref, Result} -> Result
+    after 2000 ->
+        {error, timeout}
+    end.
+
+%% @doc Triggers a simulated crash on the active worker to test fault recovery.
+trigger_crash_test(WatcherPid) ->
+    Ref = make_ref(),
+    WatcherPid ! {trigger_crash_test, self(), Ref},
+    receive
+        {reply, Ref, Result} -> Result
+    after 2000 ->
+        {error, timeout}
+    end.
+
+%% @doc Returns the process identifier and restart count of the active worker.
+get_active_worker(WatcherPid) ->
+    Ref = make_ref(),
+    WatcherPid ! {get_active_worker, self(), Ref},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Returns the map of all settled transaction receipts committed to the store.
+get_processed_txs(WatcherPid) ->
+    Ref = make_ref(),
+    WatcherPid ! {get_processed_txs, self(), Ref},
+    receive
+        {reply, Ref, Result} -> Result
+    after 1000 ->
+        #{}
+    end.
+
+%% @doc Stops the watcher system and terminates the active worker.
+stop_system(WatcherPid) ->
+    Ref = make_ref(),
+    WatcherPid ! {stop, self(), Ref},
+    receive
+        {reply, Ref, ok} -> ok
+    after 1000 ->
+        ok
+    end.
+
+%% @doc Tail-recursive coordinator loop managing state, idempotency, and worker lifecycle.
+watcher_loop(State = #{worker_pid := WorkerPid,
+                       worker_mref := WorkerMRef,
+                       restarts_left := RestartsLeft,
+                       restart_count := RestartCount,
+                       tx_store := TxStore}) ->
+    receive
+        {charge, From, Ref, RequestId, Amount, Currency} ->
+            case maps:find(RequestId, TxStore) of
+                {ok, SavedReceipt} ->
+                    From ! {reply, Ref, {ok, {already_processed, SavedReceipt}}},
+                    watcher_loop(State);
+                error when is_pid(WorkerPid) ->
+                    WorkerPid ! {validate_and_charge, self(), Ref, RequestId, Amount, Currency},
+                    receive
+                        {worker_reply, Ref, {ok, Receipt}} ->
+                            NewTxStore = maps:put(RequestId, Receipt, TxStore),
+                            From ! {reply, Ref, {ok, Receipt}},
+                            watcher_loop(State#{tx_store => NewTxStore});
+                        {worker_reply, Ref, {error, Reason}} ->
+                            From ! {reply, Ref, {error, Reason}},
+                            watcher_loop(State)
+                    after 1000 ->
+                        From ! {reply, Ref, {error, worker_timeout}},
+                        watcher_loop(State)
+                    end;
+                error ->
+                    From ! {reply, Ref, {error, no_active_worker}},
+                    watcher_loop(State)
+            end;
+
+        {trigger_crash_test, From, Ref} ->
+            if
+                is_pid(WorkerPid) andalso RestartsLeft > 0 ->
+                    OldPid = WorkerPid,
+                    WorkerPid ! crash_test,
+                    receive
+                        {'DOWN', WorkerMRef, process, OldPid, _Reason} ->
+                            {NewPid, NewMRef} = spawn_monitor(fun() -> worker_loop() end),
+                            NewState = State#{
+                                worker_pid => NewPid,
+                                worker_mref => NewMRef,
+                                restarts_left => RestartsLeft - 1,
+                                restart_count => RestartCount + 1
+                            },
+                            From ! {reply, Ref, {ok, OldPid, NewPid}},
+                            watcher_loop(NewState)
+                    after 1000 ->
+                        From ! {reply, Ref, {error, crash_timeout}},
+                        watcher_loop(State)
+                    end;
+                is_pid(WorkerPid) ->
+                    OldPid = WorkerPid,
+                    WorkerPid ! crash_test,
+                    receive
+                        {'DOWN', WorkerMRef, process, OldPid, _Reason} ->
+                            NewState = State#{
+                                worker_pid => undefined,
+                                worker_mref => undefined,
+                                restarts_left => 0,
+                                restart_count => RestartCount + 1
+                            },
+                            From ! {reply, Ref, {error, max_restarts_exceeded}},
+                            watcher_loop(NewState)
+                    after 1000 ->
+                        From ! {reply, Ref, {error, crash_timeout}},
+                        watcher_loop(State)
+                    end;
+                true ->
+                    From ! {reply, Ref, {error, no_active_worker}},
+                    watcher_loop(State)
+            end;
+
+        {'DOWN', WorkerMRef, process, WorkerPid, _CrashReason} ->
+            if
+                RestartsLeft > 0 ->
+                    {NewPid, NewMRef} = spawn_monitor(fun() -> worker_loop() end),
+                    watcher_loop(State#{
+                        worker_pid => NewPid,
+                        worker_mref => NewMRef,
+                        restarts_left => RestartsLeft - 1,
+                        restart_count => RestartCount + 1
+                    });
+                true ->
+                    watcher_loop(State#{
+                        worker_pid => undefined,
+                        worker_mref => undefined,
+                        restarts_left => 0
+                    })
+            end;
+
+        {get_active_worker, From, Ref} ->
+            if
+                is_pid(WorkerPid) ->
+                    From ! {reply, Ref, {ok, WorkerPid, RestartCount}};
+                true ->
+                    From ! {reply, Ref, {error, no_active_worker}}
+            end,
+            watcher_loop(State);
+
+        {get_processed_txs, From, Ref} ->
+            From ! {reply, Ref, TxStore},
+            watcher_loop(State);
+
+        {stop, From, Ref} ->
+            if
+                is_pid(WorkerPid) ->
+                    exit(WorkerPid, shutdown);
+                true ->
+                    ok
+            end,
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+%% @doc Worker loop handling payload validation and settlement execution.
+worker_loop() ->
+    receive
+        {validate_and_charge, From, Ref, RequestId, Amount, Currency} ->
+            if
+                not is_integer(Amount) orelse Amount =< 0 ->
+                    From ! {worker_reply, Ref, {error, invalid_amount}},
+                    worker_loop();
+                Currency =/= usd andalso Currency =/= eur andalso Currency =/= etb ->
+                    From ! {worker_reply, Ref, {error, unsupported_currency}},
+                    worker_loop();
+                true ->
+                    Receipt = #{
+                        tx_id => RequestId,
+                        amount => Amount,
+                        currency => Currency,
+                        status => settled
+                    },
+                    From ! {worker_reply, Ref, {ok, Receipt}},
+                    worker_loop()
+            end;
+
+        crash_test ->
+            exit(simulated_payment_worker_crash);
+
+        stop ->
+            ok
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -650,217 +879,12 @@ worker_loop() ->
 			visibleCount: 2,
 		},
 		{
-			name:       "ch06-l10 Payment System Mini-Capstone",
-			exerciseID: "ch06-l10",
-			files: map[string]string{
-				"src/payment_system.erl": `-module(payment_system).
--export([
-    start_system/1,
-    charge/4,
-    trigger_crash_test/1,
-    get_active_worker/1,
-    get_processed_txs/1,
-    stop_system/1,
-    watcher_loop/1,
-    worker_loop/0
-]).
-
-start_system(MaxRestarts) ->
-    WatcherPid = spawn(fun() ->
-        {WorkerPid, MRef} = spawn_monitor(fun() -> worker_loop() end),
-        watcher_loop(#{
-            worker_pid => WorkerPid,
-            worker_mref => MRef,
-            restarts_left => MaxRestarts,
-            restart_count => 0,
-            tx_store => #{}
-        })
-    end),
-    {ok, WatcherPid}.
-
-charge(WatcherPid, RequestId, Amount, Currency) ->
-    Ref = make_ref(),
-    WatcherPid ! {charge, self(), Ref, RequestId, Amount, Currency},
-    receive
-        {reply, Ref, Result} -> Result
-    after 2000 -> {error, timeout}
-    end.
-
-trigger_crash_test(WatcherPid) ->
-    Ref = make_ref(),
-    WatcherPid ! {trigger_crash, self(), Ref},
-    receive
-        {reply, Ref, Result} -> Result
-    after 2000 -> {error, timeout}
-    end.
-
-get_active_worker(WatcherPid) ->
-    Ref = make_ref(),
-    WatcherPid ! {get_active_worker, self(), Ref},
-    receive
-        {reply, Ref, Result} -> Result
-    after 1000 -> {error, timeout}
-    end.
-
-get_processed_txs(WatcherPid) ->
-    Ref = make_ref(),
-    WatcherPid ! {get_processed_txs, self(), Ref},
-    receive
-        {reply, Ref, Result} -> Result
-    after 1000 -> #{}
-    end.
-
-stop_system(WatcherPid) ->
-    Ref = make_ref(),
-    WatcherPid ! {stop, self(), Ref},
-    receive
-        {reply, Ref, ok} -> ok
-    after 1000 -> ok
-    end.
-
-watcher_loop(State = #{
-    worker_pid := WorkerPid,
-    worker_mref := WorkerMRef,
-    restarts_left := RestartsLeft,
-    restart_count := RestartCount,
-    tx_store := TxStore
-}) ->
-    receive
-        {charge, From, Ref, RequestId, Amount, Currency} ->
-            case maps:find(RequestId, TxStore) of
-                {ok, ExistingReceipt} ->
-                    From ! {reply, Ref, {ok, {already_processed, ExistingReceipt}}},
-                    watcher_loop(State);
-                error ->
-                    if
-                        is_pid(WorkerPid) ->
-                            WorkerReqRef = make_ref(),
-                            WorkerPid ! {validate_and_charge, self(), WorkerReqRef, RequestId, Amount, Currency},
-                            receive
-                                {worker_reply, WorkerReqRef, {ok, Receipt}} ->
-                                    NewTxStore = maps:put(RequestId, Receipt, TxStore),
-                                    From ! {reply, Ref, {ok, Receipt}},
-                                    watcher_loop(State#{tx_store => NewTxStore});
-                                {worker_reply, WorkerReqRef, {error, Reason}} ->
-                                    From ! {reply, Ref, {error, Reason}},
-                                    watcher_loop(State)
-                            after 1000 ->
-                                From ! {reply, Ref, {error, worker_timeout}},
-                                watcher_loop(State)
-                            end;
-                        true ->
-                            From ! {reply, Ref, {error, no_active_worker}},
-                            watcher_loop(State)
-                    end
-            end;
-
-        {trigger_crash, From, Ref} ->
-            if
-                is_pid(WorkerPid) ->
-                    OldWorker = WorkerPid,
-                    WorkerPid ! crash_test,
-                    receive
-                        {'DOWN', WorkerMRef, process, OldWorker, _CrashReason} ->
-                            if
-                                RestartsLeft > 0 ->
-                                    {NewPid, NewMRef} = spawn_monitor(fun() -> worker_loop() end),
-                                    From ! {reply, Ref, {ok, OldWorker, NewPid}},
-                                    NewState = State#{
-                                        worker_pid => NewPid,
-                                        worker_mref => NewMRef,
-                                        restarts_left => RestartsLeft - 1,
-                                        restart_count => RestartCount + 1
-                                    },
-                                    watcher_loop(NewState);
-                                true ->
-                                    From ! {reply, Ref, {error, max_restarts_exceeded}},
-                                    NewState = State#{
-                                        worker_pid => undefined,
-                                        worker_mref => undefined,
-                                        restarts_left => 0
-                                    },
-                                    watcher_loop(NewState)
-                            end
-                    after 1000 ->
-                        From ! {reply, Ref, {error, crash_timeout}},
-                        watcher_loop(State)
-                    end;
-                true ->
-                    From ! {reply, Ref, {error, no_active_worker}},
-                    watcher_loop(State)
-            end;
-
-        {'DOWN', WorkerMRef, process, WorkerPid, _CrashReason} ->
-            if
-                RestartsLeft > 0 ->
-                    {NewPid, NewMRef} = spawn_monitor(fun() -> worker_loop() end),
-                    watcher_loop(State#{
-                        worker_pid => NewPid,
-                        worker_mref => NewMRef,
-                        restarts_left => RestartsLeft - 1,
-                        restart_count => RestartCount + 1
-                    });
-                true ->
-                    watcher_loop(State#{
-                        worker_pid => undefined,
-                        worker_mref => undefined,
-                        restarts_left => 0
-                    })
-            end;
-
-        {get_active_worker, From, Ref} ->
-            if
-                is_pid(WorkerPid) ->
-                    From ! {reply, Ref, {ok, WorkerPid, RestartCount}};
-                true ->
-                    From ! {reply, Ref, {error, no_active_worker}}
-            end,
-            watcher_loop(State);
-
-        {get_processed_txs, From, Ref} ->
-            From ! {reply, Ref, TxStore},
-            watcher_loop(State);
-
-        {stop, From, Ref} ->
-            if
-                is_pid(WorkerPid) ->
-                    exit(WorkerPid, shutdown);
-                true ->
-                    ok
-            end,
-            From ! {reply, Ref, ok},
-            ok
-    end.
-
-worker_loop() ->
-    receive
-        {validate_and_charge, From, Ref, RequestId, Amount, Currency} ->
-            if
-                not is_integer(Amount) orelse Amount =< 0 ->
-                    From ! {worker_reply, Ref, {error, invalid_amount}},
-                    worker_loop();
-                Currency =/= usd andalso Currency =/= eur andalso Currency =/= etb ->
-                    From ! {worker_reply, Ref, {error, unsupported_currency}},
-                    worker_loop();
-                true ->
-                    Receipt = #{
-                        tx_id => RequestId,
-                        amount => Amount,
-                        currency => Currency,
-                        status => settled
-                    },
-                    From ! {worker_reply, Ref, {ok, Receipt}},
-                    worker_loop()
-            end;
-
-        crash_test ->
-            exit(simulated_payment_worker_crash);
-
-        stop ->
-            ok
-    end.
-`,
-			},
+			name:         "ch06-l10 Payment System Mini-Capstone",
+			exerciseID:   "ch06-l10",
+			files:        map[string]string{"src/payment_system.erl": paymentSystemSolution},
+			wantScore:    100,
+			wantStages:   7,
+			visibleCount: 3,
 		},
 	}
 
@@ -2951,6 +2975,245 @@ worker_loop() ->
 		}
 		if !priceFailed {
 			t.Errorf("Expected valid_quote_call to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch06-l10 ──────────────────────────────
+	t.Run("ch06-l10 Negative Missing spawn_monitor AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch06-l10"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/payment_system.erl": `-module(payment_system).
+-export([
+    start_system/1,
+    charge/4,
+    trigger_crash_test/1,
+    get_active_worker/1,
+    get_processed_txs/1,
+    stop_system/1,
+    watcher_loop/1,
+    worker_loop/0
+]).
+
+%% VIOLATION: Uses raw spawn without spawn_monitor!
+start_system(MaxRestarts) ->
+    InitRef = make_ref(),
+    Parent = self(),
+    _WatcherPid = spawn(fun() ->
+        WorkerPid = spawn(fun() -> worker_loop() end),
+        State = #{
+            worker_pid => WorkerPid,
+            worker_mref => undefined,
+            restarts_left => MaxRestarts,
+            restart_count => 0,
+            tx_store => #{}
+        },
+        Parent ! {InitRef, ok, self()},
+        watcher_loop(State)
+    end),
+    receive
+        {InitRef, ok, Pid} -> {ok, Pid}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+charge(_W, _ReqId, _Amt, _Cur) -> {error, unimpl}.
+trigger_crash_test(_W) -> {error, unimpl}.
+get_active_worker(_W) -> {error, unimpl}.
+get_processed_txs(_W) -> #{}.
+stop_system(_W) -> ok.
+watcher_loop(_State) -> ok.
+worker_loop() -> ok.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l10", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing spawn_monitor AST violation, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_watcher_invariants" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_watcher_invariants to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l10 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-exp-ch06-l10"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/payment_system.erl": `-module(payment_system).
+-export([
+    start_system/1,
+    % charge/4 is deliberately missing!
+    trigger_crash_test/1,
+    get_active_worker/1,
+    get_processed_txs/1,
+    stop_system/1,
+    watcher_loop/1,
+    worker_loop/0
+]).
+
+start_system(_MaxRestarts) -> ok.
+trigger_crash_test(_W) -> ok.
+get_active_worker(_W) -> ok.
+get_processed_txs(_W) -> #{}.
+stop_system(_W) -> ok.
+watcher_loop(_State) -> ok.
+worker_loop() -> ok.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l10", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export, but got PASSED")
+		}
+		var expFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				expFailed = true
+				break
+			}
+		}
+		if !expFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l10 Negative Broken Idempotency Double Charge", func(t *testing.T) {
+		sessionID := "test-neg-idem-ch06-l10"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/payment_system.erl": `-module(payment_system).
+-export([
+    start_system/1,
+    charge/4,
+    trigger_crash_test/1,
+    get_active_worker/1,
+    get_processed_txs/1,
+    stop_system/1,
+    watcher_loop/1,
+    worker_loop/0
+]).
+
+start_system(MaxRestarts) ->
+    InitRef = make_ref(),
+    Parent = self(),
+    _WatcherPid = spawn(fun() ->
+        {WorkerPid, MRef} = spawn_monitor(fun() -> worker_loop() end),
+        State = #{
+            worker_pid => WorkerPid,
+            worker_mref => MRef,
+            restarts_left => MaxRestarts,
+            restart_count => 0,
+            tx_store => #{}
+        },
+        Parent ! {InitRef, ok, self()},
+        watcher_loop(State)
+    end),
+    receive
+        {InitRef, ok, Pid} -> {ok, Pid}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+charge(WatcherPid, RequestId, Amount, Currency) ->
+    Ref = make_ref(),
+    WatcherPid ! {charge, self(), Ref, RequestId, Amount, Currency},
+    receive
+        {reply, Ref, Result} -> Result
+    after 2000 ->
+        {error, timeout}
+    end.
+
+trigger_crash_test(_W) -> ok.
+get_active_worker(_W) -> ok.
+get_processed_txs(_W) -> #{}.
+stop_system(WatcherPid) ->
+    Ref = make_ref(),
+    WatcherPid ! {stop, self(), Ref},
+    receive
+        {reply, Ref, ok} -> ok
+    after 1000 -> ok
+    end.
+
+watcher_loop(State = #{worker_pid := WorkerPid, tx_store := TxStore}) ->
+    receive
+        {charge, From, Ref, RequestId, Amount, Currency} ->
+            %% BUG: Skips maps:find idempotency cache check! Always charges anew and returns fresh {ok, Receipt}
+            Receipt = #{
+                tx_id => RequestId,
+                amount => Amount,
+                currency => Currency,
+                status => settled
+            },
+            NewTxStore = maps:put(RequestId, Receipt, TxStore),
+            From ! {reply, Ref, {ok, Receipt}},
+            watcher_loop(State#{tx_store => NewTxStore});
+        {stop, From, Ref} ->
+            if is_pid(WorkerPid) -> exit(WorkerPid, shutdown); true -> ok end,
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+worker_loop() ->
+    receive
+        stop -> ok
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l10", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on broken idempotency, but got PASSED")
+		}
+		var idemFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "idempotent_replay" && st.Status == "failed" {
+				idemFailed = true
+				break
+			}
+		}
+		if !idemFailed {
+			t.Errorf("Expected idempotent_replay to fail, stages: %+v", report.Stages)
 		}
 	})
 }

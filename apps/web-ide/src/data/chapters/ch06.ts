@@ -3953,6 +3953,31 @@ The coordinator manages the child worker using unidirectional monitors:
 - **Restart Budget Management:** The coordinator maintains a budget of remaining restarts. If the budget is greater than zero, it decrements the remaining allowance, increments a restart counter, and spawns a replacement worker. If the budget is exhausted, it transitions into a degraded state, refusing further restart attempts.
 - **State Invariance:** Because all committed entries reside exclusively in the coordinator's loop variables, a child worker crash can never corrupt or erase accumulated history.
 
+## Official Erlang Docs & Function Reference
+
+### 1. \`spawn_monitor/1\` & \`spawn_monitor/3\`
+\`\`\`erlang
+%% Official OTP Signature (erts / erlang)
+erlang:spawn_monitor(Fun) -> {Pid, MonitorRef}
+  Types:
+    Fun = fun(() -> any())
+    Pid = pid()
+    MonitorRef = reference()
+\`\`\`
+- **Atomicity**: \`spawn_monitor/1\` atomically creates the process and attaches an active unidirectional monitor before returning. There is zero scheduling gap for the spawned process to terminate before the caller receives notifications.
+
+### 2. \`maps:find/2\` & \`maps:put/3\`
+\`\`\`erlang
+%% Official OTP Signature (stdlib / maps)
+maps:find(Key, Map) -> {ok, Value} | error
+maps:put(Key, Value, Map1) -> Map2
+  Types:
+    Key = Value = term()
+    Map = Map1 = Map2 = #{Key => Value}
+\`\`\`
+- **Idempotency Verification**: \`maps:find/2\` queries existing keys without throwing exceptions, enabling immediate return of cached receipts on duplicated client requests.
+- **Durable Commits**: \`maps:put/3\` creates a new immutable version of the transaction store with the settled receipt persisted.
+
 ## Parallel Worked Example: The Durable Job Sentinel (job_sentinel.erl)
 
 To understand how a long-lived coordinator maintains state continuity while supervising a volatile worker, consider the complete, runnable \`job_sentinel.erl\` module below. This sentinel coordinates background computational jobs, ensuring completed tasks are never repeated (idempotency) and that committed results survive worker faults.
@@ -4086,10 +4111,11 @@ worker_loop() ->
     end.
 \`\`\`
 
-### Key Architectural Takeaways
-1. **Separation of Volatile vs. Durable State:** The worker holds zero long-term memory. It performs the risky task and dies if it encounters corrupted data. The coordinator owns the \`history\` map and guarantees state continuity.
-2. **Atomic Monitoring:** Calling \`spawn_monitor/1\` during initialization and in the \`'DOWN'\` handler guarantees no race window where the worker dies before a monitor can be established.
-3. **Idempotency Gate:** Evaluating \`maps:find/2\` before forwarding messages ensures repeated client retries return the cached result instantly with zero worker overhead.
+### Deep Architectural Breakdown
+1. **Step 1: Long-Lived Coordinator & Volatile Worker Separation**: The worker holds zero persistent state. It receives computational payloads, validates input format, and terminates immediately on invalid binary terms. The sentinel coordinator encapsulates all accumulated state inside its tail-recursive loop parameter (\`history\`).
+2. **Step 2: Atomic Process Monitoring (\`spawn_monitor/1\`)**: Whenever the sentinel initialises or replaces a fallen worker, it invokes \`spawn_monitor/1\`. This eliminates the dangerous race condition where a worker might terminate before an independent \`monitor/2\` call could execute.
+3. **Step 3: Idempotency Gate (Lookup Before Delegation)**: Prior to forwarding any request to the worker, the sentinel queries its \`history\` map with \`maps:find/2\`. Existing requests immediately receive the cached settlement result without generating secondary computational work.
+4. **Step 4: Monitored Worker Crash Recovery & State Preservation**: When the worker process crashes, the runtime drops a \`'DOWN'\` notification into the sentinel mailbox. The coordinator pattern-matches the monitor reference, launches a new worker, updates its state map with the new PID and monitor reference, and preserves the accumulated \`history\` map completely intact.
 
 ## Assignment Specification
 
@@ -4164,6 +4190,15 @@ Implement the \`payment_system\` module in \`src/payment_system.erl\` with the f
 - **Input**: None.
 - **Behavior**: Tail-recursive disposable worker loop. Handles payment validation and receipt generation, crash simulations, and shutdown signals.
 - **Examples**: Tail recursion is strictly enforced by compiler AST analysis.
+
+## Rules & Verification Constraints
+
+- **Atomically Monitored Workers**: Spawning of disposable child workers must always use \`erlang:spawn_monitor/1\` to guarantee zero race conditions between worker birth and monitor attachment.
+- **Idempotency Guarantee**: If a transaction with the same \`RequestId\` has already been committed, return \`{ok, {already_processed, ExistingReceipt}}\` immediately without delegating to the worker.
+- **Durable Ledger Preservation**: When a worker crashes (via \`trigger_crash_test/1\` or an unhandled exception), the coordinator must restart the worker and retain the complete transaction history in \`tx_store\` intact.
+- **Max Restarts Enforcement**: If \`restarts_left\` reaches 0, subsequent crash events must not spawn a replacement worker; return \`{error, max_restarts_exceeded}\` on \`trigger_crash_test/1\` and \`{error, no_active_worker}\` on requests.
+- **Tail Recursion**: Both \`watcher_loop/1\` and \`worker_loop/0\` must be strictly tail-recursive.
+- **AST Analysis Enforced**: Remote calls to \`erlang:spawn_monitor/1\` are required.
 `,
     mentalModelCheck: {
       question: 'In the resilient payment gateway architecture, why does the Watcher store completed transactions rather than the Payment Worker?',
@@ -4196,9 +4231,27 @@ Implement the \`payment_system\` module in \`src/payment_system.erl\` with the f
         module: 'erlang',
         signature: 'spawn_monitor(Fun) -> {pid(), reference()}',
         typesSpec: ['Fun = function()'],
-        description: 'Atomically creates and monitors worker.',
+        description: 'Atomically creates and monitors worker without scheduling race gaps.',
         complexityNote: 'O(1) allocation.',
         officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#spawn_monitor/1',
+      },
+      {
+        functionName: 'find',
+        module: 'maps',
+        signature: 'maps:find(Key, Map) -> {ok, Value} | error',
+        typesSpec: ['Key = term()', 'Map = #{Key => Value}'],
+        description: 'Searches Map for Key, returning {ok, Value} or error if key is not found.',
+        complexityNote: 'O(log N) lookup time.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/maps.html#find/2',
+      },
+      {
+        functionName: 'put',
+        module: 'maps',
+        signature: 'maps:put(Key, Value, Map1) -> Map2',
+        typesSpec: ['Key = term()', 'Value = term()', 'Map1 = Map2 = map()'],
+        description: 'Associates Key with Value in Map1 and returns the updated Map2.',
+        complexityNote: 'O(log N) functional update.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/maps.html#put/3',
       },
     ],
     visibleTestCases: [
@@ -4241,32 +4294,32 @@ Implement the \`payment_system\` module in \`src/payment_system.erl\` with the f
     worker_loop/0
 ]).
 
-%% @doc Spawns the watcher coordinator and initial monitored worker process.
-start_system(MaxRestarts) ->
+%% @doc Spawns the coordinator watcher and initial monitored worker process.
+start_system(_MaxRestarts) ->
     ok.
 
 %% @doc Submits an idempotent charge request to the payment gateway.
-charge(WatcherPid, RequestId, Amount, Currency) ->
+charge(_WatcherPid, _RequestId, _Amount, _Currency) ->
     ok.
 
 %% @doc Triggers a simulated crash on the active worker to test fault recovery.
-trigger_crash_test(WatcherPid) ->
+trigger_crash_test(_WatcherPid) ->
     ok.
 
 %% @doc Returns the process identifier and restart count of the active worker.
-get_active_worker(WatcherPid) ->
+get_active_worker(_WatcherPid) ->
     ok.
 
 %% @doc Returns the map of all settled transaction receipts committed to the store.
-get_processed_txs(WatcherPid) ->
+get_processed_txs(_WatcherPid) ->
     ok.
 
 %% @doc Stops the watcher system and terminates the active worker.
-stop_system(WatcherPid) ->
+stop_system(_WatcherPid) ->
     ok.
 
 %% @doc Tail-recursive coordinator loop managing state, idempotency, and worker lifecycle.
-watcher_loop(State) ->
+watcher_loop(_State) ->
     ok.
 
 %% @doc Worker loop handling payload validation and settlement execution.
@@ -4285,6 +4338,7 @@ worker_loop() ->
     worker_loop/0
 ]).
 
+%% @doc Spawns the coordinator watcher and initial monitored worker process.
 start_system(MaxRestarts) when is_integer(MaxRestarts), MaxRestarts >= 0 ->
     InitRef = make_ref(),
     Parent = self(),
@@ -4306,6 +4360,7 @@ start_system(MaxRestarts) when is_integer(MaxRestarts), MaxRestarts >= 0 ->
         {error, timeout}
     end.
 
+%% @doc Submits an idempotent charge request to the payment gateway.
 charge(WatcherPid, RequestId, Amount, Currency) ->
     Ref = make_ref(),
     WatcherPid ! {charge, self(), Ref, RequestId, Amount, Currency},
@@ -4315,6 +4370,7 @@ charge(WatcherPid, RequestId, Amount, Currency) ->
         {error, timeout}
     end.
 
+%% @doc Triggers a simulated crash on the active worker to test fault recovery.
 trigger_crash_test(WatcherPid) ->
     Ref = make_ref(),
     WatcherPid ! {trigger_crash_test, self(), Ref},
@@ -4324,6 +4380,7 @@ trigger_crash_test(WatcherPid) ->
         {error, timeout}
     end.
 
+%% @doc Returns the process identifier and restart count of the active worker.
 get_active_worker(WatcherPid) ->
     Ref = make_ref(),
     WatcherPid ! {get_active_worker, self(), Ref},
@@ -4333,6 +4390,7 @@ get_active_worker(WatcherPid) ->
         {error, timeout}
     end.
 
+%% @doc Returns the map of all settled transaction receipts committed to the store.
 get_processed_txs(WatcherPid) ->
     Ref = make_ref(),
     WatcherPid ! {get_processed_txs, self(), Ref},
@@ -4342,6 +4400,7 @@ get_processed_txs(WatcherPid) ->
         #{}
     end.
 
+%% @doc Stops the watcher system and terminates the active worker.
 stop_system(WatcherPid) ->
     Ref = make_ref(),
     WatcherPid ! {stop, self(), Ref},
@@ -4351,6 +4410,7 @@ stop_system(WatcherPid) ->
         ok
     end.
 
+%% @doc Tail-recursive coordinator loop managing state, idempotency, and worker lifecycle.
 watcher_loop(State = #{worker_pid := WorkerPid,
                        worker_mref := WorkerMRef,
                        restarts_left := RestartsLeft,
@@ -4465,6 +4525,7 @@ watcher_loop(State = #{worker_pid := WorkerPid,
             ok
     end.
 
+%% @doc Worker loop handling payload validation and settlement execution.
 worker_loop() ->
     receive
         {validate_and_charge, From, Ref, RequestId, Amount, Currency} ->
@@ -4509,32 +4570,32 @@ worker_loop() ->
     worker_loop/0
 ]).
 
-%% @doc Spawns the watcher coordinator and initial monitored worker process.
-start_system(MaxRestarts) ->
+%% @doc Spawns the coordinator watcher and initial monitored worker process.
+start_system(_MaxRestarts) ->
     ok.
 
 %% @doc Submits an idempotent charge request to the payment gateway.
-charge(WatcherPid, RequestId, Amount, Currency) ->
+charge(_WatcherPid, _RequestId, _Amount, _Currency) ->
     ok.
 
 %% @doc Triggers a simulated crash on the active worker to test fault recovery.
-trigger_crash_test(WatcherPid) ->
+trigger_crash_test(_WatcherPid) ->
     ok.
 
 %% @doc Returns the process identifier and restart count of the active worker.
-get_active_worker(WatcherPid) ->
+get_active_worker(_WatcherPid) ->
     ok.
 
 %% @doc Returns the map of all settled transaction receipts committed to the store.
-get_processed_txs(WatcherPid) ->
+get_processed_txs(_WatcherPid) ->
     ok.
 
 %% @doc Stops the watcher system and terminates the active worker.
-stop_system(WatcherPid) ->
+stop_system(_WatcherPid) ->
     ok.
 
 %% @doc Tail-recursive coordinator loop managing state, idempotency, and worker lifecycle.
-watcher_loop(State) ->
+watcher_loop(_State) ->
     ok.
 
 %% @doc Worker loop handling payload validation and settlement execution.
@@ -4556,6 +4617,7 @@ worker_loop() ->
     worker_loop/0
 ]).
 
+%% @doc Spawns the coordinator watcher and initial monitored worker process.
 start_system(MaxRestarts) when is_integer(MaxRestarts), MaxRestarts >= 0 ->
     InitRef = make_ref(),
     Parent = self(),
@@ -4577,6 +4639,7 @@ start_system(MaxRestarts) when is_integer(MaxRestarts), MaxRestarts >= 0 ->
         {error, timeout}
     end.
 
+%% @doc Submits an idempotent charge request to the payment gateway.
 charge(WatcherPid, RequestId, Amount, Currency) ->
     Ref = make_ref(),
     WatcherPid ! {charge, self(), Ref, RequestId, Amount, Currency},
@@ -4586,6 +4649,7 @@ charge(WatcherPid, RequestId, Amount, Currency) ->
         {error, timeout}
     end.
 
+%% @doc Triggers a simulated crash on the active worker to test fault recovery.
 trigger_crash_test(WatcherPid) ->
     Ref = make_ref(),
     WatcherPid ! {trigger_crash_test, self(), Ref},
@@ -4595,6 +4659,7 @@ trigger_crash_test(WatcherPid) ->
         {error, timeout}
     end.
 
+%% @doc Returns the process identifier and restart count of the active worker.
 get_active_worker(WatcherPid) ->
     Ref = make_ref(),
     WatcherPid ! {get_active_worker, self(), Ref},
@@ -4604,6 +4669,7 @@ get_active_worker(WatcherPid) ->
         {error, timeout}
     end.
 
+%% @doc Returns the map of all settled transaction receipts committed to the store.
 get_processed_txs(WatcherPid) ->
     Ref = make_ref(),
     WatcherPid ! {get_processed_txs, self(), Ref},
@@ -4613,6 +4679,7 @@ get_processed_txs(WatcherPid) ->
         #{}
     end.
 
+%% @doc Stops the watcher system and terminates the active worker.
 stop_system(WatcherPid) ->
     Ref = make_ref(),
     WatcherPid ! {stop, self(), Ref},
@@ -4622,6 +4689,7 @@ stop_system(WatcherPid) ->
         ok
     end.
 
+%% @doc Tail-recursive coordinator loop managing state, idempotency, and worker lifecycle.
 watcher_loop(State = #{worker_pid := WorkerPid,
                        worker_mref := WorkerMRef,
                        restarts_left := RestartsLeft,
@@ -4736,6 +4804,7 @@ watcher_loop(State = #{worker_pid := WorkerPid,
             ok
     end.
 
+%% @doc Worker loop handling payload validation and settlement execution.
 worker_loop() ->
     receive
         {validate_and_charge, From, Ref, RequestId, Amount, Currency} ->

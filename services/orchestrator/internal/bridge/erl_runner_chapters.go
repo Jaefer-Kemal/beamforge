@@ -2908,39 +2908,64 @@ T1_Start = erlang:system_time(millisecond),
 T1_Res = try
     {ok, W} = payment_system:start_system(3),
     Res1 = payment_system:charge(W, <<"req_1">>, 250, usd),
-    ExpectedReceipt = {ok, #{tx_id => <<"req_1">>, amount => 250, currency => usd, status => settled}},
+    ExpectedReceipt = {ok, #{amount => 250, currency => usd, status => settled, tx_id => <<"req_1">>}},
     payment_system:stop_system(W),
-    #{call_str => <<"payment_system:charge(W, <<\"req_1\">>, 250, usd)">>,
+    #{call_str => <<"begin {ok, W} = payment_system:start_system(3), Res = payment_system:charge(W, <<\"req_1\">>, 250, usd), payment_system:stop_system(W), Res end">>,
       expected => list_to_binary(lists:flatten(io_lib:format("~p", [ExpectedReceipt]))),
       actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res1]))),
       passed => Res1 =:= ExpectedReceipt,
       time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"payment_system:charge(...)">>, expected => <<"{ok, #{...}}">>,
+    #{call_str => <<"begin {ok, W} = payment_system:start_system(3), Res = payment_system:charge(W, <<\"req_1\">>, 250, usd), payment_system:stop_system(W), Res end">>,
+      expected => <<"{ok, #{amount => 250, currency => usd, status => settled, tx_id => <<\"req_1\">>}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
+
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try
     {ok, W2} = payment_system:start_system(3),
-    {ok, _} = payment_system:charge(W2, <<"req_1">>, 250, usd),
-    Res2 = payment_system:charge(W2, <<"req_1">>, 250, usd),
+    {ok, _} = payment_system:charge(W2, <<"req_dup">>, 100, usd),
+    Res2 = payment_system:charge(W2, <<"req_dup">>, 100, usd),
     payment_system:stop_system(W2),
     case Res2 of
-        {ok, {already_processed, #{tx_id := <<"req_1">>}}} ->
-            #{call_str => <<"payment_system:charge(W2, <<\"req_1\">>, 250, usd) [idempotent retry]">>,
-              expected => <<"{ok, {already_processed, #{tx_id => <<\"req_1\">>, ...}}}">>,
+        {ok, {already_processed, #{tx_id := <<"req_dup">>, amount := 100, currency := usd, status := settled}}} ->
+            #{call_str => <<"begin {ok, W} = payment_system:start_system(3), {ok, _} = payment_system:charge(W, <<\"req_dup\">>, 100, usd), Res = payment_system:charge(W, <<\"req_dup\">>, 100, usd), payment_system:stop_system(W), Res end">>,
+              expected => <<"{ok, {already_processed, #{amount => 100, currency => usd, status => settled, tx_id => <<\"req_dup\">>}}}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res2]))),
               passed => true,
               time_ms => erlang:system_time(millisecond) - T2_Start};
         Other2 ->
-            #{call_str => <<"payment_system:charge(...)">>, expected => <<"{ok, {already_processed, ...}}">>,
+            #{call_str => <<"begin {ok, W} = payment_system:start_system(3), {ok, _} = payment_system:charge(W, <<\"req_dup\">>, 100, usd), Res = payment_system:charge(W, <<\"req_dup\">>, 100, usd), payment_system:stop_system(W), Res end">>,
+              expected => <<"{ok, {already_processed, #{amount => 100, currency => usd, status => settled, tx_id => <<\"req_dup\">>}}}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
     end
 catch C2:R2 ->
-    #{call_str => <<"payment_system idempotent test">>, expected => <<"{ok, {already_processed, ...}}">>,
+    #{call_str => <<"begin {ok, W} = payment_system:start_system(3), {ok, _} = payment_system:charge(W, <<\"req_dup\">>, 100, usd), Res = payment_system:charge(W, <<\"req_dup\">>, 100, usd), payment_system:stop_system(W), Res end">>,
+      expected => <<"{ok, {already_processed, #{amount => 100, currency => usd, status => settled, tx_id => <<\"req_dup\">>}}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res, T2_Res],
+
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    {ok, W3} = payment_system:start_system(3),
+    {ok, _} = payment_system:charge(W3, <<"req_saved">>, 50, eur),
+    {ok, OldW, NewW} = payment_system:trigger_crash_test(W3),
+    Txs = payment_system:get_processed_txs(W3),
+    payment_system:stop_system(W3),
+    Res3 = {OldW =/= NewW, maps:is_key(<<"req_saved">>, Txs)},
+    Expected3 = {true, true},
+    #{call_str => <<"begin {ok, W} = payment_system:start_system(3), {ok, _} = payment_system:charge(W, <<\"req_saved\">>, 50, eur), {ok, OldW, NewW} = payment_system:trigger_crash_test(W), Txs = payment_system:get_processed_txs(W), payment_system:stop_system(W), {OldW =/= NewW, maps:is_key(<<\"req_saved\">>, Txs)} end">>,
+      expected => <<"{true, true}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res3]))),
+      passed => Res3 =:= Expected3,
+      time_ms => erlang:system_time(millisecond) - T3_Start}
+catch C3:R3 ->
+    #{call_str => <<"begin {ok, W} = payment_system:start_system(3), {ok, _} = payment_system:charge(W, <<\"req_saved\">>, 50, eur), {ok, OldW, NewW} = payment_system:trigger_crash_test(W), Txs = payment_system:get_processed_txs(W), payment_system:stop_system(W), {OldW =/= NewW, maps:is_key(<<\"req_saved\">>, Txs)} end">>,
+      expected => <<"{true, true}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
