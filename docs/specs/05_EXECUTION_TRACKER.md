@@ -3596,6 +3596,28 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l03` and its 3 negative regression tests in `25.55s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed `ch06-l03 | 3/3 tests passed`.
   - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
 
+## Phase 228: Spec 04 / Spec 08 Anti-Spoiler Audit, Bidirectional Process Links & Cascading Exit Signals, AST Hardening & Live Tri-Verification of Chapter 6 Lecture 4 (`ch06-l04`)
+
+- [x] **228.1: Spec 04/08 Pedagogical Anti-Spoiler Audit & Erlang/AST Hardening (`ch06-l04`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch06.ts` (`ch06-l04`, `linked_pipeline.erl`) against Spec 04, 07, and 08.
+  - Re-ordered Spec 04 layout so `## Official Erlang Docs & Function Reference` (`link/1`, `spawn_link/1,3`) precedes `## Parallel Worked Example`.
+  - Replaced 1-to-1 transliteration clone (`sensor_ingestion_pair.erl`) with domain-distinct cryptographic session tunnel `## Parallel Worked Example` (`crypto_session_tunnel.erl`) across 4 execution steps (`Step 1: Atomic Bidirectional Coupling (open_tunnel/0)`, `Step 2: Multi-Stage Pipelining with Correlation References (process_packet/2)`, `Step 3: Clean Process Retirement vs. Peer Survival (close_tunnel_clean/1)`, `Step 4: Fate-Sharing on Abnormal Crashes (trigger_tunnel_panic/2)`) accompanied by deep architectural notes on link symmetry, race avoidance via `spawn_link/1`, and normal vs abnormal exit signal semantics.
+  - Formatted `## Assignment Specification` with strict 3-part layout (`Input`, `Behavior`, `Examples`) across all 6 exported functions (`start_linked_pipeline/0`, `compute/2`, `stop_stage1_normal/1`, `crash_stage1/2`, `worker1_loop/1`, `worker2_loop/0`) with zero Erlang syntax leaks or code backticks in prompt bullets.
+  - Aligned 10/10 plain-English `%% @doc` contracts across all 4 code representations (`files[0].content`, `starterCode`, `solutionFiles['src/linked_pipeline.erl']`, `solutionCode`).
+  - Scaffolding starter pack with `_` prefixed parameters (`_Worker1Pid`, `_Number`, `_Reason`, `_Worker2`) compiling cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0).
+  - Configured `astRules` (`requiredCalls: ['erlang:spawn_link/1', 'erlang:link/1']`).
+- [x] **228.2: Go Orchestrator Runner & AST Verification Hardening (`ch06-l04`)**:
+  - Upgraded `buildChapterRunScript` in `services/orchestrator/internal/bridge/erl_runner_chapters.go` to evaluate all 3 visible tests (`T1_Res`: two-stage computation, `T2_Res`: normal exit leaves linked peer alive, `T3_Res`: abnormal crash propagates across link) and return `AllResults = [T1_Res, T2_Res, T3_Res]` with `process_flag(trap_exit, true)` safety.
+  - Decoupled catch variables (`Err1`–`Err4`) from try-body result variables (`R1`–`R4`) to avoid Erlang `unsafe_var` scope traps.
+  - Hardened `buildChapterVerificationScript` with 5 stages (`compile_and_export_audit`, `ast_link_invariants`, `two_stage_computation`, `normal_exit_isolation`, `cascading_exit_propagation`) with `process_flag(trap_exit, true)` cascading crash protection.
+  - Expanded `services/orchestrator/internal/bridge/ch06_verification_test.go` with positive verification (100% score, 5/5 stages passed, 3/3 visible tests verified) and 3 negative regression subtests (`ch06-l04_Negative_Missing_link_or_spawn_link_AST_Violation`, `ch06-l04_Negative_Missing_Export`, `ch06-l04_Negative_Broken_Link_Peer_Survives_Crash`).
+- [x] **228.3: Mandatory Live Tri-Verification & Full Test Suite Certification (`ch06-l04`)**:
+  - **Parallel Worked Example (`crypto_session_tunnel.erl`)**: Extracted directly from `ch06.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with all 4 phases passing cleanly (`ALL PWE OTP CHECKS PASSED`).
+  - **Starter Pack (`linked_pipeline.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0), loads cleanly on OTP, and safely fails tests without compiler or syntax crashes.
+  - **Solution Pack (`linked_pipeline.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/linked_pipeline.erl'] === solutionCode`), compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `required_remote_calls => [{erlang, link, 1}, {erlang, spawn_link, 1}]`, and passed 100% of visible test cases (3/3 passed).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l04` and its 3 negative regression tests in `32.38s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed `ch06-l04 | 3/3 tests passed`.
+  - **Workspace Compilers**: `npx tsc --noEmit` and `npm run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) exited `0`.
+
 
 
 

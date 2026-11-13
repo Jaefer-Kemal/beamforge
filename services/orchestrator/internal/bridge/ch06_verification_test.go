@@ -194,6 +194,68 @@ process_transaction_log(LinesList, CloseNotifyPid)
     end.
 `
 
+	linkedPipelineSolution := `-module(linked_pipeline).
+-export([
+    start_linked_pipeline/0,
+    compute/2,
+    stop_stage1_normal/1,
+    crash_stage1/2,
+    worker1_loop/1,
+    worker2_loop/0
+]).
+
+start_linked_pipeline() ->
+    Worker2 = spawn(fun() -> worker2_loop() end),
+    Worker1 = spawn_link(fun() ->
+        link(Worker2),
+        worker1_loop(Worker2)
+    end),
+    {ok, Worker1, Worker2}.
+
+compute(Worker1Pid, Number) when is_pid(Worker1Pid), is_number(Number) ->
+    Ref = make_ref(),
+    Worker1Pid ! {transform, self(), Ref, Number},
+    receive
+        {Ref, Result} -> {ok, Result}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+stop_stage1_normal(Worker1Pid) when is_pid(Worker1Pid) ->
+    Ref = make_ref(),
+    Worker1Pid ! {stop_normal, self(), Ref},
+    receive
+        {Ref, ok} -> ok
+    after 1000 ->
+        {error, timeout}
+    end.
+
+crash_stage1(Worker1Pid, Reason) when is_pid(Worker1Pid) ->
+    Worker1Pid ! {crash, Reason},
+    ok.
+
+worker1_loop(Worker2) when is_pid(Worker2) ->
+    receive
+        {transform, Caller, Ref, Value} when is_number(Value) ->
+            Doubled = Value * 2,
+            Worker2 ! {transform_stage2, Caller, Ref, Doubled},
+            worker1_loop(Worker2);
+        {stop_normal, From, Ref} ->
+            From ! {Ref, ok},
+            exit(normal);
+        {crash, Reason} ->
+            exit(Reason)
+    end.
+
+worker2_loop() ->
+    receive
+        {transform_stage2, Caller, Ref, Doubled} when is_number(Doubled) ->
+            Squared = Doubled * Doubled,
+            Caller ! {Ref, Squared},
+            worker2_loop()
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -224,6 +286,14 @@ process_transaction_log(LinesList, CloseNotifyPid)
 			name:         "ch06-l03 Guaranteed Resource Cleanup",
 			exerciseID:   "ch06-l03",
 			files:        map[string]string{"src/boundary_parser.erl": boundaryParserSolution},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 3,
+		},
+		{
+			name:         "ch06-l04 Bidirectional Process Links",
+			exerciseID:   "ch06-l04",
+			files:        map[string]string{"src/linked_pipeline.erl": linkedPipelineSolution},
 			wantScore:    100,
 			wantStages:   5,
 			visibleCount: 3,
@@ -1175,6 +1245,266 @@ process_transaction_log(LinesList, CloseNotifyPid) when is_list(LinesList), is_p
 		}
 		if !cleanupFailed {
 			t.Errorf("Expected guaranteed_resource_cleanup to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch06-l04 ──────────────────────────────
+	t.Run("ch06-l04 Negative Missing link or spawn_link AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch06-l04"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/linked_pipeline.erl": `-module(linked_pipeline).
+-export([
+    start_linked_pipeline/0,
+    compute/2,
+    stop_stage1_normal/1,
+    crash_stage1/2,
+    worker1_loop/1,
+    worker2_loop/0
+]).
+
+%% VIOLATION: Uses raw spawn, never calls link/1 or spawn_link/1
+start_linked_pipeline() ->
+    Worker2 = spawn(fun() -> worker2_loop() end),
+    Worker1 = spawn(fun() -> worker1_loop(Worker2) end),
+    {ok, Worker1, Worker2}.
+
+compute(Worker1Pid, Number) ->
+    Ref = make_ref(),
+    Worker1Pid ! {transform, self(), Ref, Number},
+    receive
+        {Ref, Result} -> {ok, Result}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+stop_stage1_normal(Worker1Pid) ->
+    Ref = make_ref(),
+    Worker1Pid ! {stop_normal, self(), Ref},
+    receive
+        {Ref, ok} -> ok
+    after 1000 ->
+        {error, timeout}
+    end.
+
+crash_stage1(Worker1Pid, Reason) ->
+    Worker1Pid ! {crash, Reason},
+    ok.
+
+worker1_loop(Worker2) ->
+    receive
+        {transform, Caller, Ref, Value} ->
+            Worker2 ! {transform_stage2, Caller, Ref, Value * 2},
+            worker1_loop(Worker2);
+        {stop_normal, From, Ref} ->
+            From ! {Ref, ok},
+            exit(normal);
+        {crash, Reason} ->
+            exit(Reason)
+    end.
+
+worker2_loop() ->
+    receive
+        {transform_stage2, Caller, Ref, Doubled} ->
+            Caller ! {Ref, Doubled * Doubled},
+            worker2_loop()
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l04", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing link AST violation, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_link_invariants" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_link_invariants to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l04 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-export-ch06-l04"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/linked_pipeline.erl": `-module(linked_pipeline).
+-export([
+    start_linked_pipeline/0,
+    compute/2,
+    stop_stage1_normal/1,
+    worker1_loop/1,
+    worker2_loop/0
+]).
+
+start_linked_pipeline() ->
+    Worker2 = spawn(fun() -> worker2_loop() end),
+    Worker1 = spawn_link(fun() ->
+        link(Worker2),
+        worker1_loop(Worker2)
+    end),
+    {ok, Worker1, Worker2}.
+
+compute(Worker1Pid, Number) ->
+    Ref = make_ref(),
+    Worker1Pid ! {transform, self(), Ref, Number},
+    receive {Ref, Result} -> {ok, Result} after 1000 -> {error, timeout} end.
+
+stop_stage1_normal(Worker1Pid) ->
+    Ref = make_ref(),
+    Worker1Pid ! {stop_normal, self(), Ref},
+    receive {Ref, ok} -> ok after 1000 -> {error, timeout} end.
+
+%% MISSING: crash_stage1/2 is not exported!
+crash_stage1(Worker1Pid, Reason) ->
+    Worker1Pid ! {crash, Reason},
+    ok.
+
+worker1_loop(Worker2) ->
+    receive
+        {transform, Caller, Ref, Value} ->
+            Worker2 ! {transform_stage2, Caller, Ref, Value * 2},
+            worker1_loop(Worker2);
+        {stop_normal, From, Ref} ->
+            From ! {Ref, ok},
+            exit(normal);
+        {crash, Reason} ->
+            exit(Reason)
+    end.
+
+worker2_loop() ->
+    receive
+        {transform_stage2, Caller, Ref, Doubled} ->
+            Caller ! {Ref, Doubled * Doubled},
+            worker2_loop()
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l04", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export, but got PASSED")
+		}
+		var exportFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				exportFailed = true
+				break
+			}
+		}
+		if !exportFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l04 Negative Broken Link Peer Survives Crash", func(t *testing.T) {
+		sessionID := "test-neg-link-ch06-l04"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/linked_pipeline.erl": `-module(linked_pipeline).
+-export([
+    start_linked_pipeline/0,
+    compute/2,
+    stop_stage1_normal/1,
+    crash_stage1/2,
+    worker1_loop/1,
+    worker2_loop/0
+]).
+
+%% BUG: Dummy link to self, NOT to Worker2! Worker2 will survive abnormal crash!
+start_linked_pipeline() ->
+    Worker2 = spawn(fun() -> worker2_loop() end),
+    Worker1 = spawn_link(fun() ->
+        link(self()),
+        worker1_loop(Worker2)
+    end),
+    {ok, Worker1, Worker2}.
+
+compute(Worker1Pid, Number) ->
+    Ref = make_ref(),
+    Worker1Pid ! {transform, self(), Ref, Number},
+    receive {Ref, Result} -> {ok, Result} after 1000 -> {error, timeout} end.
+
+stop_stage1_normal(Worker1Pid) ->
+    Ref = make_ref(),
+    Worker1Pid ! {stop_normal, self(), Ref},
+    receive {Ref, ok} -> ok after 1000 -> {error, timeout} end.
+
+crash_stage1(Worker1Pid, Reason) ->
+    Worker1Pid ! {crash, Reason},
+    ok.
+
+worker1_loop(Worker2) ->
+    receive
+        {transform, Caller, Ref, Value} ->
+            Worker2 ! {transform_stage2, Caller, Ref, Value * 2},
+            worker1_loop(Worker2);
+        {stop_normal, From, Ref} ->
+            From ! {Ref, ok},
+            exit(normal);
+        {crash, Reason} ->
+            exit(Reason)
+    end.
+
+worker2_loop() ->
+    receive
+        {transform_stage2, Caller, Ref, Doubled} ->
+            Caller ! {Ref, Doubled * Doubled},
+            worker2_loop()
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l04", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on broken link peer survival, but got PASSED")
+		}
+		var cascadeFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "cascading_exit_propagation" && st.Status == "failed" {
+				cascadeFailed = true
+				break
+			}
+		}
+		if !cascadeFailed {
+			t.Errorf("Expected cascading_exit_propagation to fail, stages: %+v", report.Stages)
 		}
 	})
 }

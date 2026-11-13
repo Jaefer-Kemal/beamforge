@@ -1345,79 +1345,6 @@ Every exit signal carries an **exit reason**. The behavior of linked peers depen
 > [!warning] Fault-Tolerance Trap: Linking to Ephemeral Workers
 > If a long-running service process links to short-lived background worker processes using \`spawn_link/1\`, any abnormal crash in a worker will instantly kill the main service process! In Lesson 6.6, you will learn how to use unidirectional **Monitors** when you want to observe worker termination without sharing its fate.
 
-## Parallel Worked Example
-
-The following module coordinates an IoT sensor ingestion pair, linking a calibrating reader to a metrics aggregator process:
-
-\`\`\`erlang
--module(sensor_ingestion_pair).
--export([
-    start_sensor_pair/0,
-    poll_reading/2,
-    retire_reader_clean/1,
-    abort_reader_fault/2,
-    reader_loop/1,
-    aggregator_loop/0
-]).
-
-%% @doc Spawns linked sensor reader and aggregator worker processes.
-start_sensor_pair() ->
-    Aggregator = spawn(fun() -> aggregator_loop() end),
-    Reader = spawn_link(fun() ->
-        link(Aggregator),
-        reader_loop(Aggregator)
-    end),
-    {ok, Reader, Aggregator}.
-
-%% @doc Queries the two-stage sensor pipeline with a raw reading.
-poll_reading(ReaderPid, RawValue) ->
-    Ref = make_ref(),
-    ReaderPid ! {sample, self(), Ref, RawValue},
-    receive
-        {Ref, Result} -> {ok, Result}
-    after 1000 ->
-        {error, timeout}
-    end.
-
-%% @doc Gracefully retires the reader via normal exit; aggregator survives.
-retire_reader_clean(ReaderPid) ->
-    Ref = make_ref(),
-    ReaderPid ! {retire, self(), Ref},
-    receive
-        {Ref, ok} -> ok
-    after 1000 ->
-        {error, timeout}
-    end.
-
-%% @doc Simulates an abnormal sensor hardware fault; tears down aggregator.
-abort_reader_fault(ReaderPid, FaultReason) ->
-    ReaderPid ! {sensor_fault, FaultReason},
-    ok.
-
-%% @doc Stage 1 worker: applies calibration offset and forwards to aggregator.
-reader_loop(AggregatorPid) ->
-    receive
-        {sample, Caller, Ref, RawVal} when is_number(RawVal) ->
-            Calibrated = RawVal + 10,
-            AggregatorPid ! {aggregate, Caller, Ref, Calibrated},
-            reader_loop(AggregatorPid);
-        {retire, From, Ref} ->
-            From ! {Ref, ok},
-            exit(normal);
-        {sensor_fault, FaultReason} ->
-            exit(FaultReason)
-    end.
-
-%% @doc Stage 2 worker: finalizes calculation and replies to caller.
-aggregator_loop() ->
-    receive
-        {aggregate, Caller, Ref, Calibrated} ->
-            Smoothed = Calibrated * 3,
-            Caller ! {Ref, Smoothed},
-            aggregator_loop()
-    end.
-\`\`\`
-
 ## Official Erlang Docs & Function Reference
 
 \`\`\`erlang
@@ -1427,54 +1354,148 @@ spawn_link(Fun) -> pid()
 spawn_link(Module, Function, Args) -> pid()
 \`\`\`
 
+## Parallel Worked Example
+
+The following module implements an authenticated cryptographic session tunnel, bidirectionally linking an ingress session unpacker to an egress message digest and signer worker:
+
+\`\`\`erlang
+-module(crypto_session_tunnel).
+-export([
+    open_tunnel/0,
+    process_packet/2,
+    close_tunnel_clean/1,
+    trigger_tunnel_panic/2,
+    unpacker_loop/1,
+    signer_loop/0
+]).
+
+%% @doc Step 1: Spawns the egress signer, then atomically spawns and links the ingress unpacker.
+%% The unpacker establishes a bidirectional link to the signer, creating a fate-sharing tunnel.
+open_tunnel() ->
+    Signer = spawn(fun() -> signer_loop() end),
+    Unpacker = spawn_link(fun() ->
+        link(Signer),
+        unpacker_loop(Signer)
+    end),
+    {ok, Unpacker, Signer}.
+
+%% @doc Step 2: Synchronously transforms and hashes an ingress payload through the two workers.
+process_packet(UnpackerPid, PacketBin) when is_pid(UnpackerPid), is_binary(PacketBin) ->
+    Ref = make_ref(),
+    UnpackerPid ! {digest_packet, self(), Ref, PacketBin},
+    receive
+        {Ref, Result} -> {ok, Result}
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Step 3: Gracefully closes the ingress unpacker with exit(normal).
+%% Because the exit reason is 'normal', the linked egress signer ignores the signal and survives.
+close_tunnel_clean(UnpackerPid) when is_pid(UnpackerPid) ->
+    Ref = make_ref(),
+    UnpackerPid ! {retire_session, self(), Ref},
+    receive
+        {Ref, ok} -> ok
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Step 4: Triggers an abnormal fault in the unpacker with exit(Reason).
+%% The abnormal exit signal propagates across the link, terminating the egress signer immediately.
+trigger_tunnel_panic(UnpackerPid, Reason) when is_pid(UnpackerPid) ->
+    UnpackerPid ! {panic, Reason},
+    ok.
+
+%% @doc Stage 1 worker loop: wraps payload in envelope and forwards to signer.
+unpacker_loop(SignerPid) when is_pid(SignerPid) ->
+    receive
+        {digest_packet, Caller, Ref, PacketBin} when is_binary(PacketBin) ->
+            Envelope = <<"[SESSION_V1]::", PacketBin/binary>>,
+            SignerPid ! {sign_envelope, Caller, Ref, Envelope},
+            unpacker_loop(SignerPid);
+        {retire_session, From, Ref} ->
+            From ! {Ref, ok},
+            exit(normal);
+        {panic, Reason} ->
+            exit(Reason)
+    end.
+
+%% @doc Stage 2 worker loop: computes MD5 digest of forwarded envelope and replies to caller.
+signer_loop() ->
+    receive
+        {sign_envelope, Caller, Ref, Envelope} when is_binary(Envelope) ->
+            Digest = erlang:md5(Envelope),
+            Caller ! {Ref, Digest},
+            signer_loop()
+    end.
+\`\`\`
+
+### Architectural Breakdown:
+1. **Step 1: Atomic Bidirectional Coupling (\`open_tunnel/0\`)**: \`spawn_link/1\` is used to eliminate the race condition where a worker crashes before a subsequent link command can execute. \`Worker1\` immediately links to \`Worker2\` using \`link/1\`, establishing symmetric fate-sharing between the workers.
+2. **Step 2: Multi-Stage Pipelining with Correlation References (\`process_packet/2\`)**: Illustrates asynchronous request forwarding across worker boundaries. The caller tags the request with \`make_ref/0\`, allowing the Stage 2 worker to reply directly to the originating process without bottlenecking Stage 1.
+3. **Step 3: Clean Process Retirement vs. Peer Survival (\`close_tunnel_clean/1\`)**: Demonstrates that terminating with \`exit(normal)\` sends a clean exit signal. Standard linked peers completely ignore \`normal\` signals and continue executing uninterrupted.
+4. **Step 4: Fate-Sharing on Abnormal Crashes (\`trigger_tunnel_panic/2\`)**: Demonstrates that terminating with an abnormal exit reason propagates an exit signal across the link, terminating all linked peers immediately and preventing zombie processes from leaking system resources.
+
 ## Assignment Specification
 
 Implement \`src/linked_pipeline.erl\` exporting \`start_linked_pipeline/0\`, \`compute/2\`, \`stop_stage1_normal/1\`, \`crash_stage1/2\`, \`worker1_loop/1\`, and \`worker2_loop/0\`:
 
 ### 1. \`start_linked_pipeline/0\`
-- **Input**: None.
+- **Input**: None (\`()\`).
 - **Behavior**:
-  1. Spawns \`Worker2\` executing \`worker2_loop/0\`.
-  2. Atomically spawns and links \`Worker1\` via \`spawn_link/1\`. Inside its initialization, \`Worker1\` links to \`Worker2\` (\`link(Worker2)\`) and begins executing \`worker1_loop(Worker2)\`.
-  3. Returns \`{ok, Worker1, Worker2}\`.
+  - Spawns Stage 2 worker executing \`worker2_loop/0\`.
+  - Atomically spawns and links Stage 1 worker using \`spawn_link/1\`.
+  - Inside Stage 1 initialization, establishes a bidirectional link to Stage 2 using \`link/1\` and begins executing \`worker1_loop/1\` passing Stage 2 process identifier.
+  - Returns \`{ok, Worker1Pid, Worker2Pid}\`.
 - **Examples**:
-  - \`{ok, W1, W2} = linked_pipeline:start_linked_pipeline()\` returns the process identifiers of both workers.
+  - \`linked_pipeline:start_linked_pipeline()\` returns \`{ok, <0.120.0>, <0.121.0>}\`.
 
 ### 2. \`compute/2\`
-- **Input**: \`Worker1Pid\` (pid of Stage 1 worker), \`Number\` (numeric input value).
+- **Input**: Process identifier of Stage 1 worker (\`pid()\`), numeric operand (\`number()\`).
 - **Behavior**:
-  - Sends a computation request with a unique reference to \`Worker1Pid\`.
-  - \`Worker1\` multiplies \`Number\` by 2 (\`Number * 2\`) and forwards the intermediate result to \`Worker2\`.
-  - \`Worker2\` squares the forwarded value (\`Doubled * Doubled\`) and replies directly to the caller.
-  - Awaits the reply up to 1,000ms. Returns \`{ok, FinalResult}\` on success, or \`{error, timeout}\` on expiration.
+  - Generates a unique correlation reference.
+  - Sends a transformation message to Stage 1 worker.
+  - Stage 1 doubles the numeric operand and forwards the intermediate value to Stage 2.
+  - Stage 2 squares the forwarded value and dispatches the final computed product directly back to the calling process tagged with the correlation reference.
+  - Awaits the reply for up to 1,000 milliseconds. Returns \`{ok, FinalResult}\` on success, or \`{error, timeout}\` on expiration.
 - **Examples**:
-  - \`linked_pipeline:compute(W1, 3)\` returns \`{ok, 36}\` ($[3 \\times 2]^2 = 36$).
-  - \`linked_pipeline:compute(W1, 5)\` returns \`{ok, 100}\` ($[5 \\times 2]^2 = 100$).
+  - \`linked_pipeline:compute(W1, 3)\` returns \`{ok, 36}\`.
+  - \`linked_pipeline:compute(W1, 5)\` returns \`{ok, 100}\`.
 
 ### 3. \`stop_stage1_normal/1\`
-- **Input**: \`Worker1Pid\` (pid of Stage 1 worker).
+- **Input**: Process identifier of Stage 1 worker (\`pid()\`).
 - **Behavior**:
-  - Sends a normal stop request to \`Worker1Pid\` and awaits acknowledgement within 1,000ms.
-  - \`Worker1\` replies to the caller and terminates with \`exit(normal)\`.
-  - Because \`normal\` exit signals represent successful completion, the linked \`Worker2\` process completely ignores the signal and remains alive. Returns \`ok\`.
+  - Sends a synchronous normal termination request with a correlation reference to Stage 1 worker.
+  - Stage 1 replies with confirmation and terminates by evaluating a normal exit signal.
+  - Because normal exit signals represent clean completion, the linked Stage 2 worker ignores the signal and survives.
+  - Awaits confirmation for up to 1,000 milliseconds and returns \`ok\` on success, or \`{error, timeout}\` on expiration.
 - **Examples**:
-  - \`linked_pipeline:stop_stage1_normal(W1)\` returns \`ok\`, leaving \`W1\` dead and \`W2\` alive.
+  - \`linked_pipeline:stop_stage1_normal(W1)\` returns \`ok\`, leaving Stage 1 dead and Stage 2 alive.
 
 ### 4. \`crash_stage1/2\`
-- **Input**: \`Worker1Pid\` (pid of Stage 1 worker), \`Reason\` (abnormal exit reason term).
+- **Input**: Process identifier of Stage 1 worker (\`pid()\`), abnormal exit reason term (\`term()\`).
 - **Behavior**:
-  - Instructs \`Worker1Pid\` to terminate with \`exit(Reason)\`. Returns \`ok\`.
-  - Because \`Reason\` is abnormal, the resulting exit signal propagates across the bidirectional link to \`Worker2\`, causing \`Worker2\` to terminate immediately as well (guaranteeing zero zombie leaks).
+  - Asynchronously sends a crash trigger carrying the abnormal exit reason to Stage 1 worker. Returns \`ok\`.
+  - Stage 1 terminates by evaluating an exit with the specified abnormal reason.
+  - Because the reason is abnormal, the resulting exit signal propagates across the bidirectional link to Stage 2, terminating Stage 2 immediately as well.
 - **Examples**:
-  - \`linked_pipeline:crash_stage1(W1, fatal_crash)\` terminates both \`W1\` and \`W2\`.
+  - \`linked_pipeline:crash_stage1(W1, fatal_crash)\` terminates both Stage 1 and Stage 2.
 
-### 5. \`worker1_loop/1\` & \`worker2_loop/0\`
-- **Input**: \`worker1_loop\` takes the \`Worker2\` PID; \`worker2_loop\` takes no arguments.
-- **Behavior**: Tail-recursive message handling loops implementing the two computation stages, request forwarding, normal exit reply, and abnormal crash exit.
+### 5. \`worker1_loop/1\`
+- **Input**: Process identifier of Stage 2 worker (\`pid()\`).
+- **Behavior**: Tail-recursive message loop receiving transformation requests (doubling numbers and forwarding to Stage 2), normal stop requests (acknowledging and exiting normally), and crash requests (exiting with the specified abnormal reason).
+- **Examples**:
+  - Loops continuously until receiving a termination request.
+
+### 6. \`worker2_loop/0\`
+- **Input**: None (\`()\`).
+- **Behavior**: Tail-recursive message loop receiving forwarded intermediate values from Stage 1, squaring the value, and replying directly to the originating caller.
+- **Examples**:
+  - Loops continuously until its linked peer crashes abnormally or until explicitly shut down.
 
 ## Rules & Verification Constraints
 
-- Must export all specified functions.
+- Must export \`start_linked_pipeline/0\`, \`compute/2\`, \`stop_stage1_normal/1\`, \`crash_stage1/2\`, \`worker1_loop/1\`, and \`worker2_loop/0\`.
 - Enforced AST rules: \`requiredCalls: ["erlang:spawn_link/1", "erlang:link/1"]\`.
 `,
     mentalModelCheck: {
@@ -1564,19 +1585,19 @@ start_linked_pipeline() ->
     ok.
 
 %% @doc Dispatches a number through the two-stage pipeline, returning the final transformed result.
-compute(Worker1Pid, Number) ->
+compute(_Worker1Pid, _Number) ->
     ok.
 
 %% @doc Stops Stage 1 with exit(normal); Stage 2 ignores the normal exit signal and survives.
-stop_stage1_normal(Worker1Pid) ->
+stop_stage1_normal(_Worker1Pid) ->
     ok.
 
 %% @doc Terminates Stage 1 with an abnormal reason; the exit signal tears down Stage 2 across the link.
-crash_stage1(Worker1Pid, Reason) ->
+crash_stage1(_Worker1Pid, _Reason) ->
     ok.
 
 %% @doc Stage 1 worker loop: doubles numbers, forwards to Stage 2, and handles exit requests.
-worker1_loop(Worker2) ->
+worker1_loop(_Worker2) ->
     ok.
 
 %% @doc Stage 2 worker loop: squares forwarded values and returns the result to the caller.
@@ -1593,6 +1614,7 @@ worker2_loop() ->
     worker2_loop/0
 ]).
 
+%% @doc Spawns a two-stage linked pipeline, establishing bidirectional links between workers.
 start_linked_pipeline() ->
     Worker2 = spawn(fun() -> worker2_loop() end),
     Worker1 = spawn_link(fun() ->
@@ -1601,7 +1623,8 @@ start_linked_pipeline() ->
     end),
     {ok, Worker1, Worker2}.
 
-compute(Worker1Pid, Number) ->
+%% @doc Dispatches a number through the two-stage pipeline, returning the final transformed result.
+compute(Worker1Pid, Number) when is_pid(Worker1Pid), is_number(Number) ->
     Ref = make_ref(),
     Worker1Pid ! {transform, self(), Ref, Number},
     receive
@@ -1610,7 +1633,8 @@ compute(Worker1Pid, Number) ->
         {error, timeout}
     end.
 
-stop_stage1_normal(Worker1Pid) ->
+%% @doc Stops Stage 1 with exit(normal); Stage 2 ignores the normal exit signal and survives.
+stop_stage1_normal(Worker1Pid) when is_pid(Worker1Pid) ->
     Ref = make_ref(),
     Worker1Pid ! {stop_normal, self(), Ref},
     receive
@@ -1619,11 +1643,13 @@ stop_stage1_normal(Worker1Pid) ->
         {error, timeout}
     end.
 
-crash_stage1(Worker1Pid, Reason) ->
+%% @doc Terminates Stage 1 with an abnormal reason; the exit signal tears down Stage 2 across the link.
+crash_stage1(Worker1Pid, Reason) when is_pid(Worker1Pid) ->
     Worker1Pid ! {crash, Reason},
     ok.
 
-worker1_loop(Worker2) ->
+%% @doc Stage 1 worker loop: doubles numbers, forwards to Stage 2, and handles exit requests.
+worker1_loop(Worker2) when is_pid(Worker2) ->
     receive
         {transform, Caller, Ref, Value} when is_number(Value) ->
             Doubled = Value * 2,
@@ -1636,9 +1662,10 @@ worker1_loop(Worker2) ->
             exit(Reason)
     end.
 
+%% @doc Stage 2 worker loop: squares forwarded values and returns the result to the caller.
 worker2_loop() ->
     receive
-        {transform_stage2, Caller, Ref, Doubled} ->
+        {transform_stage2, Caller, Ref, Doubled} when is_number(Doubled) ->
             Squared = Doubled * Doubled,
             Caller ! {Ref, Squared},
             worker2_loop()
@@ -1663,19 +1690,19 @@ start_linked_pipeline() ->
     ok.
 
 %% @doc Dispatches a number through the two-stage pipeline, returning the final transformed result.
-compute(Worker1Pid, Number) ->
+compute(_Worker1Pid, _Number) ->
     ok.
 
 %% @doc Stops Stage 1 with exit(normal); Stage 2 ignores the normal exit signal and survives.
-stop_stage1_normal(Worker1Pid) ->
+stop_stage1_normal(_Worker1Pid) ->
     ok.
 
 %% @doc Terminates Stage 1 with an abnormal reason; the exit signal tears down Stage 2 across the link.
-crash_stage1(Worker1Pid, Reason) ->
+crash_stage1(_Worker1Pid, _Reason) ->
     ok.
 
 %% @doc Stage 1 worker loop: doubles numbers, forwards to Stage 2, and handles exit requests.
-worker1_loop(Worker2) ->
+worker1_loop(_Worker2) ->
     ok.
 
 %% @doc Stage 2 worker loop: squares forwarded values and returns the result to the caller.
@@ -1695,6 +1722,7 @@ worker2_loop() ->
     worker2_loop/0
 ]).
 
+%% @doc Spawns a two-stage linked pipeline, establishing bidirectional links between workers.
 start_linked_pipeline() ->
     Worker2 = spawn(fun() -> worker2_loop() end),
     Worker1 = spawn_link(fun() ->
@@ -1703,7 +1731,8 @@ start_linked_pipeline() ->
     end),
     {ok, Worker1, Worker2}.
 
-compute(Worker1Pid, Number) ->
+%% @doc Dispatches a number through the two-stage pipeline, returning the final transformed result.
+compute(Worker1Pid, Number) when is_pid(Worker1Pid), is_number(Number) ->
     Ref = make_ref(),
     Worker1Pid ! {transform, self(), Ref, Number},
     receive
@@ -1712,7 +1741,8 @@ compute(Worker1Pid, Number) ->
         {error, timeout}
     end.
 
-stop_stage1_normal(Worker1Pid) ->
+%% @doc Stops Stage 1 with exit(normal); Stage 2 ignores the normal exit signal and survives.
+stop_stage1_normal(Worker1Pid) when is_pid(Worker1Pid) ->
     Ref = make_ref(),
     Worker1Pid ! {stop_normal, self(), Ref},
     receive
@@ -1721,11 +1751,13 @@ stop_stage1_normal(Worker1Pid) ->
         {error, timeout}
     end.
 
-crash_stage1(Worker1Pid, Reason) ->
+%% @doc Terminates Stage 1 with an abnormal reason; the exit signal tears down Stage 2 across the link.
+crash_stage1(Worker1Pid, Reason) when is_pid(Worker1Pid) ->
     Worker1Pid ! {crash, Reason},
     ok.
 
-worker1_loop(Worker2) ->
+%% @doc Stage 1 worker loop: doubles numbers, forwards to Stage 2, and handles exit requests.
+worker1_loop(Worker2) when is_pid(Worker2) ->
     receive
         {transform, Caller, Ref, Value} when is_number(Value) ->
             Doubled = Value * 2,
@@ -1738,9 +1770,10 @@ worker1_loop(Worker2) ->
             exit(Reason)
     end.
 
+%% @doc Stage 2 worker loop: squares forwarded values and returns the result to the caller.
 worker2_loop() ->
     receive
-        {transform_stage2, Caller, Ref, Doubled} ->
+        {transform_stage2, Caller, Ref, Doubled} when is_number(Doubled) ->
             Squared = Doubled * Doubled,
             Caller ! {Ref, Squared},
             worker2_loop()

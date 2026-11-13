@@ -2517,38 +2517,93 @@ init:stop().
 
 	case "ch06-l04":
 		return `
+process_flag(trap_exit, true),
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
     case code:ensure_loaded(linked_pipeline) of
         {module, linked_pipeline} ->
-            {ok, W1, W2} = linked_pipeline:start_linked_pipeline(),
-            {ok, 36} = linked_pipeline:compute(W1, 3),
-            linked_pipeline:crash_stage1(W1, deliberate_failure),
-            timer:sleep(50),
-            Alive1 = is_process_alive(W1),
-            Alive2 = is_process_alive(W2),
-            #{call_str => <<"linked_pipeline cascading exit test">>,
-              expected => <<"{Alive1: false, Alive2: false}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("{~p, ~p}", [Alive1, Alive2]))),
-              passed => (not Alive1) andalso (not Alive2),
+            {ok, W1_1, W2_1} = linked_pipeline:start_linked_pipeline(),
+            {ok, Res1} = linked_pipeline:compute(W1_1, 3),
+            AliveW1_1 = is_process_alive(W1_1),
+            AliveW2_1 = is_process_alive(W2_1),
+            R1 = {Res1, AliveW1_1, AliveW2_1},
+            Exp1 = {36, true, true},
+            #{call_str => <<"linked_pipeline:compute(W1, 3)">>,
+              expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp1]))),
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))),
+              passed => R1 =:= Exp1,
               time_ms => erlang:system_time(millisecond) - T1_Start};
         _ ->
-            case worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000) of
-                {ok, 42} = R1 ->
-                    #{call_str => <<"worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000)">>,
-                      expected => <<"{ok, 42}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [R1]))), passed => true,
-                      time_ms => erlang:system_time(millisecond) - T1_Start};
-                Other1 ->
-                    #{call_str => <<"worker_watcher:run_monitored_task(...)">>, expected => <<"{ok, 42}">>,
-                      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))), passed => false, time_ms => 0}
-            end
+            #{call_str => <<"linked_pipeline:compute(...)">>,
+              expected => <<"{36, true, true}">>,
+              actual => <<"linked_pipeline not loaded">>,
+              passed => false,
+              time_ms => erlang:system_time(millisecond) - T1_Start}
     end
-catch C1:R1 ->
-    #{call_str => <<"linked_pipeline test">>, expected => <<"{false, false}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+catch C1:Err1 ->
+    #{call_str => <<"linked_pipeline:compute(...)">>,
+      expected => <<"{36, true, true}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1])), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res],
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    case code:ensure_loaded(linked_pipeline) of
+        {module, linked_pipeline} ->
+            {ok, W1_2, W2_2} = linked_pipeline:start_linked_pipeline(),
+            ok = linked_pipeline:stop_stage1_normal(W1_2),
+            timer:sleep(60),
+            AliveW1_2 = is_process_alive(W1_2),
+            AliveW2_2 = is_process_alive(W2_2),
+            R2 = {AliveW1_2, AliveW2_2},
+            Exp2 = {false, true},
+            exit(W2_2, shutdown),
+            #{call_str => <<"linked_pipeline:stop_stage1_normal(W1)">>,
+              expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp2]))),
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [R2]))),
+              passed => R2 =:= Exp2,
+              time_ms => erlang:system_time(millisecond) - T2_Start};
+        _ ->
+            #{call_str => <<"linked_pipeline:stop_stage1_normal(...)">>,
+              expected => <<"{false, true}">>,
+              actual => <<"linked_pipeline not loaded">>,
+              passed => false,
+              time_ms => erlang:system_time(millisecond) - T2_Start}
+    end
+catch C2:Err2 ->
+    #{call_str => <<"linked_pipeline:stop_stage1_normal(...)">>,
+      expected => <<"{false, true}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2])), passed => false, time_ms => 0}
+end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    case code:ensure_loaded(linked_pipeline) of
+        {module, linked_pipeline} ->
+            {ok, W1_3, W2_3} = linked_pipeline:start_linked_pipeline(),
+            ok = linked_pipeline:crash_stage1(W1_3, fatal_crash),
+            timer:sleep(60),
+            AliveW1_3 = is_process_alive(W1_3),
+            AliveW2_3 = is_process_alive(W2_3),
+            receive {'EXIT', _, _} -> ok after 0 -> ok end,
+            R3 = {AliveW1_3, AliveW2_3},
+            Exp3 = {false, false},
+            #{call_str => <<"linked_pipeline:crash_stage1(W1, fatal_crash)">>,
+              expected => list_to_binary(lists:flatten(io_lib:format("~p", [Exp3]))),
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [R3]))),
+              passed => R3 =:= Exp3,
+              time_ms => erlang:system_time(millisecond) - T3_Start};
+        _ ->
+            #{call_str => <<"linked_pipeline:crash_stage1(...)">>,
+              expected => <<"{false, false}">>,
+              actual => <<"linked_pipeline not loaded">>,
+              passed => false,
+              time_ms => erlang:system_time(millisecond) - T3_Start}
+    end
+catch C3:Err3 ->
+    #{call_str => <<"linked_pipeline:crash_stage1(...)">>,
+      expected => <<"{false, false}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, Err3])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -8035,12 +8090,7 @@ CompileStage = case code:ensure_loaded(linked_pipeline) of
             Missing -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
         end;
     {error, E1} ->
-        case code:ensure_loaded(worker_watcher) of
-            {module, worker_watcher} ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit (Legacy)">>, status => <<"passed">>, time_ms => 12, details => <<"worker_watcher.erl loaded cleanly.">>};
-            _ ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
-        end
+        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
 S1_Ast = try
     SrcPath = filename:join(["%s", "src", "linked_pipeline.erl"]),
@@ -8058,10 +8108,10 @@ S1_Ast = try
                     #{id => <<"ast_link_invariants">>, title => <<"AST Analysis: link/1 and spawn_link/1 Invariants">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
             end;
         false ->
-            #{id => <<"ast_link_invariants">>, title => <<"AST Analysis">>, status => <<"passed">>, time_ms => 15, details => <<"Legacy skipped.">>}
+            #{id => <<"ast_link_invariants">>, title => <<"AST Analysis">>, status => <<"failed">>, time_ms => 15, details => <<"Source file missing.">>}
     end
-catch C1:R1 ->
-    #{id => <<"ast_link_invariants">>, title => <<"AST Analysis: link/1 and spawn_link/1 Invariants">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
+catch C1:Err1 ->
+    #{id => <<"ast_link_invariants">>, title => <<"AST Analysis: link/1 and spawn_link/1 Invariants">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, Err1]))}
 end,
 S2_Compute = try
     case code:is_loaded(linked_pipeline) of
@@ -8073,10 +8123,10 @@ S2_Compute = try
             true = is_process_alive(W2),
             #{id => <<"two_stage_computation">>, title => <<"Two-Stage Pipeline Forwarding & Transformation">>, status => <<"passed">>, time_ms => 14, details => <<"Numbers cleanly doubled by Stage 1, squared by Stage 2, and returned to caller.">>};
         false ->
-            #{id => <<"two_stage_computation">>, title => <<"Two-Stage Pipeline">>, status => <<"passed">>, time_ms => 14, details => <<"Legacy skipped.">>}
+            #{id => <<"two_stage_computation">>, title => <<"Two-Stage Pipeline">>, status => <<"failed">>, time_ms => 14, details => <<"linked_pipeline not loaded.">>}
     end
-catch C2:R2 ->
-    #{id => <<"two_stage_computation">>, title => <<"Two-Stage Pipeline Forwarding & Transformation">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Compute error: ~p:~p", [C2, R2]))}
+catch C2:Err2 ->
+    #{id => <<"two_stage_computation">>, title => <<"Two-Stage Pipeline Forwarding & Transformation">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Compute error: ~p:~p", [C2, Err2]))}
 end,
 S3_NormalExit = try
     case code:is_loaded(linked_pipeline) of
@@ -8094,19 +8144,22 @@ S3_NormalExit = try
                     #{id => <<"normal_exit_isolation">>, title => <<"Normal Exit Signal Isolation (Peer Remains Alive)">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Unexpected states: ~p", [OtherNorm]))}
             end;
         false ->
-            #{id => <<"normal_exit_isolation">>, title => <<"Normal Exit Isolation">>, status => <<"passed">>, time_ms => 20, details => <<"Legacy skipped.">>}
+            #{id => <<"normal_exit_isolation">>, title => <<"Normal Exit Isolation">>, status => <<"failed">>, time_ms => 20, details => <<"linked_pipeline not loaded.">>}
     end
-catch C3:R3 ->
-    #{id => <<"normal_exit_isolation">>, title => <<"Normal Exit Signal Isolation (Peer Remains Alive)">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Normal exit error: ~p:~p", [C3, R3]))}
+catch C3:Err3 ->
+    #{id => <<"normal_exit_isolation">>, title => <<"Normal Exit Signal Isolation (Peer Remains Alive)">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Normal exit error: ~p:~p", [C3, Err3]))}
 end,
 S4_CascadingExit = try
     case code:is_loaded(linked_pipeline) of
         {file, _} ->
+            OldTrap4 = process_flag(trap_exit, true),
             {ok, W1_Crash, W2_Crash} = linked_pipeline:start_linked_pipeline(),
-            linked_pipeline:crash_stage1(W1_Crash, simulated_fatal_error),
+            ok = linked_pipeline:crash_stage1(W1_Crash, simulated_fatal_error),
             timer:sleep(60),
             Alive1 = is_process_alive(W1_Crash),
             Alive2 = is_process_alive(W2_Crash),
+            receive {'EXIT', _, _} -> ok after 0 -> ok end,
+            process_flag(trap_exit, OldTrap4),
             case {Alive1, Alive2} of
                 {false, false} ->
                     #{id => <<"cascading_exit_propagation">>, title => <<"Bidirectional Exit Link Propagation (Zero Zombie Leaks)">>, status => <<"passed">>, time_ms => 20, details => <<"Crashing Stage 1 propagated an abnormal exit signal that tore down Stage 2 cleanly.">>};
@@ -8114,10 +8167,10 @@ S4_CascadingExit = try
                     #{id => <<"cascading_exit_propagation">>, title => <<"Bidirectional Exit Link Propagation (Zero Zombie Leaks)">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Processes leaked: ~p", [OtherAlive]))}
             end;
         false ->
-            #{id => <<"cascading_exit_propagation">>, title => <<"Cascading Exit Propagation">>, status => <<"passed">>, time_ms => 20, details => <<"Legacy skipped.">>}
+            #{id => <<"cascading_exit_propagation">>, title => <<"Cascading Exit Propagation">>, status => <<"failed">>, time_ms => 20, details => <<"linked_pipeline not loaded.">>}
     end
-catch C4:R4 ->
-    #{id => <<"cascading_exit_propagation">>, title => <<"Bidirectional Exit Link Propagation (Zero Zombie Leaks)">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Crash test error: ~p:~p", [C4, R4]))}
+catch C4:Err4 ->
+    #{id => <<"cascading_exit_propagation">>, title => <<"Bidirectional Exit Link Propagation (Zero Zombie Leaks)">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Crash test error: ~p:~p", [C4, Err4]))}
 end,
 Stages = [CompileStage, S1_Ast, S2_Compute, S3_NormalExit, S4_CascadingExit]
 `, wsDir, wsDir), true
