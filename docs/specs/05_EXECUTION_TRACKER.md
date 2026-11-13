@@ -3694,6 +3694,39 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l07` and its 3 negative regression tests in `62.92s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed 10/10 lessons including `ch06-l07 | 2/2 tests passed` in `15.30s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+## Phase 232: Spec 04 / Spec 08 Anti-Spoiler Audit, Architectural Decision Lab & Building my_gen_server:call/3, AST Hardening & Live Tri-Verification of Chapter 6 Lecture 8 (`ch06-l08`)
+
+- [x] **232.1: Spec 04/08 Pedagogical Anti-Spoiler Audit & Erlang/AST Hardening (`ch06-l08`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch06.ts` (`ch06-l08`, `my_gen_server.erl`) against Spec 04, 07, and 08.
+  - Positioned `## Official Erlang Docs & Function Reference` (`erlang:monitor/2`, `erlang:demonitor/2`, `erlang:make_ref/0`) preceding `## Parallel Worked Example`.
+  - Upgraded Parallel Worked Example to a complete, runnable Distributed Cluster Gateway Client (`cluster_gateway_client.erl`) exporting `evaluate_topology_primitive/1`, `start_mock_gateway/0`, `sync_query_gateway/3`, `async_notify_gateway/2`, `stop_gateway/1`, and `gateway_loop/1`. Accompanied by a 4-step architectural deep dive:
+    - *Step 1: Process Coupling & Topology Evaluation*
+    - *Step 2: Temporary Monitor Attachment & Correlation*
+    - *Step 3: Immediate Crash Interception & Mailbox Cleanliness*
+    - *Step 4: Asynchronous Fire-and-Forget Protocol*
+  - Refactored `## Assignment Specification` to strict 3-part layout (`Input`, `Behavior`, `Examples`) for all 6 exported functions (`choose_primitive/1`, `start/2`, `call/3`, `cast/2`, `stop/1`, `loop/2`) eliminating imperative code statements (`MRef = erlang:monitor(...)`, `erlang:demonitor(MRef, [flush])`) from prompt bullets.
+  - Upgraded starter code (`files[0].content` and `starterCode`) to 100% parity with 10/10 `@doc` contracts, underscore-prefixed unused variables (`_Scenario`, `_CallbackMod`, `_InitArg`, `_ServerPid`, `_Request`, `_Timeout`, `_State`), neutral stubs returning `ok.`, compiling under `erlc.exe -Wall -Werror` with 0 warnings.
+  - Aligned solution pack (`solutionFiles['src/my_gen_server.erl']` and `solutionCode`) with 100% parity, matching `@doc` comments, AST requirements (`erlang:monitor/2`, `erlang:demonitor/2`, `receive_after`), and visible test expectations.
+
+- [x] **232.2: Go Orchestrator Test Suite Hardening (`ch06_verification_test.go` & `erl_runner_chapters.go`)**:
+  - In `erl_runner_chapters.go` (`case "ch06-l08":`):
+    - Aligned `T1_Res` tuple elements and expected call string with `tc-ch06-08-1` in `ch06.ts` (`{my_gen_server:choose_primitive(client_to_server_request), my_gen_server:choose_primitive(tightly_coupled_peers)}` -> `{use_monitor, use_link}`).
+    - Simplified `T2_Res` actual result formatting to match `expected` (`{error, {server_crashed, fatal_database_error}}`).
+  - In `ch06_verification_test.go`:
+    - Defined `const myGenServerSolution = ...`.
+    - Added test case entry for `ch06-l08 Building my_gen_server:call/3` (`wantScore: 100, wantStages: 5, visibleCount: 2`).
+    - Added 3 negative regression subtests for `ch06-l08`:
+      1. `ch06-l08 Negative Missing monitor/demonitor AST Violation`: verifies failure in `ast_otp_gen_invariants` when calls to `monitor/2` or `demonitor/2` are missing.
+      2. `ch06-l08 Negative Missing Export`: verifies failure in `compile_and_export_audit` when `choose_primitive/1` is not exported.
+      3. `ch06-l08 Negative Naive Call Lacks Monitor Crash Detection`: verifies failure in `zero_latency_crash_detection` when caller fails to monitor target server and hangs.
+
+- [x] **232.3: Mandatory Live Tri-Verification & Full Test Suite Certification (`ch06-l08`)**:
+  - **Parallel Worked Example (`cluster_gateway_client.erl`)**: Extracted directly from `ch06.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with all query, cast, stop, and crash detection scenarios passing cleanly.
+  - **Starter Pack (`my_gen_server.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0), loads cleanly on OTP, and safely fails tests without compiler or syntax crashes.
+  - **Solution Pack (`my_gen_server.erl`)**: Verified parity (`files[0].content === starterCode`, `solutionFiles['src/my_gen_server.erl'] === solutionCode`), compiled with `+debug_info -Wall -Werror`, passed `bf_ast_verifier` with `required_remote_calls => [{erlang, monitor, 2}, {erlang, demonitor, 2}]`, and passed 100% of visible test cases (2/2 passed).
+  - **Go Orchestrator & Dynamic Curriculum Tests (`-count=1`)**: `go build ./...` exited `0`; `TestChapter6Verification` passed all subtests including `ch06-l08` and its 3 negative regression tests in `86.65s`; `TEST_CHAPTER=6 TestDynamicVisibleTestsCurriculum` passed 10/10 lessons including `ch06-l08 | 2/2 tests passed` in `14.10s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static pages generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
 
 
 

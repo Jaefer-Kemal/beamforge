@@ -2815,37 +2815,37 @@ init:stop().
 		return `
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try
-    Prim1 = my_gen_server:choose_primitive(tightly_coupled_peers),
-    Prim2 = my_gen_server:choose_primitive(client_to_server_request),
-    Passed = (Prim1 =:= use_link) andalso (Prim2 =:= use_monitor),
-    #{call_str => <<"my_gen_server:choose_primitive(tightly_coupled_peers), choose_primitive(client_to_server_request)">>,
-      expected => <<"{use_link, use_monitor}">>,
+    Prim1 = my_gen_server:choose_primitive(client_to_server_request),
+    Prim2 = my_gen_server:choose_primitive(tightly_coupled_peers),
+    Passed = (Prim1 =:= use_monitor) andalso (Prim2 =:= use_link),
+    #{call_str => <<"{my_gen_server:choose_primitive(client_to_server_request), my_gen_server:choose_primitive(tightly_coupled_peers)}">>,
+      expected => <<"{use_monitor, use_link}">>,
       actual => list_to_binary(lists:flatten(io_lib:format("{~p, ~p}", [Prim1, Prim2]))),
       passed => Passed,
       time_ms => erlang:system_time(millisecond) - T1_Start}
 catch C1:R1 ->
-    #{call_str => <<"my_gen_server:choose_primitive test">>, expected => <<"{use_link, use_monitor}">>,
+    #{call_str => <<"{my_gen_server:choose_primitive(client_to_server_request), my_gen_server:choose_primitive(tightly_coupled_peers)}">>, expected => <<"{use_monitor, use_link}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try
-    P = spawn(fun() -> receive {'$gen_call', {From, MRef}, crash_now} -> exit(fatal_database_error) end end),
+    P = spawn(fun() -> receive {'$gen_call', {From, MRef}, crash} -> exit(fatal_database_error) end end),
     TCallStart = erlang:system_time(millisecond),
-    Res = my_gen_server:call(P, crash_now, 5000),
+    Res = my_gen_server:call(P, crash, 5000),
     Duration = erlang:system_time(millisecond) - TCallStart,
     case Res of
         {error, {server_crashed, fatal_database_error}} ->
-            #{call_str => <<"my_gen_server:call(P, crash_now, 5000)">>,
+            #{call_str => <<"my_gen_server:call(CrashPid, crash, 5000)">>,
               expected => <<"{error, {server_crashed, fatal_database_error}}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p (unblocked in ~p ms)", [Res, Duration]))),
+              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res]))),
               passed => Duration < 200,
               time_ms => erlang:system_time(millisecond) - T2_Start};
         Other2 ->
-            #{call_str => <<"my_gen_server:call(...)">>, expected => <<"{error, {server_crashed, ...}}">>,
+            #{call_str => <<"my_gen_server:call(...)">>, expected => <<"{error, {server_crashed, fatal_database_error}}">>,
               actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))), passed => false, time_ms => 0}
     end
 catch C2:R2 ->
-    #{call_str => <<"my_gen_server:call(...)">>, expected => <<"{error, {server_crashed, ...}}">>,
+    #{call_str => <<"my_gen_server:call(...)">>, expected => <<"{error, {server_crashed, fatal_database_error}}">>,
       actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
 AllResults = [T1_Res, T2_Res],

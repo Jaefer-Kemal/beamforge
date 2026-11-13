@@ -428,6 +428,93 @@ drain_downs(Count) ->
     end.
 `
 
+	const myGenServerSolution = `-module(my_gen_server).
+-export([
+    start/2,
+    call/3,
+    cast/2,
+    stop/1,
+    choose_primitive/1,
+    loop/2
+]).
+
+%% @doc Evaluate an architectural scenario atom and return the recommended failure isolation primitive atom.
+choose_primitive(tightly_coupled_peers)    -> use_link;
+choose_primitive(supervisor_to_worker)     -> use_link_with_trap_exit;
+choose_primitive(client_to_server_request) -> use_monitor;
+choose_primitive(independent_watcher)      -> use_monitor.
+
+%% @doc Spawn and initialize a generic server process executing the callback module lifecycle.
+start(CallbackMod, InitArg) ->
+    InitRef = make_ref(),
+    Parent = self(),
+    _Pid = spawn(fun() ->
+        case CallbackMod:init(InitArg) of
+            {ok, InitialState} ->
+                Parent ! {InitRef, ok, self()},
+                loop(CallbackMod, InitialState);
+            {error, Reason} ->
+                Parent ! {InitRef, error, Reason}
+        end
+    end),
+    receive
+        {InitRef, ok, ServerPid} -> {ok, ServerPid};
+        {InitRef, error, Reason} -> {error, Reason}
+    after 1000 ->
+        {error, init_timeout}
+    end.
+
+%% @doc Issue a monitor-backed synchronous call to the server process with immediate crash detection.
+call(ServerPid, Request, Timeout) ->
+    MRef = erlang:monitor(process, ServerPid),
+    ServerPid ! {'$gen_call', {self(), MRef}, Request},
+    receive
+        {MRef, Reply} ->
+            erlang:demonitor(MRef, [flush]),
+            Reply;
+        {'DOWN', MRef, process, ServerPid, Reason} ->
+            {error, {server_crashed, Reason}}
+    after Timeout ->
+        erlang:demonitor(MRef, [flush]),
+        {error, timeout}
+    end.
+
+%% @doc Dispatch an asynchronous fire-and-forget message to the target server process.
+cast(ServerPid, Request) ->
+    ServerPid ! {'$gen_cast', Request},
+    ok.
+
+%% @doc Synchronously request the server process to terminate cleanly and await completion.
+stop(ServerPid) ->
+    call(ServerPid, stop, 1000).
+
+%% @doc Recursive server message loop processing synchronous calls and asynchronous casts.
+loop(CallbackMod, State) ->
+    receive
+        {'$gen_call', {From, MRef}, stop} ->
+            From ! {MRef, ok},
+            ok;
+
+        {'$gen_call', {From, MRef}, Request} ->
+            case CallbackMod:handle_call(Request, From, State) of
+                {reply, Reply, NewState} ->
+                    From ! {MRef, Reply},
+                    loop(CallbackMod, NewState);
+                {stop, Reason, Reply, _FinalState} ->
+                    From ! {MRef, Reply},
+                    exit(Reason)
+            end;
+
+        {'$gen_cast', Request} ->
+            case CallbackMod:handle_cast(Request, State) of
+                {noreply, NewState} ->
+                    loop(CallbackMod, NewState);
+                {stop, Reason, _FinalState} ->
+                    exit(Reason)
+            end
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -492,6 +579,14 @@ drain_downs(Count) ->
 			files:        map[string]string{"src/monitor_hygiene.erl": monitorHygieneSolution},
 			wantScore:    100,
 			wantStages:   4,
+			visibleCount: 2,
+		},
+		{
+			name:         "ch06-l08 Building my_gen_server:call/3",
+			exerciseID:   "ch06-l08",
+			files:        map[string]string{"src/my_gen_server.erl": myGenServerSolution},
+			wantScore:    100,
+			wantStages:   5,
 			visibleCount: 2,
 		},
 		{
@@ -2283,6 +2378,334 @@ drain_downs(Count) ->
 		}
 		if !raceFailed {
 			t.Errorf("Expected monitor_race_and_flush to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch06-l08 ──────────────────────────────
+	t.Run("ch06-l08 Negative Missing monitor/demonitor AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch06-l08"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/my_gen_server.erl": `-module(my_gen_server).
+-export([
+    start/2,
+    call/3,
+    cast/2,
+    stop/1,
+    choose_primitive/1,
+    loop/2
+]).
+
+choose_primitive(tightly_coupled_peers)    -> use_link;
+choose_primitive(supervisor_to_worker)     -> use_link_with_trap_exit;
+choose_primitive(client_to_server_request) -> use_monitor;
+choose_primitive(independent_watcher)      -> use_monitor.
+
+start(CallbackMod, InitArg) ->
+    InitRef = make_ref(),
+    Parent = self(),
+    _Pid = spawn(fun() ->
+        case CallbackMod:init(InitArg) of
+            {ok, InitialState} ->
+                Parent ! {InitRef, ok, self()},
+                loop(CallbackMod, InitialState);
+            {error, Reason} ->
+                Parent ! {InitRef, error, Reason}
+        end
+    end),
+    receive
+        {InitRef, ok, ServerPid} -> {ok, ServerPid};
+        {InitRef, error, Reason} -> {error, Reason}
+    after 1000 ->
+        {error, init_timeout}
+    end.
+
+%% AST VIOLATION: Naive call omitting erlang:monitor/2 and erlang:demonitor/2
+call(ServerPid, Request, Timeout) ->
+    Ref = make_ref(),
+    ServerPid ! {'$gen_call', {self(), Ref}, Request},
+    receive
+        {Ref, Reply} -> Reply
+    after Timeout ->
+        {error, timeout}
+    end.
+
+cast(ServerPid, Request) ->
+    ServerPid ! {'$gen_cast', Request},
+    ok.
+
+stop(ServerPid) ->
+    call(ServerPid, stop, 1000).
+
+loop(CallbackMod, State) ->
+    receive
+        {'$gen_call', {From, MRef}, stop} ->
+            From ! {MRef, ok},
+            ok;
+        {'$gen_call', {From, MRef}, Request} ->
+            case CallbackMod:handle_call(Request, From, State) of
+                {reply, Reply, NewState} ->
+                    From ! {MRef, Reply},
+                    loop(CallbackMod, NewState);
+                {stop, Reason, Reply, _FinalState} ->
+                    From ! {MRef, Reply},
+                    exit(Reason)
+            end;
+        {'$gen_cast', Request} ->
+            case CallbackMod:handle_cast(Request, State) of
+                {noreply, NewState} ->
+                    loop(CallbackMod, NewState);
+                {stop, Reason, _FinalState} ->
+                    exit(Reason)
+            end
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l08", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on AST violation (missing monitor/demonitor), but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_otp_gen_invariants" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_otp_gen_invariants to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l08 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-exp-ch06-l08"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/my_gen_server.erl": `-module(my_gen_server).
+%% Missing choose_primitive/1 export
+-export([
+    start/2,
+    call/3,
+    cast/2,
+    stop/1,
+    loop/2
+]).
+
+choose_primitive(tightly_coupled_peers)    -> use_link;
+choose_primitive(supervisor_to_worker)     -> use_link_with_trap_exit;
+choose_primitive(client_to_server_request) -> use_monitor;
+choose_primitive(independent_watcher)      -> use_monitor.
+
+start(CallbackMod, InitArg) ->
+    InitRef = make_ref(),
+    Parent = self(),
+    _Pid = spawn(fun() ->
+        case CallbackMod:init(InitArg) of
+            {ok, InitialState} ->
+                Parent ! {InitRef, ok, self()},
+                loop(CallbackMod, InitialState);
+            {error, Reason} ->
+                Parent ! {InitRef, error, Reason}
+        end
+    end),
+    receive
+        {InitRef, ok, ServerPid} -> {ok, ServerPid};
+        {InitRef, error, Reason} -> {error, Reason}
+    after 1000 ->
+        {error, init_timeout}
+    end.
+
+call(ServerPid, Request, Timeout) ->
+    MRef = erlang:monitor(process, ServerPid),
+    ServerPid ! {'$gen_call', {self(), MRef}, Request},
+    receive
+        {MRef, Reply} ->
+            erlang:demonitor(MRef, [flush]),
+            Reply;
+        {'DOWN', MRef, process, ServerPid, Reason} ->
+            {error, {server_crashed, Reason}}
+    after Timeout ->
+        erlang:demonitor(MRef, [flush]),
+        {error, timeout}
+    end.
+
+cast(ServerPid, Request) ->
+    ServerPid ! {'$gen_cast', Request},
+    ok.
+
+stop(ServerPid) ->
+    call(ServerPid, stop, 1000).
+
+loop(CallbackMod, State) ->
+    receive
+        {'$gen_call', {From, MRef}, stop} ->
+            From ! {MRef, ok},
+            ok;
+        {'$gen_call', {From, MRef}, Request} ->
+            case CallbackMod:handle_call(Request, From, State) of
+                {reply, Reply, NewState} ->
+                    From ! {MRef, Reply},
+                    loop(CallbackMod, NewState);
+                {stop, Reason, Reply, _FinalState} ->
+                    From ! {MRef, Reply},
+                    exit(Reason)
+            end;
+        {'$gen_cast', Request} ->
+            case CallbackMod:handle_cast(Request, State) of
+                {noreply, NewState} ->
+                    loop(CallbackMod, NewState);
+                {stop, Reason, _FinalState} ->
+                    exit(Reason)
+            end
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l08", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export choose_primitive/1, but got PASSED")
+		}
+		var expFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				expFailed = true
+				break
+			}
+		}
+		if !expFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch06-l08 Negative Naive Call Lacks Monitor Crash Detection", func(t *testing.T) {
+		sessionID := "test-neg-naive-ch06-l08"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/my_gen_server.erl": `-module(my_gen_server).
+-export([
+    start/2,
+    call/3,
+    cast/2,
+    stop/1,
+    choose_primitive/1,
+    loop/2
+]).
+
+choose_primitive(tightly_coupled_peers)    -> use_link;
+choose_primitive(supervisor_to_worker)     -> use_link_with_trap_exit;
+choose_primitive(client_to_server_request) -> use_monitor;
+choose_primitive(independent_watcher)      -> use_monitor.
+
+start(CallbackMod, InitArg) ->
+    InitRef = make_ref(),
+    Parent = self(),
+    _Pid = spawn(fun() ->
+        case CallbackMod:init(InitArg) of
+            {ok, InitialState} ->
+                Parent ! {InitRef, ok, self()},
+                loop(CallbackMod, InitialState);
+            {error, Reason} ->
+                Parent ! {InitRef, error, Reason}
+        end
+    end),
+    receive
+        {InitRef, ok, ServerPid} -> {ok, ServerPid};
+        {InitRef, error, Reason} -> {error, Reason}
+    after 1000 ->
+        {error, init_timeout}
+    end.
+
+%% BUG: Satisfies AST by having monitor/demonitor calls, but call/3 fails to monitor ServerPid!
+call(ServerPid, Request, Timeout) ->
+    _Dummy = erlang:monitor(process, self()),
+    erlang:demonitor(_Dummy, [flush]),
+    Ref = make_ref(),
+    ServerPid ! {'$gen_call', {self(), Ref}, Request},
+    receive
+        {Ref, Reply} -> Reply
+    after Timeout ->
+        {error, timeout}
+    end.
+
+cast(ServerPid, Request) ->
+    ServerPid ! {'$gen_cast', Request},
+    ok.
+
+stop(ServerPid) ->
+    call(ServerPid, stop, 1000).
+
+loop(CallbackMod, State) ->
+    receive
+        {'$gen_call', {From, MRef}, stop} ->
+            From ! {MRef, ok},
+            ok;
+        {'$gen_call', {From, MRef}, Request} ->
+            case CallbackMod:handle_call(Request, From, State) of
+                {reply, Reply, NewState} ->
+                    From ! {MRef, Reply},
+                    loop(CallbackMod, NewState);
+                {stop, Reason, Reply, _FinalState} ->
+                    From ! {MRef, Reply},
+                    exit(Reason)
+            end;
+        {'$gen_cast', Request} ->
+            case CallbackMod:handle_cast(Request, State) of
+                {noreply, NewState} ->
+                    loop(CallbackMod, NewState);
+                {stop, Reason, _FinalState} ->
+                    exit(Reason)
+            end
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch06-l08", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on naive call without server crash detection, but got PASSED")
+		}
+		var crashDetectFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "zero_latency_crash_detection" && st.Status == "failed" {
+				crashDetectFailed = true
+				break
+			}
+		}
+		if !crashDetectFailed {
+			t.Errorf("Expected zero_latency_crash_detection to fail, stages: %+v", report.Stages)
 		}
 	})
 }

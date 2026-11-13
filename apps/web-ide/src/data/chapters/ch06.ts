@@ -3004,24 +3004,38 @@ In systems design, choosing the wrong process primitive causes severe architectu
 - Monitoring when you should have linked causes **zombie leaks**, where background workers continue running forever after their parent connection disconnects.
 
 Every backend architect must master the **Architectural Decision Matrix**:
-1. **Tightly-Coupled Symmetric Peers (e.g. TCP Socket Reader + TLS Codec):** Use **\`link\`**. Neither process has any purpose if the other crashes. They must live and die together.
-2. **Supervision Trees (Supervisor to Worker):** Use **\`link\` + \`process_flag(trap_exit, true)\`**. The supervisor owns the lifecycle of the worker.
-3. **Client-to-Server Requests (Calling an Actor):** Use **\`monitor\`**. The client wants to know if the server crashes mid-request, but the client must NOT die if the server fails!
-4. **Independent Watchers / Metrics Monitors:** Use **\`monitor\`**. An observer should never risk termination because the monitored target crashed.
+1. **Tightly-Coupled Symmetric Peers (e.g. TCP Socket Reader + TLS Codec):** Use \`link\`. Neither process has any purpose if the other crashes. They must live and die together.
+2. **Supervision Trees (Supervisor to Worker):** Use \`link\` + \`process_flag(trap_exit, true)\`. The supervisor owns the lifecycle of the worker.
+3. **Client-to-Server Requests (Calling an Actor):** Use \`monitor\`. The client wants to know if the server crashes mid-request, but the client must NOT die if the server fails!
+4. **Independent Watchers / Metrics Monitors:** Use \`monitor\`. An observer should never risk termination because the monitored target crashed.
 
 ## Deep Concept Breakdown & Under the Hood
 
 ### Instant Crash Detection in Synchronous Calls
 In a naive request-response actor call:
-1. The client generates a correlation reference, sends \`{call, self(), Ref, Query}\` to a server, and waits inside \`receive ... after 5000\`.
+1. The client generates a correlation reference, sends a call message to the server, and waits inside \`receive ... after 5000\`.
 2. If the server terminates unexpectedly (e.g., due to an unhandled exception or memory exhaustion) immediately after receiving the message, the client has no way of knowing the server is dead.
 3. The client sits idle for the entire 5,000ms duration before timing out!
 
 To prevent this latency penalty, OTP's synchronous call implementation (\`gen_server:call/3\`, implemented under the hood in OTP's internal \`gen:do_call/4\` helper) pairs temporary unidirectional process monitors with request dispatching:
 - **Temporary Monitor**: The caller monitors the server process right before dispatching the request.
-- **Normal Flow**: When the server completes work and replies with \`{Ref, Reply}\`, the caller demonitors the reference with \`[flush]\` and returns the answer.
+- **Normal Flow**: When the server completes work and replies with the correlated reference, the caller demonitors the reference with the flush option and returns the answer.
 - **Crash Flow**: If the server crashes mid-flight, the BEAM runtime immediately synthesizes a \`'DOWN'\` message and delivers it to the caller's mailbox with near-zero latency (<1ms). The caller unblocks instantly with \`{error, {server_crashed, Reason}}\` instead of hanging for seconds.
 - **Timeout**: If the deadline passes without a reply or exit, the monitor is flushed and \`{error, timeout}\` is returned.
+
+## Official Erlang Docs & Function Reference
+
+The following BIFs provide the core primitives for building robust request-response mechanisms and process monitoring:
+
+| Function | Signature | Return Value | Complexity |
+| :--- | :--- | :--- | :--- |
+| \`erlang:monitor/2\` | \`erlang:monitor(process, ServerPid) -> reference()\` | Unique reference identifying the monitor | $O(1)$ |
+| \`erlang:demonitor/2\` | \`erlang:demonitor(MRef, [flush]) -> boolean()\` | \`true\` if monitor existed, \`false\` if not | $O(1)$ table + scan |
+| \`erlang:make_ref/0\` | \`erlang:make_ref() -> reference()\` | Globally unique 96-bit reference | $O(1)$ |
+
+- **\`erlang:monitor(process, ServerPid)\`**: Establishes a temporary unidirectional monitor. If \`ServerPid\` crashes or does not exist, a \`'DOWN'\` message is delivered immediately to the caller's mailbox.
+- **\`erlang:demonitor(MRef, [flush])\`**: Cancels the monitor and purges any pending \`'DOWN'\` message for \`MRef\` that may have arrived before cancellation.
+- **\`erlang:make_ref()\`**: Generates a 96-bit collision-free reference guaranteed unique across the cluster, ideal for request-response correlation.
 
 ## Parallel Worked Example
 
@@ -3031,8 +3045,11 @@ The following module coordinates requests against a distributed cluster gateway 
 -module(cluster_gateway_client).
 -export([
     evaluate_topology_primitive/1,
+    start_mock_gateway/0,
     sync_query_gateway/3,
-    async_notify_gateway/2
+    async_notify_gateway/2,
+    stop_gateway/1,
+    gateway_loop/1
 ]).
 
 %% @doc Maps infrastructure topologies to the appropriate BEAM linking or monitoring strategy.
@@ -3044,6 +3061,11 @@ evaluate_topology_primitive(client_endpoint_query) ->
     monitor_target;
 evaluate_topology_primitive(telemetry_observer) ->
     monitor_target.
+
+%% @doc Spawns an isolated mock gateway process for query and event dispatch.
+start_mock_gateway() ->
+    Pid = spawn(fun() -> gateway_loop([]) end),
+    {ok, Pid}.
 
 %% @doc Dispatches a synchronous query to a gateway process with instant failure detection.
 sync_query_gateway(GatewayPid, QueryPayload, TimeoutMs) ->
@@ -3064,7 +3086,39 @@ sync_query_gateway(GatewayPid, QueryPayload, TimeoutMs) ->
 async_notify_gateway(GatewayPid, EventPayload) ->
     GatewayPid ! {gateway_event, EventPayload},
     ok.
+
+%% @doc Synchronously stops the mock gateway process.
+stop_gateway(GatewayPid) ->
+    case sync_query_gateway(GatewayPid, stop, 1000) of
+        {ok, stopped} -> ok;
+        Error -> Error
+    end.
+
+%% @doc Server loop processing queries and notifications for the gateway mock.
+gateway_loop(State) ->
+    receive
+        {gateway_query, {From, MRef}, stop} ->
+            From ! {MRef, stopped},
+            ok;
+        {gateway_query, {From, MRef}, ping} ->
+            From ! {MRef, pong},
+            gateway_loop(State);
+        {gateway_query, {From, MRef}, {echo, Term}} ->
+            From ! {MRef, Term},
+            gateway_loop(State);
+        {gateway_query, {_From, _MRef}, crash_fatal} ->
+            exit(fatal_hardware_fault);
+        {gateway_event, _EventPayload} ->
+            gateway_loop(State)
+    end.
 \`\`\`
+
+### Architectural Deep Dive
+
+1. **Step 1: Process Coupling & Topology Evaluation**: In \`evaluate_topology_primitive/1\`, symmetric codecs require fate-sharing links, supervisors need trapped exit links, and client queries or telemetry observers mandate unidirectional monitors to isolate failures.
+2. **Step 2: Temporary Monitor Attachment & Correlation**: In \`sync_query_gateway/3\`, the client establishes a temporary monitor targeting the gateway. The unique monitor reference serves dual duty: it acts as the correlation identifier for the reply and the token for failure tracking.
+3. **Step 3: Immediate Crash Interception & Mailbox Cleanliness**: If the gateway dies mid-computation, the BEAM delivers a \`'DOWN'\` message in <1ms. If the reply arrives normally, \`erlang:demonitor(MRef, [flush])\` guarantees that no delayed down notification lingers in the caller mailbox.
+4. **Step 4: Asynchronous Fire-and-Forget Protocol**: In \`async_notify_gateway/2\`, one-way events are dispatched without waiting, decoupling telemetry producers from gateway latency.
 
 ## Assignment Specification
 
@@ -3072,64 +3126,52 @@ Implement \`src/my_gen_server.erl\` exporting \`start/2\`, \`call/3\`, \`cast/2\
 
 ### 1. \`choose_primitive/1\`
 - **Input**: \`Scenario\` (one of the atoms \`tightly_coupled_peers\`, \`supervisor_to_worker\`, \`client_to_server_request\`, or \`independent_watcher\`).
-- **Behavior**:
-  - Implements the Architectural Decision Matrix:
-    - Returns \`use_link\` for \`tightly_coupled_peers\` (symmetric fate-sharing).
-    - Returns \`use_link_with_trap_exit\` for \`supervisor_to_worker\` (lifecycle control).
-    - Returns \`use_monitor\` for \`client_to_server_request\` (safe query without fate-sharing).
-    - Returns \`use_monitor\` for \`independent_watcher\` (observer isolation).
+- **Behavior**: Evaluates the scenario according to the Architectural Decision Matrix and returns the recommended failure-isolation primitive atom:
+  - Returns \`use_link\` for \`tightly_coupled_peers\` (symmetric fate-sharing).
+  - Returns \`use_link_with_trap_exit\` for \`supervisor_to_worker\` (lifecycle supervisor control).
+  - Returns \`use_monitor\` for \`client_to_server_request\` (caller isolation).
+  - Returns \`use_monitor\` for \`independent_watcher\` (observer isolation).
 - **Examples**:
   - \`my_gen_server:choose_primitive(tightly_coupled_peers)\` returns \`use_link\`.
   - \`my_gen_server:choose_primitive(client_to_server_request)\` returns \`use_monitor\`.
 
 ### 2. \`start/2\`
-- **Input**: \`CallbackMod\` (atom module implementing callback behaviours), \`InitArg\` (initial argument term passed to callback).
-- **Behavior**:
-  - Spawns a server process that invokes \`CallbackMod:init(InitArg)\`.
-  - If \`init\` returns \`{ok, InitialState}\`, notifies the parent and enters \`loop(CallbackMod, InitialState)\`, returning \`{ok, ServerPid}\` synchronously within 1,000ms.
-  - If \`init\` returns \`{error, Reason}\`, notifies the parent and terminates, returning \`{error, Reason}\` (or \`{error, init_timeout}\` on timeout).
+- **Input**: \`CallbackMod\` (atom specifying the callback behaviour module), \`InitArg\` (term passed to the callback initialization).
+- **Behavior**: Spawns a dedicated server actor executing the callback lifecycle. Awaits the synchronous initialization confirmation from the spawned process within 1,000 milliseconds. If initialization succeeds, returns an ok tuple containing the server process identifier. If initialization fails, returns an error tuple containing the failure reason. If the deadline expires, returns an error tuple indicating an initialization timeout.
 - **Examples**:
   - \`my_gen_server:start(my_callback_mod, 10)\` returns \`{ok, ServerPid}\`.
 
 ### 3. \`call/3\`
-- **Input**: \`ServerPid\` (pid of running server), \`Request\` (term containing request payload), \`Timeout\` (integer timeout in milliseconds).
-- **Behavior**:
-  - Executes a monitor-backed synchronous call following OTP's \`gen_server:call/3\` pattern (implemented internally via \`gen:do_call/4\`):
-    - Attaches a temporary monitor to \`ServerPid\` via \`MRef = erlang:monitor(process, ServerPid)\`.
-    - Dispatches \`{'$gen_call', {self(), MRef}, Request}\` to \`ServerPid\`.
-    - Awaits \`{MRef, Reply}\`, flushes the monitor via \`erlang:demonitor(MRef, [flush])\`, and returns \`Reply\`.
-    - If \`ServerPid\` crashes before replying, receives \`{'DOWN', MRef, process, ServerPid, Reason}\` and returns \`{error, {server_crashed, Reason}}\` immediately (0ms crash detection).
-    - If \`Timeout\` elapses, demonitors with \`[flush]\` and returns \`{error, timeout}\`.
+- **Input**: \`ServerPid\` (pid of the running server process), \`Request\` (term representing the call payload), \`Timeout\` (non-negative integer millisecond deadline).
+- **Behavior**: Executes a monitor-backed synchronous call following the OTP request-response pattern. Establishes a temporary unidirectional monitor on the server process before message dispatch. Transmits the request enveloped with the caller process identifier and monitor reference in the standard format \`{'$gen_call', {self(), MRef}, Request}\`. If the server replies within the timeout duration with \`{MRef, Reply}\`, demonitors the target using the flush option to discard any race-conditioned down notifications and returns the bare reply term. If the server crashes mid-flight, immediately intercepts the runtime down notification \`{'DOWN', MRef, process, ServerPid, Reason}\` and returns an error tuple \`{error, {server_crashed, Reason}}\` without waiting for the timeout. If the timeout deadline expires, demonitors the target with flushing and returns \`{error, timeout}\`.
 - **Examples**:
   - \`my_gen_server:call(ServerPid, {add, 5}, 1000)\` returns \`15\`.
-  - \`my_gen_server:call(CrashPid, crash_now, 5000)\` returns \`{error, {server_crashed, Reason}}\` in <150ms.
+  - \`my_gen_server:call(CrashPid, crash_now, 5000)\` returns \`{error, {server_crashed, Reason}}\` in under 150ms.
 
 ### 4. \`cast/2\`
-- **Input**: \`ServerPid\` (pid of running server), \`Request\` (term containing cast payload).
-- **Behavior**:
-  - Dispatches an asynchronous cast message \`{'$gen_cast', Request}\` to \`ServerPid\` and immediately returns \`ok\`.
+- **Input**: \`ServerPid\` (pid of the running server process), \`Request\` (term representing the cast payload).
+- **Behavior**: Transmits an asynchronous fire-and-forget message envelope \`{'$gen_cast', Request}\` to the server process and immediately returns the atom \`ok\`.
 - **Examples**:
   - \`my_gen_server:cast(ServerPid, {set, 100})\` returns \`ok\`.
 
 ### 5. \`stop/1\`
-- **Input**: \`ServerPid\` (pid of running server).
-- **Behavior**:
-  - Synchronously requests the server to terminate cleanly via \`call(ServerPid, stop, 1000)\`.
-  - Returns \`ok\`.
+- **Input**: \`ServerPid\` (pid of the running server process).
+- **Behavior**: Synchronously issues a termination request to the server process via a synchronous call requesting stop with a 1,000 millisecond timeout and returns the atom \`ok\` upon confirmed shutdown.
 - **Examples**:
   - \`my_gen_server:stop(ServerPid)\` returns \`ok\`.
 
 ### 6. \`loop/2\`
-- **Input**: \`CallbackMod\` (atom callback module), \`State\` (current server state term).
-- **Behavior**:
-  - Tail-recursive message loop handling gen_server protocols:
-    - On \`{'$gen_call', {From, MRef}, stop}\`: replies \`From ! {MRef, ok}\` and terminates with \`ok\`.
-    - On \`{'$gen_call', {From, MRef}, Request}\`: calls \`CallbackMod:handle_call(Request, From, State)\`; if \`{reply, Reply, NewState}\`, replies \`From ! {MRef, Reply}\` and recurses with \`NewState\`; if \`{stop, Reason, Reply, _FinalState}\`, replies and exits with \`exit(Reason)\`.
-    - On \`{'$gen_cast', Request}\`: calls \`CallbackMod:handle_cast(Request, State)\`; if \`{noreply, NewState}\`, recurses with \`NewState\`; if \`{stop, Reason, _FinalState}\`, exits with \`exit(Reason)\`.
+- **Input**: \`CallbackMod\` (atom specifying the callback behaviour module), \`State\` (term representing current server state).
+- **Behavior**: Tail-recursive message loop handling incoming protocol envelopes:
+  - On a synchronous stop request \`{'$gen_call', {From, MRef}, stop}\`: replies to the caller with the monitor reference and the atom \`ok\`, then terminates cleanly with \`ok\`.
+  - On a synchronous call request \`{'$gen_call', {From, MRef}, Request}\`: delegates to the callback module's call handler passing the request, caller reference, and current state. If the callback returns \`{reply, Reply, NewState}\`, dispatches the response to the caller and recurses with the updated state; if it returns \`{stop, Reason, Reply, _FinalState}\`, dispatches the response and terminates by exiting with the specified reason.
+  - On an asynchronous cast request \`{'$gen_cast', Request}\`: delegates to the callback module's cast handler passing the request and current state. If the callback returns \`{noreply, NewState}\`, recurses with the updated state; if it returns \`{stop, Reason, _FinalState}\`, terminates by exiting with the specified reason.
+- **Examples**:
+  - \`my_gen_server:loop(CallbackMod, State)\` runs indefinitely awaiting client requests.
 
 ## Rules & Verification Constraints
 
-- Must export all specified functions.
+- Must export all specified functions: \`start/2\`, \`call/3\`, \`cast/2\`, \`stop/1\`, \`choose_primitive/1\`, and \`loop/2\`.
 - Enforced AST rules: \`requiredCalls: ["erlang:monitor/2", "erlang:demonitor/2"]\`, \`requiredConstructs: ["receive_after"]\`.
 `,
     mentalModelCheck: {
@@ -3163,9 +3205,18 @@ Implement \`src/my_gen_server.erl\` exporting \`start/2\`, \`call/3\`, \`cast/2\
         module: 'erlang',
         signature: 'erlang:monitor(process, ServerPid) -> reference()',
         typesSpec: ['ServerPid = pid()'],
-        description: 'Creates temporary monitor providing 0ms notification if ServerPid crashes.',
+        description: 'Creates a temporary unidirectional monitor providing immediate notification if ServerPid crashes.',
         complexityNote: 'O(1) operation.',
         officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#monitor/2',
+      },
+      {
+        functionName: 'demonitor',
+        module: 'erlang',
+        signature: 'erlang:demonitor(MRef, [flush]) -> boolean()',
+        typesSpec: ['MRef = reference()'],
+        description: 'Demonitors the reference and flushes any pending DOWN messages from the mailbox.',
+        complexityNote: 'O(1) table lookup + mailbox traversal bounded by flush scan.',
+        officialUrl: 'https://www.erlang.org/doc/apps/erts/erlang.html#demonitor/2',
       },
     ],
     visibleTestCases: [
@@ -3199,28 +3250,28 @@ Implement \`src/my_gen_server.erl\` exporting \`start/2\`, \`call/3\`, \`cast/2\
     loop/2
 ]).
 
-%% @doc Returns the appropriate BEAM process primitive for a given architectural scenario.
-choose_primitive(Scenario) ->
+%% @doc Evaluate an architectural scenario atom and return the recommended failure isolation primitive atom.
+choose_primitive(_Scenario) ->
     ok.
 
-%% @doc Spawns and initializes a generic server instance using the provided callback module.
-start(CallbackMod, InitArg) ->
+%% @doc Spawn and initialize a generic server process executing the callback module lifecycle.
+start(_CallbackMod, _InitArg) ->
     ok.
 
-%% @doc Executes a synchronous call to the server with monitor-backed 0ms crash detection.
-call(ServerPid, Request, Timeout) ->
+%% @doc Issue a monitor-backed synchronous call to the server process with immediate crash detection.
+call(_ServerPid, _Request, _Timeout) ->
     ok.
 
-%% @doc Sends an asynchronous fire-and-forget message to the server.
-cast(ServerPid, Request) ->
+%% @doc Dispatch an asynchronous fire-and-forget message to the target server process.
+cast(_ServerPid, _Request) ->
     ok.
 
-%% @doc Synchronously stops the server instance.
-stop(ServerPid) ->
+%% @doc Synchronously request the server process to terminate cleanly and await completion.
+stop(_ServerPid) ->
     ok.
 
-%% @doc Server loop dispatching incoming synchronous calls and asynchronous casts to the callback module.
-loop(CallbackMod, State) ->
+%% @doc Recursive server message loop processing synchronous calls and asynchronous casts.
+loop(_CallbackMod, _State) ->
     ok.
 `,
     solutionCode: `-module(my_gen_server).
@@ -3233,11 +3284,13 @@ loop(CallbackMod, State) ->
     loop/2
 ]).
 
+%% @doc Evaluate an architectural scenario atom and return the recommended failure isolation primitive atom.
 choose_primitive(tightly_coupled_peers)    -> use_link;
 choose_primitive(supervisor_to_worker)     -> use_link_with_trap_exit;
 choose_primitive(client_to_server_request) -> use_monitor;
 choose_primitive(independent_watcher)      -> use_monitor.
 
+%% @doc Spawn and initialize a generic server process executing the callback module lifecycle.
 start(CallbackMod, InitArg) ->
     InitRef = make_ref(),
     Parent = self(),
@@ -3257,6 +3310,7 @@ start(CallbackMod, InitArg) ->
         {error, init_timeout}
     end.
 
+%% @doc Issue a monitor-backed synchronous call to the server process with immediate crash detection.
 call(ServerPid, Request, Timeout) ->
     MRef = erlang:monitor(process, ServerPid),
     ServerPid ! {'$gen_call', {self(), MRef}, Request},
@@ -3271,13 +3325,16 @@ call(ServerPid, Request, Timeout) ->
         {error, timeout}
     end.
 
+%% @doc Dispatch an asynchronous fire-and-forget message to the target server process.
 cast(ServerPid, Request) ->
     ServerPid ! {'$gen_cast', Request},
     ok.
 
+%% @doc Synchronously request the server process to terminate cleanly and await completion.
 stop(ServerPid) ->
     call(ServerPid, stop, 1000).
 
+%% @doc Recursive server message loop processing synchronous calls and asynchronous casts.
 loop(CallbackMod, State) ->
     receive
         {'$gen_call', {From, MRef}, stop} ->
@@ -3317,28 +3374,28 @@ loop(CallbackMod, State) ->
     loop/2
 ]).
 
-%% @doc Returns the appropriate BEAM process primitive for a given architectural scenario.
-choose_primitive(Scenario) ->
+%% @doc Evaluate an architectural scenario atom and return the recommended failure isolation primitive atom.
+choose_primitive(_Scenario) ->
     ok.
 
-%% @doc Spawns and initializes a generic server instance using the provided callback module.
-start(CallbackMod, InitArg) ->
+%% @doc Spawn and initialize a generic server process executing the callback module lifecycle.
+start(_CallbackMod, _InitArg) ->
     ok.
 
-%% @doc Executes a synchronous call to the server with monitor-backed 0ms crash detection.
-call(ServerPid, Request, Timeout) ->
+%% @doc Issue a monitor-backed synchronous call to the server process with immediate crash detection.
+call(_ServerPid, _Request, _Timeout) ->
     ok.
 
-%% @doc Sends an asynchronous fire-and-forget message to the server.
-cast(ServerPid, Request) ->
+%% @doc Dispatch an asynchronous fire-and-forget message to the target server process.
+cast(_ServerPid, _Request) ->
     ok.
 
-%% @doc Synchronously stops the server instance.
-stop(ServerPid) ->
+%% @doc Synchronously request the server process to terminate cleanly and await completion.
+stop(_ServerPid) ->
     ok.
 
-%% @doc Server loop dispatching incoming synchronous calls and asynchronous casts to the callback module.
-loop(CallbackMod, State) ->
+%% @doc Recursive server message loop processing synchronous calls and asynchronous casts.
+loop(_CallbackMod, _State) ->
     ok.
 `,
       },
@@ -3354,11 +3411,13 @@ loop(CallbackMod, State) ->
     loop/2
 ]).
 
+%% @doc Evaluate an architectural scenario atom and return the recommended failure isolation primitive atom.
 choose_primitive(tightly_coupled_peers)    -> use_link;
 choose_primitive(supervisor_to_worker)     -> use_link_with_trap_exit;
 choose_primitive(client_to_server_request) -> use_monitor;
 choose_primitive(independent_watcher)      -> use_monitor.
 
+%% @doc Spawn and initialize a generic server process executing the callback module lifecycle.
 start(CallbackMod, InitArg) ->
     InitRef = make_ref(),
     Parent = self(),
@@ -3378,6 +3437,7 @@ start(CallbackMod, InitArg) ->
         {error, init_timeout}
     end.
 
+%% @doc Issue a monitor-backed synchronous call to the server process with immediate crash detection.
 call(ServerPid, Request, Timeout) ->
     MRef = erlang:monitor(process, ServerPid),
     ServerPid ! {'$gen_call', {self(), MRef}, Request},
@@ -3392,13 +3452,16 @@ call(ServerPid, Request, Timeout) ->
         {error, timeout}
     end.
 
+%% @doc Dispatch an asynchronous fire-and-forget message to the target server process.
 cast(ServerPid, Request) ->
     ServerPid ! {'$gen_cast', Request},
     ok.
 
+%% @doc Synchronously request the server process to terminate cleanly and await completion.
 stop(ServerPid) ->
     call(ServerPid, stop, 1000).
 
+%% @doc Recursive server message loop processing synchronous calls and asynchronous casts.
 loop(CallbackMod, State) ->
     receive
         {'$gen_call', {From, MRef}, stop} ->
