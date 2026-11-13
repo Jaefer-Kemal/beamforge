@@ -2053,14 +2053,14 @@ In production network services and distributed protocol engines, an actor's vali
 - A TCP socket actor is initially in the \`unauthenticated\` state; once SASL authentication succeeds, it enters the \`authenticated\` state where stanzas are routed.
 - A physical security vault or smart door is initially in the \`locked\` state; once the correct PIN is provided, it transitions to the \`unlocked\` state.
 
-In traditional languages, developers attempt to model this with a single monolithic function stuffed with nested \`switch\` or \`if (state == LOCKED)\` branches. As features expand, this monolithic function degenerates into spaghetti code where invalid state transitions silently corrupt memory.
+In traditional languages, developers attempt to model this with a single monolithic function stuffed with mutable flags or nested \`switch\` branches. As features expand, this monolithic function degenerates into fragile code where invalid state transitions silently corrupt state.
 
 In Erlang, before adopting the OTP \`gen_statem\` behaviour (taught in Chapter 7), the idiomatic way to model a Finite State Machine (FSM) is **Mutual Tail Recursion**: writing **one dedicated function per state** that transition states by directly tail-calling each other!
 
 ## Deep Concept Breakdown & Under the Hood
 
 ### 1. Modeling States as Distinct Functions
-Instead of cramming all states into a single \`loop(State)\`, each state is its own dedicated function:
+Instead of cramming all states into a single loop function, each state is its own dedicated function:
 - State A contains a \`receive\` block that only handles operations valid during State A.
 - State B contains a \`receive\` block that only handles operations valid during State B.
 
@@ -2069,7 +2069,7 @@ Consider a connection handler transitioning between \`connecting\` and \`connect
 connecting(Host, Port) ->
     receive
         {socket_ready, Socket} ->
-            connected(Socket);  %% <-- State Transition via Tail Call!
+            connected(Socket);  %% State Transition via Tail Call!
         {connect_failed, Reason} ->
             {error, Reason}
     end.
@@ -2086,89 +2086,20 @@ connected(Socket) ->
 \`\`\`
 
 ### 2. Tail-Call Optimization Across Different Functions
-A common question from newcomers is: *"Does Tail-Call Optimization only work when a function recursively calls itself?"*
-**No!** In the BEAM VM, tail-call optimization applies to **any function call in the tail position**, even if Function A calls Function B!
+Does Tail-Call Optimization only work when a function recursively calls itself?
+**No!** In the BEAM VM, tail-call optimization applies to **any function call in the tail position**, even if Function A calls Function B:
 - When State Function A tail-calls State Function B, the compiler emits the \`call_only\` (or \`call_last\`) bytecode instruction.
-- The BEAM deallocates the caller's stack arguments, writes the target arguments into registers, and jumps directly to Function B.
-- **Zero additional stack frames are allocated!** An FSM actor can transition back and forth billions of times without consuming any extra memory!
+- The BEAM deallocates the caller's stack arguments, writes the target arguments into virtual registers, and jumps directly to Function B.
+- **Zero additional stack frames are allocated.** An FSM actor can transition back and forth billions of times without consuming any extra memory ($O(1)$ constant stack space).
 
 ### 3. Clear State-Specific Error Handling
 Because each state has its own \`receive\` block, handling invalid actions is crystal clear:
 - Actions valid in State A can return a helpful acknowledgement when called in State B without crashing.
-- State-specific counters (e.g., failed attempt counters) are only tracked in the state functions that require them.
+- State-specific counters (such as failed attempt counters) are only tracked in the state functions that require them.
 - Clean transitions reset or initialize state arguments explicitly on handoff.
 
 > [!warning] Production Concurrency Trap: State Leaks Across Transitions
-> When transitioning from State A to State B, be deliberate about which state variables carry over. For example, when entering an active session, transient failure counters from the negotiation state should be discarded or reset to clean defaults.
-
-## Parallel Worked Example
-
-Consider a vending machine transitioning between \`idle\` and \`paid\`:
-
-\`\`\`erlang
--module(vending_fsm).
--export([start/0, insert_coin/2, select_item/1, refund/1, stop/1, idle/0, paid/1]).
-
-start() ->
-    spawn(fun() -> idle() end).
-
-insert_coin(Pid, Amount) ->
-    Ref = make_ref(),
-    Pid ! {insert_coin, self(), Ref, Amount},
-    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
-
-select_item(Pid) ->
-    Ref = make_ref(),
-    Pid ! {select_item, self(), Ref},
-    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
-
-refund(Pid) ->
-    Ref = make_ref(),
-    Pid ! {refund, self(), Ref},
-    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
-
-stop(Pid) ->
-    Ref = make_ref(),
-    Pid ! {stop, self(), Ref},
-    receive {reply, Ref, ok} -> ok after 1000 -> {error, timeout} end.
-
-%% State 1: IDLE
-idle() ->
-    receive
-        {insert_coin, From, Ref, Amount} when Amount >= 25 ->
-            From ! {reply, Ref, {ok, inserted}},
-            paid(Amount);
-        {insert_coin, From, Ref, _Small} ->
-            From ! {reply, Ref, {error, coin_too_small}},
-            idle();
-        {select_item, From, Ref} ->
-            From ! {reply, Ref, {error, insert_coin_first}},
-            idle();
-        {refund, From, Ref} ->
-            From ! {reply, Ref, {ok, 0}},
-            idle();
-        {stop, Ref, From} ->
-            From ! {reply, Ref, ok},
-            ok
-    end.
-
-%% State 2: PAID (Mutually recursive transition from idle)
-paid(Balance) ->
-    receive
-        {select_item, From, Ref} ->
-            From ! {reply, Ref, {ok, item_dispensed}},
-            idle();
-        {refund, From, Ref} ->
-            From ! {reply, Ref, {ok, Balance}},
-            idle();
-        {insert_coin, From, Ref, Extra} ->
-            From ! {reply, Ref, {ok, Balance + Extra}},
-            paid(Balance + Extra);
-        {stop, Ref, From} ->
-            From ! {reply, Ref, ok},
-            ok
-    end.
-\`\`\`
+> When transitioning from State A to State B, be deliberate about which state variables carry over. For example, when unlocking a vault or door, transient failure counters from the locked state should be discarded or reset to clean defaults.
 
 ## Official Erlang Docs & Function Reference
 
@@ -2189,64 +2120,186 @@ state_b(Arg) ->
     end.
 \`\`\`
 
+## Parallel Worked Example: The Vending Machine State Actor
+
+Consider a vending machine transitioning between \`idle\` and \`paid\` states:
+
+\`\`\`erlang
+-module(vending_fsm).
+-export([start/0, insert_coin/2, select_item/1, refund/1, stop/1, idle/0, paid/1]).
+
+%% === Phase 1: Client API Spawning Stateful FSM Actor ===
+
+%% @doc Spawns the vending machine actor starting in the idle state.
+start() ->
+    spawn(fun() -> idle() end).
+
+%% === Phase 2: Synchronous Client API with make_ref/0 Correlation Tokens ===
+
+%% @doc Submits coin value to the vending machine actor.
+insert_coin(Pid, Amount) ->
+    Ref = make_ref(),
+    Pid ! {insert_coin, self(), Ref, Amount},
+    receive
+        {reply, Ref, Res} -> Res
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Requests item dispensing from the vending machine actor.
+select_item(Pid) ->
+    Ref = make_ref(),
+    Pid ! {select_item, self(), Ref},
+    receive
+        {reply, Ref, Res} -> Res
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Requests refund of current deposited balance.
+refund(Pid) ->
+    Ref = make_ref(),
+    Pid ! {refund, self(), Ref},
+    receive
+        {reply, Ref, Res} -> Res
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Requests clean actor termination.
+stop(Pid) ->
+    Ref = make_ref(),
+    Pid ! {stop, self(), Ref},
+    receive
+        {reply, Ref, ok} -> ok
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% === Phase 3: State 1 (idle/0) - Awaiting Coins or Rejecting Premature Requests ===
+
+%% @doc FSM state loop while no balance has been deposited.
+idle() ->
+    receive
+        {insert_coin, From, Ref, Amount} when Amount >= 25 ->
+            From ! {reply, Ref, {ok, inserted}},
+            paid(Amount);  %% Mutual tail call into paid/1 state
+        {insert_coin, From, Ref, _Small} ->
+            From ! {reply, Ref, {error, coin_too_small}},
+            idle();
+        {select_item, From, Ref} ->
+            From ! {reply, Ref, {error, insert_coin_first}},
+            idle();
+        {refund, From, Ref} ->
+            From ! {reply, Ref, {ok, 0}},
+            idle();
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+%% === Phase 4: State 2 (paid/1) - Handling Selections, Extra Coins, or Refunds ===
+
+%% @doc FSM state loop while holding active customer balance.
+paid(Balance) ->
+    receive
+        {select_item, From, Ref} ->
+            From ! {reply, Ref, {ok, item_dispensed}},
+            idle();  %% Item dispensed: reset to idle state
+        {refund, From, Ref} ->
+            From ! {reply, Ref, {ok, Balance}},
+            idle();  %% Balance refunded: reset to idle state
+        {insert_coin, From, Ref, Extra} ->
+            From ! {reply, Ref, {ok, Balance + Extra}},
+            paid(Balance + Extra);  %% Remain in paid state with accumulated balance
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+\`\`\`
+
+### Architectural Breakdown: Mutual Tail Recursion Mechanics
+1. **Zero-Stack State Handoff**: When \`idle/0\` evaluates \`paid(Amount)\` in tail position, the BEAM compiler emits \`call_last\`. The current stack frame is deallocated before jumping into \`paid/1\`. The actor never leaks stack frames across billions of transitions.
+2. **Distinct Message Protocols per State**: In \`idle/0\`, \`select_item\` returns \`{error, insert_coin_first}\`. In \`paid/1\`, \`select_item\` dispenses the item and transitions back to \`idle/0\`. Neither function requires an \`if State == idle\` check—the current state is structurally guaranteed by the running function.
+3. **Correlation Tokens (\`make_ref/0\`)**: Every client call tags outgoing messages with a 128-bit unique reference token, ensuring callers match only the exact reply intended for their request even under high concurrency.
+
 ## Assignment Specification
 
 Implement \`src/door_lock_fsm.erl\` exporting \`start/1\`, \`enter_code/2\`, \`lock/1\`, \`get_state/1\`, \`stop/1\`, \`locked/2\`, and \`unlocked/1\`:
 
 ### 1. \`start/1\`
-- **Input**: \`SecretCode\` (arbitrary Erlang term).
-- **Behavior**: Spawns a concurrent actor starting in state \`locked(SecretCode, 0)\` and returns its process identifier.
+- **Input**: SecretCode (arbitrary Erlang term representing the authorized passcode).
+- **Behavior**: Spawns a concurrent actor starting in state \`locked/2\` with the provided SecretCode and an initial failed attempt count of 0, returning the actor process identifier.
 - **Examples**:
-  - \`is_pid(door_lock_fsm:start(<<"4321">>))\` returns \`true\`.
+  - Calling \`door_lock_fsm:start(<<"4321">>)\` returns a valid process identifier.
 
 ### 2. \`enter_code/2\`
-- **Input**: \`Pid\` (process identifier), \`AttemptCode\` (arbitrary Erlang term).
-- **Behavior**: Generates a correlation reference via \`make_ref/0\` and synchronously submits \`AttemptCode\` to \`Pid\`.
-  - When in \`locked(SecretCode, FailedAttempts)\`: if \`AttemptCode\` equals \`SecretCode\`, replies with \`{ok, unlocked}\` and transitions into \`unlocked(SecretCode)\`; if \`AttemptCode\` does not match, increments the failed attempts count by 1, replies with \`{error, {wrong_code, NewCount}}\`, and remains in \`locked(SecretCode, NewCount)\`.
-  - When in \`unlocked(SecretCode)\`: replies with \`{ok, already_unlocked}\` and remains in \`unlocked(SecretCode)\`.
-  - Waits up to 1,000 milliseconds for the reply.
+- **Input**: Pid (process identifier of the door lock actor), AttemptCode (arbitrary Erlang term).
+- **Behavior**: Generates a correlation reference via \`make_ref/0\` and synchronously submits AttemptCode to the actor:
+  - When in locked state:
+    - If AttemptCode matches SecretCode, replies with \`{ok, unlocked}\` and transitions into \`unlocked/1\`.
+    - If AttemptCode does not match SecretCode, increments the failed attempt count by 1, replies with \`{error, {wrong_code, NewCount}}\`, and remains in \`locked/2\` with the updated count.
+  - When in unlocked state:
+    - Replies with \`{ok, already_unlocked}\` and remains in \`unlocked/1\`.
+  - Awaits reply for up to 1,000 milliseconds before returning \`{error, timeout}\`.
 - **Examples**:
-  - \`door_lock_fsm:enter_code(P, <<"4321">>)\` returns \`{ok, unlocked}\`.
-  - \`door_lock_fsm:enter_code(P, <<"0000">>)\` returns \`{error, {wrong_code, 1}}\`.
-  - Calling \`enter_code/2\` on an already unlocked door returns \`{ok, already_unlocked}\`.
+  - \`door_lock_fsm:enter_code(P, <<"4321">>)\` returns \`{ok, unlocked}\` when code matches.
+  - \`door_lock_fsm:enter_code(P, <<"0000">>)\` returns \`{error, {wrong_code, 1}}\` on first mismatch.
+  - Calling \`door_lock_fsm:enter_code(P, ...)\` on an already unlocked door returns \`{ok, already_unlocked}\`.
 
 ### 3. \`lock/1\`
-- **Input**: \`Pid\` (process identifier).
-- **Behavior**: Generates a correlation reference and synchronously commands \`Pid\` to lock.
-  - When in \`unlocked(SecretCode)\`: replies with \`ok\` and transitions to \`locked(SecretCode, 0)\` (resetting the failed attempts counter to 0).
-  - When in \`locked(SecretCode, FailedAttempts)\`: replies with \`ok\` and remains in \`locked(SecretCode, FailedAttempts)\` without altering the existing counter.
+- **Input**: Pid (process identifier of the door lock actor).
+- **Behavior**: Generates a correlation reference via \`make_ref/0\` and synchronously commands the actor to lock:
+  - When in unlocked state: replies with \`ok\` and transitions into \`locked/2\` with the failed attempts counter reset to 0.
+  - When in locked state: replies with \`ok\` and remains in \`locked/2\` with its existing failed attempts count unchanged.
+  - Awaits reply for up to 1,000 milliseconds before returning \`{error, timeout}\`.
 - **Examples**:
   - \`door_lock_fsm:lock(P)\` returns \`ok\`.
 
 ### 4. \`get_state/1\`
-- **Input**: \`Pid\` (process identifier).
-- **Behavior**: Generates a correlation reference and synchronously queries the current state of \`Pid\`. Returns \`{locked, FailedAttempts}\` when currently locked, or the atom \`unlocked\` when currently unlocked.
+- **Input**: Pid (process identifier of the door lock actor).
+- **Behavior**: Generates a correlation reference via \`make_ref/0\` and synchronously queries the current state of the actor:
+  - When in locked state: replies with \`{locked, FailedAttempts}\`.
+  - When in unlocked state: replies with \`unlocked\`.
+  - Awaits reply for up to 1,000 milliseconds before returning \`{error, timeout}\`.
 - **Examples**:
-  - \`door_lock_fsm:get_state(P)\` returns \`{locked, 0}\` initially.
-  - \`door_lock_fsm:get_state(P)\` returns \`unlocked\` after code verification.
+  - Initial call to \`door_lock_fsm:get_state(P)\` returns \`{locked, 0}\`.
+  - Calling \`door_lock_fsm:get_state(P)\` after code verification returns \`unlocked\`.
 
 ### 5. \`stop/1\`
-- **Input**: \`Pid\` (process identifier).
-- **Behavior**: Generates a correlation reference and synchronously commands \`Pid\` to terminate. Replies with \`ok\` and terminates cleanly.
+- **Input**: Pid (process identifier of the door lock actor).
+- **Behavior**: Generates a correlation reference via \`make_ref/0\` and synchronously commands the actor to stop:
+  - Replies with \`ok\` and terminates execution cleanly.
+  - Awaits reply for up to 1,000 milliseconds before returning \`{error, timeout}\`.
 - **Examples**:
   - \`door_lock_fsm:stop(P)\` returns \`ok\`.
 
 ### 6. \`locked/2\`
-- **Input**: \`SecretCode\` (term), \`FailedAttempts\` (non-negative integer).
-- **Behavior**: Mutual tail-recursive FSM state loop for the locked condition, handling code attempts, lock commands, state queries, and clean shutdown.
+- **Input**: SecretCode (Erlang term), FailedAttempts (non-negative integer).
+- **Behavior**: Mutual tail-recursive state loop handling messages while the door is locked:
+  - Code attempt matching SecretCode transitions to \`unlocked/1\`.
+  - Code attempt mismatch increments FailedAttempts and recurses to \`locked/2\`.
+  - Lock command acknowledges and remains in \`locked/2\`.
+  - State query acknowledges with \`{locked, FailedAttempts}\` and remains in \`locked/2\`.
+  - Stop command acknowledges and terminates cleanly.
 - **Examples**:
-  - Transitions to \`unlocked(SecretCode)\` upon matching code entry.
+  - Receives unlock request and transitions to \`unlocked/1\`.
 
 ### 7. \`unlocked/1\`
-- **Input**: \`SecretCode\` (term).
-- **Behavior**: Mutual tail-recursive FSM state loop for the unlocked condition, handling redundant code attempts, lock commands (resetting failures to 0), state queries, and clean shutdown.
+- **Input**: SecretCode (Erlang term).
+- **Behavior**: Mutual tail-recursive state loop handling messages while the door is unlocked:
+  - Redundant code attempts acknowledge \`{ok, already_unlocked}\` and remain in \`unlocked/1\`.
+  - Lock command resets failure count to 0 and transitions to \`locked/2\`.
+  - State query acknowledges with \`unlocked\` and remains in \`unlocked/1\`.
+  - Stop command acknowledges and terminates cleanly.
 - **Examples**:
-  - Transitions to \`locked(SecretCode, 0)\` upon lock command.
+  - Receives lock command and transitions to \`locked/2\`.
 
 ## Rules & Verification Constraints
 
-- Both \`locked/2\` and \`unlocked/1\` must be tail-recursive (enforced by AST rule \`requireTailRecursion: ["locked/2", "unlocked/1"]\`).
-- Must use \`make_ref/0\` for request-reply synchronization with 1,000ms timeouts.`,
+- Both \`locked/2\` and \`unlocked/1\` must be strictly tail-recursive (enforced by AST rule \`requireTailRecursion: ["locked/2", "unlocked/1"]\`).
+- Must call \`erlang:make_ref/0\` for synchronous request-reply correlation (enforced by AST rule \`requiredCalls: ["erlang:make_ref/0"]\`).
+- All synchronous client queries must guard against unresponsiveness with 1,000 millisecond timeouts.`,
     mentalModelCheck: {
       question: 'Why does an actor alternating between mutually recursive state functions never run out of stack memory even after billions of transitions?',
       codeSnippet: `%% Mutually recursive tail call:
@@ -2321,6 +2374,7 @@ state_a(Arg) ->
     ],
     astRules: {
       requireTailRecursion: ['locked/2', 'unlocked/1'],
+      requiredCalls: ['erlang:make_ref/0'],
     },
     solutionExplanation: 'Models finite state machines via mutual tail recursion across locked/2 and unlocked/1, executing state transitions in O(1) stack space with make_ref() correlation.',
     files: [
@@ -2338,31 +2392,31 @@ state_a(Arg) ->
     unlocked/1
 ]).
 
-%% @doc Spawns the door lock FSM actor starting in the locked state.
+%% @doc Spawn a concurrent door lock actor starting in locked state with zero failed attempts and return its process identifier.
 start(_SecretCode) ->
     ok.
 
-%% @doc Submits a PIN attempt to the door lock actor.
+%% @doc Submit a passcode attempt to the door lock actor, returning unlock status or error with failed attempt count.
 enter_code(_Pid, _AttemptCode) ->
     ok.
 
-%% @doc Commands the door lock actor to enter the locked state.
+%% @doc Command the door lock actor to transition into locked state and reset failed attempt count to zero.
 lock(_Pid) ->
     ok.
 
-%% @doc Queries the current state of the door lock actor.
+%% @doc Query the current state of the door lock actor, returning locked with failure count or unlocked.
 get_state(_Pid) ->
     ok.
 
-%% @doc Stops the door lock actor cleanly.
+%% @doc Command the door lock actor to terminate execution cleanly.
 stop(_Pid) ->
     ok.
 
-%% @doc FSM state function for the locked condition.
+%% @doc Mutual tail-recursive state loop handling messages while the door is locked.
 locked(_SecretCode, _FailedAttempts) ->
     ok.
 
-%% @doc FSM state function for the unlocked condition.
+%% @doc Mutual tail-recursive state loop handling messages while the door is unlocked.
 unlocked(_SecretCode) ->
     ok.
 `,
@@ -2380,9 +2434,11 @@ unlocked(_SecretCode) ->
     unlocked/1
 ]).
 
+%% @doc Spawn a concurrent door lock actor starting in locked state with zero failed attempts and return its process identifier.
 start(SecretCode) ->
     spawn(fun() -> locked(SecretCode, 0) end).
 
+%% @doc Submit a passcode attempt to the door lock actor, returning unlock status or error with failed attempt count.
 enter_code(Pid, AttemptCode) ->
     Ref = make_ref(),
     Pid ! {enter_code, self(), Ref, AttemptCode},
@@ -2392,6 +2448,7 @@ enter_code(Pid, AttemptCode) ->
         {error, timeout}
     end.
 
+%% @doc Command the door lock actor to transition into locked state and reset failed attempt count to zero.
 lock(Pid) ->
     Ref = make_ref(),
     Pid ! {lock, self(), Ref},
@@ -2401,6 +2458,7 @@ lock(Pid) ->
         {error, timeout}
     end.
 
+%% @doc Query the current state of the door lock actor, returning locked with failure count or unlocked.
 get_state(Pid) ->
     Ref = make_ref(),
     Pid ! {get_state, self(), Ref},
@@ -2410,6 +2468,7 @@ get_state(Pid) ->
         {error, timeout}
     end.
 
+%% @doc Command the door lock actor to terminate execution cleanly.
 stop(Pid) ->
     Ref = make_ref(),
     Pid ! {stop, self(), Ref},
@@ -2419,6 +2478,7 @@ stop(Pid) ->
         {error, timeout}
     end.
 
+%% @doc Mutual tail-recursive state loop handling messages while the door is locked.
 locked(SecretCode, FailedAttempts) ->
     receive
         {enter_code, From, Ref, SecretCode} ->
@@ -2439,6 +2499,7 @@ locked(SecretCode, FailedAttempts) ->
             ok
     end.
 
+%% @doc Mutual tail-recursive state loop handling messages while the door is unlocked.
 unlocked(SecretCode) ->
     receive
         {enter_code, From, Ref, _Any} ->
@@ -2467,31 +2528,31 @@ unlocked(SecretCode) ->
     unlocked/1
 ]).
 
-%% @doc Spawns the door lock FSM actor starting in the locked state.
+%% @doc Spawn a concurrent door lock actor starting in locked state with zero failed attempts and return its process identifier.
 start(_SecretCode) ->
     ok.
 
-%% @doc Submits a PIN attempt to the door lock actor.
+%% @doc Submit a passcode attempt to the door lock actor, returning unlock status or error with failed attempt count.
 enter_code(_Pid, _AttemptCode) ->
     ok.
 
-%% @doc Commands the door lock actor to enter the locked state.
+%% @doc Command the door lock actor to transition into locked state and reset failed attempt count to zero.
 lock(_Pid) ->
     ok.
 
-%% @doc Queries the current state of the door lock actor.
+%% @doc Query the current state of the door lock actor, returning locked with failure count or unlocked.
 get_state(_Pid) ->
     ok.
 
-%% @doc Stops the door lock actor cleanly.
+%% @doc Command the door lock actor to terminate execution cleanly.
 stop(_Pid) ->
     ok.
 
-%% @doc FSM state function for the locked condition.
+%% @doc Mutual tail-recursive state loop handling messages while the door is locked.
 locked(_SecretCode, _FailedAttempts) ->
     ok.
 
-%% @doc FSM state function for the unlocked condition.
+%% @doc Mutual tail-recursive state loop handling messages while the door is unlocked.
 unlocked(_SecretCode) ->
     ok.
 `,
@@ -2506,9 +2567,11 @@ unlocked(_SecretCode) ->
     unlocked/1
 ]).
 
+%% @doc Spawn a concurrent door lock actor starting in locked state with zero failed attempts and return its process identifier.
 start(SecretCode) ->
     spawn(fun() -> locked(SecretCode, 0) end).
 
+%% @doc Submit a passcode attempt to the door lock actor, returning unlock status or error with failed attempt count.
 enter_code(Pid, AttemptCode) ->
     Ref = make_ref(),
     Pid ! {enter_code, self(), Ref, AttemptCode},
@@ -2518,6 +2581,7 @@ enter_code(Pid, AttemptCode) ->
         {error, timeout}
     end.
 
+%% @doc Command the door lock actor to transition into locked state and reset failed attempt count to zero.
 lock(Pid) ->
     Ref = make_ref(),
     Pid ! {lock, self(), Ref},
@@ -2527,6 +2591,7 @@ lock(Pid) ->
         {error, timeout}
     end.
 
+%% @doc Query the current state of the door lock actor, returning locked with failure count or unlocked.
 get_state(Pid) ->
     Ref = make_ref(),
     Pid ! {get_state, self(), Ref},
@@ -2536,6 +2601,7 @@ get_state(Pid) ->
         {error, timeout}
     end.
 
+%% @doc Command the door lock actor to terminate execution cleanly.
 stop(Pid) ->
     Ref = make_ref(),
     Pid ! {stop, self(), Ref},
@@ -2545,6 +2611,7 @@ stop(Pid) ->
         {error, timeout}
     end.
 
+%% @doc Mutual tail-recursive state loop handling messages while the door is locked.
 locked(SecretCode, FailedAttempts) ->
     receive
         {enter_code, From, Ref, SecretCode} ->
@@ -2565,6 +2632,7 @@ locked(SecretCode, FailedAttempts) ->
             ok
     end.
 
+%% @doc Mutual tail-recursive state loop handling messages while the door is unlocked.
 unlocked(SecretCode) ->
     receive
         {enter_code, From, Ref, _Any} ->

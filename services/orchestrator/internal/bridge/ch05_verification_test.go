@@ -248,6 +248,100 @@ loop(Map) ->
     end.
 `
 
+	doorLockFsmSolution := `-module(door_lock_fsm).
+-export([
+    start/1,
+    enter_code/2,
+    lock/1,
+    get_state/1,
+    stop/1,
+    locked/2,
+    unlocked/1
+]).
+
+%% @doc Spawn a concurrent door lock actor starting in locked state with zero failed attempts and return its process identifier.
+start(SecretCode) ->
+    spawn(fun() -> locked(SecretCode, 0) end).
+
+%% @doc Submit a passcode attempt to the door lock actor, returning unlock status or error with failed attempt count.
+enter_code(Pid, AttemptCode) ->
+    Ref = make_ref(),
+    Pid ! {enter_code, self(), Ref, AttemptCode},
+    receive
+        {reply, Ref, Res} -> Res
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Command the door lock actor to transition into locked state and reset failed attempt count to zero.
+lock(Pid) ->
+    Ref = make_ref(),
+    Pid ! {lock, self(), Ref},
+    receive
+        {reply, Ref, Res} -> Res
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Query the current state of the door lock actor, returning locked with failure count or unlocked.
+get_state(Pid) ->
+    Ref = make_ref(),
+    Pid ! {get_state, self(), Ref},
+    receive
+        {reply, Ref, Res} -> Res
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Command the door lock actor to terminate execution cleanly.
+stop(Pid) ->
+    Ref = make_ref(),
+    Pid ! {stop, self(), Ref},
+    receive
+        {reply, Ref, ok} -> ok
+    after 1000 ->
+        {error, timeout}
+    end.
+
+%% @doc Mutual tail-recursive state loop handling messages while the door is locked.
+locked(SecretCode, FailedAttempts) ->
+    receive
+        {enter_code, From, Ref, SecretCode} ->
+            From ! {reply, Ref, {ok, unlocked}},
+            unlocked(SecretCode);
+        {enter_code, From, Ref, _Wrong} ->
+            NextFailed = FailedAttempts + 1,
+            From ! {reply, Ref, {error, {wrong_code, NextFailed}}},
+            locked(SecretCode, NextFailed);
+        {lock, From, Ref} ->
+            From ! {reply, Ref, ok},
+            locked(SecretCode, FailedAttempts);
+        {get_state, From, Ref} ->
+            From ! {reply, Ref, {locked, FailedAttempts}},
+            locked(SecretCode, FailedAttempts);
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+%% @doc Mutual tail-recursive state loop handling messages while the door is unlocked.
+unlocked(SecretCode) ->
+    receive
+        {enter_code, From, Ref, _Any} ->
+            From ! {reply, Ref, {ok, already_unlocked}},
+            unlocked(SecretCode);
+        {lock, From, Ref} ->
+            From ! {reply, Ref, ok},
+            locked(SecretCode, 0);
+        {get_state, From, Ref} ->
+            From ! {reply, Ref, unlocked},
+            unlocked(SecretCode);
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -304,6 +398,16 @@ loop(Map) ->
 			},
 			wantScore:    100,
 			wantStages:   5,
+			visibleCount: 3,
+		},
+		{
+			name:       "ch05-l06 Finite State Machine (FSM) Actors via Mutual Tail Recursion",
+			exerciseID: "ch05-l06",
+			files: map[string]string{
+				"src/door_lock_fsm.erl": doorLockFsmSolution,
+			},
+			wantScore:    100,
+			wantStages:   4,
 			visibleCount: 3,
 		},
 	}
@@ -1127,6 +1231,291 @@ loop(Map) ->
 		}
 		if !foundFailedAst {
 			t.Errorf("Expected ast_registry_and_ref_audit to fail on body recursion")
+		}
+	})
+
+	// ch05-l06 Negative test 1: non-tail recursion on locked/2
+	t.Run("ch05-l06 Negative Body Recursion on locked/2", func(t *testing.T) {
+		sessID := "test-sess-ch05-l06-neg-rec"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		bodyRecCode := `-module(door_lock_fsm).
+-export([start/1, enter_code/2, lock/1, get_state/1, stop/1, locked/2, unlocked/1]).
+
+start(SecretCode) -> spawn(fun() -> locked(SecretCode, 0) end).
+
+enter_code(Pid, AttemptCode) ->
+    Ref = make_ref(),
+    Pid ! {enter_code, self(), Ref, AttemptCode},
+    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
+
+lock(Pid) ->
+    Ref = make_ref(),
+    Pid ! {lock, self(), Ref},
+    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
+
+get_state(Pid) ->
+    Ref = make_ref(),
+    Pid ! {get_state, self(), Ref},
+    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
+
+stop(Pid) ->
+    Ref = make_ref(),
+    Pid ! {stop, self(), Ref},
+    receive {reply, Ref, ok} -> ok after 1000 -> {error, timeout} end.
+
+locked(SecretCode, FailedAttempts) ->
+    receive
+        {enter_code, From, Ref, SecretCode} ->
+            From ! {reply, Ref, {ok, unlocked}},
+            unlocked(SecretCode);
+        {enter_code, From, Ref, _Wrong} ->
+            NextFailed = FailedAttempts + 1,
+            From ! {reply, Ref, {error, {wrong_code, NextFailed}}},
+            locked(SecretCode, NextFailed) + 1; %% VIOLATION: Body recursion on locked/2
+        {lock, From, Ref} ->
+            From ! {reply, Ref, ok},
+            locked(SecretCode, FailedAttempts);
+        {get_state, From, Ref} ->
+            From ! {reply, Ref, {locked, FailedAttempts}},
+            locked(SecretCode, FailedAttempts);
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+unlocked(SecretCode) ->
+    receive
+        {enter_code, From, Ref, _Any} ->
+            From ! {reply, Ref, {ok, already_unlocked}},
+            unlocked(SecretCode);
+        {lock, From, Ref} ->
+            From ! {reply, Ref, ok},
+            locked(SecretCode, 0);
+        {get_state, From, Ref} ->
+            From ! {reply, Ref, unlocked},
+            unlocked(SecretCode);
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l06", map[string]string{
+			"src/door_lock_fsm.erl": bodyRecCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for body recursion, got %d", report.Score)
+		}
+
+		foundFailedAst := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_mutual_tail_recursion" && st.Status == "failed" {
+				foundFailedAst = true
+			}
+		}
+		if !foundFailedAst {
+			t.Errorf("Expected ast_mutual_tail_recursion to fail on body recursion")
+		}
+	})
+
+	// ch05-l06 Negative test 2: missing export unlocked/1
+	t.Run("ch05-l06 Negative Missing Export", func(t *testing.T) {
+		sessID := "test-sess-ch05-l06-neg-exp"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		missingExpCode := `-module(door_lock_fsm).
+-export([start/1, enter_code/2, lock/1, get_state/1, stop/1, locked/2]). %% VIOLATION: missing unlocked/1
+
+start(SecretCode) -> spawn(fun() -> locked(SecretCode, 0) end).
+
+enter_code(Pid, AttemptCode) ->
+    Ref = make_ref(),
+    Pid ! {enter_code, self(), Ref, AttemptCode},
+    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
+
+lock(Pid) ->
+    Ref = make_ref(),
+    Pid ! {lock, self(), Ref},
+    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
+
+get_state(Pid) ->
+    Ref = make_ref(),
+    Pid ! {get_state, self(), Ref},
+    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
+
+stop(Pid) ->
+    Ref = make_ref(),
+    Pid ! {stop, self(), Ref},
+    receive {reply, Ref, ok} -> ok after 1000 -> {error, timeout} end.
+
+locked(SecretCode, FailedAttempts) ->
+    receive
+        {enter_code, From, Ref, SecretCode} ->
+            From ! {reply, Ref, {ok, unlocked}},
+            unlocked(SecretCode);
+        {enter_code, From, Ref, _Wrong} ->
+            NextFailed = FailedAttempts + 1,
+            From ! {reply, Ref, {error, {wrong_code, NextFailed}}},
+            locked(SecretCode, NextFailed);
+        {lock, From, Ref} ->
+            From ! {reply, Ref, ok},
+            locked(SecretCode, FailedAttempts);
+        {get_state, From, Ref} ->
+            From ! {reply, Ref, {locked, FailedAttempts}},
+            locked(SecretCode, FailedAttempts);
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+unlocked(SecretCode) ->
+    receive
+        {enter_code, From, Ref, _Any} ->
+            From ! {reply, Ref, {ok, already_unlocked}},
+            unlocked(SecretCode);
+        {lock, From, Ref} ->
+            From ! {reply, Ref, ok},
+            locked(SecretCode, 0);
+        {get_state, From, Ref} ->
+            From ! {reply, Ref, unlocked},
+            unlocked(SecretCode);
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l06", map[string]string{
+			"src/door_lock_fsm.erl": missingExpCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for missing export, got %d", report.Score)
+		}
+
+		foundFailedCompile := false
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				foundFailedCompile = true
+			}
+		}
+		if !foundFailedCompile {
+			t.Errorf("Expected compile_and_export_audit to fail on missing export")
+		}
+	})
+
+	// ch05-l06 Negative test 3: failure counter not incremented on bad code
+	t.Run("ch05-l06 Negative Failure Counter Bug", func(t *testing.T) {
+		sessID := "test-sess-ch05-l06-neg-count"
+		session, err := poolMgr.ClaimSession(sessID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessID)
+
+		counterBugCode := `-module(door_lock_fsm).
+-export([start/1, enter_code/2, lock/1, get_state/1, stop/1, locked/2, unlocked/1]).
+
+start(SecretCode) -> spawn(fun() -> locked(SecretCode, 0) end).
+
+enter_code(Pid, AttemptCode) ->
+    Ref = make_ref(),
+    Pid ! {enter_code, self(), Ref, AttemptCode},
+    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
+
+lock(Pid) ->
+    Ref = make_ref(),
+    Pid ! {lock, self(), Ref},
+    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
+
+get_state(Pid) ->
+    Ref = make_ref(),
+    Pid ! {get_state, self(), Ref},
+    receive {reply, Ref, Res} -> Res after 1000 -> {error, timeout} end.
+
+stop(Pid) ->
+    Ref = make_ref(),
+    Pid ! {stop, self(), Ref},
+    receive {reply, Ref, ok} -> ok after 1000 -> {error, timeout} end.
+
+locked(SecretCode, FailedAttempts) ->
+    receive
+        {enter_code, From, Ref, SecretCode} ->
+            From ! {reply, Ref, {ok, unlocked}},
+            unlocked(SecretCode);
+        {enter_code, From, Ref, _Wrong} ->
+            %% BUG: Returns wrong_code 0 instead of incrementing counter
+            From ! {reply, Ref, {error, {wrong_code, 0}}},
+            locked(SecretCode, FailedAttempts);
+        {lock, From, Ref} ->
+            From ! {reply, Ref, ok},
+            locked(SecretCode, FailedAttempts);
+        {get_state, From, Ref} ->
+            From ! {reply, Ref, {locked, FailedAttempts}},
+            locked(SecretCode, FailedAttempts);
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+
+unlocked(SecretCode) ->
+    receive
+        {enter_code, From, Ref, _Any} ->
+            From ! {reply, Ref, {ok, already_unlocked}},
+            unlocked(SecretCode);
+        {lock, From, Ref} ->
+            From ! {reply, Ref, ok},
+            locked(SecretCode, 0);
+        {get_state, From, Ref} ->
+            From ! {reply, Ref, unlocked},
+            unlocked(SecretCode);
+        {stop, From, Ref} ->
+            From ! {reply, Ref, ok},
+            ok
+    end.
+`
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		report, err := runner.RunVerification(ctx, session, "ch05-l06", map[string]string{
+			"src/door_lock_fsm.erl": counterBugCode,
+		})
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+
+		if report.Score >= 100 {
+			t.Errorf("Expected negative score < 100 for counter bug, got %d", report.Score)
+		}
+
+		foundFailedFsm := false
+		for _, st := range report.Stages {
+			if st.ID == "fsm_state_transitions" && st.Status == "failed" {
+				foundFailedFsm = true
+			}
+		}
+		if !foundFailedFsm {
+			t.Errorf("Expected fsm_state_transitions to fail on counter bug")
 		}
 	})
 }
