@@ -86,6 +86,92 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 `
 
+	const walletServerSolution = `-module(wallet_server).
+-behaviour(gen_server).
+
+-export([
+    start_link/1,
+    credit/3,
+    debit/3,
+    get_balances/1,
+    stop/1
+]).
+
+%% gen_server Callbacks
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+%% @doc Starts and links the wallet server with an initial balances map.
+start_link(InitialBalances) when is_map(InitialBalances) ->
+    gen_server:start_link(?MODULE, InitialBalances, []).
+
+%% @doc Asynchronously credits funds to the specified currency balance.
+credit(Pid, Currency, Amount) when Amount > 0 ->
+    gen_server:cast(Pid, {credit, Currency, Amount}).
+
+%% @doc Synchronously debits funds from the specified currency balance.
+debit(Pid, Currency, Amount) ->
+    gen_server:call(Pid, {debit, Currency, Amount}).
+
+%% @doc Synchronously queries the map of all active currency balances.
+get_balances(Pid) ->
+    gen_server:call(Pid, get_balances).
+
+%% @doc Synchronously requests clean termination of the wallet server.
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+%% ── gen_server Callbacks ─────────────────────────────────────────────────────
+
+%% @doc Initializes the server state with the balances map.
+init(InitialBalances) ->
+    {ok, #{balances => InitialBalances}}.
+
+%% @doc Handles synchronous call requests.
+handle_call({debit, _Currency, Amount}, _From, State) when Amount =< 0 ->
+    {reply, {error, invalid_amount}, State};
+handle_call({debit, Currency, Amount}, _From, State = #{balances := Balances}) ->
+    CurrentBal = maps:get(Currency, Balances, 0),
+    if
+        CurrentBal >= Amount ->
+            NewBal = CurrentBal - Amount,
+            NewBalances = maps:put(Currency, NewBal, Balances),
+            {reply, {ok, NewBal}, State#{balances := NewBalances}};
+        true ->
+            {reply, {error, insufficient_funds}, State}
+    end;
+handle_call(get_balances, _From, State = #{balances := Balances}) ->
+    {reply, Balances, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+%% @doc Handles asynchronous cast messages.
+handle_cast({credit, Currency, Amount}, State = #{balances := Balances}) ->
+    CurrentBal = maps:get(Currency, Balances, 0),
+    NewBalances = maps:put(Currency, CurrentBal + Amount, Balances),
+    {noreply, State#{balances := NewBalances}};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+%% @doc Handles out-of-band signals and raw messages.
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+%% @doc Cleans up server resources upon termination.
+terminate(_Reason, _State) ->
+    ok.
+
+%% @doc Handles state transformations across hot code upgrades.
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`
+
 	tests := []struct {
 		name         string
 		exerciseID   string
@@ -105,81 +191,14 @@ code_change(_OldVsn, State, _Extra) ->
 			visibleCount: 1,
 		},
 		{
-			name:       "ch07-l02 Wallet Server",
-			exerciseID: "ch07-l02",
+			name:         "ch07-l02 Wallet Server",
+			exerciseID:   "ch07-l02",
 			files: map[string]string{
-				"src/wallet_server.erl": `-module(wallet_server).
--behaviour(gen_server).
-
--export([
-    start_link/1,
-    credit/3,
-    debit/3,
-    get_balances/1,
-    stop/1
-]).
-
--export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
-
-start_link(InitialBalances) when is_map(InitialBalances) ->
-    gen_server:start_link(?MODULE, InitialBalances, []).
-
-credit(Pid, Currency, Amount) when Amount > 0 ->
-    gen_server:cast(Pid, {credit, Currency, Amount}).
-
-debit(Pid, Currency, Amount) ->
-    gen_server:call(Pid, {debit, Currency, Amount}).
-
-get_balances(Pid) ->
-    gen_server:call(Pid, get_balances).
-
-stop(Pid) ->
-    gen_server:stop(Pid).
-
-init(InitialBalances) ->
-    {ok, #{balances => InitialBalances}}.
-
-handle_call({debit, _Currency, Amount}, _From, State) when Amount =< 0 ->
-    {reply, {error, invalid_amount}, State};
-handle_call({debit, Currency, Amount}, _From, State = #{balances := Balances}) ->
-    CurrentBal = maps:get(Currency, Balances, 0),
-    if
-        CurrentBal >= Amount ->
-            NewBal = CurrentBal - Amount,
-            NewBalances = maps:put(Currency, NewBal, Balances),
-            {reply, {ok, NewBal}, State#{balances := NewBalances}};
-        true ->
-            {reply, {error, insufficient_funds}, State}
-    end;
-handle_call(get_balances, _From, State = #{balances := Balances}) ->
-    {reply, Balances, State};
-handle_call(_Req, _From, State) ->
-    {reply, {error, unknown_call}, State}.
-
-handle_cast({credit, Currency, Amount}, State = #{balances := Balances}) ->
-    CurrentBal = maps:get(Currency, Balances, 0),
-    NewBalances = maps:put(Currency, CurrentBal + Amount, Balances),
-    {noreply, State#{balances := NewBalances}};
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-`,
+				"src/wallet_server.erl": walletServerSolution,
 			},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 2,
 		},
 		{
 			name:       "ch07-l03 Session TTL Server",
@@ -1018,6 +1037,317 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		if !demoFailed {
 			t.Errorf("Expected demo_execution_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	// ── Negative Regression Subtests for ch07-l02 ──────────────────────────────
+	t.Run("ch07-l02 Negative Missing gen_server Cast AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch07-l02"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/wallet_server.erl": `-module(wallet_server).
+-behaviour(gen_server).
+
+-export([
+    start_link/1,
+    credit/3,
+    debit/3,
+    get_balances/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(InitialBalances) when is_map(InitialBalances) ->
+    gen_server:start_link(?MODULE, InitialBalances, []).
+
+%% BUG: Bypasses gen_server:cast/2 with raw ! send
+credit(Pid, Currency, Amount) when Amount > 0 ->
+    Pid ! {'$gen_cast', {credit, Currency, Amount}},
+    ok.
+
+debit(Pid, Currency, Amount) ->
+    gen_server:call(Pid, {debit, Currency, Amount}).
+
+get_balances(Pid) ->
+    gen_server:call(Pid, get_balances).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init(InitialBalances) ->
+    {ok, #{balances => InitialBalances}}.
+
+handle_call({debit, _Currency, Amount}, _From, State) when Amount =< 0 ->
+    {reply, {error, invalid_amount}, State};
+handle_call({debit, Currency, Amount}, _From, State = #{balances := Balances}) ->
+    CurrentBal = maps:get(Currency, Balances, 0),
+    if
+        CurrentBal >= Amount ->
+            NewBal = CurrentBal - Amount,
+            NewBalances = maps:put(Currency, NewBal, Balances),
+            {reply, {ok, NewBal}, State#{balances := NewBalances}};
+        true ->
+            {reply, {error, insufficient_funds}, State}
+    end;
+handle_call(get_balances, _From, State = #{balances := Balances}) ->
+    {reply, Balances, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast({credit, Currency, Amount}, State = #{balances := Balances}) ->
+    CurrentBal = maps:get(Currency, Balances, 0),
+    NewBalances = maps:put(Currency, CurrentBal + Amount, Balances),
+    {noreply, State#{balances := NewBalances}};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l02", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing gen_server:cast AST rule, but got PASSED")
+		}
+		var astFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "ast_gen_server_callbacks" && st.Status == "failed" {
+				astFailed = true
+				break
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_gen_server_callbacks to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l02 Negative Missing Export", func(t *testing.T) {
+		sessionID := "test-neg-exp-ch07-l02"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/wallet_server.erl": `-module(wallet_server).
+-behaviour(gen_server).
+
+%% BUG: debit/3 intentionally omitted from export list!
+-export([
+    start_link/1,
+    credit/3,
+    get_balances/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(InitialBalances) when is_map(InitialBalances) ->
+    gen_server:start_link(?MODULE, InitialBalances, []).
+
+credit(Pid, Currency, Amount) when Amount > 0 ->
+    gen_server:cast(Pid, {credit, Currency, Amount}).
+
+debit(Pid, Currency, Amount) ->
+    gen_server:call(Pid, {debit, Currency, Amount}).
+
+get_balances(Pid) ->
+    gen_server:call(Pid, get_balances).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init(InitialBalances) ->
+    {ok, #{balances => InitialBalances}}.
+
+handle_call({debit, _Currency, Amount}, _From, State) when Amount =< 0 ->
+    {reply, {error, invalid_amount}, State};
+handle_call({debit, Currency, Amount}, _From, State = #{balances := Balances}) ->
+    CurrentBal = maps:get(Currency, Balances, 0),
+    if
+        CurrentBal >= Amount ->
+            NewBal = CurrentBal - Amount,
+            NewBalances = maps:put(Currency, NewBal, Balances),
+            {reply, {ok, NewBal}, State#{balances := NewBalances}};
+        true ->
+            {reply, {error, insufficient_funds}, State}
+    end;
+handle_call(get_balances, _From, State = #{balances := Balances}) ->
+    {reply, Balances, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast({credit, Currency, Amount}, State = #{balances := Balances}) ->
+    CurrentBal = maps:get(Currency, Balances, 0),
+    NewBalances = maps:put(Currency, CurrentBal + Amount, Balances),
+    {noreply, State#{balances := NewBalances}};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l02", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on missing export, but got PASSED")
+		}
+		var expFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+				expFailed = true
+				break
+			}
+		}
+		if !expFailed {
+			t.Errorf("Expected compile_and_export_audit to fail, stages: %+v", report.Stages)
+		}
+	})
+
+	t.Run("ch07-l02 Negative Insufficient Funds Debit Allows Overdraft", func(t *testing.T) {
+		sessionID := "test-neg-overdraft-ch07-l02"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/wallet_server.erl": `-module(wallet_server).
+-behaviour(gen_server).
+
+-export([
+    start_link/1,
+    credit/3,
+    debit/3,
+    get_balances/1,
+    stop/1
+]).
+
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+start_link(InitialBalances) when is_map(InitialBalances) ->
+    gen_server:start_link(?MODULE, InitialBalances, []).
+
+credit(Pid, Currency, Amount) when Amount > 0 ->
+    gen_server:cast(Pid, {credit, Currency, Amount}).
+
+debit(Pid, Currency, Amount) ->
+    gen_server:call(Pid, {debit, Currency, Amount}).
+
+get_balances(Pid) ->
+    gen_server:call(Pid, get_balances).
+
+stop(Pid) ->
+    gen_server:stop(Pid).
+
+init(InitialBalances) ->
+    {ok, #{balances => InitialBalances}}.
+
+%% BUG: Permits negative balance overdraft!
+handle_call({debit, _Currency, Amount}, _From, State) when Amount =< 0 ->
+    {reply, {error, invalid_amount}, State};
+handle_call({debit, Currency, Amount}, _From, State = #{balances := Balances}) ->
+    CurrentBal = maps:get(Currency, Balances, 0),
+    NewBal = CurrentBal - Amount,
+    NewBalances = maps:put(Currency, NewBal, Balances),
+    {reply, {ok, NewBal}, State#{balances := NewBalances}};
+handle_call(get_balances, _From, State = #{balances := Balances}) ->
+    {reply, Balances, State};
+handle_call(_Req, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast({credit, Currency, Amount}, State = #{balances := Balances}) ->
+    CurrentBal = maps:get(Currency, Balances, 0),
+    NewBalances = maps:put(Currency, CurrentBal + Amount, Balances),
+    {noreply, State#{balances := NewBalances}};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch07-l02", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification returned unexpected error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure on overdraft debit, but got PASSED")
+		}
+		var overdraftFailed bool
+		for _, st := range report.Stages {
+			if st.ID == "insufficient_funds_protection" && st.Status == "failed" {
+				overdraftFailed = true
+				break
+			}
+		}
+		if !overdraftFailed {
+			t.Errorf("Expected insufficient_funds_protection to fail, stages: %+v", report.Stages)
 		}
 	})
 }

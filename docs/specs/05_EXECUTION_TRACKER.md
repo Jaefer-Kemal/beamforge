@@ -3825,6 +3825,38 @@ We execute the platform overhaul incrementally so every single piece is built to
   - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 4 subtests (positive + 3 negatives) in `7.48s`; `TEST_CHAPTER=7 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l01 | 1/1 tests passed` in `11.05s`.
   - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
 
+## Phase 236: Chapter 7 Lecture 2 (`ch07-l02`) Deep Pedagogical Audit, Anti-Spoiler Protocol & Exercise Hardening
+
+- [x] **236.1: Curriculum Pedagogical Audit & Exercise Structuring (`ch07-l02`, `wallet_server.erl`)**:
+  - Audited `apps/web-ide/src/data/chapters/ch07.ts` (`ch07-l02`, `wallet_server.erl`) against Spec 04, 07, and 08.
+  - Injected `## Official Erlang Docs & Function Reference` (`gen_server:start_link/3,4`, `gen_server:call/2,3`, `gen_server:cast/2`, `gen_server:stop/1,3`, `maps:get/3`, `maps:put/3`) preceding `## Parallel Worked Example`.
+  - Deepened Parallel Worked Example (`cloud_storage_bucket.erl`) with a comprehensive 4-step architectural deep dive:
+    - *Step 1: Process Initialization with Atomic Link (`init/1`)*
+    - *Step 2: Asynchronous Non-Blocking Cast Notification (`handle_cast/2`)*
+    - *Step 3: Synchronous Reservation Call with Backpressure (`handle_call/3`)*
+    - *Step 4: Clean Resource Teardown (`terminate/2`)*
+  - Structured `## Assignment Specification` with clean 3-part layout (`Input`, `Behavior`, `Examples`) for all 5 exported functions (`start_link/1`, `credit/3`, `debit/3`, `get_balances/1`, `stop/1`).
+  - Added `## Rules & Verification Constraints` bullet list enforcing callback exports, AST call invariants (`call` vs `cast`), and state map layout (`#{balances => #{...}}`).
+  - Expanded `otpDocCards` with complete entries for `start_link/3`, `call/2`, `cast/2`, `stop/1`, `maps:get/3`, and `maps:put/3`.
+  - Normalized visible test IDs to `tc-ch07-02-1` and `tc-ch07-02-2`.
+  - Audited starter scaffolding (`starterCode` and `files[0].content`): prefixed unused stub parameters with `_` (`credit(_Pid, _Currency, _Amount) when _Amount > 0`, `debit(_Pid, _Currency, _Amount)`, `get_balances(_Pid)`), ensuring starter templates compile cleanly with `erlc.exe -Wall -Werror` (0 warnings). Verified 100% parity across `starterCode` and `files[0].content`, and across `solutionCode` and `solutionFiles['src/wallet_server.erl']`.
+
+- [x] **236.2: Go Orchestrator Hardening (`ch07_verification_test.go`)**:
+  - In `ch07_verification_test.go`:
+    - Defined `const walletServerSolution = ...` matching `ch07.ts` line-for-line.
+    - Updated `tests` slice with `wantScore: 100, wantStages: 5, visibleCount: 2` for `ch07-l02`.
+    - Added 3 negative regression subtests for `ch07-l02`:
+      1. `ch07-l02 Negative Missing gen_server Cast AST Violation`: verifies rejection in `ast_gen_server_callbacks` when `gen_server:cast/2` is bypassed with raw `!` send.
+      2. `ch07-l02 Negative Missing Export`: verifies rejection in `compile_and_export_audit` when `debit/3` is omitted from exports.
+      3. `ch07-l02 Negative Insufficient Funds Debit Allows Overdraft`: verifies rejection in `insufficient_funds_protection` when negative balance overdraft is permitted.
+
+- [x] **236.3: Mandatory Live Tri-Verification Certification (`ch07-l02`)**:
+  - **Parallel Worked Example (`cloud_storage_bucket.erl`)**: Extracted directly from `ch07.ts`, compiled with `erlc.exe -Wall -Werror` (0 warnings/errors), and executed live on OTP 29 with upload notifications, storage reservations, usage queries, and clean stop passing in 0 ms.
+  - **Starter Pack (`wallet_server.erl`)**: Compiles cleanly with `erlc.exe -Wall -Werror` (0 warnings, exit code 0) and loads cleanly on OTP.
+  - **Solution Pack (`wallet_server.erl`)**: Verified parity, compiled with `+debug_info -Wall -Werror` (0 warnings), passed `bf_ast_verifier` rules (`gen_server:start_link/3`, `gen_server:call/2`, `gen_server:cast/2`), executed 100% of visible test cases (2/2 passed), and passed all 5 stages of Go verification.
+  - **Go Orchestrator & Dynamic Curriculum Tests**: `TestChapter7Verification` passed all 14 subtests across Chapter 7 in `26.54s`; `TEST_CHAPTER=7 TestDynamicVisibleTestsCurriculum` passed all 8 lessons including `ch07-l02 | 2/2 tests passed` in `13.76s`.
+  - **Workspace Compilers**: `npm --prefix apps/web-ide run build` (`8/8` static routes generated, `/learn/[lessonId]` `86.9 kB`) and `npx tsc --noEmit` exited `0`.
+
 
 
 

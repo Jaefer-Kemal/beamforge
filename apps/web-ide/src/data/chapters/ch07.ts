@@ -671,6 +671,17 @@ When client code invokes \`gen_server:call(ServerPid, {debit, <<"USD">>, 50})\`:
 > [!warning] Production OTP Trap: The Cast Mailbox Explosion
 > Never use \`gen_server:cast/2\` for requests that require backpressure or acknowledgement. If upstream traffic spikes, a \`cast\` pipeline can queue millions of messages in the server's mailbox in seconds. When in doubt, prefer \`call\`—the 5ms roundtrip latency is far cheaper than an unrecoverable production OOM restart!
 
+## Official Erlang Docs & Function Reference
+
+Before inspecting the parallel storage quota manager, review the key OTP primitives and map helpers:
+
+- **\`gen_server:start_link/3,4\`** — Spawns and links a new \`gen_server\` process, synchronously calling \`Mod:init/1\` before returning. Atomically ties the lifecycle of the child server to the caller or supervisor.
+- **\`gen_server:call/2,3\`** — Sends a synchronous request to the server and blocks caller execution until a reply arrives (or 5,000ms timeout expires). Provides natural backpressure and monitor-based crash detection.
+- **\`gen_server:cast/2\`** — Sends an asynchronous fire-and-forget message to the server mailbox and returns \`ok\` immediately.
+- **\`gen_server:stop/1,3\`** — Synchronously requests clean termination of the server with reason \`normal\`.
+- **\`maps:get/3\`** — Returns the value associated with \`Key\` in \`Map\`, or returns \`Default\` if \`Key\` is not present.
+- **\`maps:put/3\`** — Associates \`Key\` with \`Value\` in \`Map\`, returning a new map.
+
 ## Parallel Worked Example: Cloud Storage Quota Manager (cloud_storage_bucket.erl)
 
 To see how synchronous calls and asynchronous casts are orchestrated in a production system, consider \`cloud_storage_bucket.erl\`. This server manages departmental cloud storage quotas: allowing non-blocking asynchronous upload notifications, while enforcing strict synchronous reservations that prevent total storage from exceeding the provisioned ceiling.
@@ -773,6 +784,20 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 \`\`\`
 
+### Architectural Deep Dive: What the BEAM is Doing
+
+1. **Step 1: Process Initialization with Atomic Link (\`init/1\`)**
+   When client code calls \`cloud_storage_bucket:start_link(1000)\`, the caller invokes \`gen_server:start_link/3\`. The BEAM spawns a fresh process linked to the caller and synchronously executes \`init([1000])\`. The server builds its initial state map containing its byte ceiling and an empty department usage map, returning \`{ok, State}\`. The caller unblocks receiving \`{ok, ServerPid}\`.
+
+2. **Step 2: Asynchronous Non-Blocking Cast Notification (\`handle_cast/2\`)**
+   When a service reports an upload with \`upload_async(Pid, engineering, 200)\`, \`gen_server:cast/2\` deposits \`{'$gen_cast', {upload, engineering, 200}}\` into \`Pid\`'s mailbox and immediately returns \`ok\` to the caller. The caller continues without waiting. The server loop sequentially picks up the message, invokes \`handle_cast/2\`, updates its cumulative usage, and returns \`{noreply, NewState}\`.
+
+3. **Step 3: Synchronous Reservation Call with Backpressure (\`handle_call/3\`)**
+   When requesting reserved quota with \`allocate_reserved(Pid, finance, 200)\`, \`gen_server:call/2\` issues a tagged \`$gen_call\` with a unique monitor reference and blocks the calling process. The server receives the request, evaluates whether \`Used + RequestedBytes =< Max\`, updates its state if allowed, and returns \`{reply, {ok, RemainingQuota}, NewState}\` (or \`{reply, {error, quota_exceeded}, State}\`). The engine delivers the reply to the waiting caller and drops the monitor.
+
+4. **Step 4: Clean Resource Teardown (\`terminate/2\`)**
+   Calling \`stop(Pid)\` evaluates \`gen_server:stop/1\`. The OTP engine issues a system stop request, executes \`terminate(normal, State)\` to allow the server to flush buffers or notify external nodes, and gracefully terminates the process with exit reason \`normal\`.
+
 ## Assignment Specification
 
 Implement \`src/wallet_server.erl\` representing a multi-currency banking ledger:
@@ -863,6 +888,15 @@ gen_server:call(Server, {process_transaction, Tx})`,
     },
     otpDocCards: [
       {
+        functionName: 'start_link',
+        module: 'gen_server',
+        signature: 'gen_server:start_link(Mod, Args, Opts) -> {ok, Pid} | {error, Reason}',
+        typesSpec: ['Mod = module()', 'Args = term()', 'Opts = list()'],
+        description: 'Spawns a gen_server linked to the caller, synchronously invoking Mod:init(Args).',
+        complexityNote: 'O(1) process creation with atomic link.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#start_link/3',
+      },
+      {
         functionName: 'call',
         module: 'gen_server',
         signature: 'gen_server:call(ServerRef, Request) -> Reply',
@@ -879,6 +913,33 @@ gen_server:call(Server, {process_transaction, Tx})`,
         description: 'Sends an asynchronous message to ServerRef, returning ok immediately without waiting for a reply.',
         complexityNote: 'O(1) non-blocking send; lacks natural backpressure.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#cast/2',
+      },
+      {
+        functionName: 'stop',
+        module: 'gen_server',
+        signature: 'gen_server:stop(ServerRef) -> ok',
+        typesSpec: ['ServerRef = pid() | atom()'],
+        description: 'Synchronously requests clean termination of the gen_server process with exit reason normal.',
+        complexityNote: 'O(1) synchronous shutdown protocol.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/gen_server.html#stop/1',
+      },
+      {
+        functionName: 'get',
+        module: 'maps',
+        signature: 'maps:get(Key, Map, Default) -> Value | Default',
+        typesSpec: ['Key = term()', 'Map = map()', 'Default = term()'],
+        description: 'Returns the value associated with Key in Map, or Default if Key is not present.',
+        complexityNote: 'O(log N) HAMT lookup.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/maps.html#get/3',
+      },
+      {
+        functionName: 'put',
+        module: 'maps',
+        signature: 'maps:put(Key, Value, Map) -> Map',
+        typesSpec: ['Key = term()', 'Value = term()', 'Map = map()'],
+        description: 'Associates Key with Value in Map, returning a new updated map.',
+        complexityNote: 'O(log N) HAMT insertion/update.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/maps.html#put/3',
       },
     ],
     starterCode: `-module(wallet_server).
@@ -907,15 +968,15 @@ start_link(InitialBalances) when is_map(InitialBalances) ->
     gen_server:start_link(?MODULE, InitialBalances, []).
 
 %% @doc Asynchronously credits funds to the specified currency balance.
-credit(Pid, Currency, Amount) when Amount > 0 ->
+credit(_Pid, _Currency, _Amount) when _Amount > 0 ->
     ok.
 
 %% @doc Synchronously debits funds from the specified currency balance.
-debit(Pid, Currency, Amount) ->
+debit(_Pid, _Currency, _Amount) ->
     ok.
 
 %% @doc Synchronously queries the map of all active currency balances.
-get_balances(Pid) ->
+get_balances(_Pid) ->
     ok.
 
 %% @doc Synchronously requests clean termination of the wallet server.
@@ -1063,15 +1124,15 @@ start_link(InitialBalances) when is_map(InitialBalances) ->
     gen_server:start_link(?MODULE, InitialBalances, []).
 
 %% @doc Asynchronously credits funds to the specified currency balance.
-credit(Pid, Currency, Amount) when Amount > 0 ->
+credit(_Pid, _Currency, _Amount) when _Amount > 0 ->
     ok.
 
 %% @doc Synchronously debits funds from the specified currency balance.
-debit(Pid, Currency, Amount) ->
+debit(_Pid, _Currency, _Amount) ->
     ok.
 
 %% @doc Synchronously queries the map of all active currency balances.
-get_balances(Pid) ->
+get_balances(_Pid) ->
     ok.
 
 %% @doc Synchronously requests clean termination of the wallet server.
@@ -1195,14 +1256,14 @@ code_change(_OldVsn, State, _Extra) ->
     },
     visibleTestCases: [
       {
-        id: 'tc1',
+        id: 'tc-ch07-02-1',
         title: 'Credit and Query Balances',
         erlangCall: 'begin {ok, W} = wallet_server:start_link(#{<<"USD">> => 100}), wallet_server:credit(W, <<"EUR">>, 50), timer:sleep(20), Bals = wallet_server:get_balances(W), wallet_server:stop(W), Bals end',
         expectedOutput: '#{<<"EUR">> => 50, <<"USD">> => 100}',
         explanation: 'Asynchronously credits 50 EUR and retrieves current balance map.',
       },
       {
-        id: 'tc2',
+        id: 'tc-ch07-02-2',
         title: 'Debit with Insufficient Funds',
         erlangCall: 'begin {ok, W} = wallet_server:start_link(#{<<"USD">> => 100}), Err = wallet_server:debit(W, <<"USD">>, 1000), wallet_server:stop(W), Err end',
         expectedOutput: '{error, insufficient_funds}',
