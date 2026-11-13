@@ -3332,10 +3332,10 @@ catch C2:R2 ->
 end,
 T3_Start = erlang:system_time(millisecond),
 T3_Res = try
-    R1 = child_spec_factory:classify_restart(transient, normal),
-    R2 = child_spec_factory:classify_restart(permanent, normal),
-    R3 = child_spec_factory:classify_restart(transient, connection_lost),
-    Triple = {R1, R2, R3},
+    K1 = child_spec_factory:classify_restart(transient, normal),
+    K2 = child_spec_factory:classify_restart(permanent, normal),
+    K3 = child_spec_factory:classify_restart(transient, connection_lost),
+    Triple = {K1, K2, K3},
     ExpectedTriple = {do_not_restart, restart, restart},
     IsMatch = (Triple =:= ExpectedTriple) orelse (Triple =:= {false, true, true}),
     #{call_str => <<"child_spec_factory:classify_restart(...) truth table">>,
@@ -9267,17 +9267,14 @@ catch C1:R1 ->
     #{id => <<"ast_child_spec_guards">>, title => <<"AST Analysis: Restart Type & Shutdown Timeout Guards">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
 end,
 S2_WorkerSpecs = try
-    W1 = try
-        child_spec_factory:worker_spec(task_worker, task_runner, [1], transient)
+    W1 = child_spec_factory:worker_spec(task_worker, task_runner, [1], transient),
+    W2 = child_spec_factory:worker_spec(listener, tcp_listener, [4000], permanent),
+    InvalidRejection = try
+        child_spec_factory:worker_spec(bad_w, "not_an_atom", not_a_list, invalid_restart),
+        false
     catch
-        _:_ ->
-            child_spec_factory:worker_spec(task_worker, {task_runner, start_link, [1]}, transient, 5000)
-    end,
-    W2 = try
-        child_spec_factory:worker_spec(listener, tcp_listener, [4000], permanent)
-    catch
-        _:_ ->
-            child_spec_factory:worker_spec(listener, {tcp_listener, start_link, [4000]}, permanent, 5000)
+        error:function_clause -> true;
+        _:_ -> false
     end,
     IsW1Ok = case W1 of
         #{id := task_worker, start := {task_runner, start_link, [1]}, restart := transient, type := worker, modules := [task_runner]} -> true;
@@ -9287,25 +9284,27 @@ S2_WorkerSpecs = try
         #{id := listener, start := {tcp_listener, start_link, [4000]}, restart := permanent, type := worker, modules := [tcp_listener]} -> true;
         _ -> false
     end,
-    case IsW1Ok andalso IsW2Ok of
+    case IsW1Ok andalso IsW2Ok andalso InvalidRejection of
         true ->
-            #{id => <<"worker_child_spec_audit">>, title => <<"Worker Child Spec Map Specification Compliance">>, status => <<"passed">>, time_ms => 15, details => <<"Correctly formatted worker child_spec maps with modules extraction and shutdown timeout.">>};
+            #{id => <<"worker_child_spec_audit">>, title => <<"Worker Child Spec Map Specification Compliance">>, status => <<"passed">>, time_ms => 15, details => <<"Correctly formatted worker child_spec maps with modules extraction, shutdown timeout, and guard validation on invalid terms.">>};
         false ->
-            #{id => <<"worker_child_spec_audit">>, title => <<"Worker Child Spec Map Specification Compliance">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Worker spec mismatch: W1=~p, W2=~p", [W1, W2]))}
+            #{id => <<"worker_child_spec_audit">>, title => <<"Worker Child Spec Map Specification Compliance">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Worker spec mismatch: W1=~p, W2=~p, InvalidRejection=~p", [W1, W2, InvalidRejection]))}
     end
 catch C2:R2 ->
     #{id => <<"worker_child_spec_audit">>, title => <<"Worker Child Spec Map Specification Compliance">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Worker spec error: ~p:~p", [C2, R2]))}
 end,
 S3_SupervisorSpecs = try
-    SupSpec = try
-        child_spec_factory:supervisor_spec(nested_tree_sup, session_sup)
+    SupSpec = child_spec_factory:supervisor_spec(nested_tree_sup, session_sup),
+    InvalidSup = try
+        child_spec_factory:supervisor_spec(nested_tree_sup, "not_an_atom"),
+        false
     catch
-        _:_ ->
-            child_spec_factory:supervisor_spec(nested_tree_sup, {session_sup, start_link, []})
+        error:function_clause -> true;
+        _:_ -> false
     end,
     case SupSpec of
-        #{id := nested_tree_sup, start := {session_sup, start_link, []}, restart := permanent, shutdown := infinity, type := supervisor, modules := [session_sup]} ->
-            #{id => <<"supervisor_child_spec_audit">>, title => <<"Nested Supervisor Spec (shutdown => infinity Enforcement)">>, status => <<"passed">>, time_ms => 15, details => <<"Enforced shutdown => infinity and type => supervisor for sub-tree integrity.">>};
+        #{id := nested_tree_sup, start := {session_sup, start_link, []}, restart := permanent, shutdown := infinity, type := supervisor, modules := [session_sup]} when InvalidSup =:= true ->
+            #{id => <<"supervisor_child_spec_audit">>, title => <<"Nested Supervisor Spec (shutdown => infinity Enforcement)">>, status => <<"passed">>, time_ms => 15, details => <<"Enforced shutdown => infinity and type => supervisor for sub-tree integrity and validated module atom guard.">>};
         Other3 ->
             #{id => <<"supervisor_child_spec_audit">>, title => <<"Nested Supervisor Spec (shutdown => infinity Enforcement)">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Supervisor spec mismatch: ~p", [Other3]))}
     end

@@ -47,6 +47,53 @@ calculate_restart_budget(MaxCrashes, WindowSeconds)
         tolerated_downtime => ok
     }.
 `
+	const childSpecFactorySolution = `-module(child_spec_factory).
+
+-export([
+    worker_spec/4,
+    supervisor_spec/2,
+    classify_restart/2
+]).
+
+%% @doc Build a worker child specification map from an ID, module atom, start argument list, and restart policy atom; rejects invalid argument types or restart strategies.
+worker_spec(Id, Module, Args, RestartType)
+  when is_atom(Module), is_list(Args),
+       (RestartType =:= permanent orelse RestartType =:= transient orelse RestartType =:= temporary) ->
+    #{
+        id => Id,
+        start => {Module, start_link, Args},
+        restart => RestartType,
+        shutdown => 5000,
+        type => worker,
+        modules => [Module]
+    }.
+
+%% @doc Build a nested supervisor child specification map enforcing hierarchical shutdown safety; rejects non-atom supervisor module names.
+supervisor_spec(Id, SupModule) when is_atom(SupModule) ->
+    #{
+        id => Id,
+        start => {SupModule, start_link, []},
+        restart => permanent,
+        shutdown => infinity,
+        type => supervisor,
+        modules => [SupModule]
+    }.
+
+%% @doc Classify whether OTP restarts a child given its restart type and exit reason, distinguishing normal or clean shutdown exits from crashes.
+classify_restart(permanent, _Reason) ->
+    restart;
+classify_restart(temporary, _Reason) ->
+    do_not_restart;
+classify_restart(transient, normal) ->
+    do_not_restart;
+classify_restart(transient, shutdown) ->
+    do_not_restart;
+classify_restart(transient, {shutdown, _}) ->
+    do_not_restart;
+classify_restart(transient, _AbnormalReason) ->
+    restart.
+`
+
 
 	tests := []struct {
 		name         string
@@ -67,53 +114,14 @@ calculate_restart_budget(MaxCrashes, WindowSeconds)
 			visibleCount: 3,
 		},
 		{
-			name:       "ch08-l02 Child Spec Factory",
-			exerciseID: "ch08-l02",
+			name:         "ch08-l02 Child Spec Factory",
+			exerciseID:   "ch08-l02",
 			files: map[string]string{
-				"src/child_spec_factory.erl": `-module(child_spec_factory).
-
--export([
-    worker_spec/4,
-    supervisor_spec/2,
-    classify_restart/2
-]).
-
-worker_spec(Id, Module, Args, RestartType)
-  when is_atom(Module), is_list(Args),
-       (RestartType =:= permanent orelse RestartType =:= transient orelse RestartType =:= temporary) ->
-    #{
-        id => Id,
-        start => {Module, start_link, Args},
-        restart => RestartType,
-        shutdown => 5000,
-        type => worker,
-        modules => [Module]
-    }.
-
-supervisor_spec(Id, SupModule) when is_atom(SupModule) ->
-    #{
-        id => Id,
-        start => {SupModule, start_link, []},
-        restart => permanent,
-        shutdown => infinity,
-        type => supervisor,
-        modules => [SupModule]
-    }.
-
-classify_restart(permanent, _Reason) ->
-    restart;
-classify_restart(temporary, _Reason) ->
-    do_not_restart;
-classify_restart(transient, normal) ->
-    do_not_restart;
-classify_restart(transient, shutdown) ->
-    do_not_restart;
-classify_restart(transient, {shutdown, _}) ->
-    do_not_restart;
-classify_restart(transient, _AbnormalReason) ->
-    restart.
-`,
+				"src/child_spec_factory.erl": childSpecFactorySolution,
 			},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 3,
 		},
 		{
 			name:       "ch08-l03 Escalation Analyzer",
@@ -571,6 +579,7 @@ code_change(_OldVsn, State, _Extra) ->
 					t.Fatalf("[%s] RunCode compilation failed:\n%s", tc.exerciseID, runRes.Stdout)
 				}
 				if len(runRes.VisibleTests) != tc.visibleCount {
+					t.Logf("[%s] RunCode Stdout:\n%s", tc.exerciseID, runRes.Stdout)
 					t.Errorf("[%s] Visible test count mismatch: got %d, want %d", tc.exerciseID, len(runRes.VisibleTests), tc.visibleCount)
 				}
 				for idx, vt := range runRes.VisibleTests {
@@ -700,6 +709,123 @@ calculate_restart_budget(MaxCrashes, WindowSeconds)
 		}
 		if report.Verdict == "PASSED" {
 			t.Errorf("Expected failure when build_sup_flags accepts invalid strategy / negative bounds, but got PASSED")
+		}
+	})
+
+	// ── Negative Regression Subtests for ch08-l02 ──────────────────────────────
+	t.Run("ch08-l02 Negative Missing Guards AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch08-l02"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/child_spec_factory.erl": `-module(child_spec_factory).
+-export([worker_spec/4, supervisor_spec/2, classify_restart/2]).
+
+%% BUG: Missing when guards on worker_spec
+worker_spec(Id, Module, Args, RestartType) ->
+    #{id => Id, start => {Module, start_link, Args}, restart => RestartType, shutdown => 5000, type => worker, modules => [Module]}.
+
+supervisor_spec(Id, SupModule) when is_atom(SupModule) ->
+    #{id => Id, start => {SupModule, start_link, []}, restart => permanent, shutdown => infinity, type => supervisor, modules => [SupModule]}.
+
+classify_restart(permanent, _Reason) -> restart;
+classify_restart(temporary, _Reason) -> do_not_restart;
+classify_restart(transient, normal) -> do_not_restart;
+classify_restart(transient, shutdown) -> do_not_restart;
+classify_restart(transient, {shutdown, _}) -> do_not_restart;
+classify_restart(transient, _AbnormalReason) -> restart.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch08-l02", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure for missing guards AST violation, but got PASSED")
+		}
+	})
+
+	t.Run("ch08-l02 Negative Missing Export Failure", func(t *testing.T) {
+		sessionID := "test-neg-export-ch08-l02"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/child_spec_factory.erl": `-module(child_spec_factory).
+-export([worker_spec/4, supervisor_spec/2]).
+
+worker_spec(Id, Module, Args, RestartType)
+  when is_atom(Module), is_list(Args),
+       (RestartType =:= permanent orelse RestartType =:= transient orelse RestartType =:= temporary) ->
+    #{id => Id, start => {Module, start_link, Args}, restart => RestartType, shutdown => 5000, type => worker, modules => [Module]}.
+
+supervisor_spec(Id, SupModule) when is_atom(SupModule) ->
+    #{id => Id, start => {SupModule, start_link, []}, restart => permanent, shutdown => infinity, type => supervisor, modules => [SupModule]}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch08-l02", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure for missing export classify_restart/2, but got PASSED")
+		}
+	})
+
+	t.Run("ch08-l02 Negative Supervisor Shutdown Infinity Violation", func(t *testing.T) {
+		sessionID := "test-neg-sup-shutdown-ch08-l02"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/child_spec_factory.erl": `-module(child_spec_factory).
+-export([worker_spec/4, supervisor_spec/2, classify_restart/2]).
+
+worker_spec(Id, Module, Args, RestartType)
+  when is_atom(Module), is_list(Args),
+       (RestartType =:= permanent orelse RestartType =:= transient orelse RestartType =:= temporary) ->
+    #{id => Id, start => {Module, start_link, Args}, restart => RestartType, shutdown => 5000, type => worker, modules => [Module]}.
+
+%% BUG: Sets shutdown to 5000ms instead of infinity!
+supervisor_spec(Id, SupModule) when is_atom(SupModule) ->
+    #{id => Id, start => {SupModule, start_link, []}, restart => permanent, shutdown => 5000, type => supervisor, modules => [SupModule]}.
+
+classify_restart(permanent, _Reason) -> restart;
+classify_restart(temporary, _Reason) -> do_not_restart;
+classify_restart(transient, normal) -> do_not_restart;
+classify_restart(transient, shutdown) -> do_not_restart;
+classify_restart(transient, {shutdown, _}) -> do_not_restart;
+classify_restart(transient, _AbnormalReason) -> restart.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch08-l02", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure when supervisor_spec uses shutdown => 5000, but got PASSED")
 		}
 	})
 }

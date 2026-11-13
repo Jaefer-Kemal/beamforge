@@ -4072,6 +4072,24 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Dynamic Curriculum Tests: `TEST_CHAPTER=08 go test -v -run TestDynamicVisibleTestsCurriculum ./internal/bridge` passes 100% (7/7 lessons, `9.10s`).
   - Frontend Build: `npx tsc --noEmit` and `npm run build` pass with 0 errors across all 8 static and dynamic routes.
 
+## Phase 244: Chapter 8 Lecture 2 Pedagogical & Harness Audit (`ch08-l02`)
+- [x] **244.1: Spec 08 Pre-Flight Audit & Historical Analysis**:
+  - Confirmed previous Phase 149 (`02d57d8c`) intervention that initially de-spoiled `ch08-l02`, replacing the older clone PWE with `transcoder_sup_config.erl` and establishing 10/10 `@doc` contracts.
+  - Identified and closed 6 modern gap vectors relative to post-Phase 240 standards:
+    1. Upgraded PWE explanatory notes in `conceptMarkdown` with structured `## Architectural Deep Dive: 4 Core Engine Invariants` (clean shutdown recognition, timeout bounds guard conjunction, `shutdown => infinity` sub-tree preservation, and leaf worker startup MFA).
+    2. Underscore-prefixed unused parameter stubs in `starterCode` and `files[0].content` (`_Id`, `_Module`, `_Args`, `_RestartType`, `_SupModule`, `_ExitReason`) ensuring `erlc.exe -Wall -Werror` passes with 0 warnings.
+    3. Expanded `otpDocCards` from 1 card (`child_spec`) to 4 official OTP reference cards (`child_spec`, `start_child/2`, `terminate_child/2`, `delete_child/2`).
+    4. Standardized `visibleTestCases` IDs to `tc-ch08-02-1`, `tc-ch08-02-2`, and `tc-ch08-02-3`.
+    5. Resolved Erlang evaluator variable scoping collision (`unsafe_var,'R1'`) in `erl_runner_chapters.go` by isolating variables (`K1, K2, K3`) and added negative guard rejection clauses in supervisor/worker spec verification stages.
+    6. Modernized `ch08_verification_test.go` with `wantScore: 100`, `wantStages: 5`, `visibleCount: 3`, and added 3 negative regression subtests (missing guards AST violation, missing export, supervisor shutdown infinity violation).
+- [x] **244.2: Multi-Compiler & Live Tri-Verification**:
+  - Live PWE (`transcoder_sup_config.erl`): Compiles with `erlc.exe -Wall -Werror` (0 warnings/errors) and executes live on OTP cleanly.
+  - Starter Pack (`starterCode` & `files[0].content`): Compiles with `erlc.exe -Wall -Werror` (0 warnings/errors) and returns placeholder atoms safely without compiler warnings.
+  - Solution Pack (`solutionCode` & `solutionFiles`): Compiles with `erlc.exe -Wall -Werror` (0 warnings/errors), satisfies `astRules: { requiredConstructs: ['guards'] }`, and passes all 3 visible tests.
+  - Go Verifier: `TestChapter8Verification` passes all 7 chapter exercises and 6 negative regression subtests (`18.66s`).
+  - Dynamic Curriculum Tests: `TEST_CHAPTER=08 go test -v -run TestDynamicVisibleTestsCurriculum ./internal/bridge` passes 100% (7/7 lessons, `9.92s`).
+  - Frontend Build: `npx tsc --noEmit` and `npm run build` pass with 0 errors across all 8 static and dynamic routes.
+
 
 
 

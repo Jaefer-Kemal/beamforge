@@ -523,10 +523,12 @@ init({CodecMod, Channels}) when is_atom(CodecMod), is_list(Channels) ->
     {ok, {SupFlags, [ArchiveSup, AudioWorker]}}.
 \`\`\`
 
-Key Erlang mechanics illustrated above:
-- **Clause Order & Tagged Shutdown Tuples**: Placing \`{shutdown, _}\` ahead of the \`_\` catch-all in \`is_clean_exit/1\` ensures tagged clean-shutdown reasons do not fall through into crash handling.
-- **Type Guards & Nested \`orelse\` / \`andalso\`**: Guard BIFs such as \`is_atom/1\`, \`is_list/1\`, and parenthesized numeric comparisons (\`is_integer(Timeout) andalso Timeout >= 0\`) prevent bad terms from bypassing validation.
-- **Hierarchical Child Specs in \`init/1\`**: Nested supervisors declare \`type => supervisor\` with \`shutdown => infinity\`, whereas leaf workers specify finite millisecond shutdown budgets and pass runtime initialization arguments in the \`start\` tuple.
+### Architectural Deep Dive: 4 Core Engine Invariants
+
+1. **Clean Shutdown Recognition & Clause Ordering**: In \`is_clean_exit/1\`, matching \`{shutdown, _}\` ahead of the catch-all \`_\` guarantees that context-tagged shutdown tuples (e.g., \`{shutdown, client_disconnected}\`) are treated as clean exits rather than unexpected crashes.
+2. **Defensive Guard Conjunction & Timeout Bounds**: \`validate_shutdown_opt/1\` verifies that a timeout option is either one of the dedicated atoms (\`brutal_kill\` or \`infinity\`) or a non-negative integer millisecond budget via \`(is_integer(Timeout) andalso Timeout >= 0)\`.
+3. **Sub-Tree Preservation via \`shutdown => infinity\`**: In \`init/1\`, the nested supervisor \`ArchiveSup\` specifies \`shutdown => infinity\` with \`type => supervisor\`. This invariant gives the child supervisor unlimited time to terminate its own children in reverse order, preventing orphaned grandchild processes.
+4. **Leaf Worker Lifecycle & Start Tuple MFA**: Leaf workers (\`AudioWorker\`) specify a bounded shutdown deadline (\`2000\` ms) and pass initialization arguments through \`{CodecMod, start_link, Channels}\`. If the worker fails to exit within 2000ms, the BEAM forcefully terminates it with \`kill\`.
 
 ## Assignment Specification
 
@@ -612,6 +614,43 @@ Implement \`src/child_spec_factory.erl\` with the following exports:
         complexityNote: 'Static declarative specification compiled in supervisor init.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/supervisor.html#type-child_spec',
       },
+      {
+        functionName: 'start_child',
+        module: 'supervisor',
+        signature: 'supervisor:start_child(SupRef, ChildSpec) -> {ok, Child} | {ok, Child, Info} | {error, Error}',
+        typesSpec: [
+          'SupRef = pid() | atom()',
+          'ChildSpec = child_spec() | [term()]',
+          'Child = pid() | undefined'
+        ],
+        description: 'Dynamically adds a child specification to SupRef and starts that child process.',
+        complexityNote: 'Synchronous child spawn and link. Traps exits if child boot fails.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/supervisor.html#start_child/2',
+      },
+      {
+        functionName: 'terminate_child',
+        module: 'supervisor',
+        signature: 'supervisor:terminate_child(SupRef, Id) -> ok | {error, Error}',
+        typesSpec: [
+          'SupRef = pid() | atom()',
+          'Id = term()'
+        ],
+        description: 'Orders the supervisor to terminate the child identified by Id within its shutdown timeout budget.',
+        complexityNote: 'Executes graceful exit signal followed by brutal kill if deadline expires.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/supervisor.html#terminate_child/2',
+      },
+      {
+        functionName: 'delete_child',
+        module: 'supervisor',
+        signature: 'supervisor:delete_child(SupRef, Id) -> ok | {error, Error}',
+        typesSpec: [
+          'SupRef = pid() | atom()',
+          'Id = term()'
+        ],
+        description: 'Removes the terminated child specification identified by Id from the supervisor table.',
+        complexityNote: 'O(1) table deletion. Child process must be stopped prior to deletion.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/supervisor.html#delete_child/2',
+      },
     ],
     starterCode: `-module(child_spec_factory).
 
@@ -622,15 +661,15 @@ Implement \`src/child_spec_factory.erl\` with the following exports:
 ]).
 
 %% @doc Build a worker child specification map from an ID, module atom, start argument list, and restart policy atom; rejects invalid argument types or restart strategies.
-worker_spec(Id, Module, Args, RestartType) ->
+worker_spec(_Id, _Module, _Args, _RestartType) ->
     ok.
 
 %% @doc Build a nested supervisor child specification map enforcing hierarchical shutdown safety; rejects non-atom supervisor module names.
-supervisor_spec(Id, SupModule) ->
+supervisor_spec(_Id, _SupModule) ->
     ok.
 
 %% @doc Classify whether OTP restarts a child given its restart type and exit reason, distinguishing normal or clean shutdown exits from crashes.
-classify_restart(RestartType, ExitReason) ->
+classify_restart(_RestartType, _ExitReason) ->
     ok.
 `,
     solutionCode: `-module(child_spec_factory).
@@ -692,15 +731,15 @@ classify_restart(transient, _AbnormalReason) ->
 ]).
 
 %% @doc Build a worker child specification map from an ID, module atom, start argument list, and restart policy atom; rejects invalid argument types or restart strategies.
-worker_spec(Id, Module, Args, RestartType) ->
+worker_spec(_Id, _Module, _Args, _RestartType) ->
     ok.
 
 %% @doc Build a nested supervisor child specification map enforcing hierarchical shutdown safety; rejects non-atom supervisor module names.
-supervisor_spec(Id, SupModule) ->
+supervisor_spec(_Id, _SupModule) ->
     ok.
 
 %% @doc Classify whether OTP restarts a child given its restart type and exit reason, distinguishing normal or clean shutdown exits from crashes.
-classify_restart(RestartType, ExitReason) ->
+classify_restart(_RestartType, _ExitReason) ->
     ok.
 `,
       },
@@ -759,21 +798,21 @@ classify_restart(transient, _AbnormalReason) ->
     },
     visibleTestCases: [
       {
-        id: 'tc1',
+        id: 'tc-ch08-02-1',
         title: 'Worker Spec Construction',
         explanation: 'Builds a worker child spec with type => worker and 5000ms shutdown timeout.',
         erlangCall: 'child_spec_factory:worker_spec(cache_srv, my_cache, [100], transient)',
         expectedOutput: '#{id => cache_srv, modules => [my_cache], restart => transient, shutdown => 5000, start => {my_cache, start_link, [100]}, type => worker}',
       },
       {
-        id: 'tc2',
+        id: 'tc-ch08-02-2',
         title: 'Supervisor Spec Construction',
         explanation: 'Builds a nested supervisor spec with type => supervisor and shutdown => infinity.',
         erlangCall: 'child_spec_factory:supervisor_spec(sub_sup, sub_sup_mod)',
         expectedOutput: '#{id => sub_sup, modules => [sub_sup_mod], restart => permanent, shutdown => infinity, start => {sub_sup_mod, start_link, []}, type => supervisor}',
       },
       {
-        id: 'tc3',
+        id: 'tc-ch08-02-3',
         title: 'Classify Restart Truth Table',
         explanation: 'Checks transient on normal exit vs permanent on normal exit.',
         erlangCall: '{child_spec_factory:classify_restart(transient, normal), child_spec_factory:classify_restart(permanent, normal), child_spec_factory:classify_restart(transient, connection_lost)}',
