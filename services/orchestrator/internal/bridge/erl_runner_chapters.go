@@ -3353,100 +3353,41 @@ init:stop().
 
 	case "ch08-l03":
 		return `
-IsDynamic = case code:ensure_loaded(dynamic_session_sup) of
-    {module, dynamic_session_sup} -> true;
-    _ -> false
+T1_Start = erlang:system_time(millisecond),
+T1_Res = try
+    Res1 = escalation_analyzer:evaluate_crash_burst([10, 12, 14], 3, 5),
+    #{call_str => <<"escalation_analyzer:evaluate_crash_burst([10, 12, 14], 3, 5)">>,
+      expected => <<"{within_budget, 3, 3}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res1]))),
+      passed => (Res1 =:= {within_budget, 3, 3}), time_ms => erlang:system_time(millisecond) - T1_Start}
+catch C1:R1 ->
+    #{call_str => <<"escalation_analyzer:evaluate_crash_burst(...)">>, expected => <<"{within_budget, 3, 3}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = case IsDynamic of
-    true ->
-        T1_Start = erlang:system_time(millisecond),
-        T1_Res = try
-            {ok, Sup1} = dynamic_session_sup:start_link(),
-            Count1 = dynamic_session_sup:count_sessions(Sup1),
-            MRef1 = monitor(process, Sup1),
-            exit(Sup1, shutdown),
-            receive {'DOWN', MRef1, process, Sup1, _} -> ok after 500 -> ok end,
-            #{call_str => <<"dynamic_session_sup:count_sessions(Sup) (initial)">>,
-              expected => <<"0">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Count1]))),
-              passed => (Count1 =:= 0), time_ms => erlang:system_time(millisecond) - T1_Start}
-        catch C1:R1 ->
-            #{call_str => <<"dynamic_session_sup:start_link/count">>, expected => <<"0">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
-        end,
-        T2_Start = erlang:system_time(millisecond),
-        T2_Res = try
-            {ok, Sup2} = dynamic_session_sup:start_link(),
-            {ok, P1} = dynamic_session_sup:start_session(Sup2, <<"s1">>, <<"u1">>),
-            {ok, P2} = dynamic_session_sup:start_session(Sup2, <<"s2">>, <<"u2">>),
-            Count2 = dynamic_session_sup:count_sessions(Sup2),
-            MRef2 = monitor(process, Sup2),
-            exit(Sup2, shutdown),
-            receive {'DOWN', MRef2, process, Sup2, _} -> ok after 500 -> ok end,
-            PidsOk = is_pid(P1) andalso is_pid(P2) andalso (Count2 =:= 2),
-            #{call_str => <<"dynamic_session_sup:start_session(Sup, ...) -> count 2">>,
-              expected => <<"{true, true, 2}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [{is_pid(P1), is_pid(P2), Count2}]))),
-              passed => PidsOk, time_ms => erlang:system_time(millisecond) - T2_Start}
-        catch C2:R2 ->
-            #{call_str => <<"dynamic_session_sup:start_session(...)">>, expected => <<"2 active">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
-        end,
-        T3_Start = erlang:system_time(millisecond),
-        T3_Res = try
-            {ok, Sup3} = dynamic_session_sup:start_link(),
-            {ok, P3} = dynamic_session_sup:start_session(Sup3, <<"s1">>, <<"u1">>),
-            ok = dynamic_session_sup:terminate_session(Sup3, P3),
-            Count3 = dynamic_session_sup:count_sessions(Sup3),
-            MRef3 = monitor(process, Sup3),
-            exit(Sup3, shutdown),
-            receive {'DOWN', MRef3, process, Sup3, _} -> ok after 500 -> ok end,
-            #{call_str => <<"dynamic_session_sup:terminate_session(Sup, Child)">>,
-              expected => <<"0">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Count3]))),
-              passed => (Count3 =:= 0), time_ms => erlang:system_time(millisecond) - T3_Start}
-        catch C3:R3 ->
-            #{call_str => <<"dynamic_session_sup:terminate_session(...)">>, expected => <<"0">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
-        end,
-        [T1_Res, T2_Res, T3_Res];
-    false ->
-        T1_Start = erlang:system_time(millisecond),
-        T1_Res = try
-            Res1 = escalation_analyzer:evaluate_crash_burst([10, 12, 14], 3, 5),
-            #{call_str => <<"escalation_analyzer:evaluate_crash_burst([10, 12, 14], 3, 5)">>,
-              expected => <<"{within_budget, 3, 3}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res1]))),
-              passed => (Res1 =:= {within_budget, 3, 3}), time_ms => erlang:system_time(millisecond) - T1_Start}
-        catch C1:R1 ->
-            #{call_str => <<"escalation_analyzer:evaluate_crash_burst(...)">>, expected => <<"{within_budget, 3, 3}">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
-        end,
-        T2_Start = erlang:system_time(millisecond),
-        T2_Res = try
-            Res2 = escalation_analyzer:evaluate_crash_burst([10, 11, 12, 13], 3, 5),
-            #{call_str => <<"escalation_analyzer:evaluate_crash_burst([10, 11, 12, 13], 3, 5)">>,
-              expected => <<"{escalate_to_parent, 4, 3}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res2]))),
-              passed => (Res2 =:= {escalate_to_parent, 4, 3}), time_ms => erlang:system_time(millisecond) - T2_Start}
-        catch C2:R2 ->
-            #{call_str => <<"escalation_analyzer:evaluate_crash_burst(...)">>, expected => <<"{escalate_to_parent, 4, 3}">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
-        end,
-        T3_Start = erlang:system_time(millisecond),
-        T3_Res = try
-            Res3 = escalation_analyzer:plan_escalation_action([db_pool, pricing_cache, order_gateway], pricing_cache),
-            Expected3 = {stop_in_reverse_order, [order_gateway, pricing_cache], restart_in_order, [pricing_cache, order_gateway]},
-            #{call_str => <<"escalation_analyzer:plan_escalation_action([db_pool, pricing_cache, order_gateway], pricing_cache)">>,
-              expected => <<"{stop_in_reverse_order, [order_gateway, pricing_cache], restart_in_order, [pricing_cache, order_gateway]}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res3]))),
-              passed => (Res3 =:= Expected3), time_ms => erlang:system_time(millisecond) - T3_Start}
-        catch C3:R3 ->
-            #{call_str => <<"escalation_analyzer:plan_escalation_action(...)">>, expected => <<"escalation action tuple">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
-        end,
-        [T1_Res, T2_Res, T3_Res]
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    Res2 = escalation_analyzer:evaluate_crash_burst([10, 11, 12, 13], 3, 5),
+    #{call_str => <<"escalation_analyzer:evaluate_crash_burst([10, 11, 12, 13], 3, 5)">>,
+      expected => <<"{escalate_to_parent, 4, 3}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res2]))),
+      passed => (Res2 =:= {escalate_to_parent, 4, 3}), time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"escalation_analyzer:evaluate_crash_burst(...)">>, expected => <<"{escalate_to_parent, 4, 3}">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    Res3 = escalation_analyzer:plan_escalation_action([db_pool, pricing_cache, order_gateway], pricing_cache),
+    Expected3 = {stop_in_reverse_order, [order_gateway, pricing_cache], restart_in_order, [pricing_cache, order_gateway]},
+    #{call_str => <<"escalation_analyzer:plan_escalation_action([db_pool, pricing_cache, order_gateway], pricing_cache)">>,
+      expected => <<"{stop_in_reverse_order, [order_gateway, pricing_cache], restart_in_order, [pricing_cache, order_gateway]}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Res3]))),
+      passed => (Res3 =:= Expected3), time_ms => erlang:system_time(millisecond) - T3_Start}
+catch C3:R3 ->
+    #{call_str => <<"escalation_analyzer:plan_escalation_action(...)">>, expected => <<"escalation action tuple">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -9338,139 +9279,101 @@ Stages = [CompileStage, S1_Ast, S2_WorkerSpecs, S3_SupervisorSpecs, S4_DecisionM
 
 	case "ch08-l03":
 		return fmt.Sprintf(`
-IsDynamic = case code:ensure_loaded(dynamic_session_sup) of
-    {module, dynamic_session_sup} -> true;
-    _ -> false
+CompileStage = case code:ensure_loaded(escalation_analyzer) of
+    {module, escalation_analyzer} ->
+        Exports = escalation_analyzer:module_info(exports),
+        Req = [{evaluate_crash_burst, 3}, {plan_escalation_action, 2}, {reverse_shutdown_order, 1}],
+        case [E || E <- Req, not lists:member(E, Exports)] of
+            [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"escalation_analyzer.erl compiled cleanly; all API functions exported.">>};
+            Missing -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
+        end;
+    {error, E1} ->
+        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-Stages = case IsDynamic of
-    true ->
-        CompileStage_Dyn = case code:ensure_loaded(dynamic_session_sup) of
-            {module, dynamic_session_sup} ->
-                Exports_Dyn = dynamic_session_sup:module_info(exports),
-                Req_Dyn = [{start_link, 0}, {start_session, 3}, {count_sessions, 1}, {terminate_session, 2}, {init, 1}],
-                case [E || E <- Req_Dyn, not lists:member(E, Exports_Dyn)] of
-                    [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"dynamic_session_sup.erl compiled cleanly; all API functions exported.">>};
-                    Missing_Dyn -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing_Dyn]))}
-                end;
-            {error, E1_Dyn} ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1_Dyn]))}
-        end,
-        S1_Ast_Dyn = try
-            SrcPath_Dyn = filename:join(["%s", "src", "dynamic_session_sup.erl"]),
-            BeamPath_Dyn = filename:join(["%s", "ebin", "dynamic_session_sup.beam"]),
-            {ok, BeamBin_Dyn} = file:read_file(BeamPath_Dyn),
-            Rules_Dyn = #{
-                required_remote_calls => [{supervisor, start_link, 3}, {supervisor, start_child, 2}, {supervisor, count_children, 1}, {supervisor, terminate_child, 2}]
-            },
-            case bf_ast_verifier:verify_rules(SrcPath_Dyn, BeamBin_Dyn, Rules_Dyn) of
-                {ok, _} ->
-                    #{id => <<"ast_dynamic_supervisor">>, title => <<"AST Analysis: supervisor Behaviour & Dynamic Spawning Calls">>, status => <<"passed">>, time_ms => 15, details => <<"Verified supervisor behaviour, dynamic start_child/2, and telemetry queries.">>};
-                {error, Violations_Dyn} ->
-                    #{id => <<"ast_dynamic_supervisor">>, title => <<"AST Analysis: supervisor Behaviour & Dynamic Spawning Calls">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations_Dyn]))}
-            end
-        catch C1_Dyn:R1_Dyn ->
-            #{id => <<"ast_dynamic_supervisor">>, title => <<"AST Analysis: supervisor Behaviour & Dynamic Spawning Calls">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1_Dyn, R1_Dyn]))}
-        end,
-        S2_TemplateSpec_Dyn = try
-            {ok, {SupFlags_Dyn, [Template_Dyn]}} = dynamic_session_sup:init([]),
-            case {SupFlags_Dyn, Template_Dyn} of
-                {#{strategy := simple_one_for_one}, #{restart := temporary, type := worker}} ->
-                    #{id => <<"simple_one_for_one_spec">>, title => <<"simple_one_for_one Template Child Specification Audit">>, status => <<"passed">>, time_ms => 15, details => <<"init/1 returns exactly 1 template child spec with simple_one_for_one strategy and temporary restart.">>};
-                Other2_Dyn ->
-                    #{id => <<"simple_one_for_one_spec">>, title => <<"simple_one_for_one Template Child Specification Audit">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Invalid template structure: ~p", [Other2_Dyn]))}
-            end
-        catch C2_Dyn:R2_Dyn ->
-            #{id => <<"simple_one_for_one_spec">>, title => <<"simple_one_for_one Template Child Specification Audit">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Template error: ~p:~p", [C2_Dyn, R2_Dyn]))}
-        end,
-        S3_DynamicLifecycle_Dyn = try
-            {ok, Sup_Dyn} = dynamic_session_sup:start_link(),
-            0 = dynamic_session_sup:count_sessions(Sup_Dyn),
-            {ok, P1_Dyn} = dynamic_session_sup:start_session(Sup_Dyn, <<"sess_101">>, <<"usr_alpha">>),
-            {ok, P2_Dyn} = dynamic_session_sup:start_session(Sup_Dyn, <<"sess_102">>, <<"usr_beta">>),
-            {ok, P3_Dyn} = dynamic_session_sup:start_session(Sup_Dyn, <<"sess_103">>, <<"usr_gamma">>),
-            3 = dynamic_session_sup:count_sessions(Sup_Dyn),
-            ok = dynamic_session_sup:terminate_session(Sup_Dyn, P2_Dyn),
-            2 = dynamic_session_sup:count_sessions(Sup_Dyn),
-            exit(Sup_Dyn, shutdown),
-            #{id => <<"dynamic_lifecycle_pool">>, title => <<"Live Dynamic Process Pool Lifecycle (Spawn, Count, Terminate)">>, status => <<"passed">>, time_ms => 35, details => <<"Spawned 3 dynamic sessions on demand; verified count_sessions/1 increment/decrement and graceful cleanup.">>}
-        catch C3_Dyn:R3_Dyn ->
-            #{id => <<"dynamic_lifecycle_pool">>, title => <<"Live Dynamic Process Pool Lifecycle (Spawn, Count, Terminate)">>, status => <<"failed">>, time_ms => 35, details => list_to_binary(io_lib:format("Lifecycle error: ~p:~p", [C3_Dyn, R3_Dyn]))}
-        end,
-        [CompileStage_Dyn, S1_Ast_Dyn, S2_TemplateSpec_Dyn, S3_DynamicLifecycle_Dyn];
-    false ->
-        CompileStage_Esc = case code:ensure_loaded(escalation_analyzer) of
-            {module, escalation_analyzer} ->
-                Exports_Esc = escalation_analyzer:module_info(exports),
-                Req_Esc = [{evaluate_crash_burst, 3}, {plan_escalation_action, 2}, {reverse_shutdown_order, 1}],
-                case [E || E <- Req_Esc, not lists:member(E, Exports_Esc)] of
-                    [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"escalation_analyzer.erl compiled cleanly; all API functions exported.">>};
-                    Missing_Esc -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing_Esc]))}
-                end;
-            {error, E1_Esc} ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1_Esc]))}
-        end,
-        S1_Ast_Esc = try
-            SrcPath_Esc = filename:join(["%s", "src", "escalation_analyzer.erl"]),
-            BeamPath_Esc = filename:join(["%s", "ebin", "escalation_analyzer.beam"]),
-            {ok, BeamBin_Esc} = file:read_file(BeamPath_Esc),
-            Rules_Esc = #{
-                required_constructs => [guards]
-            },
-            case bf_ast_verifier:verify_rules(SrcPath_Esc, BeamBin_Esc, Rules_Esc) of
-                {ok, _} ->
-                    #{id => <<"ast_guards_and_validation">>, title => <<"AST Analysis: Guards & Sliding Window Contract">>, status => <<"passed">>, time_ms => 15, details => <<"Verified guard expressions enforcing positive burst window and integer limits.">>};
-                {error, Violations_Esc} ->
-                    #{id => <<"ast_guards_and_validation">>, title => <<"AST Analysis: Guards & Sliding Window Contract">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations_Esc]))}
-            end
-        catch C1_Esc:R1_Esc ->
-            #{id => <<"ast_guards_and_validation">>, title => <<"AST Analysis: Guards & Sliding Window Contract">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1_Esc, R1_Esc]))}
-        end,
-        S2_Burst_Esc = try
-            B1 = escalation_analyzer:evaluate_crash_burst([], 5, 10),
-            B2 = escalation_analyzer:evaluate_crash_burst([1, 2, 3], 3, 5),
-            B3 = escalation_analyzer:evaluate_crash_burst([1, 2, 10, 11], 2, 5),
-            B4 = escalation_analyzer:evaluate_crash_burst([10, 11, 12, 13, 14], 3, 5),
-            case {B1, B2, B3, B4} of
-                {{within_budget, 0, 5},
-                 {within_budget, 3, 3},
-                 {within_budget, 2, 2},
-                 {escalate_to_parent, 5, 3}} ->
-                    #{id => <<"sliding_window_crash_burst">>, title => <<"Sliding Window Crash Rate Limiting & Escalation Trigger">>, status => <<"passed">>, time_ms => 15, details => <<"Correctly verified empty list, within-budget counts, timestamp window pruning, and parent escalation trigger.">>};
-                Other2_Esc ->
-                    #{id => <<"sliding_window_crash_burst">>, title => <<"Sliding Window Crash Rate Limiting & Escalation Trigger">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Burst evaluation mismatch: ~p", [Other2_Esc]))}
-            end
-        catch C2_Esc:R2_Esc ->
-            #{id => <<"sliding_window_crash_burst">>, title => <<"Sliding Window Crash Rate Limiting & Escalation Trigger">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Burst error: ~p:~p", [C2_Esc, R2_Esc]))}
-        end,
-        S3_Plan_Esc = try
-            P1 = escalation_analyzer:plan_escalation_action([db_pool, pricing_cache, order_gateway], pricing_cache),
-            P2 = escalation_analyzer:plan_escalation_action([db_pool, pricing_cache, order_gateway], db_pool),
-            P3 = escalation_analyzer:plan_escalation_action([db_pool, pricing_cache], unknown_srv),
-            case {P1, P3} of
-                {{stop_in_reverse_order, [order_gateway, pricing_cache], restart_in_order, [pricing_cache, order_gateway]},
-                 {error, child_not_found}} ->
-                    #{id => <<"rest_for_one_shutdown_planning">>, title => <<"Downstream Reverse Shutdown & Forward Restart Planning">>, status => <<"passed">>, time_ms => 15, details => <<"Verified rest_for_one planning: downstream siblings stopped in reverse order and restarted in forward order.">>};
-                Other3_Esc ->
-                    #{id => <<"rest_for_one_shutdown_planning">>, title => <<"Downstream Reverse Shutdown & Forward Restart Planning">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Plan mismatch: ~p", [Other3_Esc]))}
-            end
-        catch C3_Esc:R3_Esc ->
-            #{id => <<"rest_for_one_shutdown_planning">>, title => <<"Downstream Reverse Shutdown & Forward Restart Planning">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Plan error: ~p:~p", [C3_Esc, R3_Esc]))}
-        end,
-        S4_Rev_Esc = try
-            R1_List = escalation_analyzer:reverse_shutdown_order([db_pool, pricing_cache, order_gateway]),
-            R2_List = escalation_analyzer:reverse_shutdown_order([]),
-            case {R1_List, R2_List} of
-                {[order_gateway, pricing_cache, db_pool], []} ->
-                    #{id => <<"reverse_shutdown_order">>, title => <<"Complete Reverse Order Startup Termination">>, status => <<"passed">>, time_ms => 10, details => <<"Verified full supervisor termination reversing the startup order of children.">>};
-                Other4_Esc ->
-                    #{id => <<"reverse_shutdown_order">>, title => <<"Complete Reverse Order Startup Termination">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Reverse shutdown mismatch: ~p", [Other4_Esc]))}
-            end
-        catch C4_Esc:R4_Esc ->
-            #{id => <<"reverse_shutdown_order">>, title => <<"Complete Reverse Order Startup Termination">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Reverse error: ~p:~p", [C4_Esc, R4_Esc]))}
-        end,
-        [CompileStage_Esc, S1_Ast_Esc, S2_Burst_Esc, S3_Plan_Esc, S4_Rev_Esc]
-end
-`, wsDir, wsDir, wsDir, wsDir), true
+S1_Ast = try
+    SrcPath = filename:join(["%s", "src", "escalation_analyzer.erl"]),
+    BeamPath = filename:join(["%s", "ebin", "escalation_analyzer.beam"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    Rules = #{
+        required_constructs => [guards]
+    },
+    case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
+        {ok, _} ->
+            #{id => <<"ast_guards_and_validation">>, title => <<"AST Analysis: Guards & Sliding Window Contract">>, status => <<"passed">>, time_ms => 15, details => <<"Verified guard expressions enforcing positive burst window and integer limits.">>};
+        {error, Violations} ->
+            #{id => <<"ast_guards_and_validation">>, title => <<"AST Analysis: Guards & Sliding Window Contract">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
+    end
+catch C1:R1 ->
+    #{id => <<"ast_guards_and_validation">>, title => <<"AST Analysis: Guards & Sliding Window Contract">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
+end,
+S2_Burst = try
+    B1 = escalation_analyzer:evaluate_crash_burst([], 5, 10),
+    B2 = escalation_analyzer:evaluate_crash_burst([1, 2, 3], 3, 5),
+    B3 = escalation_analyzer:evaluate_crash_burst([1, 2, 10, 11], 2, 5),
+    B4 = escalation_analyzer:evaluate_crash_burst([10, 11, 12, 13, 14], 3, 5),
+    HasGuard1 = case (catch escalation_analyzer:evaluate_crash_burst([], -1, 5)) of
+        {'EXIT', {function_clause, _}} -> true;
+        _ -> false
+    end,
+    HasGuard2 = case (catch escalation_analyzer:evaluate_crash_burst([], 3, 0)) of
+        {'EXIT', {function_clause, _}} -> true;
+        _ -> false
+    end,
+    HasGuard3 = case (catch escalation_analyzer:evaluate_crash_burst([1, 2], -1, 5)) of
+        {'EXIT', {function_clause, _}} -> true;
+        _ -> false
+    end,
+    case {B1, B2, B3, B4, HasGuard1, HasGuard2, HasGuard3} of
+        {{within_budget, 0, 5},
+         {within_budget, 3, 3},
+         {within_budget, 2, 2},
+         {escalate_to_parent, 5, 3},
+         true, true, true} ->
+            #{id => <<"sliding_window_crash_burst">>, title => <<"Sliding Window Crash Rate Limiting & Escalation Trigger">>, status => <<"passed">>, time_ms => 15, details => <<"Correctly verified empty list, within-budget counts, timestamp window pruning, and parent escalation trigger with guard validation.">>};
+        Other2 ->
+            #{id => <<"sliding_window_crash_burst">>, title => <<"Sliding Window Crash Rate Limiting & Escalation Trigger">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Burst evaluation or guard mismatch: ~p", [Other2]))}
+    end
+catch C2:R2 ->
+    #{id => <<"sliding_window_crash_burst">>, title => <<"Sliding Window Crash Rate Limiting & Escalation Trigger">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Burst error: ~p:~p", [C2, R2]))}
+end,
+S3_Plan = try
+    P1 = escalation_analyzer:plan_escalation_action([db_pool, pricing_cache, order_gateway], pricing_cache),
+    P2 = escalation_analyzer:plan_escalation_action([db_pool, pricing_cache, order_gateway], db_pool),
+    P3 = escalation_analyzer:plan_escalation_action([db_pool, pricing_cache], unknown_srv),
+    HasGuardPlan = case (catch escalation_analyzer:plan_escalation_action(not_a_list, pricing_cache)) of
+        {'EXIT', {function_clause, _}} -> true;
+        _ -> false
+    end,
+    case {P1, P2, P3, HasGuardPlan} of
+        {{stop_in_reverse_order, [order_gateway, pricing_cache], restart_in_order, [pricing_cache, order_gateway]},
+         {stop_in_reverse_order, [order_gateway, pricing_cache, db_pool], restart_in_order, [db_pool, pricing_cache, order_gateway]},
+         {error, child_not_found},
+         true} ->
+            #{id => <<"rest_for_one_shutdown_planning">>, title => <<"Downstream Reverse Shutdown & Forward Restart Planning">>, status => <<"passed">>, time_ms => 15, details => <<"Verified rest_for_one planning: downstream siblings stopped in reverse order and restarted in forward order with guard rejection.">>};
+        Other3 ->
+            #{id => <<"rest_for_one_shutdown_planning">>, title => <<"Downstream Reverse Shutdown & Forward Restart Planning">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Plan mismatch: ~p", [Other3]))}
+    end
+catch C3:R3 ->
+    #{id => <<"rest_for_one_shutdown_planning">>, title => <<"Downstream Reverse Shutdown & Forward Restart Planning">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Plan error: ~p:~p", [C3, R3]))}
+end,
+S4_Rev = try
+    R1_List = escalation_analyzer:reverse_shutdown_order([db_pool, pricing_cache, order_gateway]),
+    R2_List = escalation_analyzer:reverse_shutdown_order([]),
+    HasGuardRev = case (catch escalation_analyzer:reverse_shutdown_order(not_a_list)) of
+        {'EXIT', {function_clause, _}} -> true;
+        _ -> false
+    end,
+    case {R1_List, R2_List, HasGuardRev} of
+        {[order_gateway, pricing_cache, db_pool], [], true} ->
+            #{id => <<"reverse_shutdown_order">>, title => <<"Complete Reverse Order Startup Termination">>, status => <<"passed">>, time_ms => 10, details => <<"Verified full supervisor termination reversing the startup order of children with guard validation.">>};
+        Other4 ->
+            #{id => <<"reverse_shutdown_order">>, title => <<"Complete Reverse Order Startup Termination">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Reverse shutdown mismatch: ~p", [Other4]))}
+    end
+catch C4:R4 ->
+    #{id => <<"reverse_shutdown_order">>, title => <<"Complete Reverse Order Startup Termination">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Reverse error: ~p:~p", [C4, R4]))}
+end,
+Stages = [CompileStage, S1_Ast, S2_Burst, S3_Plan, S4_Rev]
+`, wsDir, wsDir), true
 
 	case "ch08-l04":
 		return fmt.Sprintf(`

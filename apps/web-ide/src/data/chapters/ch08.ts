@@ -909,9 +909,12 @@ rollback_before_gate(PipelineSteps, GateName) when is_list(PipelineSteps) ->
     end.
 \`\`\`
 
-Key Erlang mechanics illustrated above:
-- **Empty-List Clause Before \`lists:max/1\`**: Calling \`lists:max([])\` raises \`function_clause\`, so handling \`[]\` in an earlier clause keeps empty histories safe while enforcing numeric bounds in the non-empty clause.
-- **Pivot Splitting with \`lists:splitwith/2\`**: Matching against elements *not equal* to a target places everything upstream in the first tuple element and keeps the target itself at the head of the second tuple element (or \`[]\` when absent).
+### Architectural Deep Dive: 4 Core Engine Invariants
+
+1. **Defensive Guard Conjunction & Numeric Bounds**: In \`partition_stale_events/2\`, guard expressions \`when is_list(Timestamps), is_integer(RetentionSec), RetentionSec > 0\` reject invalid types and zero/negative retention periods before traversing the list.
+2. **Empty-List Pre-Clause Guarding**: Handling \`partition_stale_events([], _RetentionSec) -> {[], []}\` prior to calling \`lists:max/1\` guarantees that empty event streams do not crash with a \`function_clause\` exception on \`lists:max([])\`.
+3. **Sliding-Window Cutoff Arithmetic**: Calculating \`Cutoff = Anchor - RetentionSec\` establishes a dynamic relative time threshold based on the latest monotonic event rather than an absolute wall clock.
+4. **Pivot Splitting & Boundary Isolation**: \`lists:splitwith(fun(Step) -> Step =/= GateName end, PipelineSteps)\` partitions a pipeline into prior stages and remaining stages without scanning the list twice, placing the target gate at the head of the remaining list.
 
 ## Assignment Specification
 
@@ -997,6 +1000,41 @@ Implement \`src/escalation_analyzer.erl\` with the following exports:
         complexityNote: 'Maintained as an O(N) timestamp queue inside the supervisor loop.',
         officialUrl: 'https://www.erlang.org/doc/apps/stdlib/supervisor.html#type-sup_flags',
       },
+      {
+        functionName: 'splitwith',
+        module: 'lists',
+        signature: 'lists:splitwith(Pred, List1) -> {List2, List3}',
+        typesSpec: [
+          'Pred = fun((Elem :: T) -> boolean())',
+          'List1 = List2 = List3 = [T]'
+        ],
+        description: 'Partitions List1 into a prefix satisfying Pred and a remainder starting at the first failing element.',
+        complexityNote: 'O(N) single-pass traversal. Returns empty list if no elements match.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/lists.html#splitwith/2',
+      },
+      {
+        functionName: 'partition',
+        module: 'lists',
+        signature: 'lists:partition(Pred, List) -> {Satisfying, NonSatisfying}',
+        typesSpec: [
+          'Pred = fun((Elem :: T) -> boolean())',
+          'List = Satisfying = NonSatisfying = [T]'
+        ],
+        description: 'Partitions List into two lists: elements for which Pred returns true, and elements for which Pred returns false.',
+        complexityNote: 'O(N) single-pass list traversal preserving relative element ordering.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/lists.html#partition/2',
+      },
+      {
+        functionName: 'reverse',
+        module: 'lists',
+        signature: 'lists:reverse(List1) -> List2',
+        typesSpec: [
+          'List1 = List2 = [T]'
+        ],
+        description: 'Reverses the order of elements in List1.',
+        complexityNote: 'O(N) optimized BIF implemented directly in C runtime.',
+        officialUrl: 'https://www.erlang.org/doc/apps/stdlib/lists.html#reverse/1',
+      },
     ],
     starterCode: `-module(escalation_analyzer).
 
@@ -1007,15 +1045,15 @@ Implement \`src/escalation_analyzer.erl\` with the following exports:
 ]).
 
 %% @doc Evaluate whether crash timestamps exceed the allowed restart intensity within the sliding period window; treats empty lists as zero crashes and rejects negative intensity or non-positive period bounds.
-evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT) ->
+evaluate_crash_burst(_CrashTimestampsSecList, _MaxR, _MaxT) ->
     ok.
 
 %% @doc Determine affected downstream children from a startup order at a crashed child ID, returning reverse shutdown and forward restart plans or an error tuple if missing.
-plan_escalation_action(ChildOrderList, CrashedChildId) ->
+plan_escalation_action(_ChildOrderList, _CrashedChildId) ->
     ok.
 
 %% @doc Compute the supervisor teardown sequence by reversing a child startup ID list; rejects non-list inputs.
-reverse_shutdown_order(StartupChildIdsList) ->
+reverse_shutdown_order(_StartupChildIdsList) ->
     ok.
 `,
     solutionCode: `-module(escalation_analyzer).
@@ -1069,15 +1107,15 @@ reverse_shutdown_order(StartupChildIdsList) when is_list(StartupChildIdsList) ->
 ]).
 
 %% @doc Evaluate whether crash timestamps exceed the allowed restart intensity within the sliding period window; treats empty lists as zero crashes and rejects negative intensity or non-positive period bounds.
-evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT) ->
+evaluate_crash_burst(_CrashTimestampsSecList, _MaxR, _MaxT) ->
     ok.
 
 %% @doc Determine affected downstream children from a startup order at a crashed child ID, returning reverse shutdown and forward restart plans or an error tuple if missing.
-plan_escalation_action(ChildOrderList, CrashedChildId) ->
+plan_escalation_action(_ChildOrderList, _CrashedChildId) ->
     ok.
 
 %% @doc Compute the supervisor teardown sequence by reversing a child startup ID list; rejects non-list inputs.
-reverse_shutdown_order(StartupChildIdsList) ->
+reverse_shutdown_order(_StartupChildIdsList) ->
     ok.
 `,
       },
@@ -1128,21 +1166,21 @@ reverse_shutdown_order(StartupChildIdsList) when is_list(StartupChildIdsList) ->
     },
     visibleTestCases: [
       {
-        id: 'tc1',
+        id: 'tc-ch08-03-1',
         title: 'Crash Burst Within Budget',
         explanation: 'Tests 3 crashes within window with MaxR = 3 (within budget).',
         erlangCall: 'escalation_analyzer:evaluate_crash_burst([10, 12, 14], 3, 5)',
         expectedOutput: '{within_budget, 3, 3}',
       },
       {
-        id: 'tc2',
+        id: 'tc-ch08-03-2',
         title: 'Crash Burst Exceeds Budget (Escalate)',
         explanation: 'Tests 4 crashes within 5-second window with MaxR = 3 (triggers escalation).',
         erlangCall: 'escalation_analyzer:evaluate_crash_burst([10, 11, 12, 13], 3, 5)',
         expectedOutput: '{escalate_to_parent, 4, 3}',
       },
       {
-        id: 'tc3',
+        id: 'tc-ch08-03-3',
         title: 'Plan Escalation Action (rest_for_one)',
         explanation: 'Downstream reverse shutdown and forward restart order when middle child pricing_cache crashes.',
         erlangCall: 'escalation_analyzer:plan_escalation_action([db_pool, pricing_cache, order_gateway], pricing_cache)',

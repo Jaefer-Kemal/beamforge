@@ -94,6 +94,44 @@ classify_restart(transient, _AbnormalReason) ->
     restart.
 `
 
+	const escalationAnalyzerSolution = `-module(escalation_analyzer).
+
+-export([
+    evaluate_crash_burst/3,
+    plan_escalation_action/2,
+    reverse_shutdown_order/1
+]).
+
+%% @doc Evaluate whether crash timestamps exceed the allowed restart intensity within the sliding period window; treats empty lists as zero crashes and rejects negative intensity or non-positive period bounds.
+evaluate_crash_burst([], MaxR, MaxT)
+  when is_integer(MaxR), MaxR >= 0, is_integer(MaxT), MaxT > 0 ->
+    {within_budget, 0, MaxR};
+evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT)
+  when is_list(CrashTimestampsSecList), is_integer(MaxR), MaxR >= 0, is_integer(MaxT), MaxT > 0 ->
+    Latest = lists:max(CrashTimestampsSecList),
+    Threshold = Latest - MaxT,
+    InWindow = [Ts || Ts <- CrashTimestampsSecList, Ts >= Threshold, Ts =< Latest],
+    Count = length(InWindow),
+    if
+        Count > MaxR -> {escalate_to_parent, Count, MaxR};
+        true         -> {within_budget, Count, MaxR}
+    end.
+
+%% @doc Determine affected downstream children from a startup order at a crashed child ID, returning reverse shutdown and forward restart plans or an error tuple if missing.
+plan_escalation_action(ChildOrderList, CrashedChildId) when is_list(ChildOrderList) ->
+    case lists:splitwith(fun(Id) -> Id =/= CrashedChildId end, ChildOrderList) of
+        {_Prefix, []} ->
+            {error, child_not_found};
+        {_Prefix, Affected} ->
+            ToStop = lists:reverse(Affected),
+            ToRestart = Affected,
+            {stop_in_reverse_order, ToStop, restart_in_order, ToRestart}
+    end.
+
+%% @doc Compute the supervisor teardown sequence by reversing a child startup ID list; rejects non-list inputs.
+reverse_shutdown_order(StartupChildIdsList) when is_list(StartupChildIdsList) ->
+    lists:reverse(StartupChildIdsList).
+`
 
 	tests := []struct {
 		name         string
@@ -124,44 +162,14 @@ classify_restart(transient, _AbnormalReason) ->
 			visibleCount: 3,
 		},
 		{
-			name:       "ch08-l03 Escalation Analyzer",
-			exerciseID: "ch08-l03",
+			name:         "ch08-l03 Escalation Analyzer",
+			exerciseID:   "ch08-l03",
 			files: map[string]string{
-				"src/escalation_analyzer.erl": `-module(escalation_analyzer).
-
--export([
-    evaluate_crash_burst/3,
-    plan_escalation_action/2,
-    reverse_shutdown_order/1
-]).
-
-evaluate_crash_burst([], MaxR, _MaxT) ->
-    {within_budget, 0, MaxR};
-evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT)
-  when is_list(CrashTimestampsSecList), is_integer(MaxR), MaxR >= 0, is_integer(MaxT), MaxT > 0 ->
-    Latest = lists:max(CrashTimestampsSecList),
-    Threshold = Latest - MaxT,
-    InWindow = [Ts || Ts <- CrashTimestampsSecList, Ts >= Threshold, Ts =< Latest],
-    Count = length(InWindow),
-    if
-        Count > MaxR -> {escalate_to_parent, Count, MaxR};
-        true         -> {within_budget, Count, MaxR}
-    end.
-
-plan_escalation_action(ChildOrderList, CrashedChildId) when is_list(ChildOrderList) ->
-    case lists:splitwith(fun(Id) -> Id =/= CrashedChildId end, ChildOrderList) of
-        {_Prefix, []} ->
-            {error, child_not_found};
-        {_Prefix, Affected} ->
-            ToStop = lists:reverse(Affected),
-            ToRestart = Affected,
-            {stop_in_reverse_order, ToStop, restart_in_order, ToRestart}
-    end.
-
-reverse_shutdown_order(StartupChildIdsList) when is_list(StartupChildIdsList) ->
-    lists:reverse(StartupChildIdsList).
-`,
+				"src/escalation_analyzer.erl": escalationAnalyzerSolution,
 			},
+			wantScore:    100,
+			wantStages:   5,
+			visibleCount: 3,
 		},
 		{
 			name:       "ch08-l04 Dynamic Session Supervisor",
@@ -826,6 +834,156 @@ classify_restart(transient, _AbnormalReason) -> restart.
 		}
 		if report.Verdict == "PASSED" {
 			t.Errorf("Expected failure when supervisor_spec uses shutdown => 5000, but got PASSED")
+		}
+	})
+
+	// ── Negative Regression Subtests for ch08-l03 ──────────────────────────────
+	t.Run("ch08-l03 Negative Missing Guards AST Violation", func(t *testing.T) {
+		sessionID := "test-neg-ast-ch08-l03"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/escalation_analyzer.erl": `-module(escalation_analyzer).
+-export([evaluate_crash_burst/3, plan_escalation_action/2, reverse_shutdown_order/1]).
+
+%% BUG: Missing all when guards!
+evaluate_crash_burst([], MaxR, _MaxT) ->
+    {within_budget, 0, MaxR};
+evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT) ->
+    Latest = lists:max(CrashTimestampsSecList),
+    Threshold = Latest - MaxT,
+    InWindow = [Ts || Ts <- CrashTimestampsSecList, Ts >= Threshold, Ts =< Latest],
+    Count = length(InWindow),
+    if
+        Count > MaxR -> {escalate_to_parent, Count, MaxR};
+        true         -> {within_budget, Count, MaxR}
+    end.
+
+plan_escalation_action(ChildOrderList, CrashedChildId) ->
+    case lists:splitwith(fun(Id) -> Id =/= CrashedChildId end, ChildOrderList) of
+        {_Prefix, []} ->
+            {error, child_not_found};
+        {_Prefix, Affected} ->
+            {stop_in_reverse_order, lists:reverse(Affected), restart_in_order, Affected}
+    end.
+
+reverse_shutdown_order(StartupChildIdsList) ->
+    lists:reverse(StartupChildIdsList).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch08-l03", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure for missing guards AST violation, but got PASSED")
+		}
+	})
+
+	t.Run("ch08-l03 Negative Missing Export Failure", func(t *testing.T) {
+		sessionID := "test-neg-export-ch08-l03"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/escalation_analyzer.erl": `-module(escalation_analyzer).
+-export([evaluate_crash_burst/3, plan_escalation_action/2]).
+
+evaluate_crash_burst([], MaxR, MaxT)
+  when is_integer(MaxR), MaxR >= 0, is_integer(MaxT), MaxT > 0 ->
+    {within_budget, 0, MaxR};
+evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT)
+  when is_list(CrashTimestampsSecList), is_integer(MaxR), MaxR >= 0, is_integer(MaxT), MaxT > 0 ->
+    Latest = lists:max(CrashTimestampsSecList),
+    Threshold = Latest - MaxT,
+    InWindow = [Ts || Ts <- CrashTimestampsSecList, Ts >= Threshold, Ts =< Latest],
+    Count = length(InWindow),
+    if
+        Count > MaxR -> {escalate_to_parent, Count, MaxR};
+        true         -> {within_budget, Count, MaxR}
+    end.
+
+plan_escalation_action(ChildOrderList, CrashedChildId) when is_list(ChildOrderList) ->
+    case lists:splitwith(fun(Id) -> Id =/= CrashedChildId end, ChildOrderList) of
+        {_Prefix, []} ->
+            {error, child_not_found};
+        {_Prefix, Affected} ->
+            {stop_in_reverse_order, lists:reverse(Affected), restart_in_order, Affected}
+    end.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch08-l03", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure for missing export reverse_shutdown_order/1, but got PASSED")
+		}
+	})
+
+	t.Run("ch08-l03 Negative Unbounded Window Guard Rejection", func(t *testing.T) {
+		sessionID := "test-neg-bounds-ch08-l03"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		badFiles := map[string]string{
+			"src/escalation_analyzer.erl": `-module(escalation_analyzer).
+-export([evaluate_crash_burst/3, plan_escalation_action/2, reverse_shutdown_order/1]).
+
+%% BUG: Missing guards on empty list clause, allowing negative MaxR / MaxT!
+evaluate_crash_burst([], MaxR, _MaxT) ->
+    {within_budget, 0, MaxR};
+evaluate_crash_burst(CrashTimestampsSecList, MaxR, MaxT)
+  when is_list(CrashTimestampsSecList), is_integer(MaxR), MaxR >= 0, is_integer(MaxT), MaxT > 0 ->
+    Latest = lists:max(CrashTimestampsSecList),
+    Threshold = Latest - MaxT,
+    InWindow = [Ts || Ts <- CrashTimestampsSecList, Ts >= Threshold, Ts =< Latest],
+    Count = length(InWindow),
+    if
+        Count > MaxR -> {escalate_to_parent, Count, MaxR};
+        true         -> {within_budget, Count, MaxR}
+    end.
+
+plan_escalation_action(ChildOrderList, CrashedChildId) when is_list(ChildOrderList) ->
+    case lists:splitwith(fun(Id) -> Id =/= CrashedChildId end, ChildOrderList) of
+        {_Prefix, []} ->
+            {error, child_not_found};
+        {_Prefix, Affected} ->
+            {stop_in_reverse_order, lists:reverse(Affected), restart_in_order, Affected}
+    end.
+
+reverse_shutdown_order(StartupChildIdsList) when is_list(StartupChildIdsList) ->
+    lists:reverse(StartupChildIdsList).
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch08-l03", badFiles)
+		if err != nil {
+			t.Fatalf("RunVerification failed: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Errorf("Expected failure when evaluate_crash_burst allows negative bounds on empty list, but got PASSED")
 		}
 	})
 }

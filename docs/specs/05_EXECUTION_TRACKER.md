@@ -4090,6 +4090,24 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Dynamic Curriculum Tests: `TEST_CHAPTER=08 go test -v -run TestDynamicVisibleTestsCurriculum ./internal/bridge` passes 100% (7/7 lessons, `9.92s`).
   - Frontend Build: `npx tsc --noEmit` and `npm run build` pass with 0 errors across all 8 static and dynamic routes.
 
+## Phase 245: Chapter 8 Lecture 3 Pedagogical & Harness Audit (`ch08-l03`)
+- [x] **245.1: Spec 08 Pre-Flight Audit & Historical Analysis**:
+  - Confirmed previous Phase 150 (`f1ed1ee`) intervention that initially de-spoiled `ch08-l03`, replacing the verbatim clone example with `deploy_window_audit.erl` and establishing 10/10 `@doc` contracts.
+  - Identified and closed 6 modern gap vectors relative to post-Phase 240 standards:
+    1. Upgraded PWE explanatory text in `conceptMarkdown` to structured `### Architectural Deep Dive: 4 Core Engine Invariants` (defensive guard conjunction, empty-list pre-clause guarding ahead of `lists:max/1`, sliding-window cutoff arithmetic, and pivot splitting with `lists:splitwith/2`).
+    2. Underscore-prefixed unused parameter stubs in `starterCode` and `files[0].content` (`_CrashTimestampsSecList`, `_MaxR`, `_MaxT`, `_ChildOrderList`, `_CrashedChildId`, `_StartupChildIdsList`), ensuring `erlc.exe -Wall -Werror` passes with 0 warnings and 0 errors.
+    3. Expanded `otpDocCards` from 1 card (`sup_flags`) to 4 official OTP reference cards (`sup_flags`, `splitwith/2`, `partition/2`, `reverse/1`).
+    4. Standardized `visibleTestCases` IDs to `tc-ch08-03-1`, `tc-ch08-03-2`, and `tc-ch08-03-3`.
+    5. Cleaned up legacy dual-branch `IsDynamic` checks in `erl_runner_chapters.go` for `ch08-l03` and injected negative guard rejection assertions for empty list bounds, plan argument types, and reverse argument types.
+    6. Modernized `ch08_verification_test.go` with `wantScore: 100`, `wantStages: 5`, `visibleCount: 3`, and added 3 negative regression subtests (missing guards AST violation, missing export, and unbounded window guard rejection).
+- [x] **245.2: Multi-Compiler & Live Tri-Verification**:
+  - Live PWE (`deploy_window_audit.erl`): Compiles with `erlc.exe -Wall -Werror` (0 warnings/errors) and executes live on OTP 29 cleanly.
+  - Starter Pack (`starterCode` & `files[0].content`): Compiles with `erlc.exe -Wall -Werror` (0 warnings/errors) and returns placeholder atoms safely without compiler warnings.
+  - Solution Pack (`solutionCode` & `solutionFiles`): Compiles with `erlc.exe -Wall -Werror` (0 warnings/errors), satisfies `astRules: { requiredConstructs: ['guards'] }`, and passes all 3 visible tests.
+  - Go Verifier: `TestChapter8Verification` passes all 7 chapter exercises and 9 negative regression subtests (`23.32s`).
+  - Dynamic Curriculum Tests: `TEST_CHAPTER=08 go test -v -run TestDynamicVisibleTestsCurriculum ./internal/bridge` passes 100% (7/7 lessons, `9.22s`).
+  - Frontend Build: `npx tsc --noEmit` and `npm run build` pass with 0 errors across all 8 static and dynamic routes.
+
 
 
 
