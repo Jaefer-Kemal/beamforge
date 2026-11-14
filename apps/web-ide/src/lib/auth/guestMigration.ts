@@ -5,7 +5,10 @@
  * Seamlessly transfers local browser progress (completed lessons, code drafts, XP, streak)
  * into the learner's persistent Neon Postgres account upon authentication.
  */
-export async function migrateGuestProgress(targetUserId: string): Promise<boolean> {
+export async function migrateGuestProgress(
+  targetUserId: string,
+  userMeta?: { name?: string; email?: string; avatarUrl?: string }
+): Promise<boolean> {
   if (typeof window === 'undefined') return false;
   if (!targetUserId || targetUserId === 'guest') return false;
 
@@ -64,8 +67,8 @@ export async function migrateGuestProgress(targetUserId: string): Promise<boolea
       } catch {}
     }
 
-    // If no guest progress exists, exit cleanly
-    if (guestCompletedIds.length === 0 && Object.keys(guestDrafts).length === 0 && Object.keys(guestAccepted).length === 0) {
+    const hasGuestProgress = guestCompletedIds.length > 0 || Object.keys(guestDrafts).length > 0 || Object.keys(guestAccepted).length > 0;
+    if (!hasGuestProgress && !userMeta) {
       return false;
     }
 
@@ -77,6 +80,9 @@ export async function migrateGuestProgress(targetUserId: string): Promise<boolea
         body: JSON.stringify({
           action: 'migrate_guest',
           targetUserId,
+          name: userMeta?.name,
+          email: userMeta?.email,
+          avatarUrl: userMeta?.avatarUrl,
           guestData: {
             completedLevelIds: guestCompletedIds,
             drafts: guestDrafts,
@@ -103,6 +109,16 @@ export async function migrateGuestProgress(targetUserId: string): Promise<boolea
     Object.entries(guestAccepted).forEach(([exId, files]) => {
       try { localStorage.setItem(`beamforge_accepted_${targetUserId}_${exId}`, JSON.stringify(files)); } catch {}
     });
+
+    // Update target user profile in localStorage with meta if present
+    const existingRaw = localStorage.getItem(`beamforge_user_${targetUserId}`);
+    let targetProfile = existingRaw ? JSON.parse(existingRaw) : {};
+    if (userMeta?.name) targetProfile.name = userMeta.name;
+    if (userMeta?.email) targetProfile.email = userMeta.email;
+    if (userMeta?.avatarUrl) targetProfile.avatarUrl = userMeta.avatarUrl;
+    if (Object.keys(targetProfile).length > 0) {
+      try { localStorage.setItem(`beamforge_user_${targetUserId}`, JSON.stringify(targetProfile)); } catch {}
+    }
 
     // 4. Purge migrated guest keys to prevent redundant future migrations
     guestCompletedIds.forEach((lid) => {

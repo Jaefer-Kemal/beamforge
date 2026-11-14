@@ -157,17 +157,6 @@ export function LandingNavbar() {
 
           {/* Right Action Cluster */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Dynamic Returning Learner Pill */}
-            {lastLessonId && (
-              <Link
-                href={`/learn/${lastLessonId}`}
-                className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 transition-all shadow-sm"
-              >
-                <Zap className="w-3 h-3 text-emerald-500" />
-                <span>Resume ({lastLessonId})</span>
-              </Link>
-            )}
-
             {/* Light / Dark Mode Glass Toggle — Desktop only */}
             <button
               onClick={toggleTheme}
@@ -193,23 +182,27 @@ export function LandingNavbar() {
                   <span>Sign In</span>
                 </button>
                 <Link
-                  href="/learn/ch01-l01"
+                  href={lastLessonId ? `/learn/${lastLessonId}` : '/learn/ch01-l01'}
                   className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-[0_4px_16px_rgba(245,158,11,0.35)] transition-all hover:scale-[1.02] active:scale-[0.98] border border-amber-300/30"
                 >
-                  <span>Start Free</span>
+                  <span>{lastLessonId ? `Resume (${lastLessonId})` : 'Start Free'}</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </>
             ) : (
               <>
-                <div className="hidden md:inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-100/60 dark:bg-slate-800/60 border border-white/60 dark:border-white/10 text-xs font-semibold">
+                <Link
+                  href="/profile"
+                  className="hidden md:inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-100/60 dark:bg-slate-800/60 hover:bg-slate-200/60 dark:hover:bg-slate-700/60 border border-white/60 dark:border-white/10 text-xs font-semibold transition-all cursor-pointer"
+                  title="View Profile and Analytics"
+                >
                   {currentUser?.avatarUrl ? (
                     <img src={currentUser.avatarUrl} alt="" className="w-4 h-4 rounded-full object-cover" />
                   ) : (
                     <div className="w-2.5 h-2.5 rounded-full" style={{ background: currentUser?.avatarColor || '#3B82F6' }} />
                   )}
-                  <span className="max-w-28 truncate text-slate-800 dark:text-slate-200">{currentUser?.name || 'Engineer'}</span>
-                </div>
+                  <span className="max-w-28 truncate text-slate-800 dark:text-slate-200">{currentUser?.name || 'Explorer'}</span>
+                </Link>
                 <Link
                   href={lastLessonId ? `/learn/${lastLessonId}` : '/learn/ch01-l01'}
                   className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 shadow-[0_4px_16px_rgba(16,185,129,0.35)] transition-all hover:scale-[1.02] active:scale-[0.98] border border-emerald-300/30"
@@ -267,43 +260,8 @@ export function LandingNavbar() {
               XMPP Capstone Studio
             </a>
 
-            {/* Appearance Theme Selector (Settings Style) */}
-            <div className="pt-2 pb-1 border-t border-slate-200/60 dark:border-slate-800/60">
-              <div className="text-[11px] font-semibold mb-2 px-1 text-slate-500 dark:text-slate-400">
-                Appearance Theme
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  id="mobile-landing-theme-daylight-btn"
-                  onClick={() => { if (isDark) toggleTheme(); }}
-                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${!isDark ? 'border shadow-xs' : 'opacity-60 hover:opacity-100'}`}
-                  style={{
-                    background: !isDark ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255,255,255,0.05)',
-                    borderColor: !isDark ? 'rgba(245, 158, 11, 0.40)' : 'transparent',
-                    color: !isDark ? '#D97706' : '#94A3B8',
-                  }}
-                >
-                  <Sun className="w-4 h-4 text-amber-500" />
-                  <span>Daylight Glass</span>
-                </button>
-                <button
-                  id="mobile-landing-theme-midnight-btn"
-                  onClick={() => { if (!isDark) toggleTheme(); }}
-                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${isDark ? 'border shadow-xs' : 'opacity-60 hover:opacity-100'}`}
-                  style={{
-                    background: isDark ? 'rgba(139, 92, 246, 0.20)' : 'rgba(15,23,42,0.05)',
-                    borderColor: isDark ? 'rgba(139, 92, 246, 0.40)' : 'transparent',
-                    color: isDark ? '#C4B5FD' : '#64748B',
-                  }}
-                >
-                  <Moon className="w-4 h-4 text-purple-400" />
-                  <span>Midnight Glass</span>
-                </button>
-              </div>
-            </div>
-
             {/* Mobile Auth Actions */}
-            <div className="pt-2 space-y-2">
+            <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800/60 space-y-2">
               {!isAuthed ? (
                 <>
                   <button
@@ -321,14 +279,18 @@ export function LandingNavbar() {
                     onClick={() => setMobileMenuOpen(false)}
                     className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-[0_4px_16px_rgba(245,158,11,0.35)] active:scale-[0.98] transition-all"
                   >
-                    <span>{lastLessonId ? `Resume Last Lesson (${lastLessonId})` : 'Start Free'}</span>
+                    <span>{lastLessonId ? `Resume (${lastLessonId})` : 'Start Free'}</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </Link>
                 </>
               ) : (
                 <>
                   <div className="flex items-center justify-between p-2 rounded-xl bg-slate-100/60 dark:bg-white/5 border border-slate-200/60 dark:border-white/10 text-xs">
-                    <div className="flex items-center gap-2 min-w-0">
+                    <Link
+                      href="/profile"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
+                    >
                       {currentUser?.avatarUrl ? (
                         <img src={currentUser.avatarUrl} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
                       ) : (
@@ -336,8 +298,11 @@ export function LandingNavbar() {
                           {currentUser?.name?.[0] || 'U'}
                         </div>
                       )}
-                      <span className="font-semibold truncate text-slate-800 dark:text-slate-200">{currentUser?.name}</span>
-                    </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="font-semibold truncate text-slate-800 dark:text-slate-200">{currentUser?.name}</span>
+                        <span className="text-[10px] text-amber-500 font-medium">View Profile</span>
+                      </div>
+                    </Link>
                     <button
                       onClick={handleSignOut}
                       className="text-xs text-rose-500 hover:text-rose-600 font-semibold px-2 py-1 rounded-lg hover:bg-rose-500/10 transition-colors"

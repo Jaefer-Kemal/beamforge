@@ -147,7 +147,7 @@ export const LeaderboardDrawer: React.FC<LeaderboardDrawerProps> = ({
                   {activeTab === 'rankings' ? 'Global Leaderboard' : 'Badges & Trophies'}
                 </h2>
                 <div className="flex items-center gap-2 text-[11px] font-medium" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                  <span>{isDbConnected ? 'Neon Serverless Live' : 'Local Preset State'}</span>
+                  <span>{isDbConnected ? 'Cloud Live Rankings' : 'Local Standings'}</span>
                   <span>•</span>
                   <span>{activeTab === 'rankings' ? 'Updated in real-time' : `${badgesSummary.unlockedCount} of ${badgesSummary.total} Unlocked`}</span>
                 </div>

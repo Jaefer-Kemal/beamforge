@@ -4326,6 +4326,30 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Removed fallback hardcoded secrets from `apps/web-ide/src/lib/auth/server.ts`.
   - Audited full git history and working tree with `git grep` and `git check-ignore`. Verified zero exposed credentials, database passwords (`npg_*`), or Render tokens (`rnd_*`) across all tracked files.
 
+## Phase 259: Profile Page, Identity Sync, Topbar Progress Redesign & Zero-Emoji UX Polish
+- [x] **259.1: Landing Navbar De-Duplication & Clean Mobile Alignment (`LandingNavbar.tsx`)**:
+  - Eliminated duplicate resume buttons across desktop and mobile. Guests receive exactly one `Sign In` + `Start Free` pair (or `Resume (CHxx-Lxx)` if returning). Authenticated users receive a profile badge linking to `/profile` + one primary CTA (`Resume (CHxx-Lxx)` or `Go to IDE`).
+  - Streamlined mobile menu, removing redundant theme selector and ensuring clean vertical flow with zero emojis.
+- [x] **259.2: Database Schema Migration & Identity Sync (`route.ts`, `useWorkspaceStore.ts`, `guestMigration.ts`)**:
+  - Added non-destructive database migrations for `email`, `avatar_url`, `custom_avatar_id`, and `bio` columns on `beamforge_users`.
+  - In `useWorkspaceStore.ts:hydrateFromStorageAndDb`, captured Google OAuth name, email, and profile image from `authClient.getSession()`, passing them to backend sync and updating `currentUser` immediately.
+  - In `route.ts`, removed hardcoded `'BEAM Engineer'` default name, dynamically persisting real user names and computing role titles based on actual earned XP (`xpToRole`).
+  - Added `action: 'update_profile'` and `action: 'reset_user_progress'` endpoints in `/api/user-progress`.
+- [x] **259.3: Dedicated Authenticated User Profile Page (`/profile`)**:
+  - Built `apps/web-ide/src/app/profile/page.tsx` with Apple Glassmorphic surfaces and responsive mobile/desktop layout.
+  - Interactive BEAM avatar selector (6 preset avatars: Node, Supervisor, Mailbox, Nine-Nines, Bytecode, Actor Core) with live persistence.
+  - LeetCode-style analytics dashboard: overall completion progress (e.g. `X / 68 Lessons`), 5-world curriculum breakdown cards with progress bars, streak, and recent submissions feed.
+  - Relocated account reset into a protected Danger Zone with a type-to-confirm safeguard (`Type "RESET" to confirm`).
+- [x] **259.4: Modern Segmented Topbar Progress Bar (`BootDevTopBar.tsx`)**:
+  - Replaced raw circular dots (`lesson-dot-*`) with an Apple/LeetCode-style segmented progress bar featuring real-time chapter completion counters (`CH 02 • 3 of 6 Completed`) and responsive click-to-jump segments.
+  - Removed technical vendor branding (`(Neon DB)` -> `Cloud Sync Active`, `(Neon Cloud)` -> `Global Leaderboard`).
+  - Removed duplicate reset buttons from topbar user menu and settings popover, replacing them with a direct `View Profile & Analytics` link.
+- [x] **259.5: Multi-Compiler Verification**:
+  - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
+  - Next.js Production Build (`npm run build`): 0 errors across all 9 static & dynamic routes (including new `/profile`).
+  - Go Orchestrator package build: 0 errors.
+  - Erlang Grader harness compilation: 0 errors.
+
 
 
 

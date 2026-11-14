@@ -117,7 +117,11 @@ export function AuthModal({
       localStorage.setItem('bf_current_user_id', authUser.id);
 
       // Auto-migrate any local guest progress into the authenticated account
-      await migrateGuestProgress(authUser.id);
+      await migrateGuestProgress(authUser.id, {
+        name: authUser.name || authUser.email?.split('@')[0],
+        email: authUser.email,
+        avatarUrl: authUser.image || undefined,
+      });
 
       const cachedRaw = localStorage.getItem(`beamforge_user_${authUser.id}`);
       let existingProfile: UserProfile | null = null;
@@ -127,14 +131,14 @@ export function AuthModal({
 
       const updatedProfile: UserProfile = {
         id: authUser.id,
-        name: authUser.name || authUser.email?.split('@')[0] || existingProfile?.name || 'BEAM Engineer',
+        name: authUser.name || authUser.email?.split('@')[0] || existingProfile?.name || 'BEAM Explorer',
         email: authUser.email || existingProfile?.email,
         avatarUrl: authUser.image || existingProfile?.avatarUrl,
         isGuest: false,
         role: existingProfile?.role || 'BEAM Newcomer',
         level: existingProfile?.level || 1,
         avatarColor: existingProfile?.avatarColor || '#3B82F6',
-        bio: existingProfile?.bio || 'BeamForge Engineer',
+        bio: existingProfile?.bio || 'Exploring Erlang & OTP on the interactive BEAM platform.',
         completedLevelIds: existingProfile?.completedLevelIds || [],
         totalXp: existingProfile?.totalXp || 0,
         unlockedSolutionLessonIds: existingProfile?.unlockedSolutionLessonIds || [],

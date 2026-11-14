@@ -943,8 +943,36 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             localStorage.setItem('bf_current_user_id', sessionUser.id);
             currentUserId = sessionUser.id;
 
-            // Auto-migrate any local guest progress (completed lessons, code drafts, solutions)
-            await migrateGuestProgress(sessionUser.id);
+            // Preserve session identity immediately in cached profile
+            const existingRaw = localStorage.getItem(`beamforge_user_${sessionUser.id}`);
+            let initialProfile: UserProfile = existingRaw ? JSON.parse(existingRaw) : {
+              id: sessionUser.id,
+              name: sessionUser.name || sessionUser.email?.split('@')[0] || 'BEAM Explorer',
+              email: sessionUser.email,
+              avatarUrl: (sessionUser as any).image || undefined,
+              role: 'BEAM Newcomer',
+              level: 1,
+              avatarColor: '#3B82F6',
+              bio: 'Exploring Erlang & OTP on the interactive BEAM platform.',
+              completedLevelIds: [],
+              totalXp: 0,
+              unlockedSolutionLessonIds: [],
+              lastActiveExercise: 'ch01-l01',
+              streakDays: 1,
+            };
+            if (sessionUser.name && (!initialProfile.name || initialProfile.name === 'BEAM Engineer' || initialProfile.name === 'Alpha Tester')) {
+              initialProfile.name = sessionUser.name;
+            }
+            if (sessionUser.email) initialProfile.email = sessionUser.email;
+            if ((sessionUser as any).image) initialProfile.avatarUrl = (sessionUser as any).image;
+            localStorage.setItem(`beamforge_user_${sessionUser.id}`, JSON.stringify(initialProfile));
+
+            // Auto-migrate any local guest progress and send Google identity
+            await migrateGuestProgress(sessionUser.id, {
+              name: sessionUser.name || undefined,
+              email: sessionUser.email || undefined,
+              avatarUrl: (sessionUser as any).image || undefined,
+            });
           }
         } catch {}
 

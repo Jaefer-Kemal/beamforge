@@ -22,6 +22,10 @@ async function ensureTable(sql: any) {
     try {
       await sql`ALTER TABLE beamforge_users ADD COLUMN IF NOT EXISTS streak_days INT DEFAULT 1;`;
       await sql`ALTER TABLE beamforge_users ADD COLUMN IF NOT EXISTS last_activity_date VARCHAR(32);`;
+      await sql`ALTER TABLE beamforge_users ADD COLUMN IF NOT EXISTS email VARCHAR(256);`;
+      await sql`ALTER TABLE beamforge_users ADD COLUMN IF NOT EXISTS avatar_url TEXT;`;
+      await sql`ALTER TABLE beamforge_users ADD COLUMN IF NOT EXISTS custom_avatar_id VARCHAR(64);`;
+      await sql`ALTER TABLE beamforge_users ADD COLUMN IF NOT EXISTS bio TEXT DEFAULT 'Exploring Erlang & OTP on the interactive BEAM platform.';`;
     } catch {}
 
     await sql`
@@ -205,7 +209,7 @@ export async function GET(req: NextRequest) {
     }
 
     const rows = await sql`
-      SELECT id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, last_activity_date
+      SELECT id, name, email, avatar_url, custom_avatar_id, bio, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, last_activity_date
       FROM beamforge_users
       WHERE id = ${userId}
       LIMIT 1
@@ -263,10 +267,13 @@ export async function GET(req: NextRequest) {
       const user: UserProfile = {
         id: r.id,
         name: r.name,
+        email: r.email || undefined,
+        avatarUrl: r.avatar_url || undefined,
+        customAvatarId: r.custom_avatar_id || undefined,
         role: derived.role,
         level: derived.level,
         avatarColor: preset.avatarColor,
-        bio: preset.bio,
+        bio: r.bio || preset.bio,
         totalXp: canonicalXp,
         completedLevelIds: authoritativeCompleted,
         unlockedSolutionLessonIds,
@@ -506,13 +513,20 @@ export async function POST(req: NextRequest) {
       const canonicalXp = Math.max(mergedCompleted.length * 100, guestXp);
       const { level, role } = xpToRole(canonicalXp);
 
+      const userName = body.name || 'BEAM Explorer';
+      const userEmail = body.email || null;
+      const userAvatarUrl = body.avatarUrl || null;
+
       // 5. Upsert beamforge_users record
       await sql`
         INSERT INTO beamforge_users (
-          id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, updated_at
+          id, name, email, avatar_url, bio, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, updated_at
         ) VALUES (
           ${targetUserId},
-          'BEAM Engineer',
+          ${userName},
+          ${userEmail},
+          ${userAvatarUrl},
+          'Exploring Erlang & OTP on the interactive BEAM platform.',
           ${role},
           ${level},
           ${canonicalXp},
@@ -523,6 +537,9 @@ export async function POST(req: NextRequest) {
           NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
+          name = CASE WHEN beamforge_users.name = 'BEAM Engineer' OR beamforge_users.name = 'Guest Learner' THEN EXCLUDED.name ELSE beamforge_users.name END,
+          email = COALESCE(EXCLUDED.email, beamforge_users.email),
+          avatar_url = COALESCE(EXCLUDED.avatar_url, beamforge_users.avatar_url),
           completed_level_ids = ${JSON.stringify(mergedCompleted)},
           total_xp = GREATEST(beamforge_users.total_xp, ${canonicalXp}),
           level = GREATEST(beamforge_users.level, ${level}),
@@ -537,6 +554,56 @@ export async function POST(req: NextRequest) {
         completedLevelIds: mergedCompleted,
         totalXp: canonicalXp,
       });
+    }
+
+    // Action: Update User Profile (Name, Bio, Custom Avatar)
+    if (body.action === 'update_profile') {
+      const { userId: profUserId, name: profName, bio: profBio, customAvatarId: profAvatarId, avatarUrl: profAvatarUrl } = body;
+      if (!sql) {
+        return NextResponse.json({ status: 'ok', source: 'offline', dbConnected: false });
+      }
+      if (!profUserId || profUserId === 'guest') {
+        return NextResponse.json({ error: 'Unauthorized or guest user' }, { status: 401 });
+      }
+      await ensureTable(sql);
+      await sql`
+        UPDATE beamforge_users
+        SET 
+          name = COALESCE(${profName || null}, name),
+          bio = COALESCE(${profBio || null}, bio),
+          custom_avatar_id = COALESCE(${profAvatarId || null}, custom_avatar_id),
+          avatar_url = COALESCE(${profAvatarUrl || null}, avatar_url),
+          updated_at = NOW()
+        WHERE id = ${profUserId}
+      `;
+      return NextResponse.json({ status: 'ok', updated: true });
+    }
+
+    // Action: Reset User Progress completely (Danger Zone)
+    if (body.action === 'reset_user_progress') {
+      const resetUserId = body.userId;
+      if (!sql) {
+        return NextResponse.json({ status: 'ok', source: 'offline', dbConnected: false });
+      }
+      if (!resetUserId) {
+        return NextResponse.json({ error: 'Missing userId' }, { status: 400 });
+      }
+      await ensureTable(sql);
+      await sql`DELETE FROM beamforge_submissions WHERE user_id = ${resetUserId}`;
+      await sql`DELETE FROM beamforge_drafts WHERE user_id = ${resetUserId}`;
+      await sql`
+        UPDATE beamforge_users
+        SET completed_level_ids = '[]'::jsonb,
+            total_xp = 0,
+            level = 1,
+            role = 'BEAM Newcomer',
+            streak_days = 1,
+            unlocked_solution_lesson_ids = '[]'::jsonb,
+            last_active_exercise = 'ch01-l01',
+            updated_at = NOW()
+        WHERE id = ${resetUserId}
+      `;
+      return NextResponse.json({ status: 'ok', reset: true });
     }
 
     // Action: Save Work-in-Progress Code Draft

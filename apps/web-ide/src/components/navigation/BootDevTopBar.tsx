@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import {
   Zap,
@@ -32,7 +33,6 @@ import { ALL_CURRICULUM_CHAPTERS, getLessonById } from '../../data/curriculumCat
 import { DEFAULT_USERS, UserProfile, xpToRole, GUEST_USER } from '../../types/user';
 import { authClient } from '../../lib/auth/client';
 import { LeaderboardDrawer } from '../workspace/LeaderboardDrawer';
-import { ResetAccountModal } from './ResetAccountModal';
 import { PrerequisiteModal } from '../workspace/PrerequisiteModal';
 import { AuthModal } from '../workspace/AuthModal';
 import { checkLessonAccess, LessonPrerequisiteInfo } from '../../lib/curriculumAccess';
@@ -218,7 +218,6 @@ export function BootDevTopBar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<'rankings' | 'badges'>('rankings');
-  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
 
   const [prereqModalData, setPrereqModalData] = useState<LessonPrerequisiteInfo | null>(null);
   const [isPrereqModalOpen, setIsPrereqModalOpen] = useState(false);
@@ -448,7 +447,7 @@ export function BootDevTopBar() {
               setDrawerTab('rankings');
               setIsLeaderboardOpen(true);
             }}
-            title="Global Leaderboard (Neon Cloud)"
+            title="Global Leaderboard"
             className="hidden md:flex items-center justify-center w-7 h-7 rounded-full transition-all cursor-pointer hover:scale-105"
             style={{
               background: isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.12)',
@@ -515,66 +514,56 @@ export function BootDevTopBar() {
           </div>
         </div>
 
-        {/* ── CENTER ZONE: De-cluttered Interactive Lesson Progress Dots ──────── */}
-        <div className="hidden lg:flex flex-1 items-center justify-center gap-1 min-w-0 px-2 max-w-sm">
-          {chapterLessons.map((lessonTitle, idx) => {
-            const lessonNum = idx + 1;
-            const lessonObj = (ALL_CURRICULUM_CHAPTERS as any)[currentChapterNum]?.[idx];
-            const isCompleted = lessonObj ? isLessonDone(lessonObj.id) : false;
-            const isActive = lessonNum === currentLessonNum;
-            const access = checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll, isAuthed);
-            const isUnlocked = access.isUnlocked || isCompleted;
-            return (
-              <React.Fragment key={lessonNum}>
-                {/* Connector line */}
-                {idx > 0 && (
-                  <div
-                    className="h-0.5 flex-1 min-w-[6px] max-w-4 transition-all duration-300"
+        {/* ── CENTER ZONE: Modern Segmented Chapter Progress Bar ──────── */}
+        <div className="hidden lg:flex flex-1 items-center justify-center min-w-0 px-3 max-w-sm">
+          <div className="w-full flex flex-col gap-1.5 py-1 px-3 rounded-xl bg-slate-100/60 dark:bg-slate-800/40 border border-slate-200/60 dark:border-white/10">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+              <span className="font-mono text-amber-600 dark:text-amber-400">CH {currentChapterNum}</span>
+              <span>
+                {chapterLessons.filter((_, i) => {
+                  const lObj = (ALL_CURRICULUM_CHAPTERS as any)[currentChapterNum]?.[i];
+                  return lObj ? isLessonDone(lObj.id) : false;
+                }).length} of {chapterLessons.length} Completed
+              </span>
+            </div>
+            {/* Segmented Progress Track */}
+            <div className="flex items-center gap-1 w-full h-1.5">
+              {chapterLessons.map((lessonTitle, idx) => {
+                const lessonNum = idx + 1;
+                const lessonObj = (ALL_CURRICULUM_CHAPTERS as any)[currentChapterNum]?.[idx];
+                const isCompleted = lessonObj ? isLessonDone(lessonObj.id) : false;
+                const isActive = lessonNum === currentLessonNum;
+                const access = checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll, isAuthed);
+                const isUnlocked = access.isUnlocked || isCompleted;
+
+                return (
+                  <button
+                    key={lessonNum}
+                    id={`lesson-segment-${lessonNum}`}
+                    title={
+                      isCompleted
+                        ? `Completed: Lesson ${lessonNum} - ${lessonTitle}`
+                        : isUnlocked
+                        ? `Lesson ${lessonNum}: ${lessonTitle}`
+                        : `Locked: Lesson ${lessonNum} - ${lessonTitle}`
+                    }
+                    onClick={() => handleSelectLesson(lessonNum)}
+                    className={`flex-1 h-full rounded-full transition-all duration-300 cursor-pointer ${
+                      isActive ? 'ring-2 ring-emerald-400 dark:ring-emerald-300' : 'hover:opacity-100'
+                    }`}
                     style={{
-                      background: isCompleted || isActive
-                        ? (isDark ? 'rgba(16,185,129,0.70)' : 'rgba(16,185,129,0.60)')
-                        : (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.12)'),
+                      background: isCompleted
+                        ? '#10B981'
+                        : isActive
+                        ? (isDark ? '#34D399' : '#10B981')
+                        : (isDark ? 'rgba(255,255,255,0.15)' : 'rgba(15,23,42,0.12)'),
+                      opacity: isUnlocked || isActive ? 1 : 0.4,
                     }}
                   />
-                )}
-                <button
-                  id={`lesson-dot-${lessonNum}`}
-                  title={
-                    isCompleted
-                      ? `Completed: Lesson ${lessonNum} - ${lessonTitle}`
-                      : isUnlocked
-                      ? `Lesson ${lessonNum}: ${lessonTitle}`
-                      : `Locked: Lesson ${lessonNum} - ${lessonTitle} (Complete earlier lessons first)`
-                  }
-                  onClick={() => handleSelectLesson(lessonNum)}
-                  className={`relative flex-shrink-0 rounded-full transition-all duration-300 cursor-pointer ${
-                    isActive ? 'lesson-dot-active scale-110' : 'hover:scale-125'
-                  } ${!isUnlocked && !isActive ? 'opacity-40 hover:opacity-80' : ''}`}
-                  style={{
-                    width: isActive ? 14 : 9,
-                    height: isActive ? 14 : 9,
-                    background: isCompleted
-                      ? '#10B981'
-                      : isActive
-                      ? (isDark ? '#34D399' : '#10B981')
-                      : (isDark ? 'rgba(255,255,255,0.20)' : 'rgba(15,23,42,0.18)'),
-                    border: isActive
-                      ? `2px solid ${isDark ? '#34D399' : '#10B981'}`
-                      : isCompleted
-                      ? 'none'
-                      : `1px solid ${isDark ? 'rgba(255,255,255,0.30)' : 'rgba(15,23,42,0.25)'}`,
-                    boxShadow: isActive ? `0 0 0 3px ${isDark ? 'rgba(52,211,153,0.25)' : 'rgba(16,185,129,0.25)'}` : 'none',
-                  }}
-                >
-                  {isCompleted && (
-                    <svg className="absolute inset-0 m-auto w-2 h-2" viewBox="0 0 8 8" fill="none">
-                      <path d="M1.5 4L3 5.5L6.5 2.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  )}
-                </button>
-              </React.Fragment>
-            );
-          })}
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {/* ── RIGHT ZONE: Chapter & Lesson Dropdowns + Nav + Profile + Settings ── */}
@@ -908,18 +897,6 @@ export function BootDevTopBar() {
                       <span>Sign In with Google or Email</span>
                     </button>
 
-                    {/* Reset Guest Progress */}
-                    <button
-                      onClick={() => {
-                        setUserMenuOpen(false);
-                        setIsResetModalOpen(true);
-                      }}
-                      className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-medium text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                    >
-                      <RotateCcw className="w-3 h-3" />
-                      <span>Reset Guest Progress</span>
-                    </button>
-
                     {/* Test Profiles Collapsible / Switcher (Preserved for local development) */}
                     <div className="pt-2 border-t border-slate-200/60 dark:border-white/10">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5 flex items-center justify-between px-1">
@@ -977,10 +954,20 @@ export function BootDevTopBar() {
                       </div>
                     </div>
 
+                    {/* View Profile & Analytics Link */}
+                    <Link
+                      href="/profile"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-semibold text-sky-600 dark:text-sky-400 bg-sky-500/10 hover:bg-sky-500/15 border border-sky-500/20 transition-colors"
+                    >
+                      <User className="w-3.5 h-3.5" />
+                      <span>View Profile & Analytics</span>
+                    </Link>
+
                     {/* Cloud Sync Active Indicator */}
                     <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-                      <span className="truncate">Cloud Sync Active (Neon DB)</span>
+                      <span className="truncate">Cloud Sync Active</span>
                     </div>
 
                     {/* Sign Out Button */}
@@ -990,18 +977,6 @@ export function BootDevTopBar() {
                     >
                       <LogOut className="w-3.5 h-3.5" />
                       <span>Sign Out</span>
-                    </button>
-
-                    {/* Reset Progress */}
-                    <button
-                      onClick={() => {
-                        setUserMenuOpen(false);
-                        setIsResetModalOpen(true);
-                      }}
-                      className="w-full flex items-center justify-center gap-1.5 py-1 px-3 text-[11px] text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
-                    >
-                      <RotateCcw className="w-3 h-3" />
-                      <span>Reset Progress</span>
                     </button>
                   </>
                 )}
@@ -1139,23 +1114,16 @@ export function BootDevTopBar() {
                   </div>
                 </div>
 
-                {/* Danger Zone: Reset Progress */}
+                {/* Account & Profile Link */}
                 <div className="pt-2 border-t" style={{ borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)' }}>
-                  <button
-                    id="open-reset-modal-btn"
-                    onClick={() => {
-                      setSettingsOpen(false);
-                      setIsResetModalOpen(true);
-                    }}
-                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-semibold text-rose-500 transition-all cursor-pointer hover:bg-rose-500/10"
-                    style={{
-                      background: isDark ? 'rgba(244, 63, 94, 0.10)' : 'rgba(244, 63, 94, 0.06)',
-                      border: '1px solid rgba(244, 63, 94, 0.25)',
-                    }}
+                  <Link
+                    href="/profile"
+                    onClick={() => setSettingsOpen(false)}
+                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white bg-slate-100/70 dark:bg-slate-800/70 hover:bg-slate-200/70 dark:hover:bg-slate-700/70 border border-slate-200/60 dark:border-white/10 transition-colors"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Reset Account & Progress</span>
-                  </button>
+                    <User className="w-3.5 h-3.5 text-sky-500" />
+                    <span>Manage Profile & Analytics</span>
+                  </Link>
                 </div>
               </div>
             )}
@@ -1377,16 +1345,6 @@ export function BootDevTopBar() {
                   <span>Sign In with Google or Email (Free)</span>
                 </button>
 
-                <button
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    setIsResetModalOpen(true);
-                  }}
-                  className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-semibold text-rose-500 bg-rose-500/10 border border-rose-500/20 cursor-pointer"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Reset Guest Progress</span>
-                </button>
               </>
             ) : (
               <>
@@ -1420,26 +1378,24 @@ export function BootDevTopBar() {
 
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-                  <span className="truncate">Cloud Sync Active (Neon DB)</span>
+                  <span className="truncate">Cloud Sync Active</span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 pt-1">
+                  <Link
+                    href="/profile"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold text-sky-600 dark:text-sky-400 bg-sky-500/10 border border-sky-500/20"
+                  >
+                    <User className="w-3.5 h-3.5" />
+                    <span>Profile</span>
+                  </Link>
                   <button
                     onClick={handleSignOut}
                     className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold text-rose-500 bg-rose-500/10 border border-rose-500/20 cursor-pointer"
                   >
                     <LogOut className="w-3.5 h-3.5" />
                     <span>Sign Out</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setMobileMenuOpen(false);
-                      setIsResetModalOpen(true);
-                    }}
-                    className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-medium text-slate-500 dark:text-slate-400 bg-slate-100/60 dark:bg-white/5 border border-slate-200/60 dark:border-white/10 cursor-pointer"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    <span>Reset</span>
                   </button>
                 </div>
               </>
@@ -1549,14 +1505,6 @@ export function BootDevTopBar() {
         isDark={isDark}
         initialTab={drawerTab}
         onClose={() => setIsLeaderboardOpen(false)}
-      />
-
-      <ResetAccountModal
-        isOpen={isResetModalOpen}
-        userName={currentUser?.name || 'Alpha Tester'}
-        isDark={isDark}
-        onClose={() => setIsResetModalOpen(false)}
-        onConfirm={resetUserProgress}
       />
 
       {prereqModalData && (

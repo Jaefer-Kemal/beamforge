@@ -3,6 +3,7 @@ export interface UserProfile {
   name: string;
   email?: string;
   avatarUrl?: string;
+  customAvatarId?: string;
   isGuest?: boolean;
   role: string;
   level: number;
