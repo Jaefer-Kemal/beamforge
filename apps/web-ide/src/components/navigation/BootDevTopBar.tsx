@@ -19,7 +19,6 @@ import {
   RotateCcw,
   Trophy,
   Settings,
-  ShieldAlert,
   Trash2,
   Lock,
   Award,
@@ -187,7 +186,6 @@ export function BootDevTopBar() {
     switchUser,
     resetUserProgress,
     devModeUnlockedAll,
-    toggleDevModeUnlockedAll,
     completedLevelIds,
     activeExerciseId,
     switchExercise,
@@ -452,23 +450,6 @@ export function BootDevTopBar() {
             <Flame className="w-3.5 h-3.5 text-orange-500 fill-orange-500 flex-shrink-0" />
             <span suppressHydrationWarning>{mounted ? (currentUser?.streakDays || 1) : 1}d</span>
           </div>
-
-          {/* Tester Mode Active Indicator (Pill) */}
-          {devModeUnlockedAll && (
-            <div
-              id="tester-mode-pill"
-              title="Tester Mode: All chapters unlocked. XP is frozen (0 XP added) to protect leaderboard rankings."
-              className="hidden xl:flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold"
-              style={{
-                background: 'rgba(245, 158, 11, 0.15)',
-                border: '1px solid rgba(245, 158, 11, 0.35)',
-                color: '#F59E0B',
-              }}
-            >
-              <ShieldAlert className="w-3 h-3 flex-shrink-0" />
-              <span>Tester (0 XP)</span>
-            </div>
-          )}
 
           {/* View Switcher Pill */}
           <div
@@ -1033,51 +1014,6 @@ export function BootDevTopBar() {
                   </div>
                 </div>
 
-                {/* Developer / Tester Mode Toggle */}
-                <div
-                  className="p-3 rounded-xl space-y-2"
-                  style={{
-                    background: devModeUnlockedAll
-                      ? (isDark ? 'rgba(245, 158, 11, 0.10)' : 'rgba(245, 158, 11, 0.08)')
-                      : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)'),
-                    border: devModeUnlockedAll
-                      ? '1px solid rgba(245, 158, 11, 0.30)'
-                      : (isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(15,23,42,0.06)'),
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <ShieldAlert className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                      <div>
-                        <div className="text-xs font-bold" style={{ color: isDark ? '#F1F5F9' : '#0F172A' }}>
-                          Tester Mode (Unlock All)
-                        </div>
-                        <div className="text-[10px] text-amber-500 font-medium">
-                          {devModeUnlockedAll ? 'All Chapters Unlocked • XP Frozen' : 'Gated Progression Active'}
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={toggleDevModeUnlockedAll}
-                      id="toggle-tester-mode-btn"
-                      className="w-10 h-5 rounded-full transition-colors relative cursor-pointer flex items-center p-0.5"
-                      style={{
-                        background: devModeUnlockedAll ? '#F59E0B' : (isDark ? 'rgba(255,255,255,0.20)' : 'rgba(15,23,42,0.20)'),
-                      }}
-                    >
-                      <div
-                        className="w-4 h-4 rounded-full bg-white transition-transform shadow-xs"
-                        style={{
-                          transform: devModeUnlockedAll ? 'translateX(20px)' : 'translateX(0)',
-                        }}
-                      />
-                    </button>
-                  </div>
-                  <p className="text-[10px] leading-relaxed opacity-75" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                    When enabled, all 12 chapters are immediately accessible. To preserve global leaderboard integrity, exercise completions award 0 XP.
-                  </p>
-                </div>
-
                 {/* Danger Zone: Reset Progress */}
                 <div className="pt-2 border-t" style={{ borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)' }}>
                   <button
@@ -1250,44 +1186,34 @@ export function BootDevTopBar() {
 
           {/* Quick Settings Bar in Mobile */}
           <div
-            className="p-3 border-b flex items-center justify-between"
+            className="p-3 border-b grid grid-cols-2 gap-2"
             style={{ borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)' }}
           >
-            <div className="flex items-center gap-2">
-              <button
-                onClick={toggleTheme}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer"
-                style={{
-                  background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
-                  color: isDark ? '#F59E0B' : '#475569',
-                }}
-              >
-                {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-                <span>{isDark ? 'Daylight' : 'Midnight'}</span>
-              </button>
-
-              <button
-                onClick={toggleDevModeUnlockedAll}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer"
-                style={{
-                  background: devModeUnlockedAll ? 'rgba(245, 158, 11, 0.18)' : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)'),
-                  color: devModeUnlockedAll ? '#F59E0B' : (isDark ? '#94A3B8' : '#64748B'),
-                }}
-              >
-                <ShieldAlert className="w-3.5 h-3.5" />
-                <span>{devModeUnlockedAll ? 'Tester ON' : 'Tester OFF'}</span>
-              </button>
-            </div>
+            <button
+              onClick={toggleTheme}
+              className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              style={{
+                background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
+                color: isDark ? '#F59E0B' : '#475569',
+                border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
+              }}
+            >
+              {isDark ? <Sun className="w-3.5 h-3.5 text-amber-500" /> : <Moon className="w-3.5 h-3.5 text-purple-400" />}
+              <span>{isDark ? 'Daylight' : 'Midnight'}</span>
+            </button>
 
             <button
               onClick={() => {
                 setMobileMenuOpen(false);
                 setIsLeaderboardOpen(true);
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-amber-500 cursor-pointer"
-              style={{ background: 'rgba(245, 158, 11, 0.12)' }}
+              className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold text-amber-500 transition-all cursor-pointer"
+              style={{
+                background: isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.10)',
+                border: isDark ? '1px solid rgba(245, 158, 11, 0.30)' : '1px solid rgba(245, 158, 11, 0.20)',
+              }}
             >
-              <Trophy className="w-3.5 h-3.5" />
+              <Trophy className="w-3.5 h-3.5 text-amber-500" />
               <span>Leaderboard</span>
             </button>
           </div>
