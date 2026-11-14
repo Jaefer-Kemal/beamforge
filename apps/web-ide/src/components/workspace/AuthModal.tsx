@@ -5,6 +5,7 @@ import { X, Sparkles, AlertCircle, Loader2, Mail, Lock, User, ArrowRight, Shield
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import { authClient } from '../../lib/auth/client';
 import { UserProfile, xpToRole } from '../../types/user';
+import { migrateGuestProgress } from '../../lib/auth/guestMigration';
 
 export interface AuthModalProps {
   isOpen: boolean;
@@ -110,33 +111,42 @@ export function AuthModal({
     }
   };
 
-  const handleAuthSuccess = (authUser: { id: string; name?: string; email?: string; image?: string }) => {
+  const handleAuthSuccess = async (authUser: { id: string; name?: string; email?: string; image?: string }) => {
     try {
       localStorage.setItem('bf_is_authenticated', 'true');
       localStorage.setItem('bf_current_user_id', authUser.id);
 
+      // Auto-migrate any local guest progress into the authenticated account
+      await migrateGuestProgress(authUser.id);
+
+      const cachedRaw = localStorage.getItem(`beamforge_user_${authUser.id}`);
+      let existingProfile: UserProfile | null = null;
+      if (cachedRaw) {
+        try { existingProfile = JSON.parse(cachedRaw); } catch {}
+      }
+
       const updatedProfile: UserProfile = {
         id: authUser.id,
-        name: authUser.name || authUser.email?.split('@')[0] || 'BEAM Engineer',
-        email: authUser.email,
-        avatarUrl: authUser.image,
+        name: authUser.name || authUser.email?.split('@')[0] || existingProfile?.name || 'BEAM Engineer',
+        email: authUser.email || existingProfile?.email,
+        avatarUrl: authUser.image || existingProfile?.avatarUrl,
         isGuest: false,
-        role: 'BEAM Newcomer',
-        level: 1,
-        avatarColor: '#3B82F6',
-        bio: 'BeamForge Engineer',
-        completedLevelIds: [],
-        totalXp: 0,
-        unlockedSolutionLessonIds: [],
-        lastActiveExercise: 'ch01-l01',
-        streakDays: 1,
+        role: existingProfile?.role || 'BEAM Newcomer',
+        level: existingProfile?.level || 1,
+        avatarColor: existingProfile?.avatarColor || '#3B82F6',
+        bio: existingProfile?.bio || 'BeamForge Engineer',
+        completedLevelIds: existingProfile?.completedLevelIds || [],
+        totalXp: existingProfile?.totalXp || 0,
+        unlockedSolutionLessonIds: existingProfile?.unlockedSolutionLessonIds || [],
+        lastActiveExercise: existingProfile?.lastActiveExercise || 'ch01-l01',
+        streakDays: existingProfile?.streakDays || 1,
       };
 
       localStorage.setItem(`beamforge_user_${authUser.id}`, JSON.stringify(updatedProfile));
       useWorkspaceStore.setState({ currentUser: updatedProfile });
 
-      // Trigger cloud sync to pull database state or migrate local guest drafts
-      hydrateFromStorageAndDb();
+      // Trigger authoritative cloud sync to pull database state
+      await hydrateFromStorageAndDb();
     } catch (err) {
       console.warn('[Auth] Local profile save error:', err);
     }

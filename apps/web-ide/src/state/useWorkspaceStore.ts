@@ -30,6 +30,8 @@ import { UserProfile, DEFAULT_USERS, GUEST_USER, xpToRole } from '../types/user'
 import { triggerCelebrationConfetti } from '../lib/confetti';
 import { Badge, BADGE_CATALOG, isBadgeUnlocked } from '../types/badges';
 import type { UserSubmissionRecord } from '../types/submissions';
+import { authClient } from '../lib/auth/client';
+import { migrateGuestProgress } from '../lib/auth/guestMigration';
 
 export const getUserDraftKey = (userId: string, exerciseId: string) => `beamforge_draft_${userId}_${exerciseId}`;
 
@@ -931,8 +933,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     hydrateFromStorageAndDb: async () => {
       if (typeof window === 'undefined') return;
       try {
+        // 0. Detect active Neon Auth session (handles Google OAuth redirect & returning authenticated sessions)
+        let currentUserId = localStorage.getItem('bf_current_user_id') || 'guest';
+        try {
+          const sessionRes = await authClient.getSession();
+          if (sessionRes?.data?.user) {
+            const sessionUser = sessionRes.data.user;
+            localStorage.setItem('bf_is_authenticated', 'true');
+            localStorage.setItem('bf_current_user_id', sessionUser.id);
+            currentUserId = sessionUser.id;
+
+            // Auto-migrate any local guest progress (completed lessons, code drafts, solutions)
+            await migrateGuestProgress(sessionUser.id);
+          }
+        } catch {}
+
         // 1. Immediate client storage hydration
-        const currentUserId = localStorage.getItem('bf_current_user_id') || 'user_alpha';
         let cachedUser: UserProfile | null = null;
         const cachedRaw = localStorage.getItem(`beamforge_user_${currentUserId}`);
         if (cachedRaw) {
@@ -943,8 +959,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           if (legacyRaw) {
             try {
               const parsed = JSON.parse(legacyRaw);
+              const fallbackBase = currentUserId === 'guest' ? GUEST_USER : (DEFAULT_USERS[currentUserId] || DEFAULT_USERS['user_alpha']);
               cachedUser = {
-                ...(DEFAULT_USERS[currentUserId] || DEFAULT_USERS['user_alpha']),
+                ...fallbackBase,
                 completedLevelIds: parsed.completedLevelIds || [],
                 totalXp: parsed.totalXp ?? 0,
                 unlockedSolutionLessonIds: parsed.unlockedSolutionLessonIds || [],
@@ -975,7 +992,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         } catch {}
 
         if (cachedUser || directCompleted.length > 0) {
-          const baseUser = cachedUser || DEFAULT_USERS[currentUserId] || DEFAULT_USERS['user_alpha'];
+          const baseUser = cachedUser || (currentUserId === 'guest' ? GUEST_USER : (DEFAULT_USERS[currentUserId] || DEFAULT_USERS['user_alpha']));
           const mergedInitialCompleted = Array.from(new Set([...(baseUser.completedLevelIds || []), ...directCompleted]));
           const fullUser: UserProfile = { ...baseUser, completedLevelIds: mergedInitialCompleted };
           set((state) => ({

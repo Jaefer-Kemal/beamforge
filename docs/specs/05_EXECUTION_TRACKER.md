@@ -4280,6 +4280,25 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npx tsc --noEmit` in `apps/web-ide`: Passed with 0 errors.
   - `npm run build` in `apps/web-ide`: Passed with 0 errors across all 8 static and dynamic routes.
 
+## Phase 256: Step 5 — Guest-to-Cloud Progress Auto-Migration Architecture
+- [x] **256.1: Client-Side Guest Progress Scanner & Migrator (`guestMigration.ts`)**:
+  - Created `apps/web-ide/src/lib/auth/guestMigration.ts`.
+  - Scans `localStorage` for all guest completed lesson IDs (`beamforge_completed_guest_*`), active code drafts (`beamforge_draft_guest_*`), accepted solution files (`beamforge_accepted_guest_*`), and guest profile metadata (`beamforge_user_guest`).
+  - Dispatches a structured `migrate_guest` action to the backend `/api/user-progress` endpoint.
+  - Immediately copies progress into the authenticated user's local keys and purges guest keys to prevent redundant future migrations.
+- [x] **256.2: Backend Cloud Auto-Migration Endpoint (`route.ts`)**:
+  - Implemented `action: 'migrate_guest'` inside `apps/web-ide/src/app/api/user-progress/route.ts`.
+  - Upserts guest accepted solution files into `beamforge_submissions` as verified passed submissions (`status = 'passed'`).
+  - Re-assigns any existing submissions with `user_id = 'guest'` to `targetUserId`.
+  - Upserts all guest in-progress code drafts into `beamforge_drafts`.
+  - Upserts `beamforge_users` with the union of completed lesson IDs, computes canonical XP and level via `xpToRole`, and preserves streak days.
+- [x] **256.3: Multi-Provider Flow Integration (Email & Google OAuth)**:
+  - In `apps/web-ide/src/components/workspace/AuthModal.tsx`: `handleAuthSuccess` awaits `migrateGuestProgress(authUser.id)` before triggering store hydration.
+  - In `apps/web-ide/src/state/useWorkspaceStore.ts`: `hydrateFromStorageAndDb` queries `authClient.getSession()`, detects authenticated Google OAuth redirect returns, and automatically triggers `migrateGuestProgress(sessionUser.id)`.
+- [x] **256.4: Multi-Compiler Verification**:
+  - `npx tsc --noEmit` in `apps/web-ide`: Passed with 0 errors.
+  - `npm run build` in `apps/web-ide`: Passed with 0 errors across all 8 static and dynamic routes.
+
 
 
 

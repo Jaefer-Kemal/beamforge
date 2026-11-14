@@ -429,6 +429,116 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Action: Migrate Guest Progress to Authenticated User
+    if (body.action === 'migrate_guest') {
+      const { targetUserId, guestData } = body;
+      if (!targetUserId || targetUserId === 'guest') {
+        return NextResponse.json({ error: 'Invalid targetUserId' }, { status: 400 });
+      }
+
+      const completedLevelIds: string[] = Array.isArray(guestData?.completedLevelIds) ? guestData.completedLevelIds : [];
+      const drafts: Record<string, any> = guestData?.drafts || {};
+      const acceptedFiles: Record<string, any> = guestData?.acceptedFiles || {};
+      const guestXp = Number(guestData?.totalXp || 0);
+      const guestStreak = Number(guestData?.streakDays || 1);
+
+      if (!sql) {
+        return NextResponse.json({ status: 'ok', source: 'offline', migrated: true });
+      }
+
+      await ensureTable(sql);
+
+      // 1. Insert accepted solutions as passed submissions
+      for (const [exId, files] of Object.entries(acceptedFiles)) {
+        const subId = `sub_mig_${targetUserId}_${exId}`;
+        try {
+          await sql`
+            INSERT INTO beamforge_submissions (
+              id, user_id, exercise_id, status, score, files, stages_summary, duration_ms, created_at
+            ) VALUES (
+              ${subId},
+              ${targetUserId},
+              ${exId},
+              'passed',
+              100,
+              ${JSON.stringify(files)},
+              '[{"title":"Guest Auto-Migration","status":"passed","durationMs":0}]'::jsonb,
+              0,
+              NOW()
+            )
+            ON CONFLICT (id) DO NOTHING
+          `;
+        } catch {}
+      }
+
+      // Also migrate any existing submissions recorded with user_id = 'guest'
+      try {
+        await sql`
+          UPDATE beamforge_submissions
+          SET user_id = ${targetUserId}
+          WHERE user_id = 'guest'
+        `;
+      } catch {}
+
+      // 2. Migrate drafts into beamforge_drafts
+      for (const [exId, files] of Object.entries(drafts)) {
+        try {
+          await sql`
+            INSERT INTO beamforge_drafts (user_id, exercise_id, files, updated_at)
+            VALUES (${targetUserId}, ${exId}, ${JSON.stringify(files)}, NOW())
+            ON CONFLICT (user_id, exercise_id) DO UPDATE SET
+              files = EXCLUDED.files,
+              updated_at = NOW()
+          `;
+        } catch {}
+      }
+
+      // 3. Query all passed submissions for targetUserId to get canonical completed list
+      const passedRows = await sql`
+        SELECT DISTINCT ON (exercise_id) exercise_id
+        FROM beamforge_submissions
+        WHERE user_id = ${targetUserId} AND status = 'passed'
+      `;
+      const dbPassedIds = (passedRows || []).map((r: any) => r.exercise_id);
+      const mergedCompleted = Array.from(new Set([...dbPassedIds, ...completedLevelIds]));
+
+      // 4. Compute canonical XP, Level, and Role
+      const canonicalXp = Math.max(mergedCompleted.length * 100, guestXp);
+      const { level, role } = xpToRole(canonicalXp);
+
+      // 5. Upsert beamforge_users record
+      await sql`
+        INSERT INTO beamforge_users (
+          id, name, role, level, total_xp, completed_level_ids, unlocked_solution_lesson_ids, last_active_exercise, streak_days, updated_at
+        ) VALUES (
+          ${targetUserId},
+          'BEAM Engineer',
+          ${role},
+          ${level},
+          ${canonicalXp},
+          ${JSON.stringify(mergedCompleted)},
+          '[]'::jsonb,
+          ${mergedCompleted[mergedCompleted.length - 1] || 'ch01-l01'},
+          ${guestStreak},
+          NOW()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          completed_level_ids = ${JSON.stringify(mergedCompleted)},
+          total_xp = GREATEST(beamforge_users.total_xp, ${canonicalXp}),
+          level = GREATEST(beamforge_users.level, ${level}),
+          role = ${role},
+          streak_days = GREATEST(beamforge_users.streak_days, ${guestStreak}),
+          updated_at = NOW()
+      `;
+
+      return NextResponse.json({
+        status: 'ok',
+        migrated: true,
+        completedLevelIds: mergedCompleted,
+        totalXp: canonicalXp,
+      });
+    }
+
     // Action: Save Work-in-Progress Code Draft
     if (body.action === 'save_draft') {
       const { userId: draftUserId, exerciseId: draftExId, files: draftFiles } = body;
