@@ -4228,6 +4228,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Configured `NEON_AUTH_BASE_URL`, `NEXT_PUBLIC_NEON_AUTH_BASE_URL`, and high-entropy 256-bit `NEON_AUTH_COOKIE_SECRET` in `apps/web-ide/.env.local`.
   - Added `.neon` to root `.gitignore` to prevent leaking local CLI context credentials.
 
+## Phase 253: Step 2 — Auth SDK Installation & Next.js Catch-All Route Proxy
+- [x] **253.1: Package Installation & Next.js Peer Resolution**:
+  - Installed `@neon/auth` in `apps/web-ide` with clean dependency resolution.
+- [x] **253.2: Server & Client Auth Singletons**:
+  - Created `apps/web-ide/src/lib/auth/server.ts` using `createNeonAuth` with `NEON_AUTH_BASE_URL` and `NEON_AUTH_COOKIE_SECRET` (plus offline fallback defaults).
+  - Created `apps/web-ide/src/lib/auth/client.ts` exporting `authClient`, `useSession`, `signIn`, `signUp`, and `signOut` via `@neon/auth/next`.
+- [x] **253.3: Next.js Catch-All Auth Route Proxy Handler**:
+  - Created `apps/web-ide/src/app/api/auth/[...path]/route.ts` exporting `GET`, `POST`, `PUT`, `DELETE`, and `PATCH` methods backed by `auth.handler()`.
+- [x] **253.4: Multi-Compiler Verification**:
+  - `npx tsc --noEmit` in `apps/web-ide`: Passed with 0 errors.
+  - `npm run build` in `apps/web-ide`: Passed with 0 errors (`/api/auth/[...path]` compiled as dynamic route, all static routes compiled cleanly).
+
+
 
 
 
