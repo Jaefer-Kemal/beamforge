@@ -30,6 +30,7 @@ import { authClient } from '../../lib/auth/client';
 import { AuthModal } from '../../components/workspace/AuthModal';
 import { COURSE_WORLDS } from '../../data/courseWorlds';
 import { GUEST_USER, xpToRole } from '../../types/user';
+import { UserAvatar, PRESET_BEAM_AVATARS } from '../../components/navigation/UserAvatar';
 
 interface SubmissionItem {
   id: string;
@@ -39,15 +40,6 @@ interface SubmissionItem {
   durationMs: number;
   createdAt: string;
 }
-
-const PRESET_AVATARS = [
-  { id: 'beam-node', name: 'BEAM Node', icon: Cpu, color: '#38BDF8', bg: 'rgba(56, 189, 248, 0.15)' },
-  { id: 'supervisor', name: 'OTP Supervisor', icon: GitBranch, color: '#8B5CF6', bg: 'rgba(139, 92, 246, 0.15)' },
-  { id: 'actor-mailbox', name: 'Actor Mailbox', icon: Mail, color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.15)' },
-  { id: 'nine-nines', name: 'Nine Nines', icon: Shield, color: '#10B981', bg: 'rgba(16, 185, 129, 0.15)' },
-  { id: 'bytecode', name: 'Bytecode Engine', icon: Binary, color: '#EC4899', bg: 'rgba(236, 72, 153, 0.15)' },
-  { id: 'concurrency', name: 'Actor Core', icon: Zap, color: '#EAB308', bg: 'rgba(234, 179, 8, 0.15)' },
-];
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -116,6 +108,7 @@ export default function ProfilePage() {
   };
 
   const handleSelectAvatar = async (avatarId: string) => {
+    const effectiveAvatarId = avatarId === 'google' ? '' : avatarId;
     setSelectedAvatarId(avatarId);
     if (!currentUser?.id || currentUser.id === 'guest') return;
 
@@ -126,11 +119,11 @@ export default function ProfilePage() {
         body: JSON.stringify({
           action: 'update_profile',
           userId: currentUser.id,
-          customAvatarId: avatarId,
+          customAvatarId: effectiveAvatarId,
         }),
       });
 
-      const updated = { ...currentUser, customAvatarId: avatarId };
+      const updated = { ...currentUser, customAvatarId: effectiveAvatarId || undefined };
       useWorkspaceStore.setState({ currentUser: updated });
       localStorage.setItem(`beamforge_user_${currentUser.id}`, JSON.stringify(updated));
     } catch (err) {
@@ -233,9 +226,6 @@ export default function ProfilePage() {
     };
   });
 
-  const activeAvatarObj = PRESET_AVATARS.find((a) => a.id === selectedAvatarId) || PRESET_AVATARS[0];
-  const AvatarIconComponent = activeAvatarObj.icon;
-
   if (!isAuthed) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-[#0B0F17] text-slate-900 dark:text-white">
@@ -313,16 +303,7 @@ export default function ProfilePage() {
             <div className="flex items-center gap-4 sm:gap-5 min-w-0">
               {/* Avatar Container with Selector Trigger */}
               <div className="relative group flex-shrink-0">
-                <div
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center border-2 border-white/80 dark:border-white/20 shadow-md overflow-hidden"
-                  style={{ background: activeAvatarObj.bg }}
-                >
-                  {currentUser?.avatarUrl ? (
-                    <img src={currentUser.avatarUrl} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <AvatarIconComponent className="w-8 h-8 sm:w-10 sm:h-10" style={{ color: activeAvatarObj.color }} />
-                  )}
-                </div>
+                <UserAvatar user={currentUser} size="xl" shape="rounded" />
                 <button
                   onClick={() => setActiveAvatarModal(true)}
                   className="absolute -bottom-1 -right-1 p-1.5 rounded-lg bg-amber-500 text-white shadow-md hover:bg-amber-600 transition-colors cursor-pointer"
@@ -605,8 +586,25 @@ export default function ProfilePage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              {PRESET_AVATARS.map((av) => {
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {currentUser?.avatarUrl && (
+                <button
+                  onClick={() => handleSelectAvatar('google')}
+                  className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer text-center ${
+                    selectedAvatarId === 'google' || !selectedAvatarId
+                      ? 'border-amber-500 ring-2 ring-amber-500/20 bg-amber-500/10'
+                      : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50 dark:bg-slate-800/50'
+                  }`}
+                >
+                  <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center border border-white/40">
+                    <img src={currentUser.avatarUrl} alt="" className="w-full h-full object-cover" />
+                  </div>
+                  <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 truncate w-full">
+                    Google Photo
+                  </span>
+                </button>
+              )}
+              {PRESET_BEAM_AVATARS.map((av) => {
                 const Icon = av.icon;
                 const isSelected = selectedAvatarId === av.id;
                 return (

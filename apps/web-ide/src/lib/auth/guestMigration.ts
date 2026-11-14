@@ -80,7 +80,7 @@ export async function migrateGuestProgress(
         body: JSON.stringify({
           action: 'migrate_guest',
           targetUserId,
-          name: userMeta?.name,
+          name: (userMeta?.name && userMeta.name !== 'BEAM Engineer') ? userMeta.name : undefined,
           email: userMeta?.email,
           avatarUrl: userMeta?.avatarUrl,
           guestData: {

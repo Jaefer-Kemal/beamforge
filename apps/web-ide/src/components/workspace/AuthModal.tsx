@@ -129,9 +129,10 @@ export function AuthModal({
         try { existingProfile = JSON.parse(cachedRaw); } catch {}
       }
 
+      const resolvedName = authUser.name || authUser.email?.split('@')[0] || (existingProfile?.name && existingProfile.name !== 'BEAM Engineer' ? existingProfile.name : 'BEAM Explorer');
       const updatedProfile: UserProfile = {
         id: authUser.id,
-        name: authUser.name || authUser.email?.split('@')[0] || existingProfile?.name || 'BEAM Explorer',
+        name: resolvedName,
         email: authUser.email || existingProfile?.email,
         avatarUrl: authUser.image || existingProfile?.avatarUrl,
         isGuest: false,

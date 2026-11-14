@@ -28,6 +28,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { BeamForgeLogo } from './BeamForgeLogo';
+import { UserAvatar } from './UserAvatar';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import { ALL_CURRICULUM_CHAPTERS, getLessonById } from '../../data/curriculumCatalog';
 import { DEFAULT_USERS, UserProfile, xpToRole, GUEST_USER } from '../../types/user';
@@ -834,18 +835,7 @@ export function BootDevTopBar() {
                 boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
               }}
             >
-              {isAuthed && currentUser?.avatarUrl ? (
-                <img
-                  src={currentUser.avatarUrl}
-                  alt={currentUser.name}
-                  className="w-4 h-4 rounded-full object-cover flex-shrink-0"
-                />
-              ) : (
-                <div
-                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                  style={{ background: isAuthed ? (currentUser?.avatarColor || '#3B82F6') : '#94A3B8' }}
-                />
-              )}
+              <UserAvatar user={isAuthed ? currentUser : null} size="xs" />
               <span className="hidden xl:inline max-w-24 truncate font-medium">
                 {isAuthed ? currentUser?.name : 'Guest'}
               </span>
@@ -927,20 +917,7 @@ export function BootDevTopBar() {
                   <>
                     {/* Authenticated User Header Card */}
                     <div className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-100/60 dark:bg-white/5 border border-slate-200/60 dark:border-white/10">
-                      {currentUser?.avatarUrl ? (
-                        <img
-                          src={currentUser.avatarUrl}
-                          alt={currentUser.name}
-                          className="w-9 h-9 rounded-full object-cover flex-shrink-0"
-                        />
-                      ) : (
-                        <div
-                          className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-white text-sm flex-shrink-0 shadow-xs"
-                          style={{ background: currentUser?.avatarColor || '#3B82F6' }}
-                        >
-                          {currentUser?.name?.[0] || 'U'}
-                        </div>
-                      )}
+                      <UserAvatar user={currentUser} size="md" />
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
                           {currentUser?.name}
@@ -1349,20 +1326,7 @@ export function BootDevTopBar() {
             ) : (
               <>
                 <div className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-100/60 dark:bg-white/5 border border-slate-200/60 dark:border-white/10">
-                  {currentUser?.avatarUrl ? (
-                    <img
-                      src={currentUser.avatarUrl}
-                      alt={currentUser.name}
-                      className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                    />
-                  ) : (
-                    <div
-                      className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-white text-xs flex-shrink-0 shadow-xs"
-                      style={{ background: currentUser?.avatarColor || '#3B82F6' }}
-                    >
-                      {currentUser?.name?.[0] || 'U'}
-                    </div>
-                  )}
+                  <UserAvatar user={currentUser} size="md" />
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
                       {currentUser?.name}

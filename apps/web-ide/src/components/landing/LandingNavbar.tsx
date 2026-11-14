@@ -20,6 +20,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { BeamForgeLogo } from '../navigation/BeamForgeLogo';
+import { UserAvatar } from '../navigation/UserAvatar';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
 import { AuthModal } from '../workspace/AuthModal';
 import { authClient } from '../../lib/auth/client';
@@ -196,11 +197,7 @@ export function LandingNavbar() {
                   className="hidden md:inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-100/60 dark:bg-slate-800/60 hover:bg-slate-200/60 dark:hover:bg-slate-700/60 border border-white/60 dark:border-white/10 text-xs font-semibold transition-all cursor-pointer"
                   title="View Profile and Analytics"
                 >
-                  {currentUser?.avatarUrl ? (
-                    <img src={currentUser.avatarUrl} alt="" className="w-4 h-4 rounded-full object-cover" />
-                  ) : (
-                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: currentUser?.avatarColor || '#3B82F6' }} />
-                  )}
+                  <UserAvatar user={currentUser} size="xs" />
                   <span className="max-w-28 truncate text-slate-800 dark:text-slate-200">{currentUser?.name || 'Explorer'}</span>
                 </Link>
                 <Link
@@ -291,13 +288,7 @@ export function LandingNavbar() {
                       onClick={() => setMobileMenuOpen(false)}
                       className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
                     >
-                      {currentUser?.avatarUrl ? (
-                        <img src={currentUser.avatarUrl} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
-                      ) : (
-                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: currentUser?.avatarColor || '#3B82F6' }}>
-                          {currentUser?.name?.[0] || 'U'}
-                        </div>
-                      )}
+                      <UserAvatar user={currentUser} size="sm" />
                       <div className="flex flex-col min-w-0">
                         <span className="font-semibold truncate text-slate-800 dark:text-slate-200">{currentUser?.name}</span>
                         <span className="text-[10px] text-amber-500 font-medium">View Profile</span>

@@ -943,13 +943,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             localStorage.setItem('bf_current_user_id', sessionUser.id);
             currentUserId = sessionUser.id;
 
+            const googleName = sessionUser.name || sessionUser.email?.split('@')[0] || 'BEAM Explorer';
+            const googleEmail = sessionUser.email || undefined;
+            const googlePhoto = (sessionUser as any).image || undefined;
+
             // Preserve session identity immediately in cached profile
             const existingRaw = localStorage.getItem(`beamforge_user_${sessionUser.id}`);
             let initialProfile: UserProfile = existingRaw ? JSON.parse(existingRaw) : {
               id: sessionUser.id,
-              name: sessionUser.name || sessionUser.email?.split('@')[0] || 'BEAM Explorer',
-              email: sessionUser.email,
-              avatarUrl: (sessionUser as any).image || undefined,
+              name: googleName,
+              email: googleEmail,
+              avatarUrl: googlePhoto,
               role: 'BEAM Newcomer',
               level: 1,
               avatarColor: '#3B82F6',
@@ -960,18 +964,39 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               lastActiveExercise: 'ch01-l01',
               streakDays: 1,
             };
-            if (sessionUser.name && (!initialProfile.name || initialProfile.name === 'BEAM Engineer' || initialProfile.name === 'Alpha Tester')) {
-              initialProfile.name = sessionUser.name;
+            if (googleName && (!initialProfile.name || initialProfile.name === 'BEAM Engineer' || initialProfile.name === 'Alpha Tester' || initialProfile.name === 'Guest Learner')) {
+              initialProfile.name = googleName;
             }
-            if (sessionUser.email) initialProfile.email = sessionUser.email;
-            if ((sessionUser as any).image) initialProfile.avatarUrl = (sessionUser as any).image;
+            if (googleEmail) initialProfile.email = googleEmail;
+            if (googlePhoto && !initialProfile.avatarUrl) initialProfile.avatarUrl = googlePhoto;
             localStorage.setItem(`beamforge_user_${sessionUser.id}`, JSON.stringify(initialProfile));
+
+            set((state) => ({
+              currentUser: {
+                ...state.currentUser,
+                ...initialProfile,
+                isGuest: false,
+              },
+            }));
+
+            // Sync identity immediately to Neon database backend
+            fetch('/api/user-progress', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'update_profile',
+                userId: sessionUser.id,
+                name: googleName,
+                email: googleEmail,
+                avatarUrl: googlePhoto,
+              }),
+            }).catch(() => {});
 
             // Auto-migrate any local guest progress and send Google identity
             await migrateGuestProgress(sessionUser.id, {
-              name: sessionUser.name || undefined,
-              email: sessionUser.email || undefined,
-              avatarUrl: (sessionUser as any).image || undefined,
+              name: googleName,
+              email: googleEmail,
+              avatarUrl: googlePhoto,
             });
           }
         } catch {}
@@ -1020,7 +1045,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         } catch {}
 
         if (cachedUser || directCompleted.length > 0) {
-          const baseUser = cachedUser || (currentUserId === 'guest' ? GUEST_USER : (DEFAULT_USERS[currentUserId] || DEFAULT_USERS['user_alpha']));
+          const fallbackUser: UserProfile = currentUserId === 'guest'
+            ? GUEST_USER
+            : (DEFAULT_USERS[currentUserId] || {
+                id: currentUserId,
+                name: 'BEAM Explorer',
+                isGuest: false,
+                role: 'BEAM Newcomer',
+                level: 1,
+                avatarColor: '#3B82F6',
+                bio: 'Exploring Erlang & OTP on the interactive BEAM platform.',
+                completedLevelIds: [],
+                totalXp: 0,
+                unlockedSolutionLessonIds: [],
+                lastActiveExercise: 'ch01-l01',
+                streakDays: 1,
+              });
+          const baseUser = cachedUser || fallbackUser;
           const mergedInitialCompleted = Array.from(new Set([...(baseUser.completedLevelIds || []), ...directCompleted]));
           const fullUser: UserProfile = { ...baseUser, completedLevelIds: mergedInitialCompleted };
           set((state) => ({
@@ -1075,9 +1116,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               const authoritativeUserCompleted = authoritativeCompleted;
               const mergedUnlockedSolutions = Array.from(new Set([...state.unlockedSolutionLessonIds, ...(dbUser.unlockedSolutionLessonIds || [])]));
               const canonicalXp = dbUser.totalXp ?? (authoritativeUserCompleted.length * 100);
+
+              // Never let 'BEAM Engineer' or stale fallback name overwrite a real Google user name!
+              const resolvedName = (dbUser.name && dbUser.name !== 'BEAM Engineer' && dbUser.name !== 'Alpha Tester' && dbUser.name !== 'Guest Learner')
+                ? dbUser.name
+                : (state.currentUser?.name && state.currentUser.name !== 'BEAM Engineer' && state.currentUser.name !== 'Alpha Tester')
+                ? state.currentUser.name
+                : 'BEAM Explorer';
+
+              const resolvedAvatarUrl = dbUser.avatarUrl || state.currentUser?.avatarUrl || undefined;
+              const resolvedEmail = dbUser.email || state.currentUser?.email || undefined;
+              const resolvedCustomAvatar = dbUser.customAvatarId || state.currentUser?.customAvatarId || undefined;
+
               const mergedUser: UserProfile = {
                 ...state.currentUser,
                 ...dbUser,
+                name: resolvedName,
+                avatarUrl: resolvedAvatarUrl,
+                email: resolvedEmail,
+                customAvatarId: resolvedCustomAvatar,
                 completedLevelIds: authoritativeUserCompleted,
                 totalXp: canonicalXp,
                 unlockedSolutionLessonIds: mergedUnlockedSolutions,

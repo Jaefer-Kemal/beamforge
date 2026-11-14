@@ -264,9 +264,14 @@ export async function GET(req: NextRequest) {
         `;
       }
 
+      const rawDbName = r.name;
+      const cleanName = (rawDbName && rawDbName !== 'BEAM Engineer' && rawDbName !== 'Alpha Tester' && rawDbName !== 'Guest Learner')
+        ? rawDbName
+        : 'BEAM Explorer';
+
       const user: UserProfile = {
         id: r.id,
-        name: r.name,
+        name: cleanName,
         email: r.email || undefined,
         avatarUrl: r.avatar_url || undefined,
         customAvatarId: r.custom_avatar_id || undefined,
@@ -556,9 +561,9 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Action: Update User Profile (Name, Bio, Custom Avatar)
+    // Action: Update User Profile (Name, Email, Bio, Custom Avatar, Avatar URL)
     if (body.action === 'update_profile') {
-      const { userId: profUserId, name: profName, bio: profBio, customAvatarId: profAvatarId, avatarUrl: profAvatarUrl } = body;
+      const { userId: profUserId, name: profName, email: profEmail, bio: profBio, customAvatarId: profAvatarId, avatarUrl: profAvatarUrl } = body;
       if (!sql) {
         return NextResponse.json({ status: 'ok', source: 'offline', dbConnected: false });
       }
@@ -569,9 +574,14 @@ export async function POST(req: NextRequest) {
       await sql`
         UPDATE beamforge_users
         SET 
-          name = COALESCE(${profName || null}, name),
+          name = CASE 
+            WHEN ${profName || null} IS NOT NULL AND ${profName || null} != 'BEAM Engineer' THEN ${profName}
+            WHEN name = 'BEAM Engineer' THEN 'BEAM Explorer'
+            ELSE name
+          END,
+          email = COALESCE(${profEmail || null}, email),
           bio = COALESCE(${profBio || null}, bio),
-          custom_avatar_id = COALESCE(${profAvatarId || null}, custom_avatar_id),
+          custom_avatar_id = CASE WHEN ${profAvatarId !== undefined} THEN ${profAvatarId || null} ELSE custom_avatar_id END,
           avatar_url = COALESCE(${profAvatarUrl || null}, avatar_url),
           updated_at = NOW()
         WHERE id = ${profUserId}
