@@ -4185,6 +4185,21 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npx tsc --noEmit` in `apps/web-ide`: Passed with 0 errors.
   - `npm run build` in `apps/web-ide`: Passed with 0 errors across 8/8 routes.
 
+## Phase 250: Markdown Table Horizontal Scroll Architecture & Inline Code Token Integrity
+- [x] **250.1: Glassmorphic Table Horizontal Scroll Architecture (`MarkdownTable`)**:
+  - In `apps/web-ide/src/components/pedagogy/BeamMarkdownRenderer.tsx`, updated `<table className="w-full ...">` to `<table className="min-w-full w-max text-left text-xs border-collapse">`. Tables with many columns now expand to their natural, readable content width (`w-max`) instead of being forcibly crushed into 60px–80px columns.
+  - Added `w-full overflow-x-auto [webkit-overflow-scrolling:touch]` to the table wrapper container, enabling native, smooth horizontal scrolling with touch swipe on mobile and trackpad/scroll wheel on desktop.
+  - Added `whitespace-nowrap [&_code]:whitespace-nowrap [&_code]:break-normal` to `<th>` headers to prevent multi-word headers from wrapping vertically.
+  - Added `[&_code]:whitespace-nowrap [&_code]:break-normal` to `<td>` cells so Erlang terms, tuples, atoms, and function calls (e.g., `rest_for_one`, `throw(Value)`, `{one_for_all, 3, 60}`, `permanent`) never break onto multiple lines or get chopped in half.
+  - Applied `min-w-[120px] max-w-[420px] break-words [overflow-wrap:break-word] [word-break:normal]` to `<td>` descriptive text, ensuring English sentences wrap naturally between words at spaces without premature character splitting.
+- [x] **250.2: Inline Code Word-Boundary Respecting (`renderInlineContent`)**:
+  - Replaced aggressive `break-all [overflow-wrap:anywhere]` on inline `<code>` with `[word-break:normal] [overflow-wrap:break-word] break-words`.
+  - Words and code tokens now stay together as complete units. When nearing the right margin, the browser moves the entire token to the next line rather than arbitrarily breaking after the first character (`p-` / `ermanent`).
+  - Standardized `[overflow-wrap:break-word] [word-break:normal]` across all paragraphs, callout sub-paragraphs, unordered list items, ordered list items, and the root markdown container div.
+- [x] **250.3: Multi-Compiler Verification**:
+  - `npx tsc --noEmit` in `apps/web-ide`: Passed with 0 errors.
+  - `npm run build` in `apps/web-ide`: Passed with 0 errors across all 8 static and dynamic routes.
+
 
 
 
