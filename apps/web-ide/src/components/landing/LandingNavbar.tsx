@@ -15,16 +15,45 @@ import {
   Layers,
   Cpu,
   ShieldCheck,
+  Sparkles,
+  User,
+  LogOut,
 } from 'lucide-react';
 import { BeamForgeLogo } from '../navigation/BeamForgeLogo';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
+import { AuthModal } from '../workspace/AuthModal';
+import { authClient } from '../../lib/auth/client';
+import { GUEST_USER } from '../../types/user';
 
 export function LandingNavbar() {
   const router = useRouter();
-  const { theme, toggleTheme, currentUser, activeExerciseId, hydrateFromStorageAndDb } = useWorkspaceStore();
+  const {
+    theme,
+    toggleTheme,
+    currentUser,
+    activeExerciseId,
+    hydrateFromStorageAndDb,
+    isAuthModalOpen,
+    setIsAuthModalOpen,
+  } = useWorkspaceStore();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [lastLessonId, setLastLessonId] = useState<string | null>(null);
+
+  const isAuthed = (typeof window !== 'undefined' && localStorage.getItem('bf_is_authenticated') === 'true') || (!currentUser?.isGuest && currentUser?.id !== 'guest');
+
+  const handleSignOut = async () => {
+    try {
+      await authClient.signOut();
+    } catch {}
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('bf_is_authenticated');
+        localStorage.setItem('bf_current_user_id', 'guest');
+      } catch {}
+    }
+    useWorkspaceStore.setState({ currentUser: GUEST_USER });
+  };
 
   useEffect(() => {
     hydrateFromStorageAndDb();
@@ -152,14 +181,44 @@ export function LandingNavbar() {
               )}
             </button>
 
-            {/* Primary Action Button — Desktop only */}
-            <Link
-              href="/learn/ch01-l01"
-              className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-[0_4px_16px_rgba(245,158,11,0.35)] transition-all hover:scale-[1.02] active:scale-[0.98] border border-amber-300/30"
-            >
-              <span>Start Free</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
+            {/* Desktop Auth State / Actions */}
+            {!isAuthed ? (
+              <>
+                <button
+                  id="landing-signin-btn"
+                  onClick={() => setIsAuthModalOpen(true)}
+                  className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white bg-slate-100/70 dark:bg-slate-800/70 hover:bg-slate-200/70 dark:hover:bg-slate-700/70 border border-white/60 dark:border-white/10 transition-all cursor-pointer shadow-xs"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Sign In</span>
+                </button>
+                <Link
+                  href="/learn/ch01-l01"
+                  className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-[0_4px_16px_rgba(245,158,11,0.35)] transition-all hover:scale-[1.02] active:scale-[0.98] border border-amber-300/30"
+                >
+                  <span>Start Free</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </>
+            ) : (
+              <>
+                <div className="hidden md:inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-100/60 dark:bg-slate-800/60 border border-white/60 dark:border-white/10 text-xs font-semibold">
+                  {currentUser?.avatarUrl ? (
+                    <img src={currentUser.avatarUrl} alt="" className="w-4 h-4 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: currentUser?.avatarColor || '#3B82F6' }} />
+                  )}
+                  <span className="max-w-28 truncate text-slate-800 dark:text-slate-200">{currentUser?.name || 'Engineer'}</span>
+                </div>
+                <Link
+                  href={lastLessonId ? `/learn/${lastLessonId}` : '/learn/ch01-l01'}
+                  className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 shadow-[0_4px_16px_rgba(16,185,129,0.35)] transition-all hover:scale-[1.02] active:scale-[0.98] border border-emerald-300/30"
+                >
+                  <span>{lastLessonId ? `Resume (${lastLessonId})` : 'Go to IDE'}</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </>
+            )}
 
             {/* Mobile Hamburger Toggle */}
             <button
@@ -243,20 +302,69 @@ export function LandingNavbar() {
               </div>
             </div>
 
-            {/* Mobile Start Free CTA */}
-            <div className="pt-2">
-              <Link
-                href={lastLessonId ? `/learn/${lastLessonId}` : '/learn/ch01-l01'}
-                onClick={() => setMobileMenuOpen(false)}
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-[0_4px_16px_rgba(245,158,11,0.35)] active:scale-[0.98] transition-all"
-              >
-                <span>{lastLessonId ? `Resume Last Lesson (${lastLessonId})` : 'Start Free'}</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
+            {/* Mobile Auth Actions */}
+            <div className="pt-2 space-y-2">
+              {!isAuthed ? (
+                <>
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      setIsAuthModalOpen(true);
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 bg-slate-100/80 dark:bg-slate-800/80 border border-white/40 dark:border-white/10 transition-all cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Sign In with Google or Email</span>
+                  </button>
+                  <Link
+                    href={lastLessonId ? `/learn/${lastLessonId}` : '/learn/ch01-l01'}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-[0_4px_16px_rgba(245,158,11,0.35)] active:scale-[0.98] transition-all"
+                  >
+                    <span>{lastLessonId ? `Resume Last Lesson (${lastLessonId})` : 'Start Free'}</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between p-2 rounded-xl bg-slate-100/60 dark:bg-white/5 border border-slate-200/60 dark:border-white/10 text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {currentUser?.avatarUrl ? (
+                        <img src={currentUser.avatarUrl} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+                      ) : (
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: currentUser?.avatarColor || '#3B82F6' }}>
+                          {currentUser?.name?.[0] || 'U'}
+                        </div>
+                      )}
+                      <span className="font-semibold truncate text-slate-800 dark:text-slate-200">{currentUser?.name}</span>
+                    </div>
+                    <button
+                      onClick={handleSignOut}
+                      className="text-xs text-rose-500 hover:text-rose-600 font-semibold px-2 py-1 rounded-lg hover:bg-rose-500/10 transition-colors"
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                  <Link
+                    href={lastLessonId ? `/learn/${lastLessonId}` : '/learn/ch01-l01'}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 shadow-[0_4px_16px_rgba(16,185,129,0.35)] active:scale-[0.98] transition-all"
+                  >
+                    <span>{lastLessonId ? `Resume (${lastLessonId})` : 'Go to IDE'}</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         )}
       </div>
+
+      {/* Neon Auth Modal for Landing Page */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+      />
     </header>
   );
 }

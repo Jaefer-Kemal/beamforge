@@ -629,13 +629,15 @@ export function CurriculumWorldMap() {
                         const lessons = allLessonsByChapter[chNum] || [];
                         const isCurrentChapter = activeChapter === chNum;
 
+                        const prevChapterLessons = (ALL_CURRICULUM_CHAPTERS as any)[chNum - 1] || [];
+                        const prevFinalLesson = prevChapterLessons.length > 0 ? prevChapterLessons[prevChapterLessons.length - 1] : null;
+                        const isPrevChapterDone = prevFinalLesson ? completedLevelIds.includes(prevFinalLesson.id) : true;
+
                         const isChapterUnlocked = (() => {
                           if (devModeUnlockedAll || chNum === 1) return true;
+                          if (!isPrevChapterDone) return false;
                           if (chNum > 4 && !isAuthed) return false;
-                          const prevChapterLessons = (ALL_CURRICULUM_CHAPTERS as any)[chNum - 1] || [];
-                          if (prevChapterLessons.length === 0) return true;
-                          const prevFinalLesson = prevChapterLessons[prevChapterLessons.length - 1];
-                          return completedLevelIds.includes(prevFinalLesson.id);
+                          return true;
                         })();
 
                         return (
@@ -661,19 +663,19 @@ export function CurriculumWorldMap() {
                                 {!isChapterUnlocked && !devModeUnlockedAll && (
                                   <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0"
                                     style={{
-                                      background: chNum > 4 && !isAuthed
+                                      background: chNum > 4 && !isAuthed && isPrevChapterDone
                                         ? (isDark ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.10)')
                                         : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)'),
-                                      borderColor: chNum > 4 && !isAuthed
+                                      borderColor: chNum > 4 && !isAuthed && isPrevChapterDone
                                         ? (isDark ? 'rgba(245,158,11,0.30)' : 'rgba(245,158,11,0.25)')
                                         : (isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.10)'),
-                                      color: chNum > 4 && !isAuthed
+                                      color: chNum > 4 && !isAuthed && isPrevChapterDone
                                         ? (isDark ? '#FBBF24' : '#D97706')
                                         : (isDark ? '#94A3B8' : '#64748B'),
                                     }}
                                   >
                                     <Lock className="w-2.5 h-2.5" />
-                                    <span>{chNum > 4 && !isAuthed ? 'Sign In Required' : `Prerequisite: CH${chNum - 1}`}</span>
+                                    <span>{chNum > 4 && !isAuthed && isPrevChapterDone ? 'Sign In to Unlock' : `Prerequisite: CH${chNum - 1}`}</span>
                                   </span>
                                 )}
                                 {isCurrentChapter && (

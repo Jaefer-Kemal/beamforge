@@ -24,7 +24,7 @@ export const GUEST_USER: UserProfile = {
   role: 'BEAM Newcomer',
   level: 1,
   avatarColor: '#64748B',
-  bio: 'Exploring Erlang & OTP in Guest Mode (Chapters 1–4 Free).',
+  bio: 'Exploring Erlang & OTP on the interactive BEAM platform.',
   completedLevelIds: [],
   totalXp: 0,
   unlockedSolutionLessonIds: [],

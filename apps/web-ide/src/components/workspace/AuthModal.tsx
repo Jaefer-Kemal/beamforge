@@ -17,7 +17,7 @@ export function AuthModal({
   isOpen,
   onClose,
   title = 'Unlock the Full BEAM Experience',
-  subtitle = 'Chapters 1 through 4 are 100% free forever. Sign in to unlock Chapters 5–12 and save your progress to the cloud.',
+  subtitle = 'Save your progress, sync across devices, and unlock the full 12-chapter Erlang/OTP & Distributed Systems curriculum.',
 }: AuthModalProps) {
   const { theme, hydrateFromStorageAndDb } = useWorkspaceStore();
   const isDark = theme === 'dark';

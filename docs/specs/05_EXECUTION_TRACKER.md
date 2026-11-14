@@ -4263,6 +4263,23 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npx tsc --noEmit` in `apps/web-ide`: Passed with 0 errors.
   - `npm run build` in `apps/web-ide`: Passed with 0 errors across all 8 static and dynamic routes.
 
+## Phase 255: Step 4 — Landing Page, Topbar UI & Anti-Spoiler Preserved Suspense Architecture
+- [x] **255.1: Anti-Spoiler Suspense Protocol Enacted**:
+  - Removed all upfront mentions of "Chapters 1–4 Free" from landing page, topbar badges, user profile bio, and modal subtitles.
+  - In `apps/web-ide/src/lib/curriculumAccess.ts`, re-ordered prerequisite evaluation so sequential chapter completion (`prevFinalLesson`) is evaluated *before* authentication checks. Unreached chapters simply indicate standard sequential progression (`Prerequisite: CH${N-1}`), maintaining the natural discovery arc and suspense of solving exercises.
+  - In `apps/web-ide/src/components/curriculum/CurriculumWorldMap.tsx`, chapter headers display standard `Prerequisite: CH${N-1}` unless the learner has completed Chapter 4 and reached Chapter 5, at which point the prompt transforms into `Sign In to Unlock`.
+  - In `apps/web-ide/src/components/workspace/AuthModal.tsx` and `PrerequisiteModal.tsx`, updated copy to celebrate milestone achievement (`Foundational Milestone Reached • Account Required`) rather than an upfront lock.
+- [x] **255.2: Landing Page Navbar Guest & Authenticated States (`LandingNavbar.tsx`)**:
+  - For Guests: Renders a frosted glass `"Sign In"` button next to the amber `"Start Free"` CTA button. Added `"Sign In with Google or Email"` to the mobile drawer. Mounted `<AuthModal />` directly to handle clicks from any view.
+  - For Authenticated Learners: Displays real user profile badge with avatar and name, and transforms the primary CTA to `"Go to IDE"` or `"Resume ({lastLessonId})"` with emerald styling. Mobile menu includes a `"Sign Out"` action.
+- [x] **255.3: Topbar Profile & Dropdown Redesign (`BootDevTopBar.tsx`)**:
+  - For Guests: Topbar renders a `"Guest"` profile pill alongside a distinct `"Sign In"` gold pill button. Profile dropdown shows a Guest Session card with a prominent `"Sign In with Google or Email (Free)"` CTA, `"Reset Guest Progress"`, and a collapsible Developer Profiles section preserving seeded accounts (`user_alpha`, `user_beta`, `user_master`) for local debugging.
+  - For Authenticated Learners: Topbar displays real avatar and username. Dropdown shows user name, email, level, role, XP, an active `"Cloud Sync Active (Neon DB)"` pulsing indicator, a clean `"Sign Out"` action (invoking `authClient.signOut()`), and `"Reset Progress"`.
+  - Mobile Drawer in Topbar updated symmetrically for both guest and authenticated states.
+- [x] **255.4: Multi-Compiler Verification**:
+  - `npx tsc --noEmit` in `apps/web-ide`: Passed with 0 errors.
+  - `npm run build` in `apps/web-ide`: Passed with 0 errors across all 8 static and dynamic routes.
+
 
 
 

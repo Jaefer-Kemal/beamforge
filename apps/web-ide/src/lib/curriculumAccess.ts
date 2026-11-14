@@ -69,31 +69,11 @@ export function checkLessonAccess(
     }
   }
 
-  // Chapter 5+ requires an account
-  if (chapterNum > 4 && !authed) {
-    return {
-      isUnlocked: false,
-      prerequisite: {
-        type: 'auth_required',
-        targetChapterNum: chapterNum,
-        targetChapterTitle,
-        targetLessonNum: lessonNum,
-        targetLessonId,
-        targetLessonTitle,
-        prereqChapterNum: 4,
-        prereqLessonId: 'ch04-l08',
-        prereqLessonTitle: 'Chapter 4 Capstone Problem Set',
-        prereqLessonNum: 8,
-        message: `Chapter ${chapterNum} (${targetChapterTitle}) is locked for Guest Learners. Sign in with Google or Email to unlock Chapters 5–12 and save your progress to the cloud.`,
-      },
-    };
-  }
-
   // Combine passed completedLevelIds with immediate user-scoped local storage cache
   let effectiveCompleted = [...(completedLevelIds || [])];
   if (typeof window !== 'undefined') {
     try {
-      const uid = localStorage.getItem('bf_current_user_id') || 'user_alpha';
+      const uid = localStorage.getItem('bf_current_user_id') || 'guest';
       if (localStorage.getItem(`beamforge_completed_${uid}_${targetLessonId}`) === 'true') {
         return { isUnlocked: true };
       }
@@ -146,6 +126,26 @@ export function checkLessonAccess(
         },
       };
     }
+  }
+
+  // Chapter 5+ requires an account once previous chapter prerequisites are satisfied
+  if (chapterNum > 4 && !authed) {
+    return {
+      isUnlocked: false,
+      prerequisite: {
+        type: 'auth_required',
+        targetChapterNum: chapterNum,
+        targetChapterTitle,
+        targetLessonNum: lessonNum,
+        targetLessonId,
+        targetLessonTitle,
+        prereqChapterNum: 4,
+        prereqLessonId: 'ch04-l08',
+        prereqLessonTitle: 'Chapter 4 Capstone Problem Set',
+        prereqLessonNum: 8,
+        message: `You've conquered the foundational chapters! Sign in with Google or Email (Free) to unlock Chapter ${chapterNum} (${targetChapterTitle}) and save your progress to the cloud.`,
+      },
+    };
   }
 
   // 2. Intra-chapter lesson gating check (for Lesson > 1)

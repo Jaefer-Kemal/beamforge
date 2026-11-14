@@ -101,7 +101,7 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
               style={{ color: isAuthRequired ? (isDark ? '#FBBF24' : '#D97706') : (isDark ? '#C4B5FD' : '#7C3AED') }}
             >
               {isAuthRequired
-                ? 'Chapters 1–4 Free Forever • Sign In for Cloud Progress'
+                ? 'Foundational Milestone Reached • Account Required'
                 : isSameChapter
                 ? targetLessonTitle || `Chapter ${targetChapterNum} • ${targetChapterTitle}`
                 : `Chapter ${targetChapterNum}: ${targetChapterTitle}`}
@@ -124,7 +124,7 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
         >
           {message ||
             (isAuthRequired
-              ? `Chapters 1 through 4 are 100% free for everyone. Sign in with Google or Email to unlock Chapter ${targetChapterNum} and save your progress to the cloud.`
+              ? `You have conquered the foundational curriculum! Sign in with Google or Email (Free) to unlock Chapter ${targetChapterNum} (${targetChapterTitle}) and save your progress to the cloud.`
               : isSameChapter
               ? `This lesson requires mastering the concepts introduced in Lesson ${prerequisiteLessonNum || 1} first. Complete the earlier lessons in Chapter ${targetChapterNum} to unlock it.`
               : `Chapter ${targetChapterNum} builds directly upon concepts from Chapter ${prerequisiteChapterNum}. Complete the Chapter ${prerequisiteChapterNum} Problem Set before advancing.`)}
