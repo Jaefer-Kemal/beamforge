@@ -4214,6 +4214,21 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npx tsc --noEmit` in `apps/web-ide`: Passed with 0 errors.
   - `npm run build` in `apps/web-ide`: Passed with 0 errors across all 8 static and dynamic routes.
 
+## Phase 252: Step 1 — Managed Neon Auth Provisioning & Infrastructure Verification
+- [x] **252.1: Neon Auth Provisioning on Production Branch (`calm-field-36262565`)**:
+  - Targeted project `calm-field-36262565` (Region `aws-us-east-2`) on branch `production` (`br-delicate-paper-aylyejkg`) and database `beamforge`.
+  - Executed `neon neon-auth enable --project-id calm-field-36262565 --branch production --database-name beamforge`.
+  - Successfully provisioned `better_auth` engine with base URL `https://ep-proud-truth-ayiefcib.neonauth.c-5.us-east-2.aws.neon.tech/beamforge/auth` and JWKS endpoint.
+  - Verified `neon_auth` PostgreSQL schema containing `neon_auth.user`, `neon_auth.session`, `neon_auth.account`, `neon_auth.verification`, `neon_auth.organization`, `neon_auth.member`, `neon_auth.invitation`, `neon_auth.jwks`, and `neon_auth.project_config` alongside existing `public.beamforge_users`, `beamforge_submissions`, and `beamforge_drafts`.
+- [x] **252.2: OAuth & Email Authentication Configuration Verification**:
+  - Confirmed Email & Password authentication enabled (`neon neon-auth config email-password get` reports `Enabled: true`, `Verification Method: otp`, `Require Verification: false`, `Auto Sign In After Verify: true`).
+  - Confirmed Google OAuth provider active with Neon shared developer credentials (`neon neon-auth oauth-provider list` reports `google shared`).
+  - Confirmed `localhost` origins pre-approved for local development by Neon Auth.
+- [x] **252.3: Environment Secrets Setup & Git Ignore Security**:
+  - Configured `NEON_AUTH_BASE_URL`, `NEXT_PUBLIC_NEON_AUTH_BASE_URL`, and high-entropy 256-bit `NEON_AUTH_COOKIE_SECRET` in `apps/web-ide/.env.local`.
+  - Added `.neon` to root `.gitignore` to prevent leaking local CLI context credentials.
+
+
 
 
 

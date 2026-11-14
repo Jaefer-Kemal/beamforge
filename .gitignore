@@ -40,8 +40,10 @@ __pycache__/
 *.env
 
 
-# Vercel
+# Vercel & Neon
 .vercel/
+.neon
+
 
 # Editor & OS files
 .vscode/
