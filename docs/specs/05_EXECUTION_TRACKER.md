@@ -4108,6 +4108,29 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Dynamic Curriculum Tests: `TEST_CHAPTER=08 go test -v -run TestDynamicVisibleTestsCurriculum ./internal/bridge` passes 100% (7/7 lessons, `9.22s`).
   - Frontend Build: `npx tsc --noEmit` and `npm run build` pass with 0 errors across all 8 static and dynamic routes.
 
+## Phase 246: Chapters 8–12 Rapid Triage, Bug-Fix Certification & Starter Code Cleanliness Pass
+- [x] **246.1: Orchestrator Runner Bug-Fix in `ch10-l03` (`tcp_flow_worker`)**:
+  - In `services/orchestrator/internal/bridge/erl_runner_chapters.go`, diagnosed and resolved syntax truncation in `S2_ActiveOnceBackpressure` (`{ok, #{verdict := <<`) and restored missing `S3_EchoAndLifecycle` stage using `bf_backpressure_tester:verify_active_once_backpressure`.
+  - Re-verified `TestChapter10Verification`: all 7 lessons pass 100% with score 100.
+- [x] **246.2: Legacy Runner Fallback Elimination in `ch08-l04` and `ch08-l05`**:
+  - Cleaned out obsolete legacy dual-branch shims (`code:ensure_loaded(commerce_app)` and `code:ensure_loaded(checkout_sup)`) in `case "ch08-l04"` and `case "ch08-l05"` in both `buildChapterRunScript` and `buildVerificationScript`, removing ~300 lines of dead code and formatting mismatches.
+- [x] **246.3: Starter Code Pack & Compiler Warning Elimination Across Chapters 8–12**:
+  - Audited all 30 lessons / 32 starter code files across Chapters 8–12 (`ch08.ts`, `ch09.ts`, `ch10.ts`, `ch11.ts`, `ch12.ts`).
+  - Prefixed all unused stub parameters with `_` in `ch08-l04`, `ch08-l05`, `ch09-l01`, `ch09-l02`, `ch09-l03`, `ch09-l04`, `ch09-l05`, `ch09-l06`.
+  - Referenced `#wallet{}` in `ch09-l05` (`mnesia_ledger.erl`) to eliminate unused record definition warning under `-Werror`.
+  - Reordered multi-file starter list in `ch09-l08` so `session_cache.erl` is `files[0]`, ensuring `starterCode === files[0].content`.
+  - Verified 100% of 32 starter files compile with 0 warnings and 0 errors under `erlc.exe -Wall -Werror`.
+- [x] **246.4: Full Test Suite & Multi-Compiler Verification**:
+  - Go Test Chapter 8: `TestChapter8Verification` passed 100% (7/7 lessons + 10 invariant subtests, `21.82s`).
+  - Go Test Chapter 9: `TestChapter9Verification` passed 100% (8/8 lessons, `11.47s`).
+  - Go Test Chapter 10: `TestChapter10Verification` passed 100% (7/7 lessons, `17.47s`).
+  - Go Test Chapter 11: `TestChapter11Verification` passed 100% (8/8 lessons, `17.55s`).
+  - Go Test Chapter 12: `TestChapter12Verification` passed 100% (6/6 lessons + capstone, `16.15s`).
+  - Go Dynamic Visible Tests: `TestDynamicVisibleTestsCurriculum` passed 100% for Chapters 8, 9, 10, 11, and 12.
+  - Go Backend: `go build ./...` compiled cleanly with 0 errors.
+  - Next.js Web IDE: `npx tsc --noEmit` and `npm run build` passed with 0 errors across 8/8 routes.
+
+
 
 
 

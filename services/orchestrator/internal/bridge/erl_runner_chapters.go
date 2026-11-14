@@ -3394,211 +3394,100 @@ init:stop().
 
 	case "ch08-l04":
 		return `
-IsApp = case code:ensure_loaded(commerce_app) of
-    {module, commerce_app} -> true;
-    _ -> false
+T1_Start = erlang:system_time(millisecond),
+T1_Res = try
+    {ok, Sup1} = dynamic_session_sup:start_link(),
+    Count1 = dynamic_session_sup:count_sessions(Sup1),
+    MRef1 = monitor(process, Sup1),
+    exit(Sup1, shutdown),
+    receive {'DOWN', MRef1, process, Sup1, _} -> ok after 500 -> ok end,
+    #{call_str => <<"dynamic_session_sup:count_sessions(Sup) (initial)">>,
+      expected => <<"0">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Count1]))),
+      passed => (Count1 =:= 0), time_ms => erlang:system_time(millisecond) - T1_Start}
+catch C1:R1 ->
+    #{call_str => <<"dynamic_session_sup:start_link/count">>, expected => <<"0">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = case IsApp of
-    true ->
-        T1_Start = erlang:system_time(millisecond),
-        T1_Res = try
-            {ok, Sup} = commerce_app:start(normal, []),
-            IsAlive = is_process_alive(Sup),
-            commerce_app:stop([]),
-            #{call_str => <<"commerce_app:start(normal, [])">>,
-              expected => <<"true">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [IsAlive]))),
-              passed => (IsAlive =:= true), time_ms => erlang:system_time(millisecond) - T1_Start}
-        catch C1:R1 ->
-            #{call_str => <<"commerce_app:start(...)">>, expected => <<"true">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
-        end,
-        T2_Start = erlang:system_time(millisecond),
-        T2_Res = try
-            Val = commerce_app:get_app_config(database_timeout, 5000),
-            #{call_str => <<"commerce_app:get_app_config(database_timeout, 5000)">>,
-              expected => <<"5000">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Val]))),
-              passed => (Val =:= 5000), time_ms => erlang:system_time(millisecond) - T2_Start}
-        catch C2:R2 ->
-            #{call_str => <<"commerce_app:get_app_config(...)">>, expected => <<"5000">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
-        end,
-        T3_Start = erlang:system_time(millisecond),
-        T3_Res = try
-            ok = commerce_app:set_app_config(currency, <<"USD">>),
-            ReadVal = commerce_app:get_app_config(currency, <<"EUR">>),
-            #{call_str => <<"commerce_app:set_app_config(currency, <<\"USD\">>)">>,
-              expected => <<"<<\"USD\">>">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [ReadVal]))),
-              passed => (ReadVal =:= <<"USD">>), time_ms => erlang:system_time(millisecond) - T3_Start}
-        catch C3:R3 ->
-            #{call_str => <<"commerce_app:set_app_config(...)">>, expected => <<"<<\"USD\">>">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
-        end,
-        [T1_Res, T2_Res, T3_Res];
-    false ->
-        T1_Start = erlang:system_time(millisecond),
-        T1_Res = try
-            {ok, Sup1} = dynamic_session_sup:start_link(),
-            Count1 = dynamic_session_sup:count_sessions(Sup1),
-            MRef1 = monitor(process, Sup1),
-            exit(Sup1, shutdown),
-            receive {'DOWN', MRef1, process, Sup1, _} -> ok after 500 -> ok end,
-            #{call_str => <<"dynamic_session_sup:count_sessions(Sup) (initial)">>,
-              expected => <<"0">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Count1]))),
-              passed => (Count1 =:= 0), time_ms => erlang:system_time(millisecond) - T1_Start}
-        catch C1:R1 ->
-            #{call_str => <<"dynamic_session_sup:start_link/count">>, expected => <<"0">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
-        end,
-        T2_Start = erlang:system_time(millisecond),
-        T2_Res = try
-            {ok, Sup2} = dynamic_session_sup:start_link(),
-            {ok, P1} = dynamic_session_sup:start_session(Sup2, <<"s1">>, <<"u1">>),
-            {ok, P2} = dynamic_session_sup:start_session(Sup2, <<"s2">>, <<"u2">>),
-            Count2 = dynamic_session_sup:count_sessions(Sup2),
-            MRef2 = monitor(process, Sup2),
-            exit(Sup2, shutdown),
-            receive {'DOWN', MRef2, process, Sup2, _} -> ok after 500 -> ok end,
-            PidsOk = is_pid(P1) andalso is_pid(P2) andalso (Count2 =:= 2),
-            #{call_str => <<"dynamic_session_sup:start_session(Sup, ...) -> count 2">>,
-              expected => <<"{true, true, 2}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [{is_pid(P1), is_pid(P2), Count2}]))),
-              passed => PidsOk, time_ms => erlang:system_time(millisecond) - T2_Start}
-        catch C2:R2 ->
-            #{call_str => <<"dynamic_session_sup:start_session(...)">>, expected => <<"2 active">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
-        end,
-        T3_Start = erlang:system_time(millisecond),
-        T3_Res = try
-            {ok, Sup3} = dynamic_session_sup:start_link(),
-            {ok, P3} = dynamic_session_sup:start_session(Sup3, <<"s1">>, <<"u1">>),
-            ok = dynamic_session_sup:terminate_session(Sup3, P3),
-            Count3 = dynamic_session_sup:count_sessions(Sup3),
-            MRef3 = monitor(process, Sup3),
-            exit(Sup3, shutdown),
-            receive {'DOWN', MRef3, process, Sup3, _} -> ok after 500 -> ok end,
-            #{call_str => <<"dynamic_session_sup:terminate_session(Sup, Child)">>,
-              expected => <<"0">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Count3]))),
-              passed => (Count3 =:= 0), time_ms => erlang:system_time(millisecond) - T3_Start}
-        catch C3:R3 ->
-            #{call_str => <<"dynamic_session_sup:terminate_session(...)">>, expected => <<"0">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
-        end,
-        [T1_Res, T2_Res, T3_Res]
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    {ok, Sup2} = dynamic_session_sup:start_link(),
+    {ok, P1} = dynamic_session_sup:start_session(Sup2, <<"s1">>, <<"u1">>),
+    {ok, P2} = dynamic_session_sup:start_session(Sup2, <<"s2">>, <<"u2">>),
+    Count2 = dynamic_session_sup:count_sessions(Sup2),
+    MRef2 = monitor(process, Sup2),
+    exit(Sup2, shutdown),
+    receive {'DOWN', MRef2, process, Sup2, _} -> ok after 500 -> ok end,
+    PidsOk = is_pid(P1) andalso is_pid(P2) andalso (Count2 =:= 2),
+    #{call_str => <<"dynamic_session_sup:start_session(Sup, ...) -> count 2">>,
+      expected => <<"{true, true, 2}">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [{is_pid(P1), is_pid(P2), Count2}]))),
+      passed => PidsOk, time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"dynamic_session_sup:start_session(...)">>, expected => <<"2 active">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    {ok, Sup3} = dynamic_session_sup:start_link(),
+    {ok, P3} = dynamic_session_sup:start_session(Sup3, <<"s1">>, <<"u1">>),
+    ok = dynamic_session_sup:terminate_session(Sup3, P3),
+    Count3 = dynamic_session_sup:count_sessions(Sup3),
+    MRef3 = monitor(process, Sup3),
+    exit(Sup3, shutdown),
+    receive {'DOWN', MRef3, process, Sup3, _} -> ok after 500 -> ok end,
+    #{call_str => <<"dynamic_session_sup:terminate_session(Sup, Child)">>,
+      expected => <<"0">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Count3]))),
+      passed => (Count3 =:= 0), time_ms => erlang:system_time(millisecond) - T3_Start}
+catch C3:R3 ->
+    #{call_str => <<"dynamic_session_sup:terminate_session(...)">>, expected => <<"0">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
 
 	case "ch08-l05":
 		return `
-IsCheckout = case code:ensure_loaded(checkout_sup) of
-    {module, checkout_sup} -> true;
-    _ -> false
+T1_Start = erlang:system_time(millisecond),
+T1_Res = try
+    {ok, Sup} = commerce_app:start(normal, []),
+    IsAlive = is_process_alive(Sup),
+    commerce_app:stop([]),
+    #{call_str => <<"commerce_app:start(normal, [])">>,
+      expected => <<"true">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [IsAlive]))),
+      passed => (IsAlive =:= true), time_ms => erlang:system_time(millisecond) - T1_Start}
+catch C1:R1 ->
+    #{call_str => <<"commerce_app:start(...)">>, expected => <<"true">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
 end,
-AllResults = case IsCheckout of
-    true ->
-        T1_Start = erlang:system_time(millisecond),
-        T1_Res = try
-            [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [checkout_sup, db_pool_worker, pricing_cache_worker, order_gateway_worker]],
-            timer:sleep(20),
-            {ok, Sup1} = checkout_sup:start_link(),
-            {ok, #{db_pid := Db, cache_pid := Cache, gateway_pid := Gw}} = checkout_sup:get_pipeline_pids(),
-            unlink(Sup1),
-            catch supervisor:stop(Sup1),
-            AllPidsAlive = is_pid(Db) andalso is_pid(Cache) andalso is_pid(Gw),
-            #{call_str => <<"checkout_sup:start_link() -> get_pipeline_pids()">>,
-              expected => <<"true">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [AllPidsAlive]))),
-              passed => AllPidsAlive, time_ms => erlang:system_time(millisecond) - T1_Start}
-        catch C1:R1 ->
-            #{call_str => <<"checkout_sup:start_link(...)">>, expected => <<"all 3 pids alive">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
-        end,
-        T2_Start = erlang:system_time(millisecond),
-        T2_Res = try
-            [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [checkout_sup, db_pool_worker, pricing_cache_worker, order_gateway_worker]],
-            timer:sleep(20),
-            {ok, Sup2} = checkout_sup:start_link(),
-            {ok, #{db_pid := Db1, cache_pid := Cache1, gateway_pid := Gw1}} = checkout_sup:get_pipeline_pids(),
-            exit(Gw1, kill),
-            timer:sleep(40),
-            {ok, #{db_pid := Db2, cache_pid := Cache2, gateway_pid := Gw2}} = checkout_sup:get_pipeline_pids(),
-            unlink(Sup2),
-            catch supervisor:stop(Sup2),
-            Pass = (Db1 =:= Db2) andalso (Cache1 =:= Cache2) andalso (Gw1 =/= Gw2),
-            #{call_str => <<"checkout_sup: kill gateway worker -> check rest_for_one">>,
-              expected => <<"{true, true, true}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [{Db1 =:= Db2, Cache1 =:= Cache2, Gw1 =/= Gw2}]))),
-              passed => Pass, time_ms => erlang:system_time(millisecond) - T2_Start}
-        catch C2:R2 ->
-            #{call_str => <<"checkout_sup: kill gateway">>, expected => <<"isolated gateway restart">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
-        end,
-        T3_Start = erlang:system_time(millisecond),
-        T3_Res = try
-            [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [checkout_sup, db_pool_worker, pricing_cache_worker, order_gateway_worker]],
-            timer:sleep(20),
-            {ok, Sup3} = checkout_sup:start_link(),
-            {ok, #{db_pid := Db3, cache_pid := Cache3, gateway_pid := Gw3}} = checkout_sup:get_pipeline_pids(),
-            exit(Cache3, kill),
-            timer:sleep(40),
-            {ok, #{db_pid := Db4, cache_pid := Cache4, gateway_pid := Gw4}} = checkout_sup:get_pipeline_pids(),
-            unlink(Sup3),
-            catch supervisor:stop(Sup3),
-            Pass3 = (Db3 =:= Db4) andalso (Cache3 =/= Cache4) andalso (Gw3 =/= Gw4),
-            #{call_str => <<"checkout_sup: kill pricing_cache -> check cascade to gateway">>,
-              expected => <<"{true, true, true}">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [{Db3 =:= Db4, Cache3 =/= Cache4, Gw3 =/= Gw4}]))),
-              passed => Pass3, time_ms => erlang:system_time(millisecond) - T3_Start}
-        catch C3:R3 ->
-            #{call_str => <<"checkout_sup: kill cache">>, expected => <<"cascade restart">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
-        end,
-        [T1_Res, T2_Res, T3_Res];
-    false ->
-        T1_Start = erlang:system_time(millisecond),
-        T1_Res = try
-            {ok, Sup} = commerce_app:start(normal, []),
-            IsAlive = is_process_alive(Sup),
-            commerce_app:stop([]),
-            #{call_str => <<"commerce_app:start(normal, [])">>,
-              expected => <<"true">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [IsAlive]))),
-              passed => (IsAlive =:= true), time_ms => erlang:system_time(millisecond) - T1_Start}
-        catch C1:R1 ->
-            #{call_str => <<"commerce_app:start(...)">>, expected => <<"true">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
-        end,
-        T2_Start = erlang:system_time(millisecond),
-        T2_Res = try
-            Val = commerce_app:get_app_config(database_timeout, 5000),
-            #{call_str => <<"commerce_app:get_app_config(database_timeout, 5000)">>,
-              expected => <<"5000">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [Val]))),
-              passed => (Val =:= 5000), time_ms => erlang:system_time(millisecond) - T2_Start}
-        catch C2:R2 ->
-            #{call_str => <<"commerce_app:get_app_config(...)">>, expected => <<"5000">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
-        end,
-        T3_Start = erlang:system_time(millisecond),
-        T3_Res = try
-            ok = commerce_app:set_app_config(currency, <<"USD">>),
-            ReadVal = commerce_app:get_app_config(currency, <<"EUR">>),
-            #{call_str => <<"commerce_app:set_app_config(currency, <<\"USD\">>)">>,
-              expected => <<"<<\"USD\">>">>,
-              actual => list_to_binary(lists:flatten(io_lib:format("~p", [ReadVal]))),
-              passed => (ReadVal =:= <<"USD">>), time_ms => erlang:system_time(millisecond) - T3_Start}
-        catch C3:R3 ->
-            #{call_str => <<"commerce_app:set_app_config(...)">>, expected => <<"<<\"USD\">>">>,
-              actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
-        end,
-        [T1_Res, T2_Res, T3_Res]
+T2_Start = erlang:system_time(millisecond),
+T2_Res = try
+    Val = commerce_app:get_app_config(database_timeout, 5000),
+    #{call_str => <<"commerce_app:get_app_config(database_timeout, 5000)">>,
+      expected => <<"5000">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [Val]))),
+      passed => (Val =:= 5000), time_ms => erlang:system_time(millisecond) - T2_Start}
+catch C2:R2 ->
+    #{call_str => <<"commerce_app:get_app_config(...)">>, expected => <<"5000">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
 end,
+T3_Start = erlang:system_time(millisecond),
+T3_Res = try
+    ok = commerce_app:set_app_config(currency, <<"USD">>),
+    ReadVal = commerce_app:get_app_config(currency, <<"EUR">>),
+    #{call_str => <<"commerce_app:set_app_config(currency, <<\"USD\">>)">>,
+      expected => <<"<<\"USD\">>">>,
+      actual => list_to_binary(lists:flatten(io_lib:format("~p", [ReadVal]))),
+      passed => (ReadVal =:= <<"USD">>), time_ms => erlang:system_time(millisecond) - T3_Start}
+catch C3:R3 ->
+    #{call_str => <<"commerce_app:set_app_config(...)">>, expected => <<"<<\"USD\">>">>,
+      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -9377,284 +9266,118 @@ Stages = [CompileStage, S1_Ast, S2_Burst, S3_Plan, S4_Rev]
 
 	case "ch08-l04":
 		return fmt.Sprintf(`
-IsApp = case code:ensure_loaded(commerce_app) of
-    {module, commerce_app} -> true;
-    _ -> false
+CompileStage = case code:ensure_loaded(dynamic_session_sup) of
+    {module, dynamic_session_sup} ->
+        Exports = dynamic_session_sup:module_info(exports),
+        Req = [{start_link, 0}, {start_session, 3}, {count_sessions, 1}, {terminate_session, 2}, {init, 1}],
+        case [E || E <- Req, not lists:member(E, Exports)] of
+            [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"dynamic_session_sup.erl compiled cleanly; all API functions exported.">>};
+            Missing -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
+        end;
+    {error, E1} ->
+        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-Stages = case IsApp of
-    true ->
-        CompileStage_App = case code:ensure_loaded(commerce_app) of
-            {module, commerce_app} ->
-                Exports_App = commerce_app:module_info(exports),
-                Req_App = [{start, 2}, {stop, 1}, {get_app_config, 2}, {set_app_config, 2}],
-                case [E || E <- Req_App, not lists:member(E, Exports_App)] of
-                    [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"commerce_app.erl compiled cleanly; all API functions exported.">>};
-                    Missing_App -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing_App]))}
-                end;
-            {error, E1_App} ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1_App]))}
-        end,
-        S1_Ast_App = try
-            SrcPath_App = filename:join(["%s", "src", "commerce_app.erl"]),
-            BeamPath_App = filename:join(["%s", "ebin", "commerce_app.beam"]),
-            {ok, BeamBin_App} = file:read_file(BeamPath_App),
-            Rules_App = #{
-                required_remote_calls => [{application, get_env, 3}, {application, set_env, 3}, {supervisor, start_link, 3}]
-            },
-            case bf_ast_verifier:verify_rules(SrcPath_App, BeamBin_App, Rules_App) of
-                {ok, _} ->
-                    #{id => <<"ast_application_behaviour">>, title => <<"AST Analysis: application Behaviour & Config Management">>, status => <<"passed">>, time_ms => 15, details => <<"Verified application callback exports and application:get_env/set_env environment calls.">>};
-                {error, Violations_App} ->
-                    #{id => <<"ast_application_behaviour">>, title => <<"AST Analysis: application Behaviour & Config Management">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations_App]))}
-            end
-        catch C1_App:R1_App ->
-            #{id => <<"ast_application_behaviour">>, title => <<"AST Analysis: application Behaviour & Config Management">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1_App, R1_App]))}
-        end,
-        S2_RootSup_App = try
-            {ok, SupPid_App} = commerce_app:start(normal, []),
-            IsAlive_App = is_process_alive(SupPid_App),
-            ok = commerce_app:stop([]),
-            case IsAlive_App of
-                true ->
-                    #{id => <<"root_supervisor_startup">>, title => <<"Application Root Supervisor Startup & Shutdown">>, status => <<"passed">>, time_ms => 20, details => <<"start/2 booted live root supervisor and stop/1 terminated cleanly.">>};
-                false ->
-                    #{id => <<"root_supervisor_startup">>, title => <<"Application Root Supervisor Startup & Shutdown">>, status => <<"failed">>, time_ms => 20, details => <<"Root supervisor was not alive.">>}
-            end
-        catch C2_App:R2_App ->
-            #{id => <<"root_supervisor_startup">>, title => <<"Application Root Supervisor Startup & Shutdown">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Startup error: ~p:~p", [C2_App, R2_App]))}
-        end,
-        S3_ConfigEnv_App = try
-            ValDefault_App = commerce_app:get_app_config(worker_pool_size, 32),
-            ok = commerce_app:set_app_config(worker_pool_size, 64),
-            ValOverride_App = commerce_app:get_app_config(worker_pool_size, 32),
-            case {ValDefault_App, ValOverride_App} of
-                {32, 64} ->
-                    #{id => <<"runtime_config_env">>, title => <<"Application Environment Configuration Management">>, status => <<"passed">>, time_ms => 15, details => <<"Successfully resolved fallback default (32) and dynamic runtime override (64).">>};
-                Other3_App ->
-                    #{id => <<"runtime_config_env">>, title => <<"Application Environment Configuration Management">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Config mismatch: ~p", [Other3_App]))}
-            end
-        catch C3_App:R3_App ->
-            #{id => <<"runtime_config_env">>, title => <<"Application Environment Configuration Management">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Config error: ~p:~p", [C3_App, R3_App]))}
-        end,
-        [CompileStage_App, S1_Ast_App, S2_RootSup_App, S3_ConfigEnv_App];
-    false ->
-        CompileStage_Dyn4 = case code:ensure_loaded(dynamic_session_sup) of
-            {module, dynamic_session_sup} ->
-                Exports_Dyn4 = dynamic_session_sup:module_info(exports),
-                Req_Dyn4 = [{start_link, 0}, {start_session, 3}, {count_sessions, 1}, {terminate_session, 2}, {init, 1}],
-                case [E || E <- Req_Dyn4, not lists:member(E, Exports_Dyn4)] of
-                    [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"dynamic_session_sup.erl compiled cleanly; all API functions exported.">>};
-                    Missing_Dyn4 -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing_Dyn4]))}
-                end;
-            {error, E1_Dyn4} ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1_Dyn4]))}
-        end,
-        S1_Ast_Dyn4 = try
-            SrcPath_Dyn4 = filename:join(["%s", "src", "dynamic_session_sup.erl"]),
-            BeamPath_Dyn4 = filename:join(["%s", "ebin", "dynamic_session_sup.beam"]),
-            {ok, BeamBin_Dyn4} = file:read_file(BeamPath_Dyn4),
-            Rules_Dyn4 = #{
-                required_remote_calls => [{supervisor, start_link, 3}, {supervisor, start_child, 2}, {supervisor, count_children, 1}, {supervisor, terminate_child, 2}]
-            },
-            case bf_ast_verifier:verify_rules(SrcPath_Dyn4, BeamBin_Dyn4, Rules_Dyn4) of
-                {ok, _} ->
-                    #{id => <<"ast_dynamic_supervisor">>, title => <<"AST Analysis: supervisor Behaviour & Dynamic Spawning Calls">>, status => <<"passed">>, time_ms => 15, details => <<"Verified supervisor behaviour, dynamic start_child/2, and telemetry queries.">>};
-                {error, Violations_Dyn4} ->
-                    #{id => <<"ast_dynamic_supervisor">>, title => <<"AST Analysis: supervisor Behaviour & Dynamic Spawning Calls">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations_Dyn4]))}
-            end
-        catch C1_Dyn4:R1_Dyn4 ->
-            #{id => <<"ast_dynamic_supervisor">>, title => <<"AST Analysis: supervisor Behaviour & Dynamic Spawning Calls">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1_Dyn4, R1_Dyn4]))}
-        end,
-        S2_TemplateSpec_Dyn4 = try
-            {ok, {SupFlags_Dyn4, [Template_Dyn4]}} = dynamic_session_sup:init([]),
-            case {SupFlags_Dyn4, Template_Dyn4} of
-                {#{strategy := simple_one_for_one}, #{restart := temporary, type := worker}} ->
-                    #{id => <<"simple_one_for_one_spec">>, title => <<"simple_one_for_one Template Child Specification Audit">>, status => <<"passed">>, time_ms => 15, details => <<"init/1 returns exactly 1 template child spec with simple_one_for_one strategy and temporary restart.">>};
-                Other2_Dyn4 ->
-                    #{id => <<"simple_one_for_one_spec">>, title => <<"simple_one_for_one Template Child Specification Audit">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Invalid template structure: ~p", [Other2_Dyn4]))}
-            end
-        catch C2_Dyn4:R2_Dyn4 ->
-            #{id => <<"simple_one_for_one_spec">>, title => <<"simple_one_for_one Template Child Specification Audit">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Template error: ~p:~p", [C2_Dyn4, R2_Dyn4]))}
-        end,
-        S3_DynamicLifecycle_Dyn4 = try
-            {ok, Sup_Dyn4} = dynamic_session_sup:start_link(),
-            0 = dynamic_session_sup:count_sessions(Sup_Dyn4),
-            {ok, P1_Dyn4} = dynamic_session_sup:start_session(Sup_Dyn4, <<"sess_101">>, <<"usr_alpha">>),
-            {ok, P2_Dyn4} = dynamic_session_sup:start_session(Sup_Dyn4, <<"sess_102">>, <<"usr_beta">>),
-            {ok, P3_Dyn4} = dynamic_session_sup:start_session(Sup_Dyn4, <<"sess_103">>, <<"usr_gamma">>),
-            3 = dynamic_session_sup:count_sessions(Sup_Dyn4),
-            ok = dynamic_session_sup:terminate_session(Sup_Dyn4, P2_Dyn4),
-            2 = dynamic_session_sup:count_sessions(Sup_Dyn4),
-            exit(Sup_Dyn4, shutdown),
-            #{id => <<"dynamic_lifecycle_pool">>, title => <<"Live Dynamic Process Pool Lifecycle (Spawn, Count, Terminate)">>, status => <<"passed">>, time_ms => 35, details => <<"Spawned 3 dynamic sessions on demand; verified count_sessions/1 increment/decrement and graceful cleanup.">>}
-        catch C3_Dyn4:R3_Dyn4 ->
-            #{id => <<"dynamic_lifecycle_pool">>, title => <<"Live Dynamic Process Pool Lifecycle (Spawn, Count, Terminate)">>, status => <<"failed">>, time_ms => 35, details => list_to_binary(io_lib:format("Lifecycle error: ~p:~p", [C3_Dyn4, R3_Dyn4]))}
-        end,
-        [CompileStage_Dyn4, S1_Ast_Dyn4, S2_TemplateSpec_Dyn4, S3_DynamicLifecycle_Dyn4]
-end
-`, wsDir, wsDir, wsDir, wsDir), true
+S1_Ast = try
+    SrcPath = filename:join(["%s", "src", "dynamic_session_sup.erl"]),
+    BeamPath = filename:join(["%s", "ebin", "dynamic_session_sup.beam"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    Rules = #{
+        required_remote_calls => [{supervisor, start_link, 3}, {supervisor, start_child, 2}, {supervisor, count_children, 1}, {supervisor, terminate_child, 2}]
+    },
+    case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
+        {ok, _} ->
+            #{id => <<"ast_dynamic_supervisor">>, title => <<"AST Analysis: supervisor Behaviour & Dynamic Spawning Calls">>, status => <<"passed">>, time_ms => 15, details => <<"Verified supervisor behaviour, dynamic start_child/2, and telemetry queries.">>};
+        {error, Violations} ->
+            #{id => <<"ast_dynamic_supervisor">>, title => <<"AST Analysis: supervisor Behaviour & Dynamic Spawning Calls">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
+    end
+catch C1:R1 ->
+    #{id => <<"ast_dynamic_supervisor">>, title => <<"AST Analysis: supervisor Behaviour & Dynamic Spawning Calls">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
+end,
+S2_TemplateSpec = try
+    {ok, {SupFlags, [Template]}} = dynamic_session_sup:init([]),
+    case {SupFlags, Template} of
+        {#{strategy := simple_one_for_one}, #{restart := temporary, type := worker}} ->
+            #{id => <<"simple_one_for_one_spec">>, title => <<"simple_one_for_one Template Child Specification Audit">>, status => <<"passed">>, time_ms => 15, details => <<"init/1 returns exactly 1 template child spec with simple_one_for_one strategy and temporary restart.">>};
+        Other2 ->
+            #{id => <<"simple_one_for_one_spec">>, title => <<"simple_one_for_one Template Child Specification Audit">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Invalid template structure: ~p", [Other2]))}
+    end
+catch C2:R2 ->
+    #{id => <<"simple_one_for_one_spec">>, title => <<"simple_one_for_one Template Child Specification Audit">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Template error: ~p:~p", [C2, R2]))}
+end,
+S3_DynamicLifecycle = try
+    {ok, Sup} = dynamic_session_sup:start_link(),
+    0 = dynamic_session_sup:count_sessions(Sup),
+    {ok, _P1} = dynamic_session_sup:start_session(Sup, <<"sess_101">>, <<"usr_alpha">>),
+    {ok, P2} = dynamic_session_sup:start_session(Sup, <<"sess_102">>, <<"usr_beta">>),
+    {ok, _P3} = dynamic_session_sup:start_session(Sup, <<"sess_103">>, <<"usr_gamma">>),
+    3 = dynamic_session_sup:count_sessions(Sup),
+    ok = dynamic_session_sup:terminate_session(Sup, P2),
+    2 = dynamic_session_sup:count_sessions(Sup),
+    exit(Sup, shutdown),
+    #{id => <<"dynamic_lifecycle_pool">>, title => <<"Live Dynamic Process Pool Lifecycle (Spawn, Count, Terminate)">>, status => <<"passed">>, time_ms => 35, details => <<"Spawned 3 dynamic sessions on demand; verified count_sessions/1 increment/decrement and graceful cleanup.">>}
+catch C3:R3 ->
+    #{id => <<"dynamic_lifecycle_pool">>, title => <<"Live Dynamic Process Pool Lifecycle (Spawn, Count, Terminate)">>, status => <<"failed">>, time_ms => 35, details => list_to_binary(io_lib:format("Lifecycle error: ~p:~p", [C3, R3]))}
+end,
+Stages = [CompileStage, S1_Ast, S2_TemplateSpec, S3_DynamicLifecycle]
+`, wsDir, wsDir), true
 
 	case "ch08-l05":
 		return fmt.Sprintf(`
-IsCheckout5 = case code:ensure_loaded(checkout_sup) of
-    {module, checkout_sup} -> true;
-    _ -> false
+CompileStage = case code:ensure_loaded(commerce_app) of
+    {module, commerce_app} ->
+        Exports = commerce_app:module_info(exports),
+        Req = [{start, 2}, {stop, 1}, {get_app_config, 2}, {set_app_config, 2}],
+        case [E || E <- Req, not lists:member(E, Exports)] of
+            [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"commerce_app.erl compiled cleanly; all API functions exported.">>};
+            Missing -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing]))}
+        end;
+    {error, E1} ->
+        #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-Stages = case IsCheckout5 of
-    true ->
-        CompileStage_Chk5 = case code:ensure_loaded(checkout_sup) of
-            {module, checkout_sup} ->
-                Exports_Chk5 = checkout_sup:module_info(exports),
-                Req_Chk5 = [{start_link, 0}, {get_pipeline_pids, 0}, {init, 1}],
-                case [E || E <- Req_Chk5, not lists:member(E, Exports_Chk5)] of
-                    [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"checkout_sup.erl compiled cleanly; all API functions exported.">>};
-                    Missing_Chk5 -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing_Chk5]))}
-                end;
-            {error, E1_Chk5} ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1_Chk5]))}
-        end,
-        S1_Ast_Chk5 = try
-            SrcPath_Chk5 = filename:join(["%s", "src", "checkout_sup.erl"]),
-            BeamPath_Chk5 = filename:join(["%s", "ebin", "checkout_sup.beam"]),
-            {ok, BeamBin_Chk5} = file:read_file(BeamPath_Chk5),
-            Rules_Chk5 = #{
-                required_remote_calls => [{supervisor, start_link, 3}, {supervisor, which_children, 1}]
-            },
-            case bf_ast_verifier:verify_rules(SrcPath_Chk5, BeamBin_Chk5, Rules_Chk5) of
-                {ok, _} ->
-                    #{id => <<"ast_supervisor_contract">>, title => <<"AST Analysis: supervisor Behaviour & Introspection">>, status => <<"passed">>, time_ms => 15, details => <<"Verified -behaviour(supervisor), supervisor:start_link, and which_children introspection.">>};
-                {error, Violations_Chk5} ->
-                    #{id => <<"ast_supervisor_contract">>, title => <<"AST Analysis: supervisor Behaviour & Introspection">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations_Chk5]))}
-            end
-        catch C1_Chk5:R1_Chk5 ->
-            #{id => <<"ast_supervisor_contract">>, title => <<"AST Analysis: supervisor Behaviour & Introspection">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1_Chk5, R1_Chk5]))}
-        end,
-        S2_Flags_Chk5 = try
-            {ok, {SupFlags_Chk5, ChildSpecs_Chk5}} = checkout_sup:init([]),
-            case {SupFlags_Chk5, [maps:get(id, S_Chk5) || S_Chk5 <- ChildSpecs_Chk5]} of
-                {#{strategy := rest_for_one, intensity := 5, period := 10}, [db_pool, pricing_cache, order_gateway]} ->
-                    #{id => <<"rest_for_one_pipeline_order">>, title => <<"Supervisor Flags & Strict Pipeline Dependency Order">>, status => <<"passed">>, time_ms => 15, details => <<"Verified rest_for_one strategy and exact [db_pool, pricing_cache, order_gateway] child ordering.">>};
-                Other2_Chk5 ->
-                    #{id => <<"rest_for_one_pipeline_order">>, title => <<"Supervisor Flags & Strict Pipeline Dependency Order">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Flags or ordering mismatch: ~p", [Other2_Chk5]))}
-            end
-        catch C2_Chk5:R2_Chk5 ->
-            #{id => <<"rest_for_one_pipeline_order">>, title => <<"Supervisor Flags & Strict Pipeline Dependency Order">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Init error: ~p:~p", [C2_Chk5, R2_Chk5]))}
-        end,
-        S3_ChaosGw_Chk5 = try
-            [case whereis(N_Gw5) of undefined -> ok; P_Gw5 -> exit(P_Gw5, kill) end || N_Gw5 <- [checkout_sup, db_pool_worker, pricing_cache_worker, order_gateway_worker]],
-            timer:sleep(20),
-            {ok, Sup1_Chk5} = checkout_sup:start_link(),
-            {ok, #{db_pid := Db1_Gw5, cache_pid := Cache1_Gw5, gateway_pid := Gw1_Gw5}} = checkout_sup:get_pipeline_pids(),
-            exit(Gw1_Gw5, kill),
-            timer:sleep(40),
-            {ok, #{db_pid := Db2_Gw5, cache_pid := Cache2_Gw5, gateway_pid := Gw2_Gw5}} = checkout_sup:get_pipeline_pids(),
-            unlink(Sup1_Chk5),
-            catch supervisor:stop(Sup1_Chk5),
-            case {Db1_Gw5 =:= Db2_Gw5, Cache1_Gw5 =:= Cache2_Gw5, Gw1_Gw5 =/= Gw2_Gw5} of
-                {true, true, true} ->
-                    #{id => <<"chaos_gateway_isolated_restart">>, title => <<"Chaos Test 1: Isolated Gateway Restart (Children 1 & 2 Preserved)">>, status => <<"passed">>, time_ms => 50, details => <<"Killing order_gateway_worker restarted only Child 3; DB and Cache PIDs were preserved.">>};
-                Other3_Gw5 ->
-                    #{id => <<"chaos_gateway_isolated_restart">>, title => <<"Chaos Test 1: Isolated Gateway Restart (Children 1 & 2 Preserved)">>, status => <<"failed">>, time_ms => 50, details => list_to_binary(io_lib:format("Gateway crash assertion failed: ~p", [Other3_Gw5]))}
-            end
-        catch C3_Chk5:R3_Chk5 ->
-            #{id => <<"chaos_gateway_isolated_restart">>, title => <<"Chaos Test 1: Isolated Gateway Restart (Children 1 & 2 Preserved)">>, status => <<"failed">>, time_ms => 50, details => list_to_binary(io_lib:format("Chaos Gateway error: ~p:~p", [C3_Chk5, R3_Chk5]))}
-        end,
-        S4_ChaosCache_Chk5 = try
-            [case whereis(N_C5) of undefined -> ok; P_C5 -> exit(P_C5, kill) end || N_C5 <- [checkout_sup, db_pool_worker, pricing_cache_worker, order_gateway_worker]],
-            timer:sleep(20),
-            {ok, Sup2_Chk5} = checkout_sup:start_link(),
-            {ok, #{db_pid := Db3_C5, cache_pid := Cache3_C5, gateway_pid := Gw3_C5}} = checkout_sup:get_pipeline_pids(),
-            exit(Cache3_C5, kill),
-            timer:sleep(40),
-            {ok, #{db_pid := Db4_C5, cache_pid := Cache4_C5, gateway_pid := Gw4_C5}} = checkout_sup:get_pipeline_pids(),
-            unlink(Sup2_Chk5),
-            catch supervisor:stop(Sup2_Chk5),
-            case {Db3_C5 =:= Db4_C5, Cache3_C5 =/= Cache4_C5, Gw3_C5 =/= Gw4_C5} of
-                {true, true, true} ->
-                    #{id => <<"chaos_cache_cascade_restart">>, title => <<"Chaos Test 2: Cache Crash Cascades to Gateway (DB Pool Preserved)">>, status => <<"passed">>, time_ms => 50, details => <<"Killing pricing_cache_worker restarted both Cache and Gateway, while db_pool PID remained untouched.">>};
-                Other4_C5 ->
-                    #{id => <<"chaos_cache_cascade_restart">>, title => <<"Chaos Test 2: Cache Crash Cascades to Gateway (DB Pool Preserved)">>, status => <<"failed">>, time_ms => 50, details => list_to_binary(io_lib:format("Cache cascade assertion failed: ~p", [Other4_C5]))}
-            end
-        catch C4_Chk5:R4_Chk5 ->
-            #{id => <<"chaos_cache_cascade_restart">>, title => <<"Chaos Test 2: Cache Crash Cascades to Gateway (DB Pool Preserved)">>, status => <<"failed">>, time_ms => 50, details => list_to_binary(io_lib:format("Chaos Cache error: ~p:~p", [C4_Chk5, R4_Chk5]))}
-        end,
-        S5_ChaosDb_Chk5 = try
-            [case whereis(N_Db5) of undefined -> ok; P_Db5 -> exit(P_Db5, kill) end || N_Db5 <- [checkout_sup, db_pool_worker, pricing_cache_worker, order_gateway_worker]],
-            timer:sleep(20),
-            {ok, Sup3_Chk5} = checkout_sup:start_link(),
-            {ok, #{db_pid := Db5_D5, cache_pid := Cache5_D5, gateway_pid := Gw5_D5}} = checkout_sup:get_pipeline_pids(),
-            exit(Db5_D5, kill),
-            timer:sleep(40),
-            {ok, #{db_pid := Db6_D5, cache_pid := Cache6_D5, gateway_pid := Gw6_D5}} = checkout_sup:get_pipeline_pids(),
-            unlink(Sup3_Chk5),
-            catch supervisor:stop(Sup3_Chk5),
-            case {Db5_D5 =/= Db6_D5, Cache5_D5 =/= Cache6_D5, Gw5_D5 =/= Gw6_D5} of
-                {true, true, true} ->
-                    #{id => <<"chaos_db_full_pipeline_restart">>, title => <<"Chaos Test 3: Root DB Crash Restarts Entire Pipeline In Order">>, status => <<"passed">>, time_ms => 50, details => <<"Killing db_pool_worker successfully caused sequential rest_for_one restart across all 3 workers.">>};
-                Other5_Db5 ->
-                    #{id => <<"chaos_db_full_pipeline_restart">>, title => <<"Chaos Test 3: Root DB Crash Restarts Entire Pipeline In Order">>, status => <<"failed">>, time_ms => 50, details => list_to_binary(io_lib:format("DB crash assertion failed: ~p", [Other5_Db5]))}
-            end
-        catch C5_Chk5:R5_Chk5 ->
-            #{id => <<"chaos_db_full_pipeline_restart">>, title => <<"Chaos Test 3: Root DB Crash Restarts Entire Pipeline In Order">>, status => <<"failed">>, time_ms => 50, details => list_to_binary(io_lib:format("Chaos DB error: ~p:~p", [C5_Chk5, R5_Chk5]))}
-        end,
-        [CompileStage_Chk5, S1_Ast_Chk5, S2_Flags_Chk5, S3_ChaosGw_Chk5, S4_ChaosCache_Chk5, S5_ChaosDb_Chk5];
-    false ->
-        CompileStage_App5 = case code:ensure_loaded(commerce_app) of
-            {module, commerce_app} ->
-                Exports_App5 = commerce_app:module_info(exports),
-                Req_App5 = [{start, 2}, {stop, 1}, {get_app_config, 2}, {set_app_config, 2}],
-                case [E || E <- Req_App5, not lists:member(E, Exports_App5)] of
-                    [] -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"passed">>, time_ms => 12, details => <<"commerce_app.erl compiled cleanly; all API functions exported.">>};
-                    Missing_App5 -> #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Missing exports: ~p", [Missing_App5]))}
-                end;
-            {error, E1_App5} ->
-                #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1_App5]))}
-        end,
-        S1_Ast_App5 = try
-            SrcPath_App5 = filename:join(["%s", "src", "commerce_app.erl"]),
-            BeamPath_App5 = filename:join(["%s", "ebin", "commerce_app.beam"]),
-            {ok, BeamBin_App5} = file:read_file(BeamPath_App5),
-            Rules_App5 = #{
-                required_remote_calls => [{application, get_env, 3}, {application, set_env, 3}, {supervisor, start_link, 3}]
-            },
-            case bf_ast_verifier:verify_rules(SrcPath_App5, BeamBin_App5, Rules_App5) of
-                {ok, _} ->
-                    #{id => <<"ast_application_behaviour">>, title => <<"AST Analysis: application Behaviour & Config Management">>, status => <<"passed">>, time_ms => 15, details => <<"Verified application callback exports and application:get_env/set_env environment calls.">>};
-                {error, Violations_App5} ->
-                    #{id => <<"ast_application_behaviour">>, title => <<"AST Analysis: application Behaviour & Config Management">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations_App5]))}
-            end
-        catch C1_App5:R1_App5 ->
-            #{id => <<"ast_application_behaviour">>, title => <<"AST Analysis: application Behaviour & Config Management">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1_App5, R1_App5]))}
-        end,
-        S2_RootSup_App5 = try
-            {ok, SupPid_App5} = commerce_app:start(normal, []),
-            IsAlive_App5 = is_process_alive(SupPid_App5),
-            ok = commerce_app:stop([]),
-            case IsAlive_App5 of
-                true ->
-                    #{id => <<"root_supervisor_startup">>, title => <<"Application Root Supervisor Startup & Shutdown">>, status => <<"passed">>, time_ms => 20, details => <<"start/2 booted live root supervisor and stop/1 terminated cleanly.">>};
-                false ->
-                    #{id => <<"root_supervisor_startup">>, title => <<"Application Root Supervisor Startup & Shutdown">>, status => <<"failed">>, time_ms => 20, details => <<"Root supervisor was not alive.">>}
-            end
-        catch C2_App5:R2_App5 ->
-            #{id => <<"root_supervisor_startup">>, title => <<"Application Root Supervisor Startup & Shutdown">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Startup error: ~p:~p", [C2_App5, R2_App5]))}
-        end,
-        S3_ConfigEnv_App5 = try
-            ValDefault_App5 = commerce_app:get_app_config(worker_pool_size, 32),
-            ok = commerce_app:set_app_config(worker_pool_size, 64),
-            ValOverride_App5 = commerce_app:get_app_config(worker_pool_size, 32),
-            case {ValDefault_App5, ValOverride_App5} of
-                {32, 64} ->
-                    #{id => <<"runtime_config_env">>, title => <<"Application Environment Configuration Management">>, status => <<"passed">>, time_ms => 15, details => <<"Successfully resolved fallback default (32) and dynamic runtime override (64).">>};
-                Other3_App5 ->
-                    #{id => <<"runtime_config_env">>, title => <<"Application Environment Configuration Management">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Config mismatch: ~p", [Other3_App5]))}
-            end
-        catch C3_App5:R3_App5 ->
-            #{id => <<"runtime_config_env">>, title => <<"Application Environment Configuration Management">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Config error: ~p:~p", [C3_App5, R3_App5]))}
-        end,
-        [CompileStage_App5, S1_Ast_App5, S2_RootSup_App5, S3_ConfigEnv_App5]
-end
-`, wsDir, wsDir, wsDir, wsDir), true
+S1_Ast = try
+    SrcPath = filename:join(["%s", "src", "commerce_app.erl"]),
+    BeamPath = filename:join(["%s", "ebin", "commerce_app.beam"]),
+    {ok, BeamBin} = file:read_file(BeamPath),
+    Rules = #{
+        required_remote_calls => [{application, get_env, 3}, {application, set_env, 3}, {supervisor, start_link, 3}]
+    },
+    case bf_ast_verifier:verify_rules(SrcPath, BeamBin, Rules) of
+        {ok, _} ->
+            #{id => <<"ast_application_behaviour">>, title => <<"AST Analysis: application Behaviour & Config Management">>, status => <<"passed">>, time_ms => 15, details => <<"Verified application callback exports and application:get_env/set_env environment calls.">>};
+        {error, Violations} ->
+            #{id => <<"ast_application_behaviour">>, title => <<"AST Analysis: application Behaviour & Config Management">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Violations: ~p", [Violations]))}
+    end
+catch C1:R1 ->
+    #{id => <<"ast_application_behaviour">>, title => <<"AST Analysis: application Behaviour & Config Management">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, R1]))}
+end,
+S2_RootSup = try
+    {ok, SupPid} = commerce_app:start(normal, []),
+    IsAlive = is_process_alive(SupPid),
+    ok = commerce_app:stop([]),
+    case IsAlive of
+        true ->
+            #{id => <<"root_supervisor_startup">>, title => <<"Application Root Supervisor Startup & Shutdown">>, status => <<"passed">>, time_ms => 20, details => <<"start/2 booted live root supervisor and stop/1 terminated cleanly.">>};
+        false ->
+            #{id => <<"root_supervisor_startup">>, title => <<"Application Root Supervisor Startup & Shutdown">>, status => <<"failed">>, time_ms => 20, details => <<"Root supervisor was not alive.">>}
+    end
+catch C2:R2 ->
+    #{id => <<"root_supervisor_startup">>, title => <<"Application Root Supervisor Startup & Shutdown">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Startup error: ~p:~p", [C2, R2]))}
+end,
+S3_ConfigEnv = try
+    ValDefault = commerce_app:get_app_config(worker_pool_size, 32),
+    ok = commerce_app:set_app_config(worker_pool_size, 64),
+    ValOverride = commerce_app:get_app_config(worker_pool_size, 32),
+    case {ValDefault, ValOverride} of
+        {32, 64} ->
+            #{id => <<"runtime_config_env">>, title => <<"Application Environment Configuration Management">>, status => <<"passed">>, time_ms => 15, details => <<"Successfully resolved fallback default (32) and dynamic runtime override (64).">>};
+        Other3 ->
+            #{id => <<"runtime_config_env">>, title => <<"Application Environment Configuration Management">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Config mismatch: ~p", [Other3]))}
+    end
+catch C3:R3 ->
+    #{id => <<"runtime_config_env">>, title => <<"Application Environment Configuration Management">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Config error: ~p:~p", [C3, R3]))}
+end,
+Stages = [CompileStage, S1_Ast, S2_RootSup, S3_ConfigEnv]
+`, wsDir, wsDir), true
 
 	case "ch08-l07":
 		return fmt.Sprintf(`
@@ -10337,9 +10060,28 @@ end,
 S2_ActiveOnceBackpressure = try
     catch tcp_flow_worker:stop_server(whereis(tcp_flow_worker)),
     timer:sleep(20),
-    {ok, ListenPid, Port} = tcp_flow_worker:start_server(),
-    case bf_backpressure_tester:verify_active_once_backpressure(node(), Port, tcp_flow_worker, 50, 5) of
-        {ok, #{verdict := <<
+    {ok, ListenPid2, Port2} = tcp_flow_worker:start_server(),
+    Res2 = case bf_backpressure_tester:verify_active_once_backpressure(node(), Port2, tcp_flow_worker, 50, 5) of
+        {ok, #{verdict := <<"PASSED">>}} ->
+            #{id => <<"active_once_backpressure">>, title => <<"Active-Once Mailbox Bound & TCP Backpressure">>, status => <<"passed">>, time_ms => 40, details => <<"Verified mailbox queue stayed <= 5 under 50-packet burst load.">>};
+        {ok, #{observed_queue_len := QLen}} ->
+            #{id => <<"active_once_backpressure">>, title => <<"Active-Once Mailbox Bound & TCP Backpressure">>, status => <<"failed">>, time_ms => 40, details => list_to_binary(io_lib:format("Observed queue length too high: ~p", [QLen]))};
+        {error, Reason2, _} ->
+            #{id => <<"active_once_backpressure">>, title => <<"Active-Once Mailbox Bound & TCP Backpressure">>, status => <<"failed">>, time_ms => 40, details => list_to_binary(io_lib:format("Backpressure test error: ~p", [Reason2]))}
+    end,
+    ok = tcp_flow_worker:stop_server(ListenPid2),
+    Res2
+catch C2:R2 ->
+    (case whereis(tcp_flow_worker) of undefined -> ok; OldP2 -> catch gen_server:stop(OldP2) end),
+    #{id => <<"active_once_backpressure">>, title => <<"Active-Once Mailbox Bound & TCP Backpressure">>, status => <<"failed">>, time_ms => 40, details => list_to_binary(io_lib:format("Backpressure verification crashed: ~p:~p", [C2, R2]))}
+end,
+S3_EchoAndLifecycle = try
+    timer:sleep(20),
+    {ok, LPid3, Port3} = tcp_flow_worker:start_server(),
+    {ok, CSock3} = gen_tcp:connect("127.0.0.1", Port3, [binary, {packet, raw}, {active, false}], 2000),
+    ok = gen_tcp:send(CSock3, <<"PING_DATA\r\n">>),
+    {ok, <<"+ACK: PING_DATA\r\n">>} = gen_tcp:recv(CSock3, 0, 2000),
+    timer:sleep(30),
     #{packets_processed := 1, bytes_processed := 11, closed := false} = tcp_flow_worker:get_stats(tcp_flow_worker),
     1 = tcp_flow_worker:get_processed_count(tcp_flow_worker),
     ok = gen_tcp:close(CSock3),

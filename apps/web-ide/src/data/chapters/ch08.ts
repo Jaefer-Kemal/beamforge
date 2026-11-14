@@ -1444,15 +1444,15 @@ init([]) ->
     ok.
 
 %% @doc Dynamically spawn a monitored session worker process for the given session and user identifiers.
-start_session(SupRef, SessionId, UserId) ->
+start_session(_SupRef, _SessionId, _UserId) ->
     ok.
 
 %% @doc Query the supervisor and return the integer count of currently active dynamic session processes.
-count_sessions(SupRef) ->
+count_sessions(_SupRef) ->
     ok.
 
 %% @doc Request the supervisor to terminate a specific running session worker child by its PID.
-terminate_session(SupRef, ChildPid) ->
+terminate_session(_SupRef, _ChildPid) ->
     ok.
 `,
     solutionCode: `-module(dynamic_session_sup).
@@ -1533,15 +1533,15 @@ init([]) ->
     ok.
 
 %% @doc Dynamically spawn a monitored session worker process for the given session and user identifiers.
-start_session(SupRef, SessionId, UserId) ->
+start_session(_SupRef, _SessionId, _UserId) ->
     ok.
 
 %% @doc Query the supervisor and return the integer count of currently active dynamic session processes.
-count_sessions(SupRef) ->
+count_sessions(_SupRef) ->
     ok.
 
 %% @doc Request the supervisor to terminate a specific running session worker child by its PID.
-terminate_session(SupRef, ChildPid) ->
+terminate_session(_SupRef, _ChildPid) ->
     ok.
 `,
       },
@@ -1988,11 +1988,11 @@ stop(_State) ->
     ok.
 
 %% @doc Retrieve a runtime environment setting for this application, returning Default when unset.
-get_app_config(Key, Default) ->
+get_app_config(_Key, _Default) ->
     ok.
 
 %% @doc Dynamically update a runtime environment key-value parameter for this application.
-set_app_config(Key, Value) ->
+set_app_config(_Key, _Value) ->
     ok.
 
 %% @doc Initialize the root supervisor restart strategy, crash intensity limits, and empty child spec list.
@@ -2066,11 +2066,11 @@ stop(_State) ->
     ok.
 
 %% @doc Retrieve a runtime environment setting for this application, returning Default when unset.
-get_app_config(Key, Default) ->
+get_app_config(_Key, _Default) ->
     ok.
 
 %% @doc Dynamically update a runtime environment key-value parameter for this application.
-set_app_config(Key, Value) ->
+set_app_config(_Key, _Value) ->
     ok.
 
 %% @doc Initialize the root supervisor restart strategy, crash intensity limits, and empty child spec list.

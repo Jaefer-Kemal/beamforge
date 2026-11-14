@@ -255,19 +255,19 @@ init_table() ->
     ok.
 
 %% @doc Atomically add Incr to the hit count for EndpointBin and return the total.
-record_endpoint_hit(EndpointBin, Incr) ->
+record_endpoint_hit(_EndpointBin, _Incr) ->
     ok.
 
 %% @doc Return the stored integer hit count for EndpointBin, or zero if absent.
-get_endpoint_hits(EndpointBin) ->
+get_endpoint_hits(_EndpointBin) ->
     ok.
 
 %% @doc Store Name and Role in telemetry_store keyed by UserId.
-put_user_profile(UserId, Name, Role) ->
+put_user_profile(_UserId, _Name, _Role) ->
     ok.
 
 %% @doc Look up the profile map for UserId, or return a not-found error value.
-get_user_profile(UserId) ->
+get_user_profile(_UserId) ->
     ok.
 `,
     solutionCode: `-module(ets_telemetry).
@@ -330,19 +330,19 @@ init_table() ->
     ok.
 
 %% @doc Atomically add Incr to the hit count for EndpointBin and return the total.
-record_endpoint_hit(EndpointBin, Incr) ->
+record_endpoint_hit(_EndpointBin, _Incr) ->
     ok.
 
 %% @doc Return the stored integer hit count for EndpointBin, or zero if absent.
-get_endpoint_hits(EndpointBin) ->
+get_endpoint_hits(_EndpointBin) ->
     ok.
 
 %% @doc Store Name and Role in telemetry_store keyed by UserId.
-put_user_profile(UserId, Name, Role) ->
+put_user_profile(_UserId, _Name, _Role) ->
     ok.
 
 %% @doc Look up the profile map for UserId, or return a not-found error value.
-get_user_profile(UserId) ->
+get_user_profile(_UserId) ->
     ok.
 `,
       },
@@ -653,15 +653,15 @@ init_auth_table() ->
     ok.
 
 %% @doc Insert or overwrite a token entry keyed by TokenBin in auth_token_table.
-store_token(TokenBin, UserId, Role, ExpiresAt) ->
+store_token(_TokenBin, _UserId, _Role, _ExpiresAt) ->
     ok.
 
 %% @doc Return a sorted list of unique user IDs whose stored tokens match Role.
-find_users_by_role(Role) ->
+find_users_by_role(_Role) ->
     ok.
 
 %% @doc Atomically purge all tokens expired strictly before CurrentTimestamp and return the count.
-delete_expired_tokens(CurrentTimestamp) ->
+delete_expired_tokens(_CurrentTimestamp) ->
     ok.
 `,
     solutionCode: `-module(ets_query_engine).
@@ -719,15 +719,15 @@ init_auth_table() ->
     ok.
 
 %% @doc Insert or overwrite a token entry keyed by TokenBin in auth_token_table.
-store_token(TokenBin, UserId, Role, ExpiresAt) ->
+store_token(_TokenBin, _UserId, _Role, _ExpiresAt) ->
     ok.
 
 %% @doc Return a sorted list of unique user IDs whose stored tokens match Role.
-find_users_by_role(Role) ->
+find_users_by_role(_Role) ->
     ok.
 
 %% @doc Atomically purge all tokens expired strictly before CurrentTimestamp and return the count.
-delete_expired_tokens(CurrentTimestamp) ->
+delete_expired_tokens(_CurrentTimestamp) ->
     ok.
 `,
       },
@@ -1012,7 +1012,7 @@ Implement module \`src/ets_heir_handshake.erl\` exporting \`create_resilient_tab
 -export([start_guardian/0, guardian_loop/1]).
 
 %% @doc Create a named public ETS set table with HeirPid configured as heir and return its name.
-create_resilient_table(TableNameAtom, HeirPid) ->
+create_resilient_table(_TableNameAtom, _HeirPid) ->
     ok.
 
 %% @doc Spawn and link a guardian process executing guardian_loop/1.
@@ -1020,13 +1020,13 @@ start_guardian() ->
     ok.
 
 %% @doc Reclaim ownership of Tab from GuardianPid or hand Tab off directly to NewOwnerPid.
-reclaim_table(GuardianPid, Tab) when is_pid(GuardianPid) ->
+reclaim_table(_GuardianPid, _Tab) when is_pid(_GuardianPid) ->
     ok;
-reclaim_table(Tab, NewOwnerPid) when is_pid(NewOwnerPid) ->
+reclaim_table(_Tab, _NewOwnerPid) when is_pid(_NewOwnerPid) ->
     ok.
 
 %% @doc Hold orphaned ETS tables upon transfer and give them away when workers reclaim them.
-guardian_loop(HeldTables) ->
+guardian_loop(_HeldTables) ->
     ok.
 
 %% @doc Simulate a worker crash after writing demo_heir_tab and return the surviving entries.
@@ -1116,7 +1116,7 @@ verify_heir_survival_demo() ->
 -export([start_guardian/0, guardian_loop/1]).
 
 %% @doc Create a named public ETS set table with HeirPid configured as heir and return its name.
-create_resilient_table(TableNameAtom, HeirPid) ->
+create_resilient_table(_TableNameAtom, _HeirPid) ->
     ok.
 
 %% @doc Spawn and link a guardian process executing guardian_loop/1.
@@ -1124,13 +1124,13 @@ start_guardian() ->
     ok.
 
 %% @doc Reclaim ownership of Tab from GuardianPid or hand Tab off directly to NewOwnerPid.
-reclaim_table(GuardianPid, Tab) when is_pid(GuardianPid) ->
+reclaim_table(_GuardianPid, _Tab) when is_pid(_GuardianPid) ->
     ok;
-reclaim_table(Tab, NewOwnerPid) when is_pid(NewOwnerPid) ->
+reclaim_table(_Tab, _NewOwnerPid) when is_pid(_NewOwnerPid) ->
     ok.
 
 %% @doc Hold orphaned ETS tables upon transfer and give them away when workers reclaim them.
-guardian_loop(HeldTables) ->
+guardian_loop(_HeldTables) ->
     ok.
 
 %% @doc Simulate a worker crash after writing demo_heir_tab and return the surviving entries.
@@ -1478,7 +1478,7 @@ cluster_node_info() ->
     ok.
 
 %% @doc Execute an RPC against TargetNode with a 2000 ms timeout and normalized result tuple.
-safe_remote_call(TargetNode, Mod, Fun, Args) ->
+safe_remote_call(_TargetNode, _Mod, _Fun, _Args) ->
     ok.
 
 %% @doc Ensure the default pg process group server is started idempotently.
@@ -1486,23 +1486,23 @@ init_pubsub() ->
     ok.
 
 %% @doc Subscribe Pid to Topic in the default pg group.
-join_topic(Topic, Pid) ->
+join_topic(_Topic, _Pid) ->
     ok.
 
 %% @doc Deliver a pubsub tuple with Message to every subscriber of Topic and return count.
-publish_to_topic(Topic, Message) ->
+publish_to_topic(_Topic, _Message) ->
     ok.
 
 %% @doc Publish Message to Topic subscribers and return an ok-tagged delivery count.
-broadcast(Topic, Message) ->
+broadcast(_Topic, _Message) ->
     ok.
 
 %% @doc Unsubscribe Pid from Topic in the default pg group.
-leave_topic(Topic, Pid) ->
+leave_topic(_Topic, _Pid) ->
     ok.
 
 %% @doc Return the list of active subscriber PIDs currently registered on Topic.
-get_subscribers(Topic) ->
+get_subscribers(_Topic) ->
     ok.
 `,
     solutionCode: `-module(cluster_pubsub_pg).
@@ -1578,7 +1578,7 @@ cluster_node_info() ->
     ok.
 
 %% @doc Execute an RPC against TargetNode with a 2000 ms timeout and normalized result tuple.
-safe_remote_call(TargetNode, Mod, Fun, Args) ->
+safe_remote_call(_TargetNode, _Mod, _Fun, _Args) ->
     ok.
 
 %% @doc Ensure the default pg process group server is started idempotently.
@@ -1586,23 +1586,23 @@ init_pubsub() ->
     ok.
 
 %% @doc Subscribe Pid to Topic in the default pg group.
-join_topic(Topic, Pid) ->
+join_topic(_Topic, _Pid) ->
     ok.
 
 %% @doc Deliver a pubsub tuple with Message to every subscriber of Topic and return count.
-publish_to_topic(Topic, Message) ->
+publish_to_topic(_Topic, _Message) ->
     ok.
 
 %% @doc Publish Message to Topic subscribers and return an ok-tagged delivery count.
-broadcast(Topic, Message) ->
+broadcast(_Topic, _Message) ->
     ok.
 
 %% @doc Unsubscribe Pid from Topic in the default pg group.
-leave_topic(Topic, Pid) ->
+leave_topic(_Topic, _Pid) ->
     ok.
 
 %% @doc Return the list of active subscriber PIDs currently registered on Topic.
-get_subscribers(Topic) ->
+get_subscribers(_Topic) ->
     ok.
 `,
       },
@@ -1942,18 +1942,19 @@ Implement module \`src/mnesia_ledger.erl\` defining a \`wallet\` record with fie
 
 %% @doc Start Mnesia and ensure the ram_copies wallet table exists and is ready.
 setup_mnesia_table() ->
+    _ = #wallet{},
     ok.
 
 %% @doc Write or update Owner's wallet Balance inside a Mnesia transaction.
-upsert_wallet(Owner, Balance) ->
+upsert_wallet(_Owner, _Balance) ->
     ok.
 
 %% @doc Atomically transfer positive Amount from FromOwner to ToOwner with abort rollback.
-atomic_transfer(FromOwner, ToOwner, Amount) ->
+atomic_transfer(_FromOwner, _ToOwner, _Amount) ->
     ok.
 
 %% @doc Look up Owner's balance in Mnesia, returning {ok, Balance} or {error, not_found}.
-get_wallet_balance(Owner) ->
+get_wallet_balance(_Owner) ->
     ok.
 `,
     solutionCode: `-module(mnesia_ledger).
@@ -2033,18 +2034,19 @@ get_wallet_balance(Owner) ->
 
 %% @doc Start Mnesia and ensure the ram_copies wallet table exists and is ready.
 setup_mnesia_table() ->
+    _ = #wallet{},
     ok.
 
 %% @doc Write or update Owner's wallet Balance inside a Mnesia transaction.
-upsert_wallet(Owner, Balance) ->
+upsert_wallet(_Owner, _Balance) ->
     ok.
 
 %% @doc Atomically transfer positive Amount from FromOwner to ToOwner with abort rollback.
-atomic_transfer(FromOwner, ToOwner, Amount) ->
+atomic_transfer(_FromOwner, _ToOwner, _Amount) ->
     ok.
 
 %% @doc Look up Owner's balance in Mnesia, returning {ok, Balance} or {error, not_found}.
-get_wallet_balance(Owner) ->
+get_wallet_balance(_Owner) ->
     ok.
 `,
       },
@@ -2349,11 +2351,11 @@ Implement module \`src/ledger_specs_and_tests.erl\` including EUnit's standard h
 -export([calculate_fee/2, validate_transfer_spec/3, run_unit_checks/0, run_unit_tests/0]).
 
 %% @doc Calculate the integer transaction fee for Amount and supported Currency atom.
-calculate_fee(Amount, Currency) ->
+calculate_fee(_Amount, _Currency) ->
     ok.
 
 %% @doc Validate Amount bounds, deduct Amount plus fee from Balance, and return the remainder or error.
-validate_transfer_spec(Balance, Amount, Currency) ->
+validate_transfer_spec(_Balance, _Amount, _Currency) ->
     ok.
 
 %% @doc Execute all embedded EUnit generator tests for the ledger module and return ok on pass.
@@ -2425,11 +2427,11 @@ run_unit_tests() ->
 -export([calculate_fee/2, validate_transfer_spec/3, run_unit_checks/0, run_unit_tests/0]).
 
 %% @doc Calculate the integer transaction fee for Amount and supported Currency atom.
-calculate_fee(Amount, Currency) ->
+calculate_fee(_Amount, _Currency) ->
     ok.
 
 %% @doc Validate Amount bounds, deduct Amount plus fee from Balance, and return the remainder or error.
-validate_transfer_spec(Balance, Amount, Currency) ->
+validate_transfer_spec(_Balance, _Amount, _Currency) ->
     ok.
 
 %% @doc Execute all embedded EUnit generator tests for the ledger module and return ok on pass.
@@ -3617,6 +3619,80 @@ terminate(_Reason, _State) ->
 `,
     files: [
       {
+        name: 'session_cache.erl',
+        path: 'src/session_cache.erl',
+        behaviour: 'gen_server',
+        content: `-module(session_cache).
+-behaviour(gen_server).
+
+-export([start_link/0, put_session/3, get_session/1, increment_hits/1, delete_session/1, count_sessions/0]).
+-export([start_pipeline/0, stop_pipeline/0]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+
+-define(TAB, session_cache_tab).
+
+%% @doc Start and register the session_cache gen_server worker under the supervisor.
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+%% @doc Start the session_sup supervision tree and both managed workers.
+start_pipeline() ->
+    session_sup:start_link().
+
+%% @doc Stop the session_sup supervision tree and clean up any lingering registered processes.
+stop_pipeline() ->
+    case whereis(session_sup) of
+        undefined -> ok;
+        SupPid ->
+            unlink(SupPid),
+            try supervisor:stop(SupPid) catch _:_ -> ok end
+    end,
+    [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [session_cache, table_manager, session_sup]],
+    ok.
+
+%% @doc Create the public concurrent ETS session table with table_manager as heir on cold boot, or reclaim custody on worker restart.
+init([]) ->
+    {ok, #{}}.
+
+%% @doc Store a 4-field session tuple initialized at zero hits into session_cache_tab and return ok.
+put_session(_SessionId, _UserId, _MetaMap) ->
+    ok.
+
+%% @doc Look up SessionId in session_cache_tab and return {ok, SessionMap} with user_id, meta, and hit_count, or a not_found error tuple.
+get_session(_SessionId) ->
+    ok.
+
+%% @doc Atomically increment the hit counter field for SessionId by 1, returning {ok, NewCount} or a not_found error tuple if absent.
+increment_hits(_SessionId) ->
+    ok.
+
+%% @doc Remove any stored session entry matching SessionId from session_cache_tab and return ok.
+delete_session(_SessionId) ->
+    ok.
+
+%% @doc Return the current entry count stored in session_cache_tab, or 0 if the table does not exist.
+count_sessions() ->
+    0.
+
+%% @doc Handle synchronous gen_server call requests.
+handle_call(_Req, _From, State) ->
+    {reply, ok, State}.
+
+%% @doc Handle asynchronous gen_server cast messages.
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+%% @doc Handle out-of-band messages including ETS custody handover notifications.
+handle_info({'ETS-TRANSFER', _Tab, _OldOwner, _GiftData}, State) ->
+    {noreply, State};
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+%% @doc Clean up worker state prior to termination.
+terminate(_Reason, _State) ->
+    ok.`
+      },
+      {
         name: 'session_sup.erl',
         path: 'src/session_sup.erl',
         behaviour: 'supervisor',
@@ -3711,80 +3787,6 @@ handle_info(_Info, State) ->
 terminate(_Reason, _State) ->
     ok.
 `
-      },
-      {
-        name: 'session_cache.erl',
-        path: 'src/session_cache.erl',
-        behaviour: 'gen_server',
-        content: `-module(session_cache).
--behaviour(gen_server).
-
--export([start_link/0, put_session/3, get_session/1, increment_hits/1, delete_session/1, count_sessions/0]).
--export([start_pipeline/0, stop_pipeline/0]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
-
--define(TAB, session_cache_tab).
-
-%% @doc Start and register the session_cache gen_server worker under the supervisor.
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
-
-%% @doc Start the session_sup supervision tree and both managed workers.
-start_pipeline() ->
-    session_sup:start_link().
-
-%% @doc Stop the session_sup supervision tree and clean up any lingering registered processes.
-stop_pipeline() ->
-    case whereis(session_sup) of
-        undefined -> ok;
-        SupPid ->
-            unlink(SupPid),
-            try supervisor:stop(SupPid) catch _:_ -> ok end
-    end,
-    [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [session_cache, table_manager, session_sup]],
-    ok.
-
-%% @doc Create the public concurrent ETS session table with table_manager as heir on cold boot, or reclaim custody on worker restart.
-init([]) ->
-    {ok, #{}}.
-
-%% @doc Store a 4-field session tuple initialized at zero hits into session_cache_tab and return ok.
-put_session(_SessionId, _UserId, _MetaMap) ->
-    ok.
-
-%% @doc Look up SessionId in session_cache_tab and return {ok, SessionMap} with user_id, meta, and hit_count, or a not_found error tuple.
-get_session(_SessionId) ->
-    ok.
-
-%% @doc Atomically increment the hit counter field for SessionId by 1, returning {ok, NewCount} or a not_found error tuple if absent.
-increment_hits(_SessionId) ->
-    ok.
-
-%% @doc Remove any stored session entry matching SessionId from session_cache_tab and return ok.
-delete_session(_SessionId) ->
-    ok.
-
-%% @doc Return the current entry count stored in session_cache_tab, or 0 if the table does not exist.
-count_sessions() ->
-    0.
-
-%% @doc Handle synchronous gen_server call requests.
-handle_call(_Req, _From, State) ->
-    {reply, ok, State}.
-
-%% @doc Handle asynchronous gen_server cast messages.
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-%% @doc Handle out-of-band messages including ETS custody handover notifications.
-handle_info({'ETS-TRANSFER', _Tab, _OldOwner, _GiftData}, State) ->
-    {noreply, State};
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-%% @doc Clean up worker state prior to termination.
-terminate(_Reason, _State) ->
-    ok.`
       }
     ],
     solutionFiles: {
