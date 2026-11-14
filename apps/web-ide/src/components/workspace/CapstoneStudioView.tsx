@@ -815,7 +815,7 @@ export function CapstoneStudioView() {
         </div>
 
         {/* ── Left Pane Scrollable Body (Rich Textbook & Specs) ── */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden break-words px-4 sm:px-6 py-4 sm:py-5 space-y-5">
           {/* Milestone Header Info */}
           <div className="flex items-center justify-between pb-2 border-b" style={{ borderColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.06)' }}>
             <div className="flex items-center gap-2">

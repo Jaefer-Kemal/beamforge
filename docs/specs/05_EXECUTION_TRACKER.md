@@ -4163,6 +4163,29 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Next.js Web IDE: `npx tsc --noEmit` passed with 0 errors.
   - Next.js Production Build: `npm run build` passed with 0 errors across all 8 static and dynamic routes.
 
+## Phase 249: Mobile Responsiveness Overhaul — Inline Code Auto-Wrap & Visual Step-Diagrams Adaptation
+- [x] **249.1: Inline Code (`code`) & Markdown Container Mobile Overflow Healing**:
+  - In `apps/web-ide/src/components/pedagogy/BeamMarkdownRenderer.tsx`, updated inline `<code>` rendering from `inline-block` to `inline break-all [overflow-wrap:anywhere] max-w-full mx-0.5`. This prevents long Erlang function calls, records, and terms (e.g., `xmpp_stream_parser:feed_chunk/2`, `{ok, #state{socket=S}}`) from expanding into unbreakable block elements that generate horizontal scroll.
+  - Added `break-words [overflow-wrap:anywhere]` to all regular paragraphs (`<p>`), callout sub-paragraphs, unordered list items (`<li>`), ordered list items (`<li>`), table cells (`<td>`), and the root markdown container div (`min-w-0 max-w-full`).
+  - Wrapped fenced code blocks (`ErlangCodeBlock`) in `<div className="my-3 min-w-0 max-w-full overflow-hidden">` and added `max-w-full` with `p-3 sm:p-4` to `pre` in `monacoErlang.tsx`.
+- [x] **249.2: Guide Scroll Container Horizontal Lock**:
+  - In `apps/web-ide/src/components/workspace/LessonSplitView.tsx` (line 1086), updated the guide scroll container to `flex-1 overflow-y-auto overflow-x-hidden break-words px-3.5 sm:px-5 py-3 sm:py-4`.
+  - In `apps/web-ide/src/components/workspace/CapstoneStudioView.tsx` (line 818), updated the rich textbook scroll container to `flex-1 overflow-y-auto overflow-x-hidden break-words px-4 sm:px-6 py-4 sm:py-5 space-y-5`.
+  - Eliminates rogue horizontal `x_scroll` across mobile viewports (< 400px).
+- [x] **249.3: `<BeamConceptVisualizer/>` Responsive Architecture & Mobile Scene Overhaul**:
+  - **Header & Controls Strip**: Responsive padding `px-3 sm:px-4 py-2 sm:py-2.5`, compact step pill (`<span className="hidden xs:inline">Step </span>{currentStep + 1}/4`), compact `w-6 h-6 sm:w-7 sm:h-7` stepper buttons (`ChevronLeft`, `ChevronRight`, `RotateCcw`, `ChevronDown`/`ChevronUp`), and hidden secondary badge (`hidden md:inline`). Reduced right-side control footprint from ~215px to ~135px on mobile, giving ample room for the title without truncation.
+  - **Scene 1 (`XmppArchScene`)**: Made M3 (`session_registry`) $\leftrightarrow$ M5 (`xmpp_router`) adapt to `flex-col sm:flex-row items-stretch sm:items-center` on mobile with a compact connector badge. Adapted bottom TCP pipeline (TCP Socket $\rightarrow$ M2 stream_parser $\rightarrow$ M4 c2s_statem) with `flex-wrap sm:flex-nowrap` and responsive text sizing, preventing card clipping.
+  - **Scene 2 (`TcoVsBodyScene`)**: Replaced fixed desktop side-by-side row with `flex-col sm:flex-row items-stretch sm:items-center justify-around gap-3 sm:gap-4 max-w-full sm:max-w-[460px]`. Replaced vertical divider with an adaptive divider (`w-full h-0.5 sm:w-0.5 sm:h-32 rounded-full`). On mobile viewports, Body Recursion (O(N) RAM) and Tail Recursion (O(1) RAM) cards stack cleanly with full width and zero text collisions.
+  - **Scene 3 (`SubBinaryProcBinScene`)**: Refactored ProcBin buffer header to `flex-col sm:flex-row sm:items-center justify-between` and pointer arrows to `text-center flex-wrap`.
+  - **Scene 4 (`MailboxSelectiveReceiveScene`)**: Added `flex-wrap items-center gap-1.5 sm:gap-2` to mailbox messages and internal save queue buffers, preventing badge overflow on narrow screens.
+  - **Scene 5 (`LinksMonitorsSignalsScene`)**: Updated 3-party layout from tight horizontal squeezing into `flex-col sm:flex-row items-stretch sm:items-center justify-around gap-2.5 sm:gap-2`. Added responsive directional indicators: downward arrow on mobile (`block sm:hidden`) and reverse horizontal arrow on desktop (`hidden sm:block rotate-180`).
+  - **Scene 6 (`SupervisionEtsHeirScene`)**: Adapted 3 worker cards (`1. table_heir`, `2. pricing_cache`, `3. order_gateway`) to `flex-col sm:flex-row items-stretch sm:items-center justify-between w-full gap-2 sm:gap-2.5`, eliminating 86px-wide column cramming on mobile.
+  - **Scene 7 (`TcpStreamFramingScene`)**: Added `flex-wrap sm:flex-nowrap` to the incoming TCP Wire stream, preventing hidden overflow. Stacked BufferBin Leftover and Emitted Frames vertically on mobile with an `ArrowDown` connector, removing truncation on Erlang terms.
+- [x] **249.4: Multi-Compiler Verification**:
+  - `npx tsc --noEmit` in `apps/web-ide`: Passed with 0 errors.
+  - `npm run build` in `apps/web-ide`: Passed with 0 errors across 8/8 routes.
+
+
 
 
 

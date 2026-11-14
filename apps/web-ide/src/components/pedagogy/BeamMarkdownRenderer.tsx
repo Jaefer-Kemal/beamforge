@@ -236,7 +236,7 @@ export function renderInlineContent(text?: string | null, isDark: boolean = true
       return (
         <code
           key={idx}
-          className="px-1.5 py-0.5 rounded text-xs font-mono font-semibold inline-block mx-0.5"
+          className="px-1.5 py-0.5 rounded text-xs font-mono font-semibold inline break-all [overflow-wrap:anywhere] max-w-full mx-0.5"
           style={{
             background: isDark ? 'rgba(139,92,246,0.22)' : 'rgba(124,58,237,0.12)',
             color: isDark ? '#DDD6FE' : '#4C1D95',
@@ -512,7 +512,7 @@ function renderSubContent(subLines: string[], isDark: boolean): React.ReactNode[
           style={{ color: isDark ? '#E2E8F0' : '#1E293B' }}
         >
           {items.map((it, idx) => (
-            <li key={`sub-li-${k}-${idx}`}>{renderInlineContent(it, isDark)}</li>
+            <li key={`sub-li-${k}-${idx}`} className="break-words [overflow-wrap:anywhere]">{renderInlineContent(it, isDark)}</li>
           ))}
         </ul>
       );
@@ -534,7 +534,7 @@ function renderSubContent(subLines: string[], isDark: boolean): React.ReactNode[
           style={{ color: isDark ? '#E2E8F0' : '#1E293B' }}
         >
           {items.map((it, idx) => (
-            <li key={`sub-oli-${k}-${idx}`} value={it.num}>
+            <li key={`sub-oli-${k}-${idx}`} value={it.num} className="break-words [overflow-wrap:anywhere]">
               {renderInlineContent(it.text, isDark)}
             </li>
           ))}
@@ -547,7 +547,7 @@ function renderSubContent(subLines: string[], isDark: boolean): React.ReactNode[
       result.push(
         <p
           key={`sub-p-${k}`}
-          className="text-xs leading-relaxed mb-1.5 font-normal"
+          className="text-xs leading-relaxed mb-1.5 font-normal break-words [overflow-wrap:anywhere]"
           style={{ color: isDark ? '#E2E8F0' : '#1E293B' }}
         >
           {renderInlineContent(sLine, isDark)}
@@ -616,7 +616,7 @@ export function MarkdownCallout({
           )}
         </div>
       </div>
-      <div className="callout-body pl-0.5">
+      <div className="callout-body pl-0.5 break-words [overflow-wrap:anywhere] min-w-0">
         {renderSubContent(bodyLines, isDark)}
       </div>
     </div>
@@ -712,7 +712,7 @@ export function MarkdownTable({
               {row.map((cell, cIdx) => (
                 <td
                   key={cIdx}
-                  className="px-4 py-3 leading-relaxed font-normal align-top text-xs"
+                  className="px-3 sm:px-4 py-2 sm:py-3 leading-relaxed font-normal align-top text-xs break-words [overflow-wrap:anywhere]"
                   style={{
                     textAlign: alignments[cIdx] || 'left',
                     color: isDark ? '#E2E8F0' : '#1E293B',
@@ -773,7 +773,9 @@ export function BeamMarkdownRenderer({ md, isDark: explicitDark }: { md: string;
           : codeLines.join('\n');
 
       elements.push(
-        <ErlangCodeBlock key={`code-${i}`} code={dedentedCode} isDark={isDark} />
+        <div key={`code-wrap-${i}`} className="my-3 min-w-0 max-w-full overflow-hidden">
+          <ErlangCodeBlock key={`code-${i}`} code={dedentedCode} isDark={isDark} />
+        </div>
       );
       i++;
       continue;
@@ -983,7 +985,7 @@ export function BeamMarkdownRenderer({ md, isDark: explicitDark }: { md: string;
           style={{ color: isDark ? '#E2E8F0' : '#0F172A' }}
         >
           {listItems.map((item, idx) => (
-            <li key={`uli-${i}-${idx}`}>
+            <li key={`uli-${i}-${idx}`} className="break-words [overflow-wrap:anywhere]">
               {renderInlineContent(item, isDark)}
             </li>
           ))}
@@ -1014,7 +1016,7 @@ export function BeamMarkdownRenderer({ md, isDark: explicitDark }: { md: string;
           style={{ color: isDark ? '#E2E8F0' : '#0F172A' }}
         >
           {listItems.map((item, idx) => (
-            <li key={`oli-${i}-${idx}`} value={item.num}>
+            <li key={`oli-${i}-${idx}`} value={item.num} className="break-words [overflow-wrap:anywhere]">
               {renderInlineContent(item.text, isDark)}
             </li>
           ))}
@@ -1034,7 +1036,7 @@ export function BeamMarkdownRenderer({ md, isDark: explicitDark }: { md: string;
     elements.push(
       <p
         key={`p-${i}`}
-        className="text-sm leading-relaxed mb-2 font-normal"
+        className="text-sm leading-relaxed mb-2 font-normal break-words [overflow-wrap:anywhere]"
         style={{ color: isDark ? '#E2E8F0' : '#0F172A' }}
       >
         {renderInlineContent(line, isDark)}
@@ -1043,5 +1045,5 @@ export function BeamMarkdownRenderer({ md, isDark: explicitDark }: { md: string;
     i++;
   }
 
-  return <div className="leading-relaxed">{elements}</div>;
+  return <div className="leading-relaxed break-words [overflow-wrap:anywhere] min-w-0 max-w-full">{elements}</div>;
 }

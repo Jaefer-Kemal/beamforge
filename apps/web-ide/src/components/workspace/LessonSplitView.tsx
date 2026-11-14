@@ -1083,7 +1083,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
 
         {/* Left Scrollable Content */}
         {leftTab === 'guide' ? (
-          <div key={`guide-${lesson.id}`} className="flex-1 overflow-y-auto px-5 py-4">
+          <div key={`guide-${lesson.id}`} className="flex-1 overflow-y-auto overflow-x-hidden break-words px-3.5 sm:px-5 py-3 sm:py-4">
             {/* Slot 0: Prominent Lesson Title */}
             <h1
               className="text-xl sm:text-2xl font-black tracking-tight mb-4 flex items-center gap-2"

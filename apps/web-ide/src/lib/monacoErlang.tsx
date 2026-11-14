@@ -591,7 +591,7 @@ export function ErlangCodeBlock({ code, isDark }: { code: string; isDark: boolea
 
   return (
     <pre
-      className="p-4 my-3 overflow-x-auto text-xs sm:text-sm font-mono leading-relaxed rounded-xl transition-all duration-200"
+      className="p-3 sm:p-4 my-3 overflow-x-auto max-w-full text-xs sm:text-sm font-mono leading-relaxed rounded-xl transition-all duration-200"
       style={{
         background: isDark ? 'rgba(11, 15, 23, 0.85)' : '#F8FAFC',
         border: isDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid #CBD5E1',

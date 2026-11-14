@@ -15,6 +15,7 @@ import {
   FileCode,
   Zap,
   ArrowRight,
+  ArrowDown,
   CheckCircle2,
   AlertCircle,
   Database,
@@ -286,34 +287,35 @@ export function BeamConceptVisualizer({ scene, activeMilestone = 1 }: BeamConcep
     >
       {/* ── Top Header Strip ──────────────────────────────────────────────── */}
       <div
-        className="flex items-center justify-between px-4 py-3 border-b"
+        className="flex items-center justify-between px-3 sm:px-4 py-2 sm:py-2.5 border-b gap-2"
         style={{
           background: isDark ? 'rgba(11, 15, 23, 0.65)' : 'rgba(248, 250, 252, 0.90)',
           borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
         }}
       >
         {/* Left: Icon + Title + Subtitle */}
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm"
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm"
             style={{
               background: isDark ? `${config.accentColor}25` : `${config.accentColor}18`,
               border: `1.5px solid ${config.accentColor}50`,
               color: config.accentColor,
             }}
           >
-            <IconComponent className="w-4 h-4" />
+            <IconComponent className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <span
                 className="text-xs sm:text-sm font-black tracking-tight truncate"
                 style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}
+                title={config.title}
               >
                 {config.title}
               </span>
               <span
-                className="text-[11px] px-2 py-0.5 rounded font-bold uppercase tracking-wider hidden sm:inline"
+                className="text-[10px] sm:text-[11px] px-1.5 sm:px-2 py-0.5 rounded font-bold uppercase tracking-wider hidden md:inline shrink-0"
                 style={{
                   background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)',
                   color: isDark ? '#CBD5E1' : '#334155',
@@ -326,17 +328,18 @@ export function BeamConceptVisualizer({ scene, activeMilestone = 1 }: BeamConcep
         </div>
 
         {/* Right: Step Controls & Collapse */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
           {/* Step Pill */}
           <div
-            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold font-mono mr-0.5 shadow-sm"
+            className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-bold font-mono mr-0.5 shadow-sm"
             style={{
               background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)',
               color: isDark ? '#F1F5F9' : '#0F172A',
               border: `1px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(15,23,42,0.12)'}`,
             }}
           >
-            <span>Step {currentStep + 1}/4</span>
+            <span className="hidden xs:inline">Step </span>
+            <span>{currentStep + 1}/4</span>
           </div>
 
           {/* Stepper Buttons */}
@@ -344,55 +347,55 @@ export function BeamConceptVisualizer({ scene, activeMilestone = 1 }: BeamConcep
             onClick={handlePrev}
             disabled={currentStep === 0}
             title="Previous Step"
-            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer active:scale-95"
+            className="w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer active:scale-95"
             style={{
               background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)',
               color: isDark ? '#F1F5F9' : '#0F172A',
               border: `1px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(15,23,42,0.12)'}`,
             }}
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
 
           <button
             onClick={handleNext}
             disabled={currentStep === config.steps.length - 1}
             title="Next Step"
-            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer active:scale-95"
+            className="w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer active:scale-95"
             style={{
               background: config.accentColor,
               color: '#FFFFFF',
               boxShadow: `0 2px 8px ${config.accentColor}50`,
             }}
           >
-            <ChevronRight className="w-4 h-4" />
+            <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
 
           <button
             onClick={handleReset}
             title="Reset to Step 1"
-            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all cursor-pointer opacity-80 hover:opacity-100 active:scale-95"
+            className="w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg flex items-center justify-center transition-all cursor-pointer opacity-80 hover:opacity-100 active:scale-95"
             style={{
               background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)',
               color: isDark ? '#CBD5E1' : '#475569',
               border: `1px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.10)'}`,
             }}
           >
-            <RotateCcw className="w-3.5 h-3.5" />
+            <RotateCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
           </button>
 
           {/* Collapse/Expand Toggle */}
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
             title={isCollapsed ? 'Expand Diagram' : 'Collapse Diagram'}
-            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all ml-0.5 cursor-pointer opacity-80 hover:opacity-100 active:scale-95"
+            className="w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg flex items-center justify-center transition-all ml-0.5 cursor-pointer opacity-80 hover:opacity-100 active:scale-95"
             style={{
               background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)',
               color: isDark ? '#CBD5E1' : '#475569',
               border: `1px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.10)'}`,
             }}
           >
-            {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+            {isCollapsed ? <ChevronDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
           </button>
         </div>
       </div>
@@ -402,9 +405,9 @@ export function BeamConceptVisualizer({ scene, activeMilestone = 1 }: BeamConcep
         <div className="flex flex-col">
           {/* Visual Scene Viewport */}
           <div
-            className="p-4 flex items-center justify-center relative overflow-hidden"
+            className="p-2.5 sm:p-4 flex items-center justify-center relative overflow-hidden min-w-0"
             style={{
-              minHeight: '210px',
+              minHeight: '200px',
               background: isDark ? 'rgba(2, 6, 23, 0.50)' : 'rgba(241, 245, 249, 0.50)',
             }}
           >
@@ -437,29 +440,29 @@ export function BeamConceptVisualizer({ scene, activeMilestone = 1 }: BeamConcep
 
           {/* Step Explanation Footer */}
           <div
-            className="px-4 py-3 border-t space-y-2"
+            className="px-3 sm:px-4 py-2.5 sm:py-3 border-t space-y-1.5 sm:space-y-2 min-w-0"
             style={{
               background: isDark ? 'rgba(11, 15, 23, 0.75)' : 'rgba(248, 250, 252, 0.95)',
               borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)',
             }}
           >
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span
-                className="text-xs sm:text-sm font-bold flex items-center gap-2"
+                className="text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 truncate"
                 style={{ color: isDark ? '#F1F5F9' : '#0F172A' }}
               >
                 <span
-                  className="w-2.5 h-2.5 rounded-full inline-block shadow-sm"
+                  className="w-2 sm:w-2.5 h-2 sm:h-2.5 rounded-full inline-block shadow-sm shrink-0"
                   style={{ background: config.accentColor }}
                 />
-                {step.title}
+                <span className="truncate">{step.title}</span>
               </span>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
                 {[0, 1, 2, 3].map((idx) => (
                   <button
                     key={idx}
                     onClick={() => setCurrentStep(idx)}
-                    className="w-5 h-2 rounded-full transition-all cursor-pointer"
+                    className="w-4 sm:w-5 h-1.5 sm:h-2 rounded-full transition-all cursor-pointer"
                     style={{
                       background:
                         idx === currentStep
@@ -474,23 +477,24 @@ export function BeamConceptVisualizer({ scene, activeMilestone = 1 }: BeamConcep
             </div>
 
             <p
-              className="text-xs sm:text-sm leading-relaxed font-normal"
+              className="text-xs sm:text-sm leading-relaxed font-normal break-words [overflow-wrap:anywhere]"
               style={{ color: isDark ? '#CBD5E1' : '#1E293B' }}
             >
               {step.vmAction}
             </p>
 
-            <div className="flex items-center gap-2 pt-1">
+            <div className="flex items-center gap-2 pt-0.5 sm:pt-1">
               <span
-                className="text-[11px] sm:text-xs font-mono px-2.5 py-1 rounded-lg font-bold truncate flex items-center gap-1.5 shadow-xs"
+                className="text-[10px] sm:text-xs font-mono px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg font-bold max-w-full truncate flex items-center gap-1.5 shadow-xs"
                 style={{
                   background: isDark ? 'rgba(139,92,246,0.22)' : 'rgba(124,58,237,0.12)',
                   color: isDark ? '#DDD6FE' : '#4C1D95',
                   border: isDark ? '1px solid rgba(139,92,246,0.35)' : '1.5px solid rgba(124,58,237,0.28)',
                 }}
+                title={step.bifOpcode}
               >
-                <Zap className="w-3.5 h-3.5 text-purple-600 dark:text-purple-300 fill-purple-600 dark:fill-purple-300 shrink-0" />
-                <span>{step.bifOpcode}</span>
+                <Zap className="w-3 sm:w-3.5 h-3 sm:h-3.5 text-purple-600 dark:text-purple-300 fill-purple-600 dark:fill-purple-300 shrink-0" />
+                <span className="truncate">{step.bifOpcode}</span>
               </span>
             </div>
           </div>
@@ -519,12 +523,12 @@ function XmppArchScene({
   const isM5Active = activeMilestone === 5 || stepIndex === 0 || stepIndex === 3;
 
   return (
-    <div className="w-full flex flex-col items-center justify-center gap-2.5 py-1">
+    <div className="w-full flex flex-col items-center justify-center gap-2 sm:gap-2.5 py-1 max-w-full">
       {/* Top Node: Supervisor (M1) */}
       <div
-        className={`px-4 py-2 rounded-xl border text-center transition-all duration-300 ${
+        className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border text-center transition-all duration-300 max-w-full ${
           isM1Active
-            ? 'ring-2 ring-purple-500 shadow-[0_0_14px_rgba(168,85,247,0.50)] scale-105'
+            ? 'ring-2 ring-purple-500 shadow-[0_0_14px_rgba(168,85,247,0.50)] scale-102 sm:scale-105'
             : 'opacity-90'
         }`}
         style={{
@@ -535,7 +539,7 @@ function XmppArchScene({
         <div className="text-xs sm:text-sm font-mono font-bold" style={{ color: isDark ? '#F3E8FF' : '#4C1D95' }}>
           M1: xmpp_sup
         </div>
-        <div className="text-[11px] font-semibold mt-0.5" style={{ color: isDark ? '#D8B4FE' : '#581C87' }}>
+        <div className="text-[10px] sm:text-[11px] font-semibold mt-0.5" style={{ color: isDark ? '#D8B4FE' : '#581C87' }}>
           rest_for_one · intensity: 5/10s
         </div>
       </div>
@@ -543,16 +547,16 @@ function XmppArchScene({
       {/* Downward Connector to Core Layer */}
       <div className="flex items-center justify-center w-full max-w-[280px]">
         <div
-          className="h-3.5 w-1 rounded-full transition-all"
+          className="h-2.5 sm:h-3.5 w-1 rounded-full transition-all"
           style={{ background: isM1Active ? '#A855F7' : isDark ? '#475569' : '#94A3B8' }}
         />
       </div>
 
       {/* Middle Row: M3 (Registry) <-> M5 (Router) */}
-      <div className="flex items-center justify-between w-full max-w-[390px] gap-3">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between w-full max-w-full sm:max-w-[390px] gap-2 sm:gap-3">
         {/* M3: Registry */}
         <div
-          className={`flex-1 p-2.5 rounded-xl border transition-all duration-300 ${
+          className={`flex-1 p-2 sm:p-2.5 rounded-xl border transition-all duration-300 ${
             isM3Active
               ? 'ring-2 ring-amber-500 shadow-[0_0_14px_rgba(245,158,11,0.45)] scale-102'
               : 'opacity-85'
@@ -562,26 +566,26 @@ function XmppArchScene({
             borderColor: isDark ? '#F59E0B' : '#D97706',
           }}
         >
-          <div className="flex items-center gap-1.5 mb-1">
-            <Database className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-            <span className="text-[11px] sm:text-xs font-mono font-bold" style={{ color: isDark ? '#FDE68A' : '#78350F' }}>
+          <div className="flex items-center gap-1.5 mb-0.5 sm:mb-1">
+            <Database className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span className="text-[11px] sm:text-xs font-mono font-bold truncate" style={{ color: isDark ? '#FDE68A' : '#78350F' }}>
               M3: session_registry
             </span>
           </div>
-          <div className="text-[11px] font-semibold" style={{ color: isDark ? '#FCD34D' : '#92400E' }}>
+          <div className="text-[10px] sm:text-[11px] font-semibold" style={{ color: isDark ? '#FCD34D' : '#92400E' }}>
             ETS · monitor/2 cleanup
           </div>
         </div>
 
         {/* Bi-directional Link Badge */}
-        <div className="flex flex-col items-center">
-          <Share2 className="w-4 h-4 text-slate-700 dark:text-slate-300" />
-          <span className="text-[10px] font-mono font-bold text-slate-700 dark:text-slate-300">ETS query</span>
+        <div className="flex sm:flex-col items-center justify-center gap-1">
+          <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-700 dark:text-slate-300 shrink-0" />
+          <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-700 dark:text-slate-300">ETS query</span>
         </div>
 
         {/* M5: Router */}
         <div
-          className={`flex-1 p-2.5 rounded-xl border transition-all duration-300 ${
+          className={`flex-1 p-2 sm:p-2.5 rounded-xl border transition-all duration-300 ${
             isM5Active
               ? 'ring-2 ring-emerald-500 shadow-[0_0_14px_rgba(16,185,129,0.45)] scale-102'
               : 'opacity-85'
@@ -591,13 +595,13 @@ function XmppArchScene({
             borderColor: isDark ? '#10B981' : '#059669',
           }}
         >
-          <div className="flex items-center gap-1.5 mb-1">
-            <Radio className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span className="text-[11px] sm:text-xs font-mono font-bold" style={{ color: isDark ? '#A7F3D0' : '#064E3B' }}>
+          <div className="flex items-center gap-1.5 mb-0.5 sm:mb-1">
+            <Radio className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span className="text-[11px] sm:text-xs font-mono font-bold truncate" style={{ color: isDark ? '#A7F3D0' : '#064E3B' }}>
               M5: xmpp_router
             </span>
           </div>
-          <div className="text-[11px] font-semibold" style={{ color: isDark ? '#6EE7B7' : '#047857' }}>
+          <div className="text-[10px] sm:text-[11px] font-semibold" style={{ color: isDark ? '#6EE7B7' : '#047857' }}>
             PID ! Xml · Offline Queue
           </div>
         </div>
@@ -606,15 +610,15 @@ function XmppArchScene({
       {/* Downward Connector to Protocol Pipeline */}
       <div className="flex items-center justify-center w-full max-w-[280px]">
         <div
-          className="h-3 w-1 rounded-full"
+          className="h-2.5 sm:h-3 w-1 rounded-full"
           style={{ background: isDark ? '#475569' : '#94A3B8' }}
         />
       </div>
 
       {/* Bottom Pipeline: TCP -> M2 (Framer) -> M4 (C2S FSM) */}
-      <div className="flex items-center justify-center w-full max-w-[420px] gap-2">
+      <div className="flex flex-wrap sm:flex-nowrap items-center justify-center w-full max-w-full sm:max-w-[420px] gap-1.5 sm:gap-2">
         <div
-          className="px-2.5 py-1.5 rounded-lg border text-xs font-mono font-bold text-center shadow-xs"
+          className="px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg border text-[10px] sm:text-xs font-mono font-bold text-center shadow-xs"
           style={{
             background: isDark ? 'rgba(30, 41, 59, 0.70)' : 'rgba(241, 245, 249, 0.95)',
             borderColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(15,23,42,0.15)',
@@ -624,10 +628,10 @@ function XmppArchScene({
           TCP Socket
         </div>
 
-        <ArrowRight className="w-4 h-4 text-slate-700 dark:text-slate-300" />
+        <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-700 dark:text-slate-300 shrink-0" />
 
         <div
-          className={`px-3 py-1.5 rounded-xl border text-center transition-all ${
+          className={`flex-1 sm:flex-initial px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border text-center transition-all ${
             isM2Active
               ? 'ring-2 ring-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.45)] scale-102'
               : 'opacity-85'
@@ -637,18 +641,18 @@ function XmppArchScene({
             borderColor: isDark ? '#3B82F6' : '#2563EB',
           }}
         >
-          <div className="text-[11px] sm:text-xs font-mono font-bold" style={{ color: isDark ? '#BFDBFE' : '#1E3A8A' }}>
+          <div className="text-[10px] sm:text-xs font-mono font-bold" style={{ color: isDark ? '#BFDBFE' : '#1E3A8A' }}>
             M2: stream_parser
           </div>
-          <div className="text-[10px] font-semibold mt-0.5" style={{ color: isDark ? '#93C5FD' : '#1D4ED8' }}>
+          <div className="text-[9px] sm:text-[10px] font-semibold mt-0.5" style={{ color: isDark ? '#93C5FD' : '#1D4ED8' }}>
             binary:copy/1 unpin
           </div>
         </div>
 
-        <ArrowRight className="w-4 h-4 text-slate-700 dark:text-slate-300" />
+        <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-700 dark:text-slate-300 shrink-0" />
 
         <div
-          className={`px-3 py-1.5 rounded-xl border text-center transition-all ${
+          className={`flex-1 sm:flex-initial px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border text-center transition-all ${
             isM4Active
               ? 'ring-2 ring-indigo-500 shadow-[0_0_12px_rgba(99,102,241,0.45)] scale-102'
               : 'opacity-85'
@@ -658,10 +662,10 @@ function XmppArchScene({
             borderColor: isDark ? '#6366F1' : '#4F46E5',
           }}
         >
-          <div className="text-[11px] sm:text-xs font-mono font-bold" style={{ color: isDark ? '#C7D2FE' : '#312E81' }}>
+          <div className="text-[10px] sm:text-xs font-mono font-bold" style={{ color: isDark ? '#C7D2FE' : '#312E81' }}>
             M4: c2s_statem
           </div>
-          <div className="text-[10px] font-semibold mt-0.5" style={{ color: isDark ? '#A5B4FC' : '#4338CA' }}>
+          <div className="text-[9px] sm:text-[10px] font-semibold mt-0.5" style={{ color: isDark ? '#A5B4FC' : '#4338CA' }}>
             4-State FSM · SASL
           </div>
         </div>
@@ -678,18 +682,18 @@ function TcoVsBodyScene({ stepIndex, isDark }: { stepIndex: number; isDark: bool
   const tcoAcc = stepIndex === 0 ? 0 : stepIndex === 1 ? 25 : stepIndex === 2 ? 100 : 175;
 
   return (
-    <div className="w-full flex items-center justify-around gap-4 px-2 py-1 max-w-[460px]">
+    <div className="w-full flex flex-col sm:flex-row items-stretch sm:items-center justify-around gap-3 sm:gap-4 px-1 sm:px-2 py-1 max-w-full sm:max-w-[460px]">
       {/* Left: Body Recursion (Stack accumulator) */}
       <div
-        className="flex-1 p-3 rounded-xl border flex flex-col items-center"
+        className="flex-1 p-2.5 sm:p-3 rounded-xl border flex flex-col items-center"
         style={{
           background: isDark ? 'rgba(239, 68, 68, 0.16)' : 'rgba(254, 242, 242, 0.95)',
           borderColor: isDark ? 'rgba(239, 68, 68, 0.45)' : '#F87171',
         }}
       >
         <div className="text-xs font-bold mb-2 flex items-center gap-1.5 text-red-600 dark:text-red-400">
-          <AlertCircle className="w-3.5 h-3.5" />
-          Body Recursion (O(N) RAM)
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          <span>Body Recursion (O(N) RAM)</span>
         </div>
         <div className="w-full space-y-1.5 flex flex-col items-center">
           {Array.from({ length: bodyFrames }).map((_, idx) => (
@@ -713,24 +717,24 @@ function TcoVsBodyScene({ stepIndex, isDark }: { stepIndex: number; isDark: bool
         </div>
       </div>
 
-      {/* Center Divider */}
-      <div className="h-32 w-0.5 rounded-full" style={{ background: isDark ? '#475569' : '#CBD5E1' }} />
+      {/* Center Divider: Horizontal on mobile, Vertical on sm+ */}
+      <div className="w-full h-0.5 sm:w-0.5 sm:h-32 rounded-full my-0.5 sm:my-0 shrink-0" style={{ background: isDark ? '#475569' : '#CBD5E1' }} />
 
       {/* Right: Tail Recursion (TCO in-place) */}
       <div
-        className="flex-1 p-3 rounded-xl border flex flex-col items-center"
+        className="flex-1 p-2.5 sm:p-3 rounded-xl border flex flex-col items-center"
         style={{
           background: isDark ? 'rgba(16, 185, 129, 0.16)' : 'rgba(236, 253, 245, 0.95)',
           borderColor: isDark ? 'rgba(16, 185, 129, 0.45)' : '#4ADE80',
         }}
       >
         <div className="text-xs font-bold mb-2 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-          <CheckCircle2 className="w-3.5 h-3.5" />
-          Tail Recursion (O(1) RAM)
+          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+          <span>Tail Recursion (O(1) RAM)</span>
         </div>
         <div className="w-full flex flex-col items-center gap-2">
           <div
-            className="w-full py-2.5 px-2 rounded-lg text-xs font-mono text-center font-bold transition-all duration-300 ring-2 ring-emerald-500 shadow-sm"
+            className="w-full py-2 sm:py-2.5 px-2 rounded-lg text-xs font-mono text-center font-bold transition-all duration-300 ring-2 ring-emerald-500 shadow-sm"
             style={{
               background: isDark ? 'rgba(16, 185, 129, 0.28)' : 'rgba(16, 185, 129, 0.18)',
               color: isDark ? '#6EE7B7' : '#065F46',
@@ -741,7 +745,7 @@ function TcoVsBodyScene({ stepIndex, isDark }: { stepIndex: number; isDark: bool
               Acc = {tcoAcc} · call_last
             </div>
           </div>
-          <div className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400 font-bold text-center mt-0.5">
+          <div className="text-[10px] sm:text-[11px] font-mono text-emerald-700 dark:text-emerald-400 font-bold text-center mt-0.5">
             Zero Stack Growth · Constant Memory
           </div>
         </div>
@@ -758,7 +762,7 @@ function SubBinaryProcBinScene({ stepIndex, isDark }: { stepIndex: number; isDar
   const refCount = isCopied ? 0 : 1;
 
   return (
-    <div className="w-full flex flex-col items-center gap-2.5 max-w-[420px] py-1">
+    <div className="w-full flex flex-col items-center gap-2 sm:gap-2.5 max-w-full sm:max-w-[420px] py-1">
       {/* 64 KB Off-heap ProcBin */}
       <div
         className={`w-full p-2.5 rounded-xl border transition-all duration-300 ${
@@ -769,12 +773,12 @@ function SubBinaryProcBinScene({ stepIndex, isDark }: { stepIndex: number; isDar
           borderColor: isDark ? '#F59E0B' : '#D97706',
         }}
       >
-        <div className="flex items-center justify-between text-xs font-mono font-bold">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs font-mono font-bold">
           <span style={{ color: isDark ? '#FDE68A' : '#78350F' }}>
             64 KB Off-Heap ProcBin Buffer
           </span>
           <span
-            className="px-2 py-0.5 rounded text-[11px] font-bold"
+            className="px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-bold self-start sm:self-auto"
             style={{
               background: refCount > 0 ? 'rgba(239,68,68,0.22)' : 'rgba(16,185,129,0.22)',
               color: refCount > 0 ? '#DC2626' : '#059669',
@@ -786,23 +790,23 @@ function SubBinaryProcBinScene({ stepIndex, isDark }: { stepIndex: number; isDar
       </div>
 
       {/* Pointer connection arrow */}
-      <div className="flex items-center justify-center gap-1.5 text-xs font-mono font-bold">
+      <div className="flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-mono font-bold text-center flex-wrap">
         {!isCopied ? (
           <>
             <span className="text-amber-700 dark:text-amber-300">SubBinary slice pointer (16 bytes)</span>
-            <ArrowRight className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <ArrowRight className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
           </>
         ) : (
           <>
             <span className="text-emerald-700 dark:text-emerald-300">binary:copy/1 local heap allocation</span>
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
           </>
         )}
       </div>
 
       {/* Resulting 16-byte Slice */}
       <div
-        className="w-full max-w-[300px] p-2.5 rounded-xl border text-center transition-all duration-300 shadow-sm"
+        className="w-full max-w-full sm:max-w-[320px] p-2.5 rounded-xl border text-center transition-all duration-300 shadow-sm"
         style={{
           background: isCopied
             ? isDark
@@ -817,7 +821,7 @@ function SubBinaryProcBinScene({ stepIndex, isDark }: { stepIndex: number; isDar
         <div className="text-xs font-mono font-bold" style={{ color: isCopied ? (isDark ? '#34D399' : '#065F46') : (isDark ? '#F87171' : '#991B1B') }}>
           {isCopied ? '<<"alex">> on Process Heap' : 'SubBinary Pointer in Session State'}
         </div>
-        <div className="text-[11px] font-semibold mt-1" style={{ color: isDark ? '#E2E8F0' : '#334155' }}>
+        <div className="text-[10px] sm:text-[11px] font-semibold mt-1" style={{ color: isDark ? '#E2E8F0' : '#334155' }}>
           {isCopied
             ? '16 bytes on process heap · 64 KB ProcBin unpinned'
             : 'Pins 64 KB ProcBin in RAM indefinitely!'}
@@ -835,15 +839,15 @@ function MailboxSelectiveReceiveScene({ stepIndex, isDark }: { stepIndex: number
   const currentScan = stepIndex === 0 ? '{log, 1}' : stepIndex === 1 ? '{metric, 2}' : stepIndex === 2 ? '{urgent, 99}' : null;
 
   return (
-    <div className="w-full flex flex-col items-center gap-2.5 max-w-[440px] py-1">
+    <div className="w-full flex flex-col items-center gap-2 sm:gap-2.5 max-w-full sm:max-w-[440px] py-1">
       {/* Mailbox Row */}
       <div className="w-full">
         <div className="text-xs font-mono font-bold mb-1.5 flex items-center justify-between" style={{ color: isDark ? '#E2E8F0' : '#0F172A' }}>
           <span>Process Mailbox (Scan: {currentScan || 'Idle'})</span>
-          <span className="text-blue-600 dark:text-blue-400 font-bold">FIFO Order</span>
+          <span className="text-blue-600 dark:text-blue-400 font-bold text-[11px] sm:text-xs">FIFO Order</span>
         </div>
         <div
-          className="flex items-center gap-2 p-2.5 rounded-xl border shadow-xs"
+          className="flex flex-wrap items-center gap-1.5 sm:gap-2 p-2 sm:p-2.5 rounded-xl border shadow-xs"
           style={{
             background: isDark ? 'rgba(30, 41, 59, 0.40)' : 'rgba(255, 255, 255, 0.90)',
             borderColor: isDark ? '#475569' : '#CBD5E1',
@@ -852,23 +856,23 @@ function MailboxSelectiveReceiveScene({ stepIndex, isDark }: { stepIndex: number
           {stepIndex < 3 ? (
             <>
               {stepIndex === 0 && (
-                <div className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40 text-[11px] font-mono font-bold">
+                <div className="px-2 sm:px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40 text-[10px] sm:text-[11px] font-mono font-bold">
                   {'{log, 1}'}
                 </div>
               )}
               {stepIndex <= 1 && (
-                <div className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40 text-[11px] font-mono font-bold">
+                <div className="px-2 sm:px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40 text-[10px] sm:text-[11px] font-mono font-bold">
                   {'{metric, 2}'}
                 </div>
               )}
               {stepIndex <= 2 && (
-                <div className="px-2.5 py-1 rounded-lg bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/50 text-[11px] font-mono font-bold animate-pulse ring-1 ring-emerald-500">
+                <div className="px-2 sm:px-2.5 py-1 rounded-lg bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/50 text-[10px] sm:text-[11px] font-mono font-bold animate-pulse ring-1 ring-emerald-500">
                   {'{urgent, 99}'} (Target)
                 </div>
               )}
             </>
           ) : (
-            <div className="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-xs font-mono font-bold">
+            <div className="px-2 sm:px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-[11px] sm:text-xs font-mono font-bold">
               [ {'{log, 1}'}, {'{metric, 2}'} ] (Spliced back to front!)
             </div>
           )}
@@ -878,11 +882,11 @@ function MailboxSelectiveReceiveScene({ stepIndex, isDark }: { stepIndex: number
       {/* Save Queue Buffer */}
       <div className="w-full">
         <div className="text-xs font-mono font-bold text-amber-700 dark:text-amber-400 mb-1.5 flex items-center gap-1.5">
-          <Layers className="w-3.5 h-3.5" />
-          Internal Save Queue (Unmatched Buffer)
+          <Layers className="w-3.5 h-3.5 shrink-0" />
+          <span>Internal Save Queue (Unmatched Buffer)</span>
         </div>
         <div
-          className="flex items-center gap-2 p-2.5 rounded-xl border min-h-[40px] shadow-xs"
+          className="flex flex-wrap items-center gap-1.5 sm:gap-2 p-2 sm:p-2.5 rounded-xl border min-h-[40px] shadow-xs"
           style={{
             background: isDark ? 'rgba(245, 158, 11, 0.12)' : 'rgba(254, 243, 199, 0.85)',
             borderColor: isDark ? 'rgba(245, 158, 11, 0.40)' : '#F59E0B',
@@ -892,7 +896,7 @@ function MailboxSelectiveReceiveScene({ stepIndex, isDark }: { stepIndex: number
             saveQueue.map((item, idx) => (
               <span
                 key={idx}
-                className="px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold shadow-xs"
+                className="px-2 sm:px-2.5 py-1 rounded-lg text-[10px] sm:text-[11px] font-mono font-bold shadow-xs"
                 style={{
                   background: isDark ? 'rgba(245, 158, 11, 0.30)' : 'rgba(245, 158, 11, 0.20)',
                   color: isDark ? '#FDE68A' : '#78350F',
@@ -903,7 +907,7 @@ function MailboxSelectiveReceiveScene({ stepIndex, isDark }: { stepIndex: number
               </span>
             ))
           ) : (
-            <span className="text-xs font-mono text-slate-600 dark:text-slate-400 italic">
+            <span className="text-[11px] sm:text-xs font-mono text-slate-600 dark:text-slate-400 italic">
               {stepIndex === 3 ? 'Emptied: Spliced back to front of Mailbox' : 'Empty'}
             </span>
           )}
@@ -920,10 +924,10 @@ function LinksMonitorsSignalsScene({ stepIndex, isDark }: { stepIndex: number; i
   const isCallerAlive = stepIndex > 0;
 
   return (
-    <div className="w-full flex items-center justify-around gap-2 max-w-[440px] py-1">
+    <div className="w-full flex flex-col sm:flex-row items-stretch sm:items-center justify-around gap-2.5 sm:gap-2 max-w-full sm:max-w-[440px] py-1">
       {/* Caller Process */}
       <div
-        className={`flex-1 p-3 rounded-xl border text-center transition-all duration-300 ${
+        className={`flex-1 p-2.5 sm:p-3 rounded-xl border text-center transition-all duration-300 ${
           isCallerAlive ? 'border-emerald-500 shadow-sm' : 'border-red-500 opacity-70'
         }`}
         style={{
@@ -939,7 +943,7 @@ function LinksMonitorsSignalsScene({ stepIndex, isDark }: { stepIndex: number; i
         <div className="text-xs sm:text-sm font-mono font-bold" style={{ color: isCallerAlive ? (isDark ? '#34D399' : '#065F46') : (isDark ? '#F87171' : '#991B1B') }}>
           Caller &lt;0.105.0&gt;
         </div>
-        <div className="text-[11px] font-mono font-bold mt-1.5" style={{ color: isDark ? '#CBD5E1' : '#1E293B' }}>
+        <div className="text-[10px] sm:text-[11px] font-mono font-bold mt-1 sm:mt-1.5" style={{ color: isDark ? '#CBD5E1' : '#1E293B' }}>
           {stepIndex === 0 && 'Crashed by Exit Cascade!'}
           {stepIndex === 1 && 'trap_exit=true (Survives)'}
           {stepIndex === 2 && 'Monitored Worker (Survives)'}
@@ -948,9 +952,9 @@ function LinksMonitorsSignalsScene({ stepIndex, isDark }: { stepIndex: number; i
       </div>
 
       {/* Signal Channel */}
-      <div className="flex flex-col items-center gap-1.5">
+      <div className="flex sm:flex-col items-center justify-center gap-1 sm:gap-1.5 py-0.5 sm:py-0">
         <span
-          className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md shadow-xs"
+          className="text-[10px] sm:text-[11px] font-mono font-bold px-2 py-0.5 rounded-md shadow-xs text-center"
           style={{
             background: stepIndex === 0 ? 'rgba(239,68,68,0.22)' : 'rgba(139,92,246,0.22)',
             color: stepIndex === 0 ? (isDark ? '#F87171' : '#DC2626') : (isDark ? '#C084FC' : '#7C3AED'),
@@ -962,12 +966,13 @@ function LinksMonitorsSignalsScene({ stepIndex, isDark }: { stepIndex: number; i
           {stepIndex === 2 && '{\'DOWN\', #Ref}'}
           {stepIndex === 3 && 'SIGKILL'}
         </span>
-        <ArrowRight className="w-4 h-4 text-slate-700 dark:text-slate-300 rotate-180" />
+        <ArrowRight className="hidden sm:block w-4 h-4 text-slate-700 dark:text-slate-300 rotate-180 shrink-0" />
+        <ArrowDown className="block sm:hidden w-3.5 h-3.5 text-slate-700 dark:text-slate-300 shrink-0" />
       </div>
 
       {/* Worker Process */}
       <div
-        className="flex-1 p-3 rounded-xl border text-center border-red-500 shadow-sm"
+        className="flex-1 p-2.5 sm:p-3 rounded-xl border text-center border-red-500 shadow-sm"
         style={{
           background: isDark ? 'rgba(239, 68, 68, 0.20)' : 'rgba(254, 242, 242, 0.95)',
         }}
@@ -975,7 +980,7 @@ function LinksMonitorsSignalsScene({ stepIndex, isDark }: { stepIndex: number; i
         <div className="text-xs sm:text-sm font-mono font-bold text-red-600 dark:text-red-400">
           Worker &lt;0.210.0&gt;
         </div>
-        <div className="text-[11px] font-mono text-red-700 dark:text-red-300 font-bold mt-1.5">
+        <div className="text-[10px] sm:text-[11px] font-mono text-red-700 dark:text-red-300 font-bold mt-1 sm:mt-1.5">
           {stepIndex === 3 ? 'Untrappable Kill' : 'exit(badarith)'}
         </div>
       </div>
@@ -990,18 +995,18 @@ function SupervisionEtsHeirScene({ stepIndex, isDark }: { stepIndex: number; isD
   const etsOwner = stepIndex === 1 || stepIndex === 2 ? 'table_heir' : 'pricing_cache';
 
   return (
-    <div className="w-full flex flex-col items-center gap-2.5 max-w-[460px] py-1">
+    <div className="w-full flex flex-col items-center gap-2 sm:gap-2.5 max-w-full sm:max-w-[460px] py-1">
       {/* Supervisor Header */}
       <div className="text-xs sm:text-sm font-mono font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
-        <Shield className="w-4 h-4" />
-        Root Supervisor: rest_for_one
+        <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+        <span>Root Supervisor: rest_for_one</span>
       </div>
 
-      {/* 3 Workers in Order */}
-      <div className="flex items-center justify-between w-full gap-2.5">
+      {/* 3 Workers in Order: column on mobile, row on sm+ */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between w-full gap-2 sm:gap-2.5">
         {/* Worker 1: table_heir */}
         <div
-          className={`flex-1 p-2.5 rounded-xl border text-center transition-all ${
+          className={`flex-1 p-2 sm:p-2.5 rounded-xl border text-center transition-all ${
             etsOwner === 'table_heir' ? 'ring-2 ring-amber-500 shadow-md' : 'opacity-90'
           }`}
           style={{
@@ -1019,7 +1024,7 @@ function SupervisionEtsHeirScene({ stepIndex, isDark }: { stepIndex: number; isD
 
         {/* Worker 2: pricing_cache */}
         <div
-          className={`flex-1 p-2.5 rounded-xl border text-center transition-all ${
+          className={`flex-1 p-2 sm:p-2.5 rounded-xl border text-center transition-all ${
             stepIndex === 1
               ? 'border-red-500 bg-red-500/20 opacity-60'
               : etsOwner === 'pricing_cache'
@@ -1041,7 +1046,7 @@ function SupervisionEtsHeirScene({ stepIndex, isDark }: { stepIndex: number; isD
 
         {/* Worker 3: order_gateway */}
         <div
-          className={`flex-1 p-2.5 rounded-xl border text-center transition-all ${
+          className={`flex-1 p-2 sm:p-2.5 rounded-xl border text-center transition-all ${
             stepIndex === 1 || stepIndex === 2 ? 'opacity-50' : 'opacity-90'
           }`}
           style={{
@@ -1060,15 +1065,15 @@ function SupervisionEtsHeirScene({ stepIndex, isDark }: { stepIndex: number; isD
 
       {/* ETS Table Capsule */}
       <div
-        className="px-3.5 py-1.5 rounded-full border text-xs font-mono font-bold flex items-center gap-2 shadow-xs"
+        className="px-3 sm:px-3.5 py-1.5 rounded-full border text-[11px] sm:text-xs font-mono font-bold flex items-center gap-1.5 sm:gap-2 shadow-xs text-center"
         style={{
           background: isDark ? 'rgba(245, 158, 11, 0.25)' : 'rgba(254, 243, 199, 0.95)',
           borderColor: '#F59E0B',
           color: isDark ? '#FDE68A' : '#78350F',
         }}
       >
-        <Database className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-        ETS Table: owned by &lt;{etsOwner}&gt;
+        <Database className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+        <span>ETS Table: owned by &lt;{etsOwner}&gt;</span>
       </div>
     </div>
   );
@@ -1086,14 +1091,14 @@ function TcpStreamFramingScene({ stepIndex, isDark }: { stepIndex: number; isDar
       : '<<>> (Empty)';
 
   return (
-    <div className="w-full flex flex-col items-center gap-2.5 max-w-[460px] py-1">
-      {/* Sliding Incoming Packet Stream */}
-      <div className="w-full flex items-center gap-2 overflow-x-auto pb-1">
-        <span className="text-xs font-mono font-bold whitespace-nowrap" style={{ color: isDark ? '#CBD5E1' : '#1E293B' }}>
+    <div className="w-full flex flex-col items-center gap-2 sm:gap-2.5 max-w-full sm:max-w-[460px] py-1">
+      {/* Sliding Incoming Packet Stream: wraps neatly on small screens */}
+      <div className="w-full flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 pb-1">
+        <span className="text-[11px] sm:text-xs font-mono font-bold whitespace-nowrap" style={{ color: isDark ? '#CBD5E1' : '#1E293B' }}>
           TCP Wire:
         </span>
         <div
-          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-mono font-bold whitespace-nowrap transition-all shadow-xs ${
+          className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-[11px] font-mono font-bold whitespace-nowrap transition-all shadow-xs ${
             stepIndex === 0
               ? 'bg-cyan-500/30 text-cyan-800 dark:text-cyan-200 ring-2 ring-cyan-500'
               : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
@@ -1102,7 +1107,7 @@ function TcpStreamFramingScene({ stepIndex, isDark }: { stepIndex: number; isDar
           Chunk 1: "&lt;stream:str"
         </div>
         <div
-          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-mono font-bold whitespace-nowrap transition-all shadow-xs ${
+          className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-[11px] font-mono font-bold whitespace-nowrap transition-all shadow-xs ${
             stepIndex === 1
               ? 'bg-cyan-500/30 text-cyan-800 dark:text-cyan-200 ring-2 ring-cyan-500'
               : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
@@ -1111,7 +1116,7 @@ function TcpStreamFramingScene({ stepIndex, isDark }: { stepIndex: number; isDar
           Chunk 2: "eam to='localhost'&gt;&lt;message&gt;Hi&lt;/mes"
         </div>
         <div
-          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-mono font-bold whitespace-nowrap transition-all shadow-xs ${
+          className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-[11px] font-mono font-bold whitespace-nowrap transition-all shadow-xs ${
             stepIndex >= 2
               ? 'bg-cyan-500/30 text-cyan-800 dark:text-cyan-200 ring-2 ring-cyan-500'
               : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
@@ -1121,38 +1126,40 @@ function TcpStreamFramingScene({ stepIndex, isDark }: { stepIndex: number; isDar
         </div>
       </div>
 
-      {/* Incremental Framer State */}
-      <div className="flex items-center justify-between w-full gap-2.5">
+      {/* Incremental Framer State: column on mobile, row on sm+ */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between w-full gap-2 sm:gap-2.5">
         {/* Left: Leftover BufferBin */}
         <div
-          className="flex-1 p-2.5 rounded-xl border text-center shadow-xs"
+          className="flex-1 p-2 sm:p-2.5 rounded-xl border text-center shadow-xs"
           style={{
             background: isDark ? 'rgba(6, 182, 212, 0.16)' : 'rgba(207, 250, 254, 0.95)',
             borderColor: '#06B6D4',
           }}
         >
-          <div className="text-xs font-mono font-bold text-cyan-700 dark:text-cyan-300">
+          <div className="text-[11px] sm:text-xs font-mono font-bold text-cyan-700 dark:text-cyan-300">
             BufferBin Leftover
           </div>
-          <div className="text-[11px] font-mono font-bold mt-1 truncate" style={{ color: isDark ? '#A5F3FC' : '#083344' }}>
+          <div className="text-[10px] sm:text-[11px] font-mono font-bold mt-1 break-all" style={{ color: isDark ? '#A5F3FC' : '#083344' }}>
             {bufferContent}
           </div>
         </div>
 
-        <ArrowRight className="w-4 h-4 text-slate-700 dark:text-slate-300 flex-shrink-0" />
+        {/* Arrow between buffer and frames */}
+        <ArrowRight className="hidden sm:block w-4 h-4 text-slate-700 dark:text-slate-300 flex-shrink-0 self-center" />
+        <ArrowDown className="block sm:hidden w-3.5 h-3.5 text-slate-700 dark:text-slate-300 flex-shrink-0 self-center" />
 
         {/* Right: Emitted Protocol Events */}
         <div
-          className="flex-1 p-2.5 rounded-xl border text-center shadow-xs"
+          className="flex-1 p-2 sm:p-2.5 rounded-xl border text-center shadow-xs"
           style={{
             background: isDark ? 'rgba(16, 185, 129, 0.18)' : 'rgba(209, 250, 229, 0.95)',
             borderColor: '#10B981',
           }}
         >
-          <div className="text-xs font-mono font-bold text-emerald-700 dark:text-emerald-300">
+          <div className="text-[11px] sm:text-xs font-mono font-bold text-emerald-700 dark:text-emerald-300">
             Emitted Frames
           </div>
-          <div className="text-[11px] font-mono font-bold mt-1 truncate" style={{ color: isDark ? '#6EE7B7' : '#064E3B' }}>
+          <div className="text-[10px] sm:text-[11px] font-mono font-bold mt-1 break-all" style={{ color: isDark ? '#6EE7B7' : '#064E3B' }}>
             {stepIndex === 0 && '[] (Waiting for more)'}
             {stepIndex === 1 && '[{stream_open, <<"localhost">>}]'}
             {stepIndex >= 2 && '[{chat_message, ...}, {ping, "p1"}]'}
