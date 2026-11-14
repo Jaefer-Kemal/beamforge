@@ -16,6 +16,7 @@
 
 [**Explore Curriculum**](#-curriculum-master-blueprint-5-worlds--12-chapters) &nbsp;|&nbsp;
 [**Architecture Deep-Dive**](#-system-architecture--dual-engine-topology) &nbsp;|&nbsp;
+[**Authentication & Cloud**](#-authentication--cloud-persistence-neon-auth--lakebase-postgres) &nbsp;|&nbsp;
 [**Quickstart Guide**](#-quickstart--local-development) &nbsp;|&nbsp;
 [**Roadmap & Coming Soon**](#-roadmap--future-platform-expansion) &nbsp;|&nbsp;
 [**Specifications Suite**](#-formal-engineering-specifications)
@@ -133,6 +134,44 @@ The following platform capabilities, multi-language tracks, and pedagogical syst
 | **Planned** | **7 Production Incident Triage Labs** | Reliability Engineering | Realistic "Fix-the-Production-Outage" scenarios with live incident banners: Slowloris TCP floods, selective receive mailbox OOM cascades, and supervision restart blizzard recovery. |
 | **Planned** | **Live Distributed Node Clustering** | Distributed Systems | Interactive multi-node simulation in the browser: connecting virtual BEAM nodes (`net_adm:ping/1`), global process registries (`global`), and decentralized process groups (`pg`). |
 | **Planned** | **BEAM Footprint Runtime Scorecard** | Telemetry & Profiling | Sub-millisecond telemetry cards capturing exact peak stack words, heap size, reduction counts, and sub-binary memory leaks per submission. |
+
+---
+
+## Authentication & Cloud Persistence (Neon Auth & Lakebase Postgres)
+
+BeamForge features a hybrid serverless identity and persistence architecture powered by **Neon Auth** (Managed Better Auth engine) and **Neon Lakebase Postgres**:
+
+### 1. Zero-Friction Guest Mode & Anti-Spoiler Preserved Suspense
+- **Instant Onboarding:** New learners start coding and solving challenges immediately without registration barriers or credit cards.
+- **Preserved Suspense & Progressive Discovery:** Foundational chapters (World 1: Chapters 1 through 4) are 100% free and open. Rather than spoiling gating mechanics upfront with discount banners or locks, learners experience the curriculum naturally. Only upon completing Chapter 4 does Chapter 5 prompt them with a milestone celebration to create a free account and persist their progress to the cloud.
+- **Unreached Chapter Neutrality:** Unreached chapters display standard sequential prerequisite requirements (`Prerequisite: CH${N-1}`), keeping learners focused on learning without artificial paywall distractions.
+
+### 2. Transparent Guest-to-Cloud Auto-Migration
+- When a guest signs in or creates an account (via in-modal Email/Password or full-page Google OAuth redirect), BeamForge automatically scans browser `localStorage` for:
+  - Completed lesson IDs and earned XP
+  - Active in-progress code drafts across all chapters
+  - Accepted solution files
+  - Streak counters and role levels
+- All guest artifacts are seamlessly transferred into Neon Lakebase Postgres tables (`beamforge_users`, `beamforge_submissions`, `beamforge_drafts`) and re-keyed without losing a single line of written code.
+
+### 3. Dual-Mode Topology: Cloud vs. Local/Offline
+BeamForge dynamically switches between two operation modes based on environment configuration:
+- **Cloud Mode (Production & Authenticated Dev):** Connected to Neon Auth and Neon PostgreSQL. Sessions are cryptographically signed with cookies, and user submissions, drafts, and profile statistics persist across devices and browsers.
+- **Local / Offline Mode (Zero Configuration Fallback):** If `NEON_AUTH_BASE_URL` is omitted or the local environment is offline, BeamForge operates with complete offline functionality using browser `localStorage`. Offline developer profiles (`user_alpha`, `user_beta`, `user_master`) are preserved in a developer drawer for rapid offline testing.
+
+### 4. Environment Variables Configuration
+
+To run BeamForge with full cloud authentication and database synchronization, configure the following keys in `apps/web-ide/.env.local`:
+
+```env
+# Neon Auth Configuration (Managed Better Auth)
+NEON_AUTH_BASE_URL=https://<your-endpoint>.neonauth.<region>.aws.neon.tech/<database>/auth
+NEXT_PUBLIC_NEON_AUTH_BASE_URL=https://<your-endpoint>.neonauth.<region>.aws.neon.tech/<database>/auth
+NEON_AUTH_COOKIE_SECRET=<random-32-character-secret>
+
+# Neon Lakebase Postgres Connection String
+DATABASE_URL=postgres://<user>:<password>@<ep-endpoint>.<region>.aws.neon.tech/<database>?sslmode=require
+```
 
 ---
 
