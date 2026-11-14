@@ -4142,6 +4142,28 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Queried `https://beamforge-orchestrator.onrender.com/health`.
   - Response 200 OK: `{"active_workers":0,"erl_path":"/usr/bin/erl","max_workers":2,"mode":"native_beam_bridge","otp_release":"26","pool_warm":4,"status":"ok","timestamp":"2026-11-14T09:32:41Z"}`.
 
+## Phase 248: Chapter 12 Capstone Studio Code Editor & Mobile Responsiveness Parity Overhaul
+- [x] **248.1: Full-Screen Zen Focus Mode (`isEditorMaximized`)**:
+  - Added `isEditorMaximized` state to `CapstoneStudioView.tsx` with `#toggle-editor-maximize-btn` in the file strip (`Maximize2` / `Minimize2`).
+  - Added global `Escape` key event listener to gracefully collapse back to normal split/tab view.
+  - Dynamically expanded editor to `fixed inset-0 z-[60] flex flex-col w-full h-full` and hid the action bar on mobile while maximized to grant 100% viewport space to Monaco.
+- [x] **248.2: Mobile Quick-Syntax Toolbar Parity (17 Tokens)**:
+  - Replaced grouped `[ ]` and `{ }` tokens with discrete open/close tokens: `{`, `}`, `[`, `]`.
+  - Added essential OTP macro prefix `?` and atom literals `ok` and `error` (`['->', '>>', '<<', ':=', '=>', ',', ';', '.', '_', '|', '{', '}', '[', ']', '?', 'ok', 'error']`).
+- [x] **248.3: Click-to-Jump Compilation Error Card & Marker Sync**:
+  - Implemented `CompilationErrorCard` in `CapstoneStudioView.tsx` with 1-tap `Jump to L{line}:C{col}` buttons.
+  - Implemented `jumpToPosition` and `handleJumpToError` to seamlessly switch mobile tabs to `code`, load the target file, and focus the Monaco cursor on the error line.
+  - Synchronized backend compilation failure diagnostics to Monaco model markers (`setModelMarkers`), displaying red squigglies directly on erroneous lines.
+  - Embedded `CompilationErrorCard` in both desktop output drawer (`stages` and `terminal` tabs) and mobile results drawer (`stages` and `terminal` tabs).
+- [x] **248.4: Mobile File Tab Density & Drawer Chevron Cleanup**:
+  - Added responsive `shortLabel` (`sup.erl`, `parser.erl`, `registry.erl`, `statem.erl`, `router.erl`) rendering on small screens (`sm:hidden`) to eliminate horizontal tab overcrowding.
+  - Hidden desktop-only drawer toggle chevron on mobile (`hidden md:flex`), eliminating confusing dead clicks.
+  - Enabled `bracketPairColorization: { enabled: true }` and added `min-h-0` to the Monaco flex container to prevent overflow clipping.
+- [x] **248.5: Multi-Compiler Verification**:
+  - Next.js Web IDE: `npx tsc --noEmit` passed with 0 errors.
+  - Next.js Production Build: `npm run build` passed with 0 errors across all 8 static and dynamic routes.
+
+
 
 
 

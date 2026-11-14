@@ -38,6 +38,8 @@ import {
   ArrowRight,
   MessageSquare,
   Server,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import type { OtpDocSignatureCard } from '../../types/workspace';
 import { BeamConceptVisualizer } from '../pedagogy/BeamConceptVisualizer';
@@ -51,11 +53,11 @@ import { SolutionViewerTab } from './SolutionViewerTab';
 import { LiveXmppChatSimulator } from './LiveXmppChatSimulator';
 
 const CAPSTONE_FILES = [
-  { path: 'src/xmpp_sup.erl', label: 'xmpp_sup.erl', milestoneIdx: 0, tag: 'M1' },
-  { path: 'src/xmpp_stream_parser.erl', label: 'xmpp_stream_parser.erl', milestoneIdx: 1, tag: 'M2' },
-  { path: 'src/xmpp_session_registry.erl', label: 'xmpp_session_registry.erl', milestoneIdx: 2, tag: 'M3' },
-  { path: 'src/xmpp_c2s_statem.erl', label: 'xmpp_c2s_statem.erl', milestoneIdx: 3, tag: 'M4' },
-  { path: 'src/xmpp_router.erl', label: 'xmpp_router.erl', milestoneIdx: 4, tag: 'M5' },
+  { path: 'src/xmpp_sup.erl', label: 'xmpp_sup.erl', shortLabel: 'sup.erl', milestoneIdx: 0, tag: 'M1' },
+  { path: 'src/xmpp_stream_parser.erl', label: 'xmpp_stream_parser.erl', shortLabel: 'parser.erl', milestoneIdx: 1, tag: 'M2' },
+  { path: 'src/xmpp_session_registry.erl', label: 'xmpp_session_registry.erl', shortLabel: 'registry.erl', milestoneIdx: 2, tag: 'M3' },
+  { path: 'src/xmpp_c2s_statem.erl', label: 'xmpp_c2s_statem.erl', shortLabel: 'statem.erl', milestoneIdx: 3, tag: 'M4' },
+  { path: 'src/xmpp_router.erl', label: 'xmpp_router.erl', shortLabel: 'router.erl', milestoneIdx: 4, tag: 'M5' },
 ];
 
 const FILE_TO_MILESTONE_KEY: Record<string, string> = {
@@ -188,6 +190,93 @@ function CapstoneOtpDocCard({ card, isDark }: { card: OtpDocSignatureCard; isDar
   );
 }
 
+// ── Click-to-Jump Compilation Error Card ──────────────────────────────────────
+function CompilationErrorCard({
+  stdout,
+  diagnostics,
+  onJumpTo,
+  isDark,
+}: {
+  stdout: string;
+  diagnostics?: Array<{ file?: string; line: number; col: number; severity?: string; message: string }>;
+  onJumpTo: (line: number, col: number, filePath?: string) => void;
+  isDark: boolean;
+}) {
+  return (
+    <div
+      className="rounded-xl p-4 my-2 select-text border shadow-lg"
+      style={{
+        background: isDark ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.05)',
+        borderColor: isDark ? 'rgba(239, 68, 68, 0.40)' : 'rgba(239, 68, 68, 0.30)',
+        userSelect: 'text',
+      }}
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+          <span className="text-xs font-bold uppercase tracking-wider" style={{ color: '#EF4444' }}>
+            Erlang Compiler Failure (erlc)
+          </span>
+        </div>
+        <span
+          className="text-xs px-2.5 py-0.5 rounded-full font-bold"
+          style={{ background: 'rgba(239,68,68,0.2)', color: '#EF4444' }}
+        >
+          {diagnostics && diagnostics.length > 0 ? `${diagnostics.length} Error${diagnostics.length > 1 ? 's' : ''}` : 'Build Failed'}
+        </span>
+      </div>
+
+      {/* Clickable jump-to-location buttons */}
+      {diagnostics && diagnostics.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {diagnostics.map((diag, idx) => (
+            <button
+              key={idx}
+              onClick={() => onJumpTo(diag.line, diag.col, diag.file)}
+              className="group flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+              style={{
+                background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
+                border: isDark ? '1px solid rgba(239,68,68,0.35)' : '1px solid rgba(239,68,68,0.25)',
+                color: isDark ? '#FCA5A5' : '#DC2626',
+              }}
+              title={`Click to jump to line ${diag.line}, col ${diag.col} in editor`}
+            >
+              <ArrowRight className="w-3.5 h-3.5 text-red-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
+              <span className="font-semibold underline decoration-dotted">
+                {diag.file || 'module'}:{diag.line}:{diag.col}
+              </span>
+              <span className="opacity-80 truncate max-w-xs">{diag.message}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Monospace terminal output */}
+      <div
+        className="rounded-lg p-3 font-mono text-xs overflow-x-auto select-text leading-relaxed"
+        style={{
+          background: isDark ? '#05070B' : '#0F172A',
+          color: '#E2E8F0',
+          border: '1px solid rgba(255,255,255,0.1)',
+          userSelect: 'text',
+          WebkitUserSelect: 'text',
+        }}
+      >
+        <div className="text-gray-400 text-xs mb-1.5 select-none border-b border-gray-800 pb-1 flex items-center justify-between">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+            <span>BEAM Native Output (Select &amp; Ctrl+C to copy)</span>
+          </span>
+          <span className="text-[10px] text-gray-500 font-mono">erlc / c(module)</span>
+        </div>
+        <pre className="whitespace-pre select-text font-mono text-xs" style={{ userSelect: 'text' }}>
+          {stdout || 'Compilation failed with no compiler stdout.'}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Capstone Studio Component ───────────────────────────────────────────
 export function CapstoneStudioView() {
   const {
@@ -226,6 +315,18 @@ export function CapstoneStudioView() {
   const [mobileTab, setMobileTab] = useState<'guide' | 'code' | 'results'>('guide');
   const [isColdBooting, setIsColdBooting] = useState(false);
   const [lastVerifiedExerciseId, setLastVerifiedExerciseId] = useState<string | null>(null);
+  const [isEditorMaximized, setIsEditorMaximized] = useState(false);
+
+  // Allow ESC key to exit maximized editor mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isEditorMaximized) {
+        setIsEditorMaximized(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isEditorMaximized]);
 
   // Render Cold-Start Notification (detects when cloud container on Render is waking up after inactivity)
   useEffect(() => {
@@ -374,6 +475,55 @@ export function CapstoneStudioView() {
       runLint(activeFile.content, activeFile.path);
     }
   };
+
+  // Click-to-jump navigation: Reveal and place cursor at line/column in Monaco editor
+  const jumpToPosition = (line: number, col: number) => {
+    if (editorRef.current) {
+      const editor = editorRef.current;
+      editor.revealPositionInCenter({ lineNumber: line, column: col });
+      editor.setPosition({ lineNumber: line, column: col });
+      editor.focus();
+    }
+  };
+
+  const handleJumpToError = (line: number, col: number, filePath?: string) => {
+    if (filePath && files.some((f) => f.path === filePath)) {
+      openFile(filePath);
+    }
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setMobileTab('code');
+    }
+    setTimeout(() => {
+      jumpToPosition(line, col);
+    }, 60);
+  };
+
+  // Synchronize error markers whenever runResult changes
+  useEffect(() => {
+    if (!editorRef.current || !monacoRef.current) return;
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    const model = editor.getModel();
+    if (!model) return;
+
+    if (runResult && !runResult.compileOk && runResult.diagnostics && runResult.diagnostics.length > 0) {
+      const markers = runResult.diagnostics.map((d: any) => {
+        const lineMax = model.getLineMaxColumn ? model.getLineMaxColumn(d.line) : d.col + 10;
+        const startCol = Math.min(Math.max(d.col, 1), lineMax);
+        return {
+          severity: d.severity === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error,
+          startLineNumber: d.line,
+          startColumn: startCol,
+          endLineNumber: d.line,
+          endColumn: lineMax,
+          message: d.message,
+        };
+      });
+      monaco.editor.setModelMarkers(model, 'erlang-linter', markers);
+    } else if (runResult && runResult.compileOk) {
+      monaco.editor.setModelMarkers(model, 'erlang-linter', []);
+    }
+  }, [runResult]);
 
   // Check stage passes for milestone pills
   const isFullCapstoneStages = useMemo(
@@ -786,7 +936,9 @@ export function CapstoneStudioView() {
       {/* RIGHT PANE — Focused Code Editor, Action Bar & Drawer                   */}
       {/* ══════════════════════════════════════════════════════════════════════ */}
       <div
-        className={`${mobileTab === 'code' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-1 md:h-full flex-col overflow-hidden relative`}
+        className={isEditorMaximized
+          ? 'fixed inset-0 z-[60] flex flex-col w-full h-full'
+          : `${mobileTab === 'code' ? 'w-full flex' : 'hidden md:flex'} md:w-1/2 flex-1 md:h-full flex-col min-h-0 overflow-hidden relative`}
         style={{
           background: isDark ? '#0B0F17' : '#FFFFFF',
         }}
@@ -840,7 +992,8 @@ export function CapstoneStudioView() {
                     {cf.tag}
                   </span>
                   <FileCode className="w-3.5 h-3.5" style={{ color: isActive ? '#38BDF8' : '#64748B' }} />
-                  <span>{cf.label}</span>
+                  <span className="hidden sm:inline">{cf.label}</span>
+                  <span className="sm:hidden">{cf.shortLabel}</span>
                   {isTarget && (
                     <span
                       className="text-[9px] font-black px-1.5 py-0.5 rounded tracking-wide shadow-sm"
@@ -859,26 +1012,56 @@ export function CapstoneStudioView() {
             })}
           </div>
 
-          {/* Reset Current File Button */}
-          <button
-            id="reset-template-btn"
-            onClick={() => setIsResetModalOpen(true)}
-            className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-all duration-200 shrink-0 cursor-pointer"
-            style={{
-              color: isDark ? '#CBD5E1' : '#334155',
-              background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
-              border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
-            }}
-            title="Reset active file to initial challenge template"
-          >
-            <RotateCcw className="w-3 h-3" />
-            <span>Reset File</span>
-          </button>
+          {/* Action Tools: Reset & Maximize / Zen Focus Toggle */}
+          <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+            <button
+              id="reset-template-btn"
+              onClick={() => setIsResetModalOpen(true)}
+              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-all duration-200 shrink-0 cursor-pointer"
+              style={{
+                color: isDark ? '#CBD5E1' : '#334155',
+                background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
+                border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
+              }}
+              title="Reset active file to initial challenge template"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span className="hidden sm:inline">Reset File</span>
+            </button>
+
+            <button
+              id="toggle-editor-maximize-btn"
+              onClick={() => setIsEditorMaximized(!isEditorMaximized)}
+              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-all duration-200 shrink-0 cursor-pointer"
+              style={{
+                background: isEditorMaximized
+                  ? (isDark ? 'rgba(245, 158, 11, 0.25)' : 'rgba(245, 158, 11, 0.20)')
+                  : (isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.06)'),
+                color: isEditorMaximized ? '#F59E0B' : (isDark ? '#CBD5E1' : '#334155'),
+                border: isEditorMaximized
+                  ? '1px solid rgba(245, 158, 11, 0.40)'
+                  : (isDark ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(15, 23, 42, 0.08)'),
+              }}
+              title={isEditorMaximized ? 'Minimize Editor (Exit Zen Mode) [Esc]' : 'Maximize Editor (Zen Mode)'}
+            >
+              {isEditorMaximized ? (
+                <>
+                  <Minimize2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Minimize</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Maximize</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* ── Monaco Editor Instance ── */}
         <div
-          className="flex-1 w-full relative overflow-hidden"
+          className="flex-1 w-full min-h-0 relative overflow-hidden"
           style={{ background: isDark ? '#0B0F17' : '#FFFFFF' }}
         >
           {activeFile ? (
@@ -909,6 +1092,7 @@ export function CapstoneStudioView() {
                 folding: typeof window !== 'undefined' && window.innerWidth < 768 ? false : true,
                 lineNumbersMinChars: typeof window !== 'undefined' && window.innerWidth < 768 ? 2 : 3,
                 automaticLayout: true,
+                bracketPairColorization: { enabled: true },
                 tabSize: 4,
                 insertSpaces: true,
                 wordWrap: 'on',
@@ -930,13 +1114,17 @@ export function CapstoneStudioView() {
 
         {/* ── Mobile Erlang Quick-Syntax Toolbar (< md) ── */}
         <div
-          className="flex md:hidden items-center gap-1 px-2 py-1 border-t overflow-x-auto flex-shrink-0 no-scrollbar"
+          id="erlang-syntax-accessory-bar"
+          className="flex md:hidden items-center gap-1.5 px-3 py-1.5 border-t overflow-x-auto flex-shrink-0 no-scrollbar"
           style={{
             background: isDark ? 'rgba(15, 23, 42, 0.90)' : 'rgba(241, 245, 249, 0.95)',
             borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.06)',
           }}
         >
-          {['->', '>>', '<<', ':=', '=>', ',', ';', '.', '_', '|', '[ ]', '{ }'].map((token) => (
+          {[
+            '->', '>>', '<<', ':=', '=>', ',', ';', '.', '_', '|',
+            '{', '}', '[', ']', '?', 'ok', 'error',
+          ].map((token) => (
             <button
               key={token}
               type="button"
@@ -957,7 +1145,7 @@ export function CapstoneStudioView() {
         {/* ── Boot.dev Action Bar ── */}
         <div
           id="lesson-action-bar"
-          className="flex items-center gap-2 px-3 py-1 flex-shrink-0 select-none pb-safe"
+          className={`${isEditorMaximized ? 'hidden sm:flex' : 'flex'} items-center gap-2 px-3 py-1 flex-shrink-0 select-none pb-safe`}
           style={{
             minHeight: '48px',
             background: isDark ? 'rgba(11, 15, 23, 0.55)' : 'rgba(241, 245, 249, 0.70)',
@@ -1067,7 +1255,7 @@ export function CapstoneStudioView() {
             <button
               id="drawer-toggle-btn"
               onClick={() => setIsDrawerOpen(!isDrawerOpen)}
-              className="p-1 rounded-lg text-xs transition-colors cursor-pointer"
+              className="hidden md:flex p-1 rounded-lg text-xs transition-colors cursor-pointer"
               style={{
                 background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)',
                 color: isDark ? '#94A3B8' : '#64748B',
@@ -1256,6 +1444,16 @@ export function CapstoneStudioView() {
                       </button>
                     )}
                   </div>
+                  {/* Compilation Failure Terminal Card if erlc failed */}
+                  {runResult && !runResult.compileOk && (
+                    <CompilationErrorCard
+                      stdout={runResult.stdout}
+                      diagnostics={runResult.diagnostics}
+                      onJumpTo={handleJumpToError}
+                      isDark={isDark}
+                    />
+                  )}
+
                   {verificationStages.length > 0 ? (
                     verificationStages.map((stage) => {
                       const isPassed = stage.status === 'passed';
@@ -1323,6 +1521,14 @@ export function CapstoneStudioView() {
 
               {drawerTab === 'terminal' && (
                 <div className="font-mono text-[11px] space-y-2">
+                  {runResult && !runResult.compileOk && (
+                    <CompilationErrorCard
+                      stdout={runResult.stdout}
+                      diagnostics={runResult.diagnostics}
+                      onJumpTo={handleJumpToError}
+                      isDark={isDark}
+                    />
+                  )}
                   {runResult ? (
                     <>
                       <div
@@ -1604,6 +1810,17 @@ export function CapstoneStudioView() {
                   </span>
                 </div>
               </div>
+
+              {/* Compilation Failure Terminal Card if erlc failed */}
+              {runResult && !runResult.compileOk && (
+                <CompilationErrorCard
+                  stdout={runResult.stdout}
+                  diagnostics={runResult.diagnostics}
+                  onJumpTo={handleJumpToError}
+                  isDark={isDark}
+                />
+              )}
+
               {verificationStages.length > 0 ? (
                 <div className="space-y-1.5">
                   {verificationStages.map((stage) => {
@@ -1680,6 +1897,15 @@ export function CapstoneStudioView() {
 
           {drawerTab === 'terminal' && (
             <div className="space-y-2">
+              {/* Compilation Failure Terminal Card if erlc failed */}
+              {runResult && !runResult.compileOk && (
+                <CompilationErrorCard
+                  stdout={runResult.stdout}
+                  diagnostics={runResult.diagnostics}
+                  onJumpTo={handleJumpToError}
+                  isDark={isDark}
+                />
+              )}
               <span className="text-xs font-bold uppercase tracking-wider block" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
                 Simulation Console Output
               </span>
