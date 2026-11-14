@@ -30,6 +30,7 @@ import { DEFAULT_USERS, UserProfile, xpToRole } from '../../types/user';
 import { LeaderboardDrawer } from '../workspace/LeaderboardDrawer';
 import { ResetAccountModal } from './ResetAccountModal';
 import { PrerequisiteModal } from '../workspace/PrerequisiteModal';
+import { AuthModal } from '../workspace/AuthModal';
 import { checkLessonAccess, LessonPrerequisiteInfo } from '../../lib/curriculumAccess';
 
 // ── Chapter metadata for the 12-chapter curriculum ──────────────────────────
@@ -189,7 +190,11 @@ export function BootDevTopBar() {
     completedLevelIds,
     activeExerciseId,
     switchExercise,
+    isAuthModalOpen,
+    setIsAuthModalOpen,
   } = useWorkspaceStore();
+
+  const isAuthed = (typeof window !== 'undefined' && localStorage.getItem('bf_is_authenticated') === 'true') || (!currentUser?.isGuest && currentUser?.id !== 'guest');
 
   const router = useRouter();
   const pathname = usePathname();
@@ -262,7 +267,7 @@ export function BootDevTopBar() {
     const targetLessons = (ALL_CURRICULUM_CHAPTERS as any)[chNum] || [];
     if (targetLessons.length === 0) return;
 
-    const access = checkLessonAccess(chNum, 1, completedLevelIds, devModeUnlockedAll);
+    const access = checkLessonAccess(chNum, 1, completedLevelIds, devModeUnlockedAll, isAuthed);
     // Find learner's first incomplete lesson in this chapter, or default to lesson 1
     let targetLesson = targetLessons[0];
     for (const l of targetLessons) {
@@ -294,7 +299,7 @@ export function BootDevTopBar() {
     if (!targetLesson) return;
 
     const isCompleted = isLessonDone(targetLesson.id);
-    const access = checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll);
+    const access = checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll, isAuthed);
     if (access.isUnlocked || isCompleted) {
       setActiveChapter(currentChapterNum);
       setActiveLesson(lessonNum);
@@ -337,7 +342,7 @@ export function BootDevTopBar() {
       const nextLessons = (ALL_CURRICULUM_CHAPTERS as any)[nextChNum] || [];
       if (nextLessons[0]) {
         const isNextCompleted = isLessonDone(nextLessons[0].id);
-        const access = checkLessonAccess(nextChNum, 1, completedLevelIds, devModeUnlockedAll);
+        const access = checkLessonAccess(nextChNum, 1, completedLevelIds, devModeUnlockedAll, isAuthed);
         if (access.isUnlocked || isNextCompleted) {
           handleSelectChapter(nextChNum);
         } else if (access.prerequisite) {
@@ -359,7 +364,7 @@ export function BootDevTopBar() {
         isLessonDone(
           ((ALL_CURRICULUM_CHAPTERS as any)[nextTarget.ch] || [])[nextTarget.l - 1]?.id || ''
         ) ||
-        checkLessonAccess(nextTarget.ch, nextTarget.l, completedLevelIds, devModeUnlockedAll).isUnlocked
+        checkLessonAccess(nextTarget.ch, nextTarget.l, completedLevelIds, devModeUnlockedAll, isAuthed).isUnlocked
       )
     : false;
 
@@ -498,7 +503,7 @@ export function BootDevTopBar() {
             const lessonObj = (ALL_CURRICULUM_CHAPTERS as any)[currentChapterNum]?.[idx];
             const isCompleted = lessonObj ? isLessonDone(lessonObj.id) : false;
             const isActive = lessonNum === currentLessonNum;
-            const access = checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll);
+            const access = checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll, isAuthed);
             const isUnlocked = access.isUnlocked || isCompleted;
             return (
               <React.Fragment key={lessonNum}>
@@ -598,7 +603,7 @@ export function BootDevTopBar() {
                 <div className="max-h-80 overflow-y-auto py-1">
                   {CHAPTERS.map((ch) => {
                     const isSelected = ch.num === currentChapterNum;
-                    const isUnlocked = checkLessonAccess(ch.num, 1, completedLevelIds, devModeUnlockedAll).isUnlocked;
+                    const isUnlocked = checkLessonAccess(ch.num, 1, completedLevelIds, devModeUnlockedAll, isAuthed).isUnlocked;
                     return (
                       <button
                         key={ch.num}
@@ -694,7 +699,7 @@ export function BootDevTopBar() {
                     const isSelected = lessonNum === currentLessonNum;
                     const lessonObj = ALL_CURRICULUM_CHAPTERS[currentChapterNum]?.[idx];
                     const isCompleted = lessonObj ? isLessonDone(lessonObj.id) : false;
-                    const isUnlocked = isCompleted || checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll).isUnlocked;
+                    const isUnlocked = isCompleted || checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll, isAuthed).isUnlocked;
                     const isIncident = lessonObj?.lessonType === 'incident_triage' || !!lessonObj?.incidentAlert;
                     return (
                       <button
@@ -1277,7 +1282,7 @@ export function BootDevTopBar() {
             <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
               {CHAPTERS.map((ch) => {
                 const isSelected = ch.num === currentChapterNum;
-                const isUnlocked = checkLessonAccess(ch.num, 1, completedLevelIds, devModeUnlockedAll).isUnlocked;
+                const isUnlocked = checkLessonAccess(ch.num, 1, completedLevelIds, devModeUnlockedAll, isAuthed).isUnlocked;
                 return (
                   <button
                     key={ch.num}
@@ -1317,7 +1322,7 @@ export function BootDevTopBar() {
                 const isSelected = lessonNum === currentLessonNum;
                 const lessonObj = ALL_CURRICULUM_CHAPTERS[currentChapterNum]?.[idx];
                 const isCompleted = lessonObj ? isLessonDone(lessonObj.id) : false;
-                const isUnlocked = isCompleted || checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll).isUnlocked;
+                const isUnlocked = isCompleted || checkLessonAccess(currentChapterNum, lessonNum, completedLevelIds, devModeUnlockedAll, isAuthed).isUnlocked;
                 return (
                   <button
                     key={lessonNum}
@@ -1397,6 +1402,10 @@ export function BootDevTopBar() {
           message={prereqModalData.message}
           isDark={isDark}
           onClose={() => setIsPrereqModalOpen(false)}
+          onOpenAuthModal={() => {
+            setIsPrereqModalOpen(false);
+            setIsAuthModalOpen(true);
+          }}
           onGoToPrerequisite={(lessonId) => {
             const targetChNum = prereqModalData.prereqChapterNum;
             const targetLessons = (ALL_CURRICULUM_CHAPTERS as any)[targetChNum] || [];
@@ -1410,6 +1419,12 @@ export function BootDevTopBar() {
           }}
         />
       )}
+
+      {/* Neon Auth Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+      />
     </>
   );
 }

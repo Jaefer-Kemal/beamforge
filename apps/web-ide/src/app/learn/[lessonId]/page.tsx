@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Lock, ArrowRight } from 'lucide-react';
+import { Lock, ArrowRight, Sparkles } from 'lucide-react';
 import { BootDevTopBar } from '../../../components/navigation/BootDevTopBar';
 import { checkLessonAccessById } from '../../../lib/curriculumAccess';
 import { LessonSplitView } from '../../../components/workspace/LessonSplitView';
@@ -39,6 +39,8 @@ export default function LessonPage() {
     celebrationBadge,
     isBadgeCelebrationOpen,
     closeBadgeCelebration,
+    isAuthModalOpen,
+    setIsAuthModalOpen,
     isHydrated,
     hydrateFromStorageAndDb,
   } = useWorkspaceStore();
@@ -50,11 +52,13 @@ export default function LessonPage() {
     hydrateFromStorageAndDb();
   }, [hydrateFromStorageAndDb]);
 
+  const isAuthed = (typeof window !== 'undefined' && localStorage.getItem('bf_is_authenticated') === 'true') || (!currentUser?.isGuest && currentUser?.id !== 'guest');
+
   // Check if current route lesson is unlocked
   const currentAccess = useMemo(() => {
     if (!rawLessonId) return { isUnlocked: true };
-    return checkLessonAccessById(rawLessonId, completedLevelIds, devModeUnlockedAll);
-  }, [rawLessonId, completedLevelIds, devModeUnlockedAll]);
+    return checkLessonAccessById(rawLessonId, completedLevelIds, devModeUnlockedAll, isAuthed);
+  }, [rawLessonId, completedLevelIds, devModeUnlockedAll, isAuthed]);
 
   // Sync route params with store state (responds strictly to URL changes, preventing bounce loops)
   useEffect(() => {
@@ -144,16 +148,29 @@ export default function LessonPage() {
             </p>
           </div>
 
-          <button
-            onClick={() => router.push(`/learn/${currentAccess.prerequisite!.prereqLessonId}`)}
-            className="flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1 cursor-pointer"
-            style={{
-              background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
-            }}
-          >
-            <span>Go to Prerequisite</span>
-            <ArrowRight className="w-3 h-3" />
-          </button>
+          {currentAccess.prerequisite.type === 'auth_required' ? (
+            <button
+              onClick={() => setIsAuthModalOpen(true)}
+              className="flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5 cursor-pointer"
+              style={{
+                background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+              }}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+              <span>Sign In to Unlock</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => router.push(`/learn/${currentAccess.prerequisite!.prereqLessonId}`)}
+              className="flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1 cursor-pointer"
+              style={{
+                background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+              }}
+            >
+              <span>Go to Prerequisite</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          )}
         </div>
       )}
 

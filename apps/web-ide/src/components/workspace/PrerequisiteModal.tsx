@@ -1,11 +1,11 @@
 'use client';
 
 import React from 'react';
-import { Lock, X, ArrowRight, Eye, ShieldAlert, BookOpen } from 'lucide-react';
+import { Lock, X, ArrowRight, Eye, ShieldAlert, BookOpen, Sparkles } from 'lucide-react';
 
 export interface PrerequisiteModalProps {
   isOpen: boolean;
-  type?: 'same_chapter' | 'previous_chapter';
+  type?: 'same_chapter' | 'previous_chapter' | 'auth_required';
   targetChapterNum: number;
   targetChapterTitle: string;
   targetLessonNum?: number;
@@ -18,6 +18,7 @@ export interface PrerequisiteModalProps {
   isDark: boolean;
   onClose: () => void;
   onGoToPrerequisite: (lessonId: string) => void;
+  onOpenAuthModal?: () => void;
 }
 
 export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
@@ -35,9 +36,11 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
   isDark,
   onClose,
   onGoToPrerequisite,
+  onOpenAuthModal,
 }) => {
   if (!isOpen) return null;
 
+  const isAuthRequired = type === 'auth_required';
   const isSameChapter = type === 'same_chapter' || prerequisiteChapterNum === targetChapterNum;
 
   return (
@@ -46,10 +49,16 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
         className="w-full max-w-md rounded-2xl p-6 shadow-2xl relative overflow-hidden animate-scale-up"
         style={{
           background: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.98)',
-          border: isDark ? '1px solid rgba(139, 92, 246, 0.35)' : '1px solid rgba(124, 58, 237, 0.30)',
+          border: isAuthRequired
+            ? (isDark ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid rgba(245, 158, 11, 0.30)')
+            : (isDark ? '1px solid rgba(139, 92, 246, 0.35)' : '1px solid rgba(124, 58, 237, 0.30)'),
           boxShadow: isDark
-            ? '0 24px 60px rgba(0, 0, 0, 0.8), 0 0 35px rgba(139, 92, 246, 0.20)'
-            : '0 20px 50px rgba(0, 0, 0, 0.12), 0 0 30px rgba(139, 92, 246, 0.12)',
+            ? (isAuthRequired
+                ? '0 24px 60px rgba(0, 0, 0, 0.8), 0 0 35px rgba(245, 158, 11, 0.20)'
+                : '0 24px 60px rgba(0, 0, 0, 0.8), 0 0 35px rgba(139, 92, 246, 0.20)')
+            : (isAuthRequired
+                ? '0 20px 50px rgba(0, 0, 0, 0.12), 0 0 30px rgba(245, 158, 11, 0.12)'
+                : '0 20px 50px rgba(0, 0, 0, 0.12), 0 0 30px rgba(139, 92, 246, 0.12)'),
         }}
       >
         {/* Close Button */}
@@ -66,26 +75,34 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
           <div
             className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-inner"
             style={{
-              background: 'rgba(139, 92, 246, 0.15)',
-              border: '1px solid rgba(139, 92, 246, 0.35)',
-              color: '#A78BFA',
+              background: isAuthRequired ? 'rgba(245, 158, 11, 0.15)' : 'rgba(139, 92, 246, 0.15)',
+              border: isAuthRequired ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid rgba(139, 92, 246, 0.35)',
+              color: isAuthRequired ? '#F59E0B' : '#A78BFA',
             }}
           >
-            <Lock className="w-5 h-5 text-purple-400" />
+            {isAuthRequired ? (
+              <Sparkles className="w-5 h-5 text-amber-500" />
+            ) : (
+              <Lock className="w-5 h-5 text-purple-400" />
+            )}
           </div>
           <div className="pr-6">
             <h3
               className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-100"
             >
-              {isSameChapter
+              {isAuthRequired
+                ? `Chapter ${targetChapterNum} Requires Free Account`
+                : isSameChapter
                 ? `Lesson ${targetLessonNum || 1} is Locked`
                 : `Chapter ${targetChapterNum} Prerequisite`}
             </h3>
             <p
               className="text-xs font-medium mt-0.5"
-              style={{ color: isDark ? '#C4B5FD' : '#7C3AED' }}
+              style={{ color: isAuthRequired ? (isDark ? '#FBBF24' : '#D97706') : (isDark ? '#C4B5FD' : '#7C3AED') }}
             >
-              {isSameChapter
+              {isAuthRequired
+                ? 'Chapters 1–4 Free Forever • Sign In for Cloud Progress'
+                : isSameChapter
                 ? targetLessonTitle || `Chapter ${targetChapterNum} • ${targetChapterTitle}`
                 : `Chapter ${targetChapterNum}: ${targetChapterTitle}`}
             </p>
@@ -96,45 +113,72 @@ export const PrerequisiteModal: React.FC<PrerequisiteModalProps> = ({
         <div
           className="rounded-xl p-3.5 mb-5 text-xs leading-relaxed"
           style={{
-            background: isDark ? 'rgba(139, 92, 246, 0.08)' : 'rgba(124, 58, 237, 0.05)',
-            border: isDark ? '1px solid rgba(139, 92, 246, 0.20)' : '1px solid rgba(124, 58, 237, 0.20)',
+            background: isAuthRequired
+              ? (isDark ? 'rgba(245, 158, 11, 0.08)' : 'rgba(245, 158, 11, 0.05)')
+              : (isDark ? 'rgba(139, 92, 246, 0.08)' : 'rgba(124, 58, 237, 0.05)'),
+            border: isAuthRequired
+              ? (isDark ? '1px solid rgba(245, 158, 11, 0.20)' : '1px solid rgba(245, 158, 11, 0.20)')
+              : (isDark ? '1px solid rgba(139, 92, 246, 0.20)' : '1px solid rgba(124, 58, 237, 0.20)'),
             color: isDark ? '#E2E8F0' : '#334155',
           }}
         >
           {message ||
-            (isSameChapter
+            (isAuthRequired
+              ? `Chapters 1 through 4 are 100% free for everyone. Sign in with Google or Email to unlock Chapter ${targetChapterNum} and save your progress to the cloud.`
+              : isSameChapter
               ? `This lesson requires mastering the concepts introduced in Lesson ${prerequisiteLessonNum || 1} first. Complete the earlier lessons in Chapter ${targetChapterNum} to unlock it.`
               : `Chapter ${targetChapterNum} builds directly upon concepts from Chapter ${prerequisiteChapterNum}. Complete the Chapter ${prerequisiteChapterNum} Problem Set before advancing.`)}
         </div>
 
         {/* Action Choices */}
         <div className="flex flex-col gap-2.5">
-          {/* Prerequisite Jump Button */}
-          <button
-            onClick={() => {
-              onGoToPrerequisite(prerequisiteLessonId);
-              onClose();
-            }}
-            className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all hover:brightness-110 shadow-md text-white"
-            style={{
-              background: 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
-              boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
-            }}
-          >
-            <div className="flex items-center gap-2 truncate pr-2">
-              {isSameChapter ? (
-                <BookOpen className="w-4 h-4 text-blue-200 flex-shrink-0" />
-              ) : (
-                <ShieldAlert className="w-4 h-4 text-blue-200 flex-shrink-0" />
-              )}
-              <span className="truncate">
-                {isSameChapter
-                  ? `Go to Lesson ${prerequisiteLessonNum || 1}: ${prerequisiteLessonTitle || 'Prerequisite'}`
-                  : `Complete CH${prerequisiteChapterNum} Problem Set`}
-              </span>
-            </div>
-            <ArrowRight className="w-3.5 h-3.5 flex-shrink-0" />
-          </button>
+          {isAuthRequired ? (
+            <button
+              onClick={() => {
+                onClose();
+                if (onOpenAuthModal) {
+                  onOpenAuthModal();
+                }
+              }}
+              className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all hover:brightness-110 shadow-md text-white"
+              style={{
+                background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+                boxShadow: '0 4px 14px rgba(245, 158, 11, 0.35)',
+              }}
+            >
+              <div className="flex items-center gap-2 truncate pr-2">
+                <Sparkles className="w-4 h-4 text-amber-200 flex-shrink-0" />
+                <span className="truncate">Sign In with Google or Email (Free)</span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 flex-shrink-0" />
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                onGoToPrerequisite(prerequisiteLessonId);
+                onClose();
+              }}
+              className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all hover:brightness-110 shadow-md text-white"
+              style={{
+                background: 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
+                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
+              }}
+            >
+              <div className="flex items-center gap-2 truncate pr-2">
+                {isSameChapter ? (
+                  <BookOpen className="w-4 h-4 text-blue-200 flex-shrink-0" />
+                ) : (
+                  <ShieldAlert className="w-4 h-4 text-blue-200 flex-shrink-0" />
+                )}
+                <span className="truncate">
+                  {isSameChapter
+                    ? `Go to Lesson ${prerequisiteLessonNum || 1}: ${prerequisiteLessonTitle || 'Prerequisite'}`
+                    : `Complete CH${prerequisiteChapterNum} Problem Set`}
+                </span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 flex-shrink-0" />
+            </button>
+          )}
         </div>
       </div>
     </div>

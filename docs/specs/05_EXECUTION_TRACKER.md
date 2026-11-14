@@ -4240,6 +4240,29 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npx tsc --noEmit` in `apps/web-ide`: Passed with 0 errors.
   - `npm run build` in `apps/web-ide`: Passed with 0 errors (`/api/auth/[...path]` compiled as dynamic route, all static routes compiled cleanly).
 
+## Phase 254: Step 3 — Chapter 4 Free Tier Boundary & AuthModal / PrerequisiteModal Integration
+- [x] **254.1: User Profile Guest Mode Schema (`user.ts`)**:
+  - Updated `UserProfile` in `apps/web-ide/src/types/user.ts` to include `email?: string`, `avatarUrl?: string`, and `isGuest?: boolean`.
+  - Defined `GUEST_USER` with `id: 'guest'`, `name: 'Guest Explorer'`, `role: 'BEAM Explorer'`, and `isGuest: true`.
+- [x] **254.2: Chapter 4 Free Tier Boundary Enforcement (`curriculumAccess.ts`)**:
+  - Added `'auth_required'` to `PrerequisiteType`.
+  - Updated `checkLessonAccess` and `checkLessonAccessById` with `isAuthenticated?: boolean` parameter.
+  - If `chapterNum > 4 && !authed`, access is locked with `type: 'auth_required'`, providing a clear call to action to sign in with Google or Email to unlock Chapters 5–12 and persist progress to the cloud. Chapters 1 through 4 remain 100% free and open for all guest learners.
+- [x] **254.3: Apple Glassmorphic AuthModal (`AuthModal.tsx`)**:
+  - Created `apps/web-ide/src/components/workspace/AuthModal.tsx` styled with Apple light & dark glassmorphic surfaces (`backdrop-blur-2xl`, subtle glowing borders, and rounded corners).
+  - Built interactive tabs for "Create Free Account" and "Welcome Back" with Google OAuth and Email/Password flows powered by `@neon/auth/next`.
+  - Wired immediate post-login state persistence and cloud hydration (`hydrateFromStorageAndDb`).
+- [x] **254.4: Prerequisite Modal Auth Branching (`PrerequisiteModal.tsx`)**:
+  - Added `type === 'auth_required'` handling in `apps/web-ide/src/components/workspace/PrerequisiteModal.tsx`.
+  - Renders an amber sparkles lock banner explaining the guest tier boundary and a direct `"Sign In with Google or Email (Free)"` CTA button invoking `onOpenAuthModal`.
+- [x] **254.5: Global TopBar, Lesson Split View & World Map Integration**:
+  - Updated `apps/web-ide/src/components/navigation/BootDevTopBar.tsx` to pass `isAuthed` to all access checks, connect `PrerequisiteModal`'s `onOpenAuthModal` callback, and mount the authoritative `<AuthModal />`.
+  - Updated `apps/web-ide/src/app/learn/[lessonId]/page.tsx` locked banner to display `"Sign In to Unlock"` when access fails due to `auth_required`.
+  - Updated `apps/web-ide/src/components/curriculum/CurriculumWorldMap.tsx` chapter header pills to display `"Sign In Required"` for Chapters 5–12 when unauthenticated, and connected `onOpenAuthModal`.
+- [x] **254.6: Multi-Compiler Verification**:
+  - `npx tsc --noEmit` in `apps/web-ide`: Passed with 0 errors.
+  - `npm run build` in `apps/web-ide`: Passed with 0 errors across all 8 static and dynamic routes.
+
 
 
 

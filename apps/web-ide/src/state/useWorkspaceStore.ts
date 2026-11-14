@@ -26,7 +26,7 @@ import {
 } from '../data/curriculumCatalog';
 import { wsMux, WSConnectionStatus, WSResponseFrame } from '../lib/ws-multiplexer';
 import { ORCHESTRATOR_HTTP_URL, getOrchestratorHttpUrl } from '../lib/orchestratorConfig';
-import { UserProfile, DEFAULT_USERS, xpToRole } from '../types/user';
+import { UserProfile, DEFAULT_USERS, GUEST_USER, xpToRole } from '../types/user';
 import { triggerCelebrationConfetti } from '../lib/confetti';
 import { Badge, BADGE_CATALOG, isBadgeUnlocked } from '../types/badges';
 import type { UserSubmissionRecord } from '../types/submissions';
@@ -209,6 +209,8 @@ interface WorkspaceState {
   isBadgeCelebrationOpen: boolean;
   openBadgeCelebration: (badge: Badge) => void;
   closeBadgeCelebration: () => void;
+  isAuthModalOpen: boolean;
+  setIsAuthModalOpen: (open: boolean) => void;
   isSuccessToastOpen: boolean;
   successToastData: SuccessToastData | null;
   openSuccessToast: (data: SuccessToastData) => void;
@@ -401,29 +403,29 @@ const syncUserToStorageAndDb = (user: UserProfile) => {
 
 const loadInitialUser = (): UserProfile => {
   if (typeof window === 'undefined') {
-    return DEFAULT_USERS['user_alpha'];
+    return GUEST_USER;
   }
   try {
-    const currentUserId = localStorage.getItem('bf_current_user_id') || 'user_alpha';
+    const isAuthed = localStorage.getItem('bf_is_authenticated') === 'true';
+    const currentUserId = localStorage.getItem('bf_current_user_id');
+
+    if (!currentUserId || !isAuthed) {
+      const cachedGuest = localStorage.getItem('beamforge_user_guest');
+      if (cachedGuest) {
+        try {
+          return JSON.parse(cachedGuest);
+        } catch {}
+      }
+      return GUEST_USER;
+    }
+
     const cached = localStorage.getItem(`beamforge_user_${currentUserId}`);
     if (cached) {
       return JSON.parse(cached);
     }
-    // Backward compatibility with legacy beamforge_progress
-    const legacyRaw = localStorage.getItem('beamforge_progress');
-    if (legacyRaw && currentUserId === 'user_alpha') {
-      const parsed = JSON.parse(legacyRaw);
-      const user: UserProfile = {
-        ...DEFAULT_USERS['user_alpha'],
-        completedLevelIds: parsed.completedLevelIds || DEFAULT_USERS['user_alpha'].completedLevelIds,
-        totalXp: parsed.totalXp ?? DEFAULT_USERS['user_alpha'].totalXp,
-        unlockedSolutionLessonIds: parsed.unlockedSolutionLessonIds || [],
-      };
-      return user;
-    }
-    return DEFAULT_USERS[currentUserId] || DEFAULT_USERS['user_alpha'];
+    return DEFAULT_USERS[currentUserId] || GUEST_USER;
   } catch {
-    return DEFAULT_USERS['user_alpha'];
+    return GUEST_USER;
   }
 };
 
@@ -914,6 +916,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     isBadgeCelebrationOpen: false,
     openBadgeCelebration: (badge: Badge) => set({ celebrationBadge: badge, isBadgeCelebrationOpen: true }),
     closeBadgeCelebration: () => set({ isBadgeCelebrationOpen: false, celebrationBadge: null }),
+    isAuthModalOpen: false,
+    setIsAuthModalOpen: (open: boolean) => set({ isAuthModalOpen: open }),
     isSuccessToastOpen: false,
     successToastData: null,
     openSuccessToast: (data: SuccessToastData) => set({ isSuccessToastOpen: true, successToastData: data }),

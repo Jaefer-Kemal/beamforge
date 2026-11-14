@@ -1,7 +1,7 @@
 import { ALL_CURRICULUM_CHAPTERS, ALL_LESSONS_FLAT, getLessonById } from '../data/curriculumCatalog';
 import { CHAPTERS } from '../components/navigation/BootDevTopBar';
 
-export type PrerequisiteType = 'same_chapter' | 'previous_chapter';
+export type PrerequisiteType = 'same_chapter' | 'previous_chapter' | 'auth_required';
 
 export interface LessonPrerequisiteInfo {
   type: PrerequisiteType;
@@ -26,6 +26,8 @@ export interface LessonAccessResult {
  * Checks whether a specific chapter and lesson are unlocked based on user progress.
  * Enforces sequential pedagogical progression:
  * - Chapter 1 Lesson 1 is always unlocked for everyone.
+ * - Chapters 1 through 4 are 100% free for Guest learners.
+ * - Chapter 5 through 12 require an authenticated account.
  * - For Chapter N (N > 1), Chapter N-1's final lesson (Problem Set) must be completed.
  * - For Lesson K (K > 1) within an accessible chapter, Lesson K-1 in the SAME chapter must be completed.
  * - Dev/Tester Mode bypasses all locks.
@@ -34,7 +36,8 @@ export function checkLessonAccess(
   chapterNum: number,
   lessonNum: number,
   completedLevelIds: string[] = [],
-  devModeUnlockedAll = false
+  devModeUnlockedAll = false,
+  isAuthenticated?: boolean
 ): LessonAccessResult {
   // Dev mode or tester mode unlocks everything
   if (devModeUnlockedAll) {
@@ -52,6 +55,39 @@ export function checkLessonAccess(
   const targetLesson = currChapterLessons[lessonNum - 1];
   const targetLessonId = targetLesson?.id || `ch0${chapterNum}-l0${lessonNum}`;
   const targetLessonTitle = targetLesson?.title || `Lesson ${lessonNum}`;
+
+  // Check authentication status for Chapter 5+
+  let authed = isAuthenticated;
+  if (authed === undefined && typeof window !== 'undefined') {
+    try {
+      const isAuthStorage = localStorage.getItem('bf_is_authenticated');
+      const uid = localStorage.getItem('bf_current_user_id');
+      // If explicitly marked authenticated, or using an authenticated profile
+      authed = isAuthStorage === 'true' || (Boolean(uid) && uid !== 'guest' && !uid?.startsWith('guest_'));
+    } catch {
+      authed = false;
+    }
+  }
+
+  // Chapter 5+ requires an account
+  if (chapterNum > 4 && !authed) {
+    return {
+      isUnlocked: false,
+      prerequisite: {
+        type: 'auth_required',
+        targetChapterNum: chapterNum,
+        targetChapterTitle,
+        targetLessonNum: lessonNum,
+        targetLessonId,
+        targetLessonTitle,
+        prereqChapterNum: 4,
+        prereqLessonId: 'ch04-l08',
+        prereqLessonTitle: 'Chapter 4 Capstone Problem Set',
+        prereqLessonNum: 8,
+        message: `Chapter ${chapterNum} (${targetChapterTitle}) is locked for Guest Learners. Sign in with Google or Email to unlock Chapters 5–12 and save your progress to the cloud.`,
+      },
+    };
+  }
 
   // Combine passed completedLevelIds with immediate user-scoped local storage cache
   let effectiveCompleted = [...(completedLevelIds || [])];
@@ -149,13 +185,14 @@ export function checkLessonAccess(
 export function checkLessonAccessById(
   lessonId: string,
   completedLevelIds: string[] = [],
-  devModeUnlockedAll = false
+  devModeUnlockedAll = false,
+  isAuthenticated?: boolean
 ): LessonAccessResult {
   if (devModeUnlockedAll) return { isUnlocked: true };
   if (completedLevelIds && completedLevelIds.includes(lessonId)) return { isUnlocked: true };
   if (typeof window !== 'undefined') {
     try {
-      const uid = localStorage.getItem('bf_current_user_id') || 'user_alpha';
+      const uid = localStorage.getItem('bf_current_user_id') || 'guest';
       if (localStorage.getItem(`beamforge_completed_${uid}_${lessonId}`) === 'true') {
         return { isUnlocked: true };
       }
@@ -173,6 +210,6 @@ export function checkLessonAccessById(
   if (!lesson) {
     return { isUnlocked: true };
   }
-  return checkLessonAccess(lesson.chapterNumber, lesson.lessonNumber, completedLevelIds, devModeUnlockedAll);
+  return checkLessonAccess(lesson.chapterNumber, lesson.lessonNumber, completedLevelIds, devModeUnlockedAll, isAuthenticated);
 }
 

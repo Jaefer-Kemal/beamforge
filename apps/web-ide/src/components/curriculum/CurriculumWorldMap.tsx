@@ -258,7 +258,11 @@ export function CurriculumWorldMap() {
     devModeUnlockedAll,
     toggleDevModeUnlockedAll,
     isHydrated,
+    currentUser,
+    setIsAuthModalOpen,
   } = useWorkspaceStore();
+
+  const isAuthed = (typeof window !== 'undefined' && localStorage.getItem('bf_is_authenticated') === 'true') || (!currentUser?.isGuest && currentUser?.id !== 'guest');
 
   const router = useRouter();
   const isDark = theme === 'dark';
@@ -309,7 +313,7 @@ export function CurriculumWorldMap() {
 
   // Navigate directly to selected lesson
   const handleSelectLesson = (chNum: number, lessonNum: number, lessonId: string) => {
-    const access = checkLessonAccess(chNum, lessonNum, completedLevelIds, devModeUnlockedAll);
+    const access = checkLessonAccess(chNum, lessonNum, completedLevelIds, devModeUnlockedAll, isAuthed);
     if (isHydrated && !access.isUnlocked && access.prerequisite) {
       setPrereqModalData(access.prerequisite);
       setIsPrereqModalOpen(true);
@@ -627,6 +631,7 @@ export function CurriculumWorldMap() {
 
                         const isChapterUnlocked = (() => {
                           if (devModeUnlockedAll || chNum === 1) return true;
+                          if (chNum > 4 && !isAuthed) return false;
                           const prevChapterLessons = (ALL_CURRICULUM_CHAPTERS as any)[chNum - 1] || [];
                           if (prevChapterLessons.length === 0) return true;
                           const prevFinalLesson = prevChapterLessons[prevChapterLessons.length - 1];
@@ -654,15 +659,21 @@ export function CurriculumWorldMap() {
                                   {chapterInfo?.title || `Chapter ${chNum}`}
                                 </h3>
                                 {!isChapterUnlocked && !devModeUnlockedAll && (
-                                  <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border opacity-70 shrink-0"
+                                  <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0"
                                     style={{
-                                      background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)',
-                                      borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.10)',
-                                      color: isDark ? '#94A3B8' : '#64748B',
+                                      background: chNum > 4 && !isAuthed
+                                        ? (isDark ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.10)')
+                                        : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)'),
+                                      borderColor: chNum > 4 && !isAuthed
+                                        ? (isDark ? 'rgba(245,158,11,0.30)' : 'rgba(245,158,11,0.25)')
+                                        : (isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.10)'),
+                                      color: chNum > 4 && !isAuthed
+                                        ? (isDark ? '#FBBF24' : '#D97706')
+                                        : (isDark ? '#94A3B8' : '#64748B'),
                                     }}
                                   >
                                     <Lock className="w-2.5 h-2.5" />
-                                    <span>Prerequisite: CH{chNum - 1}</span>
+                                    <span>{chNum > 4 && !isAuthed ? 'Sign In Required' : `Prerequisite: CH${chNum - 1}`}</span>
                                   </span>
                                 )}
                                 {isCurrentChapter && (
@@ -684,7 +695,7 @@ export function CurriculumWorldMap() {
                               {lessons.map((lesson: any) => {
                                 const isCompleted = completedLevelIds.includes(lesson.id);
                                 const isCurrent = activeChapter === chNum && activeLesson === lesson.lessonNumber;
-                                const access = checkLessonAccess(chNum, lesson.lessonNumber, completedLevelIds, devModeUnlockedAll);
+                                const access = checkLessonAccess(chNum, lesson.lessonNumber, completedLevelIds, devModeUnlockedAll, isAuthed);
                                 const isAccessible = !isHydrated || access.isUnlocked || isCompleted || isCurrent;
 
                                 return (
@@ -840,6 +851,10 @@ export function CurriculumWorldMap() {
           message={prereqModalData.message}
           isDark={isDark}
           onClose={() => setIsPrereqModalOpen(false)}
+          onOpenAuthModal={() => {
+            setIsPrereqModalOpen(false);
+            setIsAuthModalOpen(true);
+          }}
           onGoToPrerequisite={(lessonId) => {
             const targetChNum = prereqModalData.prereqChapterNum;
             const targetLessons = (ALL_CURRICULUM_CHAPTERS as any)[targetChNum] || [];

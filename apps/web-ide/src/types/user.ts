@@ -1,6 +1,9 @@
 export interface UserProfile {
   id: string;
   name: string;
+  email?: string;
+  avatarUrl?: string;
+  isGuest?: boolean;
   role: string;
   level: number;
   avatarColor: string;
@@ -13,6 +16,21 @@ export interface UserProfile {
   lastActivityDate?: string;
   badges?: string[];
 }
+
+export const GUEST_USER: UserProfile = {
+  id: 'guest',
+  name: 'Guest Learner',
+  isGuest: true,
+  role: 'BEAM Newcomer',
+  level: 1,
+  avatarColor: '#64748B',
+  bio: 'Exploring Erlang & OTP in Guest Mode (Chapters 1–4 Free).',
+  completedLevelIds: [],
+  totalXp: 0,
+  unlockedSolutionLessonIds: [],
+  lastActiveExercise: 'ch01-l01',
+  streakDays: 1,
+};
 
 /**
  * Single Canonical Source of Truth for XP, Level (1-7), and Role titles across BeamForge.
