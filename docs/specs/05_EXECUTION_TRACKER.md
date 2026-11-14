@@ -4312,6 +4312,20 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Go Orchestrator compile & tests (`go build ./...`, `go test ./...`): 0 errors.
   - Erlang Grader harness compilation (`erlc -o ebin apps/bf_grader/src/*.erl`): 0 errors.
 
+## Phase 258: Cloud Production Deployment (Vercel & Render) & Zero-Leak Secret Sanitization
+- [x] **258.1: Vercel Environment Variables Synchronization**:
+  - Replicated all 6 required runtime and build-time environment variables across Production, Preview, and Development environments for both `beamforge` (`prj_O6n3qdyBs2yiAOgkZ07TOqssidO7`) and `web-ide` (`prj_unoJ59Q81PS6ocUApYdiZTPmDvry`): `DATABASE_URL` (Secret), `NEON_AUTH_COOKIE_SECRET` (Secret), `NEON_AUTH_BASE_URL` (Config), `NEXT_PUBLIC_NEON_AUTH_BASE_URL` (Config), `NEXT_PUBLIC_ORCHESTRATOR_URL` (Config), and `NEXT_PUBLIC_ORCHESTRATOR_WS_URL` (Config).
+- [x] **258.2: Render Orchestrator Backend Synchronization**:
+  - Configured Render web service `beamforge-orchestrator` (`srv-dblioqjbc2fs73ed02qg`) with full environment variables via Render REST API: `PORT`, `PROJECT_ROOT`, `MAX_CONCURRENT_WORKERS`, `ERL_FLAGS`, `DATABASE_URL`, `NEON_AUTH_BASE_URL`, and `NEON_AUTH_COOKIE_SECRET`.
+  - Restarted service and verified live health check at `https://beamforge-orchestrator.onrender.com/health` &rarr; HTTP 200 OK (`otp_release: 29`, `mode: native_beam_bridge`, `status: ok`).
+- [x] **258.3: Vercel Production Build & Deployment**:
+  - Added `.npmrc` with `legacy-peer-deps=true` to resolve `@neon/auth` peer dependencies cleanly in CI/CD.
+  - Deployed to Vercel production (`https://beamforge-eight.vercel.app`) with `readyState: READY`.
+  - Verified live endpoint with `vercel curl https://beamforge-eight.vercel.app` &rarr; HTTP 200 OK.
+- [x] **258.4: Zero-Leak Security Audit**:
+  - Removed fallback hardcoded secrets from `apps/web-ide/src/lib/auth/server.ts`.
+  - Audited full git history and working tree with `git grep` and `git check-ignore`. Verified zero exposed credentials, database passwords (`npg_*`), or Render tokens (`rnd_*`) across all tracked files.
+
 
 
 
