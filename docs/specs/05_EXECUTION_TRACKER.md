@@ -4387,11 +4387,14 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Created `CompilationWarningCard` displaying amber warning banner, warning count, pedagogical guidance, and clickable jump-to-location buttons with Lucide `AlertTriangle` and `ArrowRight` (zero emojis).
   - Added warning banner in the console drawer tab and updated the test results drawer subtitle (`Compiled with warnings (-Werror on Submit)`).
   - Applied matching warning card and marker logic across `CapstoneStudioView.tsx` for desktop and mobile views.
-- [x] **261.5: Multi-Compiler Verification**:
+- [x] **261.5: Multi-Compiler Verification & Production Deployment**:
   - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
   - Next.js Production Build (`npm run build`): 0 errors across all 9 routes.
   - Go Orchestrator package build (`go build ./...`): 0 errors.
   - Go Bridge test suite (`go test -v -run TestDualStrictness ./internal/bridge`): 3/3 passed.
+  - Vercel Frontend Production: Deployed to `https://beamforge-eight.vercel.app` (Deployment `dpl_6MdPr7b6zdnJgdhtHN36XKQwxzSH`, `readyState: READY`, HTTP 200 OK).
+  - Render Backend Production: Deployed to `https://beamforge-orchestrator.onrender.com` (Deploy `dep-dbtck6mi0phs73fbnsb0`, commit `d7ac267`, `status: live`).
+  - Live Render Dual Strictness API verified: `/api/v1/run` returns `compileOk: true` with warning diagnostics, and `/api/v1/verify` rejects unused variables with `verdict: FAILED`, `score: 0`, and `-Werror` remediation details.
 
 
 
