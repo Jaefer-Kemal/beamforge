@@ -140,15 +140,15 @@ extract_middle({_A, Middle, _C}) ->
 		t.Errorf("Expected compile stage status=failed, got: %s", compileStage.Status)
 	}
 
-	if !strings.Contains(compileStage.Details, "-Werror") {
-		t.Errorf("Expected compile stage details to mention -Werror, got: %s", compileStage.Details)
+	if !strings.Contains(compileStage.Details, "Compiler warning detected on Submit") {
+		t.Errorf("Expected compile stage details to mention compiler warning detected on submit, got: %s", compileStage.Details)
 	}
 
 	if !strings.Contains(compileStage.Details, "unused") {
 		t.Errorf("Expected compile stage details to mention unused variable, got: %s", compileStage.Details)
 	}
 
-	t.Logf("Verified Submit mode correctly rejected submission with -Werror details:\n%s", compileStage.Details)
+	t.Logf("Verified Submit mode correctly rejected submission with compiler warning details:\n%s", compileStage.Details)
 }
 
 func TestDualStrictness_CleanCodePassesSubmit(t *testing.T) {

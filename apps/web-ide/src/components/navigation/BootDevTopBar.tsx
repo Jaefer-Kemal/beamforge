@@ -178,6 +178,7 @@ export const LESSONS_PER_CHAPTER: Record<number, string[]> = {
 export function BootDevTopBar() {
   const {
     theme,
+    setTheme,
     toggleTheme,
     bootDevView,
     setBootDevView,
@@ -1064,7 +1065,7 @@ export function BootDevTopBar() {
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       id="theme-daylight-btn"
-                      onClick={() => { if (isDark) toggleTheme(); }}
+                      onClick={() => setTheme('light')}
                       className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${!isDark ? 'border shadow-xs' : 'opacity-60 hover:opacity-100'}`}
                       style={{
                         background: !isDark ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255,255,255,0.05)',
@@ -1077,7 +1078,7 @@ export function BootDevTopBar() {
                     </button>
                     <button
                       id="theme-midnight-btn"
-                      onClick={() => { if (!isDark) toggleTheme(); }}
+                      onClick={() => setTheme('dark')}
                       className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${isDark ? 'border shadow-xs' : 'opacity-60 hover:opacity-100'}`}
                       style={{
                         background: isDark ? 'rgba(139, 92, 246, 0.20)' : 'rgba(15,23,42,0.05)',

@@ -61,21 +61,6 @@ export function LandingNavbar() {
   }, [hydrateFromStorageAndDb]);
 
   useEffect(() => {
-    try {
-      const storedTheme = localStorage.getItem('bf_theme');
-      if (storedTheme === 'dark') {
-        useWorkspaceStore.setState({ theme: 'dark' });
-        document.documentElement.classList.add('dark');
-        document.documentElement.classList.add('theme-dark');
-      } else if (storedTheme === 'light') {
-        useWorkspaceStore.setState({ theme: 'light' });
-        document.documentElement.classList.remove('dark');
-        document.documentElement.classList.remove('theme-dark');
-      }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 20);
     };

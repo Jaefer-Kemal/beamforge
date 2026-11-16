@@ -318,7 +318,7 @@ function CompilationWarningCard({
       </div>
 
       <p className="text-xs mb-3 leading-relaxed" style={{ color: isDark ? '#FDE68A' : '#92400E' }}>
-        Tolerated on <strong>Run</strong> for iterative drafting, but will fail verification on <strong>Submit (-Werror)</strong>. In Erlang/OTP, prefix unused variables with an underscore (e.g. <code>_Var</code>) or use anonymous <code>_</code>.
+        Tolerated on <strong>Run</strong> for iterative drafting, but will fail verification on <strong>Submit</strong>. In Erlang/OTP, prefix unused variables with an underscore (e.g. <code>_Var</code>) or use anonymous <code>_</code>.
       </p>
 
       {/* Clickable jump-to-location buttons */}

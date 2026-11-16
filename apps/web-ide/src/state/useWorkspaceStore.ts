@@ -159,6 +159,7 @@ interface WorkspaceState {
 
   /** Dual-theme: 'light' (Daylight Frosted Glass) or 'dark' (Midnight Glass) */
   theme: AppTheme;
+  setTheme: (theme: AppTheme) => void;
   toggleTheme: () => void;
 
   /** Boot.dev top-bar view switcher: lesson workspace / syllabus */
@@ -599,15 +600,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     setActiveView: (view) => set({ activeView: view }),
 
     // ── Phase 2: Boot.dev Glassmorphic UI ─────────────────────────────────
-    theme: 'light' as AppTheme,
+    theme: (typeof window !== 'undefined' && localStorage.getItem('bf_theme') === 'dark' ? 'dark' : 'light') as AppTheme,
+    setTheme: (theme: AppTheme) => {
+      set({ theme });
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('bf_theme', theme);
+        document.documentElement.classList.toggle('dark', theme === 'dark');
+        document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+      }
+    },
     toggleTheme: () => {
       const next: AppTheme = get().theme === 'light' ? 'dark' : 'light';
-      set({ theme: next });
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('bf_theme', next);
-        document.documentElement.classList.toggle('dark', next === 'dark');
-        document.documentElement.classList.toggle('theme-dark', next === 'dark');
-      }
+      get().setTheme(next);
     },
 
     bootDevView: 'lesson',
@@ -933,6 +937,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     hydrateFromStorageAndDb: async () => {
       if (typeof window === 'undefined') return;
       try {
+        // Theme hydration: restore persisted preference from localStorage across all routes
+        const storedTheme = localStorage.getItem('bf_theme') as AppTheme | null;
+        if (storedTheme === 'dark' || storedTheme === 'light') {
+          set({ theme: storedTheme });
+          document.documentElement.classList.toggle('dark', storedTheme === 'dark');
+          document.documentElement.classList.toggle('theme-dark', storedTheme === 'dark');
+        }
+
         // 0. Detect active Neon Auth session (handles Google OAuth redirect & returning authenticated sessions)
         let currentUserId = localStorage.getItem('bf_current_user_id') || 'guest';
         try {

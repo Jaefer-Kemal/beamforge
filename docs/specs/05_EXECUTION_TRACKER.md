@@ -4396,6 +4396,25 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Render Backend Production: Deployed to `https://beamforge-orchestrator.onrender.com` (Deploy `dep-dbtck6mi0phs73fbnsb0`, commit `d7ac267`, `status: live`).
   - Live Render Dual Strictness API verified: `/api/v1/run` returns `compileOk: true` with warning diagnostics, and `/api/v1/verify` rejects unused variables with `verdict: FAILED`, `score: 0`, and `-Werror` remediation details.
 
+## Phase 262: Full Theme Persistence on Reload & Client Visual Sanitization
+- [x] **262.1: Unified Theme Persistence Across All Routes (`useWorkspaceStore.ts`)**:
+  - Centralized initial state: `theme` now initializes directly from `localStorage.getItem('bf_theme')` in the client environment with fallback to `'light'`.
+  - Added `setTheme: (theme: AppTheme) => void` method updating Zustand state, storing `'bf_theme'` in `localStorage`, and toggling `dark` and `theme-dark` classes on `document.documentElement`.
+  - Added theme hydration to `hydrateFromStorageAndDb()` ensuring page mounts and tab re-focus events reliably restore user theme preference on `/learn/[lessonId]`, `/syllabus`, and `/profile`.
+  - Removed fragmented, landing-page-only `useEffect` from `LandingNavbar.tsx`.
+- [x] **262.2: TopBar Explicit Theme Selection (`BootDevTopBar.tsx`)**:
+  - Updated Daylight and Midnight buttons to call explicit `setTheme('light')` and `setTheme('dark')` actions.
+- [x] **262.3: Client Visual Sanitization (Removal of Confusing `-Werror` Labels)**:
+  - Sanitized compiler failure and warning messages across the client IDE (`LessonSplitView.tsx`, `CapstoneStudioView.tsx`, and `erl_runner.go`):
+    - Changed `Compiler warning treated as error on Submit (-Werror):` to `Compiler warning detected on Submit:`.
+    - Changed Stage 1 Title `Module Compilation & Syntax (erlc -Werror)` to `Module Compilation & Syntax (erlc)`.
+    - Removed confusing `(-Werror on Submit)` mentions from warning cards and drawer subtitles, replacing with clear pedagogical instructions (`must be resolved before Submit`).
+- [x] **262.4: Multi-Compiler Verification**:
+  - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
+  - Next.js Production Build (`npm run build`): 0 errors across all 9 routes.
+  - Go Orchestrator package build (`go build ./...`): 0 errors.
+  - Go Bridge test suite (`go test -v -run TestDualStrictness ./internal/bridge`): 3/3 passed.
+
 
 
 

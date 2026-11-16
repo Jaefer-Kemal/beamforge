@@ -452,7 +452,7 @@ function CompilationWarningCard({
       </div>
 
       <p className="text-xs mb-3 leading-relaxed" style={{ color: isDark ? '#FDE68A' : '#92400E' }}>
-        Tolerated on <strong>Run</strong> for iterative drafting, but will fail verification on <strong>Submit (-Werror)</strong>. In Erlang/OTP, prefix unused variables with an underscore (e.g. <code>_Var</code>) or use anonymous <code>_</code>.
+        Tolerated on <strong>Run</strong> for iterative drafting, but will fail verification on <strong>Submit</strong>. In Erlang/OTP, prefix unused variables with an underscore (e.g. <code>_Var</code>) or use anonymous <code>_</code>.
       </p>
 
       {/* Clickable jump-to-location buttons */}
@@ -1803,7 +1803,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                     {runResult?.compileOk && (
                       runResult.diagnostics && runResult.diagnostics.some((d) => d.severity === 'warning') ? (
                         <span className="font-medium text-amber-500 flex items-center gap-1">
-                          <AlertTriangle className="w-3 h-3 text-amber-500" /> Compiled with warnings (-Werror on Submit)
+                          <AlertTriangle className="w-3 h-3 text-amber-500" /> Compiled with warnings (must be resolved before Submit)
                         </span>
                       ) : (
                         <span className="font-medium text-emerald-500 flex items-center gap-1">
@@ -1896,7 +1896,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                     >
                       <span className="flex items-center gap-1.5 font-sans font-semibold">
                         <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-                        <span>Compiled with warnings (-Werror on Submit). Prefix unused variables with &apos;_&apos;.</span>
+                        <span>Compiled with warnings. Prefix unused variables with &apos;_&apos; before submitting.</span>
                       </span>
                       {runResult.diagnostics.filter((d) => d.severity === 'warning').length > 0 && (
                         <button

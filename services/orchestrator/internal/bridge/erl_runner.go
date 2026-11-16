@@ -372,11 +372,11 @@ func (r *Runner) RunVerification(ctx context.Context, session *pool.Session, exe
 		}, nil
 	}
 
-	// Dual Strictness Architecture: Enforce -Werror on Submit
+	// Dual Strictness Architecture: Enforce strict compiler warnings on Submit
 	hasWarningText := strings.Contains(strings.ToLower(rawCompileOut), "warning:")
 	if len(compileWarnings) > 0 || hasWarningText {
 		var warnDetails strings.Builder
-		warnDetails.WriteString("Compiler warning treated as error on Submit (-Werror):\n")
+		warnDetails.WriteString("Compiler warning detected on Submit:\n")
 		warnDetails.WriteString(strings.TrimSpace(rawCompileOut))
 		warnDetails.WriteString("\n\nIn Erlang/OTP, all unused variables must be prefixed with '_' (e.g., '_Var') or replaced with anonymous '_'.")
 
@@ -388,7 +388,7 @@ func (r *Runner) RunVerification(ctx context.Context, session *pool.Session, exe
 			Stages: []StageResult{
 				{
 					ID:      "compile",
-					Title:   "Module Compilation & Syntax (erlc -Werror)",
+					Title:   "Module Compilation & Syntax (erlc)",
 					Status:  "failed",
 					TimeMs:  5,
 					Details: warnDetails.String(),
