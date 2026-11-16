@@ -16,6 +16,7 @@ import {
   Play,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Sparkles,
   Clock,
   ChevronUp,
@@ -277,6 +278,75 @@ function CompilationErrorCard({
   );
 }
 
+// ── Click-to-Jump Compilation Warning Card ────────────────────────────────────
+function CompilationWarningCard({
+  stdout,
+  diagnostics,
+  onJumpTo,
+  isDark,
+}: {
+  stdout: string;
+  diagnostics?: Array<{ file?: string; line: number; col: number; severity?: string; message: string }>;
+  onJumpTo: (line: number, col: number, filePath?: string) => void;
+  isDark: boolean;
+}) {
+  const warnings = (diagnostics || []).filter((d) => d.severity === 'warning');
+  if (warnings.length === 0) return null;
+
+  return (
+    <div
+      className="rounded-xl p-4 my-2 select-text border shadow-lg"
+      style={{
+        background: isDark ? 'rgba(245, 158, 11, 0.08)' : 'rgba(245, 158, 11, 0.05)',
+        borderColor: isDark ? 'rgba(245, 158, 11, 0.40)' : 'rgba(245, 158, 11, 0.30)',
+        userSelect: 'text',
+      }}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+          <span className="text-xs font-bold uppercase tracking-wider" style={{ color: '#F59E0B' }}>
+            Compiler Warning (erlc -Wall)
+          </span>
+        </div>
+        <span
+          className="text-xs px-2.5 py-0.5 rounded-full font-bold"
+          style={{ background: 'rgba(245,158,11,0.2)', color: '#F59E0B' }}
+        >
+          {warnings.length} Warning{warnings.length > 1 ? 's' : ''}
+        </span>
+      </div>
+
+      <p className="text-xs mb-3 leading-relaxed" style={{ color: isDark ? '#FDE68A' : '#92400E' }}>
+        Tolerated on <strong>Run</strong> for iterative drafting, but will fail verification on <strong>Submit (-Werror)</strong>. In Erlang/OTP, prefix unused variables with an underscore (e.g. <code>_Var</code>) or use anonymous <code>_</code>.
+      </p>
+
+      {/* Clickable jump-to-location buttons */}
+      <div className="flex flex-wrap gap-2">
+        {warnings.map((diag, idx) => (
+          <button
+            key={idx}
+            onClick={() => onJumpTo(diag.line, diag.col, diag.file)}
+            className="group flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+            style={{
+              background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
+              border: isDark ? '1px solid rgba(245,158,11,0.35)' : '1px solid rgba(245,158,11,0.25)',
+              color: isDark ? '#FCD34D' : '#B45309',
+            }}
+            title={`Click to jump to line ${diag.line}, col ${diag.col} in editor`}
+          >
+            <ArrowRight className="w-3.5 h-3.5 text-amber-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
+            <span className="font-semibold underline decoration-dotted">
+              {diag.file || 'module'}:{diag.line}:{diag.col}
+            </span>
+            <span className="opacity-80 truncate max-w-xs">{diag.message}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Capstone Studio Component ───────────────────────────────────────────
 export function CapstoneStudioView() {
   const {
@@ -506,7 +576,7 @@ export function CapstoneStudioView() {
     const model = editor.getModel();
     if (!model) return;
 
-    if (runResult && !runResult.compileOk && runResult.diagnostics && runResult.diagnostics.length > 0) {
+    if (runResult && runResult.diagnostics && runResult.diagnostics.length > 0) {
       const markers = runResult.diagnostics.map((d: any) => {
         const lineMax = model.getLineMaxColumn ? model.getLineMaxColumn(d.line) : d.col + 10;
         const startCol = Math.min(Math.max(d.col, 1), lineMax);
@@ -520,7 +590,7 @@ export function CapstoneStudioView() {
         };
       });
       monaco.editor.setModelMarkers(model, 'erlang-linter', markers);
-    } else if (runResult && runResult.compileOk) {
+    } else if (runResult) {
       monaco.editor.setModelMarkers(model, 'erlang-linter', []);
     }
   }, [runResult]);
@@ -1453,6 +1523,23 @@ export function CapstoneStudioView() {
                       isDark={isDark}
                     />
                   )}
+                  {runResult && runResult.compileOk && runResult.diagnostics && runResult.diagnostics.some((d: any) => d.severity === 'warning') && (
+                    <CompilationWarningCard
+                      stdout={runResult.stdout}
+                      diagnostics={runResult.diagnostics}
+                      onJumpTo={handleJumpToError}
+                      isDark={isDark}
+                    />
+                  )}
+                  {/* Compilation Warning Card if erlc emitted warnings */}
+                  {runResult && runResult.compileOk && runResult.diagnostics && runResult.diagnostics.some((d: any) => d.severity === 'warning') && (
+                    <CompilationWarningCard
+                      stdout={runResult.stdout}
+                      diagnostics={runResult.diagnostics}
+                      onJumpTo={handleJumpToError}
+                      isDark={isDark}
+                    />
+                  )}
 
                   {verificationStages.length > 0 ? (
                     verificationStages.map((stage) => {
@@ -1523,6 +1610,14 @@ export function CapstoneStudioView() {
                 <div className="font-mono text-[11px] space-y-2">
                   {runResult && !runResult.compileOk && (
                     <CompilationErrorCard
+                      stdout={runResult.stdout}
+                      diagnostics={runResult.diagnostics}
+                      onJumpTo={handleJumpToError}
+                      isDark={isDark}
+                    />
+                  )}
+                  {runResult && runResult.compileOk && runResult.diagnostics && runResult.diagnostics.some((d: any) => d.severity === 'warning') && (
+                    <CompilationWarningCard
                       stdout={runResult.stdout}
                       diagnostics={runResult.diagnostics}
                       onJumpTo={handleJumpToError}
@@ -1820,6 +1915,15 @@ export function CapstoneStudioView() {
                   isDark={isDark}
                 />
               )}
+              {/* Compilation Warning Card if erlc emitted warnings */}
+              {runResult && runResult.compileOk && runResult.diagnostics && runResult.diagnostics.some((d: any) => d.severity === 'warning') && (
+                <CompilationWarningCard
+                  stdout={runResult.stdout}
+                  diagnostics={runResult.diagnostics}
+                  onJumpTo={handleJumpToError}
+                  isDark={isDark}
+                />
+              )}
 
               {verificationStages.length > 0 ? (
                 <div className="space-y-1.5">
@@ -1900,6 +2004,15 @@ export function CapstoneStudioView() {
               {/* Compilation Failure Terminal Card if erlc failed */}
               {runResult && !runResult.compileOk && (
                 <CompilationErrorCard
+                  stdout={runResult.stdout}
+                  diagnostics={runResult.diagnostics}
+                  onJumpTo={handleJumpToError}
+                  isDark={isDark}
+                />
+              )}
+              {/* Compilation Warning Card if erlc emitted warnings */}
+              {runResult && runResult.compileOk && runResult.diagnostics && runResult.diagnostics.some((d: any) => d.severity === 'warning') && (
+                <CompilationWarningCard
                   stdout={runResult.stdout}
                   diagnostics={runResult.diagnostics}
                   onJumpTo={handleJumpToError}

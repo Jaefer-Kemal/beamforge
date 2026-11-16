@@ -4371,6 +4371,28 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Erlang Grader harness compilation (`erlc`): 0 errors.
   - Deployed to Vercel production: `https://beamforge-eight.vercel.app` (Deployment `dpl_5HTyJVWoyD8NhN3fAQaKK7XtpmoA`, `readyState: READY`, `/profile` HTTP 200 OK).
 
+## Phase 261: Dual Strictness Architecture & Compiler Warning Enforcement (-Werror on Submit, Permissive on Run)
+- [x] **261.1: Compiler Invocations with Standardized `-Wall` (`erl_runner.go`)**:
+  - In `compileFilesLocked`: added `-Wall` flag to `erlc` execution arguments so that all standard compiler warnings (unused variables, unused functions, shadowed variables) are actively surfaced with source line, column, and diagnostic message.
+- [x] **261.2: Dual Strictness Execution Pipeline (`erl_runner.go`)**:
+  - Mode A (`RunCode` / `runCodeLocked`): Permissive execution mode preserved for iterative drafting and debugging. Only diagnostics with `d.Severity == "error"` halt execution (`CompileOk: false`). Diagnostics with `d.Severity == "warning"` allow compilation (`CompileOk: true`) and test execution, returning warning diagnostics for editor markers and output drawer.
+  - Mode B (`RunVerification` / Submit): Strict production Erlang/OTP enforcement under `-Werror`. Any diagnostic with `d.Severity == "warning"` or compile output containing warnings immediately halts submission in Stage 1 (`compile`), failing with `Verdict: "FAILED"`, `Score: 0`, and pedagogical remediation instructions explaining that unused variables must be prefixed with `'_'` (e.g. `_Var`) or replaced with anonymous `'_'`.
+- [x] **261.3: Automated Regression & Integration Test Suite (`dual_strictness_warning_test.go`)**:
+  - `TestDualStrictness_UnusedVariableWarningOnRun`: verified that un-prefixed unused variable code compiles (`CompileOk: true`), emits warning diagnostic with line/col, and passes visible tests on Run.
+  - `TestDualStrictness_UnusedVariableRejectionOnSubmit`: verified that un-prefixed unused variable code is rejected on Submit with `Verdict: FAILED`, `Score: 0`, and Stage 1 `-Werror` warning details.
+  - `TestDualStrictness_CleanCodePassesSubmit`: verified that prefixing unused variable with `_` passes verification with 100/100 score.
+  - `TestChapter1Verification`: all 8 lessons and 8 negative regression tests pass 100% under `-Wall`.
+- [x] **261.4: Monaco Warning Marker Preservation & Output Drawer Polish (`LessonSplitView.tsx` & `CapstoneStudioView.tsx`)**:
+  - Resolved model marker erasure: Monaco markers are now updated whenever `runResult.diagnostics` has entries (mapping `severity: 'warning'` to `monaco.MarkerSeverity.Warning` yellow squigglies), and only cleared when diagnostics array is empty.
+  - Created `CompilationWarningCard` displaying amber warning banner, warning count, pedagogical guidance, and clickable jump-to-location buttons with Lucide `AlertTriangle` and `ArrowRight` (zero emojis).
+  - Added warning banner in the console drawer tab and updated the test results drawer subtitle (`Compiled with warnings (-Werror on Submit)`).
+  - Applied matching warning card and marker logic across `CapstoneStudioView.tsx` for desktop and mobile views.
+- [x] **261.5: Multi-Compiler Verification**:
+  - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
+  - Next.js Production Build (`npm run build`): 0 errors across all 9 routes.
+  - Go Orchestrator package build (`go build ./...`): 0 errors.
+  - Go Bridge test suite (`go test -v -run TestDualStrictness ./internal/bridge`): 3/3 passed.
+
 
 
 

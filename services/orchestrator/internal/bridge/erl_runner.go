@@ -196,7 +196,7 @@ func (r *Runner) compileFilesLocked(ctx context.Context, session *pool.Session, 
 		return nil, "", nil
 	}
 
-	args := append([]string{"-I", filepath.ToSlash(incDir), "-I", filepath.ToSlash(r.poolMgr.HarnessDir()), "-o", filepath.ToSlash(ebinDir)}, erlFiles...)
+	args := append([]string{"-Wall", "-I", filepath.ToSlash(incDir), "-I", filepath.ToSlash(r.poolMgr.HarnessDir()), "-o", filepath.ToSlash(ebinDir)}, erlFiles...)
 	cmd := exec.CommandContext(ctx, r.poolMgr.ErlcPath(), args...)
 	output, err := cmd.CombinedOutput()
 	log.Printf("[Compile] erlc args: %v, output: %q, err: %v", args, string(output), err)
@@ -346,10 +346,12 @@ func (r *Runner) RunVerification(ctx context.Context, session *pool.Session, exe
 	// First compile user files into ebin
 	diags, rawCompileOut, _ := r.compileFilesLocked(ctx, session, files)
 	hasErrors := false
+	var compileWarnings []Diagnostic
 	for _, d := range diags {
 		if d.Severity == "error" {
 			hasErrors = true
-			break
+		} else if d.Severity == "warning" {
+			compileWarnings = append(compileWarnings, d)
 		}
 	}
 	if hasErrors {
@@ -365,6 +367,31 @@ func (r *Runner) RunVerification(ctx context.Context, session *pool.Session, exe
 					Status:  "failed",
 					TimeMs:  5,
 					Details: strings.TrimSpace(rawCompileOut),
+				},
+			},
+		}, nil
+	}
+
+	// Dual Strictness Architecture: Enforce -Werror on Submit
+	hasWarningText := strings.Contains(strings.ToLower(rawCompileOut), "warning:")
+	if len(compileWarnings) > 0 || hasWarningText {
+		var warnDetails strings.Builder
+		warnDetails.WriteString("Compiler warning treated as error on Submit (-Werror):\n")
+		warnDetails.WriteString(strings.TrimSpace(rawCompileOut))
+		warnDetails.WriteString("\n\nIn Erlang/OTP, all unused variables must be prefixed with '_' (e.g., '_Var') or replaced with anonymous '_'.")
+
+		return &VerificationReport{
+			ExerciseID:  exerciseID,
+			Score:       0,
+			Verdict:     "FAILED",
+			TotalTimeMs: 5,
+			Stages: []StageResult{
+				{
+					ID:      "compile",
+					Title:   "Module Compilation & Syntax (erlc -Werror)",
+					Status:  "failed",
+					TimeMs:  5,
+					Details: warnDetails.String(),
 				},
 			},
 		}, nil

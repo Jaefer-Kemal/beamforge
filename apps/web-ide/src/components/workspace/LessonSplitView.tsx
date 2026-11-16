@@ -412,6 +412,75 @@ function CompilationErrorCard({
   );
 }
 
+// ── Compilation Warning Terminal Card ─────────────────────────────────────────
+function CompilationWarningCard({
+  stdout,
+  diagnostics,
+  onJumpTo,
+  isDark,
+}: {
+  stdout: string;
+  diagnostics?: Array<{ file: string; line: number; col: number; severity: string; message: string }>;
+  onJumpTo: (line: number, col: number) => void;
+  isDark: boolean;
+}) {
+  const warnings = (diagnostics || []).filter((d) => d.severity === 'warning');
+  if (warnings.length === 0) return null;
+
+  return (
+    <div
+      className="rounded-xl p-4 my-2 select-text border shadow-lg"
+      style={{
+        background: isDark ? 'rgba(245, 158, 11, 0.08)' : 'rgba(245, 158, 11, 0.05)',
+        borderColor: isDark ? 'rgba(245, 158, 11, 0.40)' : 'rgba(245, 158, 11, 0.30)',
+        userSelect: 'text',
+      }}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+          <span className="text-xs font-bold uppercase tracking-wider" style={{ color: '#F59E0B' }}>
+            Compiler Warning (erlc -Wall)
+          </span>
+        </div>
+        <span
+          className="text-xs px-2.5 py-0.5 rounded-full font-bold"
+          style={{ background: 'rgba(245,158,11,0.2)', color: '#F59E0B' }}
+        >
+          {warnings.length} Warning{warnings.length > 1 ? 's' : ''}
+        </span>
+      </div>
+
+      <p className="text-xs mb-3 leading-relaxed" style={{ color: isDark ? '#FDE68A' : '#92400E' }}>
+        Tolerated on <strong>Run</strong> for iterative drafting, but will fail verification on <strong>Submit (-Werror)</strong>. In Erlang/OTP, prefix unused variables with an underscore (e.g. <code>_Var</code>) or use anonymous <code>_</code>.
+      </p>
+
+      {/* Clickable jump-to-location buttons */}
+      <div className="flex flex-wrap gap-2">
+        {warnings.map((diag, idx) => (
+          <button
+            key={idx}
+            onClick={() => onJumpTo(diag.line, diag.col)}
+            className="group flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-all hover:scale-[1.02] active:scale-[0.98]"
+            style={{
+              background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
+              border: isDark ? '1px solid rgba(245,158,11,0.35)' : '1px solid rgba(245,158,11,0.25)',
+              color: isDark ? '#FCD34D' : '#B45309',
+            }}
+            title={`Click to jump to line ${diag.line}, col ${diag.col} in editor`}
+          >
+            <ArrowRight className="w-3.5 h-3.5 text-amber-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
+            <span className="font-semibold underline decoration-dotted">
+              {diag.file || 'module'}:{diag.line}:{diag.col}
+            </span>
+            <span className="opacity-80 truncate max-w-xs">{diag.message}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── AST Rules Card ────────────────────────────────────────────────────────────
 function AstRulesCard({ rules, isDark }: { rules: AstRuleSpec; isDark: boolean }) {
   return (
@@ -523,16 +592,18 @@ function StageRow({ stage, isDark }: { stage: any; isDark: boolean }) {
           )}
         </div>
         {stage.assertionDetails && (
-          <p
-            className="text-xs mt-1 leading-relaxed font-mono select-text"
+          <div
+            className="text-xs mt-1.5 p-2 rounded-lg leading-relaxed font-mono select-text whitespace-pre-wrap break-words"
             style={{
+              background: stage.status === 'failed' ? (isDark ? 'rgba(0,0,0,0.30)' : 'rgba(239,68,68,0.06)') : 'transparent',
+              border: stage.status === 'failed' ? (isDark ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(239,68,68,0.15)') : 'none',
               color: stage.status === 'failed' ? (isDark ? '#FCA5A5' : '#DC2626') : (isDark ? '#94A3B8' : '#475569'),
               userSelect: 'text',
               WebkitUserSelect: 'text',
             }}
           >
             {stage.assertionDetails}
-          </p>
+          </div>
         )}
       </div>
     </div>
@@ -851,7 +922,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
     const model = editor.getModel();
     if (!model) return;
 
-    if (runResult && !runResult.compileOk && runResult.diagnostics && runResult.diagnostics.length > 0) {
+    if (runResult && runResult.diagnostics && runResult.diagnostics.length > 0) {
       const markers = runResult.diagnostics.map((d) => {
         const lineMax = model.getLineMaxColumn ? model.getLineMaxColumn(d.line) : d.col + 10;
         const startCol = Math.min(Math.max(d.col, 1), lineMax);
@@ -865,7 +936,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
         };
       });
       monaco.editor.setModelMarkers(model, 'erlang-linter', markers);
-    } else if (runResult && runResult.compileOk) {
+    } else if (runResult) {
       monaco.editor.setModelMarkers(model, 'erlang-linter', []);
     }
   }, [runResult]);
@@ -1713,15 +1784,32 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                     />
                   )}
 
+                  {/* Compilation Warning Card if erlc emitted warnings */}
+                  {runResult && runResult.compileOk && runResult.diagnostics && runResult.diagnostics.some((d) => d.severity === 'warning') && (
+                    <CompilationWarningCard
+                      key={`comp-warn-${lesson.id}`}
+                      stdout={runResult.stdout}
+                      diagnostics={runResult.diagnostics}
+                      onJumpTo={jumpToPosition}
+                      isDark={isDark}
+                    />
+                  )}
+
                   {/* Header subtitle */}
                   <div className="flex items-center justify-between text-xs" style={{ color: isDark ? '#64748B' : '#94A3B8' }}>
                     <span>
                       {lesson.visibleTestCases.length} test expressions evaluated on <strong>Run</strong>.
                     </span>
                     {runResult?.compileOk && (
-                      <span className="font-medium text-emerald-500 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> All modules compiled cleanly
-                      </span>
+                      runResult.diagnostics && runResult.diagnostics.some((d) => d.severity === 'warning') ? (
+                        <span className="font-medium text-amber-500 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3 text-amber-500" /> Compiled with warnings (-Werror on Submit)
+                        </span>
+                      ) : (
+                        <span className="font-medium text-emerald-500 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> All modules compiled cleanly
+                        </span>
+                      )
                     )}
                   </div>
 
@@ -1792,6 +1880,34 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                         >
                           <ArrowRight className="w-3 h-3" />
                           <span>Jump to L{runResult.diagnostics[0].line}:C{runResult.diagnostics[0].col}</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {runResult && runResult.compileOk && runResult.diagnostics && runResult.diagnostics.some((d) => d.severity === 'warning') && (
+                    <div
+                      className="mb-3 p-2.5 rounded-lg flex items-center justify-between border select-text"
+                      style={{
+                        background: isDark ? 'rgba(245,158,11,0.12)' : 'rgba(245,158,11,0.08)',
+                        borderColor: isDark ? 'rgba(245,158,11,0.30)' : 'rgba(245,158,11,0.20)',
+                        color: isDark ? '#FCD34D' : '#B45309',
+                        userSelect: 'text',
+                      }}
+                    >
+                      <span className="flex items-center gap-1.5 font-sans font-semibold">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Compiled with warnings (-Werror on Submit). Prefix unused variables with &apos;_&apos;.</span>
+                      </span>
+                      {runResult.diagnostics.filter((d) => d.severity === 'warning').length > 0 && (
+                        <button
+                          onClick={() => {
+                            const w = runResult.diagnostics!.find((d) => d.severity === 'warning')!;
+                            jumpToPosition(w.line, w.col);
+                          }}
+                          className="px-2 py-0.5 rounded text-[11px] font-mono font-medium underline hover:text-amber-300 flex items-center gap-1"
+                        >
+                          <ArrowRight className="w-3 h-3" />
+                          <span>Jump to L{runResult.diagnostics.find((d) => d.severity === 'warning')!.line}:C{runResult.diagnostics.find((d) => d.severity === 'warning')!.col}</span>
                         </button>
                       )}
                     </div>
