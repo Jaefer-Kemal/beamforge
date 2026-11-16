@@ -623,6 +623,13 @@ code_change(_OldVsn, State, _Extra) ->
         expectedOutput: '#{final_count => 35, live_state => #{counter => 35, ops => 3}}',
         explanation: 'Spawns server, performs 2 increments and 1 call, inspects live state via sys:get_state/1, and stops cleanly.',
       },
+      {
+        id: 'tc-ch07-01-2',
+        title: 'Direct Client Call & Counter Increment',
+        erlangCall: 'begin {ok, Pid} = otp_intro_demo:start_link(), ok = otp_intro_demo:increment(Pid, 50), timer:sleep(15), Count = otp_intro_demo:get_count(Pid), ok = otp_intro_demo:stop(Pid), Count end',
+        expectedOutput: '50',
+        explanation: 'Directly validates start_link/0, increment/2, get_count/1, and stop/1 client interface functions.',
+      },
     ],
     solutionExplanation: 'Demonstrates OTP Inversion of Control with gen_server callbacks and live state inspection via sys:get_state/1 without taking down the process.',
     astRules: {

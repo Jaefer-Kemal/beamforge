@@ -1655,8 +1655,12 @@ export function CapstoneStudioView() {
 
               {drawerTab === 'tests' && (
                 <div className="space-y-2 font-mono text-[11px]">
-                  {capstoneMasterLesson?.visibleTestCases[activeMilestoneIndex] && (
+                  {((activeMilestoneLesson?.visibleTestCases && activeMilestoneLesson.visibleTestCases.length > 0)
+                    ? activeMilestoneLesson.visibleTestCases
+                    : (capstoneMasterLesson?.visibleTestCases[activeMilestoneIndex] ? [capstoneMasterLesson.visibleTestCases[activeMilestoneIndex]] : [])
+                  ).map((tc) => (
                     <div
+                      key={tc.id}
                       className="p-3.5 rounded-xl border"
                       style={{
                         background: isDark ? 'rgba(15, 23, 42, 0.60)' : 'rgba(255, 255, 255, 0.70)',
@@ -1665,25 +1669,25 @@ export function CapstoneStudioView() {
                     >
                       <div className="flex items-center justify-between font-sans mb-1.5">
                         <span className="font-bold text-sm" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
-                          {capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].title}
+                          {tc.title}
                         </span>
                         <span className="text-[10px]" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                          {capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].id}
+                          {tc.id}
                         </span>
                       </div>
                       <code className="text-blue-500 block mb-1.5 text-xs font-bold">
-                        {capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].erlangCall}
+                        {tc.erlangCall}
                       </code>
                       <div className="text-xs font-sans space-y-1" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
                         <div>
-                          Expected: <span className="font-mono text-emerald-500 font-bold">{capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].expectedOutput}</span>
+                          Expected: <span className="font-mono text-emerald-500 font-bold">{tc.expectedOutput}</span>
                         </div>
                         <p className="text-[11px]" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                          {capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].explanation}
+                          {tc.explanation}
                         </p>
                       </div>
                     </div>
-                  )}
+                  ))}
                 </div>
               )}
 
@@ -2038,8 +2042,12 @@ export function CapstoneStudioView() {
 
           {drawerTab === 'tests' && (
             <div className="space-y-2 font-mono text-[11px]">
-              {capstoneMasterLesson?.visibleTestCases[activeMilestoneIndex] && (
+              {((activeMilestoneLesson?.visibleTestCases && activeMilestoneLesson.visibleTestCases.length > 0)
+                ? activeMilestoneLesson.visibleTestCases
+                : (capstoneMasterLesson?.visibleTestCases[activeMilestoneIndex] ? [capstoneMasterLesson.visibleTestCases[activeMilestoneIndex]] : [])
+              ).map((tc) => (
                 <div
+                  key={tc.id}
                   className="p-3.5 rounded-xl border"
                   style={{
                     background: isDark ? 'rgba(15, 23, 42, 0.60)' : 'rgba(255, 255, 255, 0.70)',
@@ -2048,25 +2056,25 @@ export function CapstoneStudioView() {
                 >
                   <div className="flex items-center justify-between font-sans mb-1.5">
                     <span className="font-bold text-sm" style={{ color: isDark ? '#F8FAFC' : '#0F172A' }}>
-                      {capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].title}
+                      {tc.title}
                     </span>
                     <span className="text-[10px]" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                      {capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].id}
+                      {tc.id}
                     </span>
                   </div>
                   <code className="text-blue-500 block mb-1.5 text-xs font-bold">
-                    {capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].erlangCall}
+                    {tc.erlangCall}
                   </code>
                   <div className="text-xs font-sans space-y-1" style={{ color: isDark ? '#CBD5E1' : '#475569' }}>
                     <div>
-                      Expected: <span className="font-mono text-emerald-500 font-bold">{capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].expectedOutput}</span>
+                      Expected: <span className="font-mono text-emerald-500 font-bold">{tc.expectedOutput}</span>
                     </div>
                     <p className="text-[11px]" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                      {capstoneMasterLesson.visibleTestCases[activeMilestoneIndex].explanation}
+                      {tc.explanation}
                     </p>
                   </div>
                 </div>
-              )}
+              ))}
             </div>
           )}
 

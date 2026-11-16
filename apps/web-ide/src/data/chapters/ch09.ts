@@ -2511,6 +2511,13 @@ run_unit_tests() ->
         erlangCall: 'ledger_specs_and_tests:run_unit_checks()',
         expectedOutput: 'ok',
         explanation: 'Executes EUnit test generator suites and confirms all assertions pass.'
+      },
+      {
+        id: 'tc3',
+        title: 'Execute EUnit Suite via Alias run_unit_tests/0',
+        erlangCall: 'ledger_specs_and_tests:run_unit_tests()',
+        expectedOutput: 'ok',
+        explanation: 'Verifies the exported run_unit_tests/0 alias executes the embedded EUnit suite and confirms zero test failures.'
       }
     ],
     astRules: {
@@ -3998,6 +4005,13 @@ terminate(_Reason, _State) ->
         erlangCall: 'begin [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [session_cache, table_manager, session_sup]], timer:sleep(20), {ok, _} = session_cache:start_pipeline(), ok = session_cache:put_session(<<"sess_a">>, 999, #{role => admin}), {ok, 1} = session_cache:increment_hits(<<"sess_a">>), OldPid = whereis(session_cache), exit(OldPid, kill), timer:sleep(60), NewPid = whereis(session_cache), {ok, SessA} = session_cache:get_session(<<"sess_a">>), session_cache:stop_pipeline(), {OldPid =/= NewPid, maps:get(hit_count, SessA)} end',
         expectedOutput: '{true, 1}',
         explanation: 'Kills worker with kill signal, verifies new PID from supervisor, and confirms 100% data preservation.'
+      },
+      {
+        id: 'tc3',
+        title: 'Session Deletion and Entry Counting',
+        erlangCall: 'begin [case whereis(N) of undefined -> ok; P -> exit(P, kill) end || N <- [session_cache, table_manager, session_sup]], timer:sleep(20), {ok, _} = session_cache:start_pipeline(), ok = session_cache:put_session(<<"s_del">>, 404, #{}), 1 = session_cache:count_sessions(), ok = session_cache:delete_session(<<"s_del">>), C = session_cache:count_sessions(), session_cache:stop_pipeline(), C end',
+        expectedOutput: '0',
+        explanation: 'Verifies session insertion, table entry counting via count_sessions/0, and removal via delete_session/1.'
       }
     ],
     astRules: {

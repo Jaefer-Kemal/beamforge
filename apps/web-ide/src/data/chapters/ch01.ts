@@ -130,6 +130,13 @@ This is a **Guided Runnable Demo**. The module \`src/beam_intro.erl\` is pre-wri
         expectedOutput: '{vm_info,...}',
         explanation: 'Calls erlang:system_info/1 on the live OTP runtime and formats emulator properties into a diagnostic 5-tuple: {vm_info, OtpRelease, Schedulers, ProcessLimit, AtomLimit}.',
       },
+      {
+        id: 'tc-ch01-02',
+        title: 'Verify Online Schedulers Count',
+        erlangCall: 'begin {vm_info, _Release, Schedulers, _MaxProcs, _MaxAtoms} = beam_intro:inspect_vm(), Schedulers > 0 end',
+        expectedOutput: 'true',
+        explanation: 'Confirms that the inspect_vm/0 telemetry 5-tuple reports at least 1 online BEAM scheduler thread.',
+      },
     ],
     astRules: {
       requiredCalls: ['erlang:system_info/1'],

@@ -4482,3 +4482,53 @@ We execute the platform overhaul incrementally so every single piece is built to
 
 
 
+
+## Phase 263: Test Reinforcement, Anti-Cheat Architecture & Phase 1 Line Mapping
+- [x] **263.1: Specification 09 Authoring (`docs/specs/09_TEST_REINFORCEMENT_AND_ANTI_CHEAT.md`)**:
+  - Authored official specification governing test reinforcement, anti-cheat verification, and visible test quality.
+  - Formulated the 4-Tier Anti-Cheat Architecture:
+    - Tier 1: AST Structural & Standard-Library Whitelist/Blacklist (`bf_ast_verifier` via `epp` & `beam_disasm`).
+    - Tier 2: Adversarial Hidden Edge-Case Matrices (empty collections, negative bounds, type safety, `function_clause` exception assertions).
+    - Tier 3: Dynamic Property-Based Fuzzing (20-50 iterations using `rand:uniform/1`).
+    - Tier 4: Concurrency Chaos & State Invariant Injection (Chapters 5-12).
+  - Formulated the 4-Phase Roadmap:
+    - Phase 1: Chapters 1-4 Backend Fuzzing and Edge-Case Matrices (`erl_runner_chapters.go`).
+    - Phase 2: Chapters 1-4 AST Rule Hardening & BIF Blacklisting.
+    - Phase 3: Chapters 5-12 Concurrency Chaos, Worker Kills & Network Slicing.
+    - Phase 4: Chapters 1-12 Visible Test Reinforcement (2-Test Minimum Rule & missing export coverage).
+- [x] **263.2: Case-by-Case Line Mapping (`erl_runner_chapters.go`)**:
+  - Mapped all 31 cases across Chapters 1-4 in `buildChapterVerificationScript` with exact starting line numbers:
+    - Chapter 1: `ch01-l01` (4806), `ch01-l02` (4855), `ch01-l03` (4900), `ch01-l04` (4940), `ch01-l05` (4986), `ch01-l06` (5054), `ch01-l07` (5121), `ch01-l08` (5182).
+    - Chapter 2: `ch02-l01` (5271), `ch02-l02` (5355), `ch02-l03` (5436), `ch02-l04` (5520), `ch02-l05` (5604), `ch02-l06` (5664), `ch02-l07` (5751), `ch02-l08` (5840).
+    - Chapter 3: `ch03-l01` (5844), `ch03-l02` (5945), `ch03-l03` (6017), `ch03-l04` (6081), `ch03-l05` (6165), `ch03-l06` (6240), `ch03-l07` (6326).
+    - Chapter 4: `ch04-l01` (6402), `ch04-l02` (6490), `ch04-l03` (6559), `ch04-l04` (6664), `ch04-l05` (6732), `ch04-l06` (6877), `ch04-l07` (6989), `ch04-l08` (7120).
+- [x] **263.3: Cardinal Invariants Certification**:
+  - Re-verified live: Canonical solutions across all 12 chapters pass 100% with score 100.
+  - Zero modifications to `apps/web-ide/src/data/chapters/` solution packs or starter templates.
+
+## Phase 264: Test Reinforcement, Anti-Cheat Execution & Visible Test Hardening (Spec 09)
+- [x] **264.1: Phase 1 Backend Hardening (Chapters 1–4)**:
+  - Added dynamic property fuzzing with `rand:uniform/1` (20–50 iterations) across all numerical, string, and data transformation exercises.
+  - Injected adversarial edge-case matrices: boundary collections (`[]`, `<<>>`, `#{}`), exact equality assertions (`=:=`), and `error:function_clause` crash tests for malformed inputs.
+  - Target: `services/orchestrator/internal/bridge/erl_runner_chapters.go` (Lines 4806–7150).
+  - Verified: `go test -v -run "TestChapter(1|2|3|4)Verification" ./internal/bridge` -> 31/31 passed 100%.
+- [x] **264.2: Phase 2 Concurrency & Fault Tolerance Hardening (Chapters 5–8)**:
+  - Reinforced actor model, process links, monitors, OTP behaviours, and supervision trees with concurrent message floods (50–100 workers), process kill cascades, and mailbox memory leak verifications.
+  - Target: `services/orchestrator/internal/bridge/erl_runner_chapters.go` (Lines 7150–9800).
+  - Verified: `go test -v -run "TestChapter(5|6|7|8)Verification" ./internal/bridge` -> 27/27 passed 100%.
+- [x] **264.3: Phase 3 Distributed Systems & Networking Hardening (Chapters 9–12)**:
+  - Chapter 9: Dynamic ETS counter fuzzing, TTL eviction threshold randomization, zero-data-loss heir transfer on worker kill, and Mnesia balance conservation assertions.
+  - Chapter 10: Wire framing chunking fuzzing, active-once backpressure burst benchmarks, and TCP packet counter validations.
+  - Chapter 11: Dynamic RFC 7622 JID parsing round-trips, XML stanza serialization, SASL credential handshakes, and priority presence routing.
+  - Chapter 12: Capstone milestone multi-stage dynamic assertions across all 5 modules with live Chaos Monkey worker termination.
+  - Target: `services/orchestrator/internal/bridge/erl_runner_chapters.go` (Lines 9800–12350).
+  - Verified: `go test -v -run "TestChapter(9|10|11|12)Verification" ./internal/bridge` -> 29/29 passed 100%.
+- [x] **264.4: Phase 4 Visible Test Context Enrichment & 2-Test Minimum Enforcement (Chapters 1–12)**:
+  - Enforced the 2-Test Minimum Rule across the entire 94-lesson curriculum (0 lessons remaining with < 2 visible tests; distribution: 36 with 2, 35 with 3, 22 with 4, 1 with 6).
+  - Added contextual visible tests for previously uncovered exports in `ch01-l01` (`beam_intro:inspect_vm/0` scheduler assertions), `ch07-l01` (`otp_intro_demo` client functions), `ch09-l06` (`run_unit_tests/0` alias), `ch09-l08` (`count_sessions/0` and `delete_session/1`), `ch10-l01` (socket reception telemetry), `ch10-l03` (`get_processed_count/1`), `ch11-l01` (`print_transcript/2`), `ch11-l02` (`to_bare/1` and `is_same_bare_jid/2`), `ch11-l03` (`build_stream_features/1`), `ch11-l04` (`build_stream_not_authorized/0`), and all 6 Capstone Milestones (`ch12-m1` to `ch12-m6`).
+  - Added milestone lesson lookup support to `getLessonById` in `apps/web-ide/src/data/chapters/index.ts`.
+  - Updated `CapstoneStudioView.tsx` to render all milestone visible tests in the Test Cases drawer.
+  - Re-verified all cardinal invariants: `solutionCode`, `solutionFiles`, `starterCode`, and `files` remain 100% untouched.
+  - Verified: `go test -v -count=1 -run TestDynamicVisibleTestsCurriculum ./internal/bridge` -> 100% passed (135.29s).
+  - Verified: `npx tsc --noEmit` -> 0 errors.
+  - Verified: `npm run build` -> Next.js production build passed with 0 errors.

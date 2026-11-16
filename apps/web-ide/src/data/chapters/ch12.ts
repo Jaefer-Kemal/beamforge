@@ -1,4 +1,4 @@
-import { LessonContent, CapstoneMilestone, MentalModelCheckSpec } from '../../types/workspace';
+import { LessonContent, CapstoneMilestone, MentalModelCheckSpec, VisibleTestCase } from '../../types/workspace';
 
 // ── Capstone Milestones Definition for Chapter 12 ────────────────────────────
 export const CH12_CAPSTONE_MILESTONES: CapstoneMilestone[] = [
@@ -88,6 +88,7 @@ export interface MilestoneLesson {
   targetFunctions: string[];
   verificationHint: string;
   mentalModelCheck?: MentalModelCheckSpec;
+  visibleTestCases?: VisibleTestCase[];
 }
 
 export const CH12_MILESTONE_LESSONS: MilestoneLesson[] = [
@@ -124,6 +125,22 @@ export const CH12_MILESTONE_LESSONS: MilestoneLesson[] = [
         },
       ],
     },
+    visibleTestCases: [
+      {
+        id: 'tc-m1-1',
+        title: 'Root Supervisor Process Boot',
+        erlangCall: 'begin catch xmpp_sup:stop(), {ok, SupPid} = xmpp_sup:start_link(), Res = is_pid(SupPid) andalso is_process_alive(SupPid), xmpp_sup:stop(), Res end',
+        expectedOutput: 'true',
+        explanation: 'Boots the root OTP supervisor with rest_for_one strategy and launches both workers.',
+      },
+      {
+        id: 'tc-m1-2',
+        title: 'Clean and Idempotent Supervisor Shutdown',
+        erlangCall: 'begin catch xmpp_sup:stop(), ok = xmpp_sup:stop(), whereis(xmpp_sup) =:= undefined end',
+        expectedOutput: 'true',
+        explanation: 'Verifies that calling xmpp_sup:stop/0 cleans up registered supervisor process.',
+      },
+    ],
     conceptMarkdown: `## Milestone 1: The Root OTP Supervisor Hierarchy
 
 ### Why This Matters in Production
@@ -232,6 +249,22 @@ Implement \`src/xmpp_sup.erl\` with \`-behaviour(supervisor)\`, exporting \`star
         },
       ],
     },
+    visibleTestCases: [
+      {
+        id: 'tc-m2-1',
+        title: 'Chunk Boundary Stream Framing',
+        erlangCall: 'xmpp_stream_parser:feed_chunk(<<"<stream:str">>, <<"eam to=\'localhost\'><ping id=\'p1\'/>">>)',
+        expectedOutput: '{[{stream_open, <<"localhost">>}, {ping, <<"p1">>}], <<>>}',
+        explanation: 'Parses fragmented XML chunk boundaries and extracts structured stream stanzas.',
+      },
+      {
+        id: 'tc-m2-2',
+        title: 'XML Attribute Extraction',
+        erlangCall: 'xmpp_stream_parser:extract_attr(<<"to">>, <<"<stream:stream to=\'chat.org\' version=\'1.0\'>">>)',
+        expectedOutput: '{ok, <<"chat.org">>}',
+        explanation: 'Extracts single- or double-quoted XML attribute value from an element header.',
+      },
+    ],
     conceptMarkdown: `## Milestone 2: Binary TCP Stream Framing & Memory Unpinning
 
 ### Why This Matters in Production
@@ -357,6 +390,22 @@ Complete \`src/xmpp_stream_parser.erl\` exporting \`new_buffer/0\`, \`feed_chunk
         },
       ],
     },
+    visibleTestCases: [
+      {
+        id: 'tc-m3-1',
+        title: 'Bare JID Priority Dispatch',
+        erlangCall: 'begin catch xmpp_session_registry:stop(), {ok, _} = xmpp_session_registry:start_link(), ok = xmpp_session_registry:register_session(<<"alice@localhost/mobile">>, 5, self()), ok = xmpp_session_registry:register_session(<<"alice@localhost/desktop">>, 10, self()), Res = xmpp_session_registry:lookup_by_jid(<<"alice@localhost">>), xmpp_session_registry:stop(), Res =:= [self()] end',
+        expectedOutput: 'true',
+        explanation: 'Verifies session registration and bare JID dispatch to the highest-priority active connection.',
+      },
+      {
+        id: 'tc-m3-2',
+        title: 'JID RFC 7622 Address Parsing',
+        erlangCall: 'xmpp_session_registry:parse_jid(<<"bob@chat.net/tablet">>)',
+        expectedOutput: '{ok, <<"bob">>, <<"chat.net">>, <<"tablet">>}',
+        explanation: 'Parses RFC 7622 JID binary into user, domain, and resource segments.',
+      },
+    ],
     conceptMarkdown: `## Milestone 3: High-Concurrency ETS Tables & Process Monitors
 
 ### Why This Matters in Production
@@ -511,6 +560,22 @@ Implement \`src/xmpp_session_registry.erl\` (\`-behaviour(gen_server)\`) maintai
         },
       ],
     },
+    visibleTestCases: [
+      {
+        id: 'tc-m4-1',
+        title: 'C2S Handshake SASL Transition',
+        erlangCall: 'begin {ok, C2SPid} = xmpp_c2s_statem:start_link(#{}), {ok, wait_for_sasl, _} = xmpp_c2s_statem:feed_xml(C2SPid, <<"<stream:stream to=\'localhost\'>">>), {ok, AuthState, _} = xmpp_c2s_statem:feed_xml(C2SPid, <<"<auth mechanism=\'PLAIN\'>alice</auth>">>), xmpp_c2s_statem:stop(C2SPid), AuthState end',
+        expectedOutput: 'authenticated',
+        explanation: 'Steps state machine from wait_for_stream through wait_for_sasl to authenticated.',
+      },
+      {
+        id: 'tc-m4-2',
+        title: 'Pre-Authentication Stanza Rejection',
+        erlangCall: 'begin {ok, C2SPid} = xmpp_c2s_statem:start_link(#{}), Res = xmpp_c2s_statem:feed_xml(C2SPid, <<"<message to=\'bob\'>hi</message>">>), xmpp_c2s_statem:stop(C2SPid), element(1, Res) end',
+        expectedOutput: 'error',
+        explanation: 'Rejects premature message delivery attempts before SASL authentication succeeds.',
+      },
+    ],
     conceptMarkdown: `## Milestone 4: Client-to-Server State Machine (\`gen_statem\`)
 
 ### Why This Matters in Production
@@ -635,6 +700,22 @@ Implement \`src/xmpp_c2s_statem.erl\` (\`-behaviour(gen_statem)\`, \`callback_mo
         },
       ],
     },
+    visibleTestCases: [
+      {
+        id: 'tc-m5-1',
+        title: 'Offline Message Spooling',
+        erlangCall: 'begin catch xmpp_router:stop(), {ok, _} = xmpp_router:start_link(), {queued_offline, Bare} = xmpp_router:route_stanza(<<"alice@localhost">>, <<"bob@localhost">>, <<"<message>Hi</message>">>), Count = xmpp_router:get_offline_count(<<"bob@localhost">>), xmpp_router:stop(), {Bare, Count} end',
+        expectedOutput: '{<<"bob@localhost">>, 1}',
+        explanation: 'Verifies message routing falls back to offline queue when recipient is disconnected.',
+      },
+      {
+        id: 'tc-m5-2',
+        title: 'FIFO Offline Message Drain',
+        erlangCall: 'begin catch xmpp_router:stop(), {ok, _} = xmpp_router:start_link(), {queued_offline, _} = xmpp_router:route_stanza(<<"alice@localhost">>, <<"carol@localhost">>, <<"<message>M1</message>">>), {ok, Msgs} = xmpp_router:pop_offline_messages(<<"carol@localhost">>), Rem = xmpp_router:get_offline_count(<<"carol@localhost">>), xmpp_router:stop(), {length(Msgs), Rem} end',
+        expectedOutput: '{1, 0}',
+        explanation: 'Pops spooled messages in FIFO order and verifies queue is emptied.',
+      },
+    ],
     conceptMarkdown: `## Milestone 5: Stanza Routing Engine & Offline Message Queue
 
 ### Why This Matters in Production
@@ -763,6 +844,22 @@ Implement \`src/xmpp_router.erl\` (\`-behaviour(gen_server)\`) exporting \`start
         },
       ],
     },
+    visibleTestCases: [
+      {
+        id: 'tc-m6-1',
+        title: 'Chaos Monkey Supervisor Self-Healing',
+        erlangCall: 'begin catch xmpp_sup:stop(), {ok, _} = xmpp_sup:start_link(), Reg1 = whereis(xmpp_session_registry), exit(Reg1, kill), timer:sleep(150), Reg2 = whereis(xmpp_session_registry), xmpp_sup:stop(), Reg2 =/= undefined andalso Reg2 =/= Reg1 end',
+        expectedOutput: 'true',
+        explanation: 'Verifies rest_for_one supervisor restarts dead workers autonomously upon failure.',
+      },
+      {
+        id: 'tc-m6-2',
+        title: 'Router Crash Fault Isolation',
+        erlangCall: 'begin catch xmpp_sup:stop(), {ok, _} = xmpp_sup:start_link(), RegBefore = whereis(xmpp_session_registry), RouterBefore = whereis(xmpp_router), exit(RouterBefore, kill), timer:sleep(100), RegAfter = whereis(xmpp_session_registry), RouterAfter = whereis(xmpp_router), xmpp_sup:stop(), RegBefore =:= RegAfter andalso RouterAfter =/= RouterBefore andalso RouterAfter =/= undefined end',
+        expectedOutput: 'true',
+        explanation: 'Verifies router crash restarts router without restarting upstream session registry.',
+      },
+    ],
     conceptMarkdown: `## Milestone 6: Chaos Monkey Resilience & 5-Module Integration
 
 ### Why This Matters in Production

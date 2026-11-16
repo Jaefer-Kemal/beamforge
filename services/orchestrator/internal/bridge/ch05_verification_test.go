@@ -743,7 +743,7 @@ inspect_process(_Pid) -> 2688.
 
 		foundFailedCompile := false
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				foundFailedCompile = true
 			}
 		}
@@ -913,7 +913,7 @@ broadcast(PidsList, Msg) ->
 
 		foundFailedCompile := false
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				foundFailedCompile = true
 			}
 		}
@@ -953,7 +953,7 @@ request_with_timeout(_TargetPid, _RequestMsg, _TimeoutMs) -> {error, timeout}.
 
 		foundFailedCompile := false
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				foundFailedCompile = true
 			}
 		}
@@ -1184,7 +1184,7 @@ loop(CurrentVal) ->
 
 		foundFailedCompile := false
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				foundFailedCompile = true
 			}
 		}
@@ -1381,7 +1381,7 @@ loop(Map) ->
 
 		foundFailedCompile := false
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				foundFailedCompile = true
 			}
 		}
@@ -1656,7 +1656,7 @@ unlocked(SecretCode) ->
 
 		foundFailedCompile := false
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				foundFailedCompile = true
 			}
 		}
@@ -1987,7 +1987,7 @@ loop(State = #{count := Count, total := Total}) ->
 
 		foundFailedCompile := false
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				foundFailedCompile = true
 			}
 		}
@@ -2344,7 +2344,7 @@ run_batch([Tx | Rest], Accounts, Applied, Rejected) ->
 
 		foundFailedCompile := false
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				foundFailedCompile = true
 			}
 		}

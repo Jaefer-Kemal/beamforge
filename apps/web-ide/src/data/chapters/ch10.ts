@@ -515,6 +515,13 @@ solutionExplanation: `### How the TCP Socket Lifecycle Operates
         expectedOutput: '3',
         explanation: 'Opens ephemeral loopback port, connects real client, exchanges 3 frames, and closes cleanly.',
       },
+      {
+        id: 'tc-ch10-l01-2',
+        title: 'Verify Socket Reception Telemetry',
+        erlangCall: 'begin Res = tcp_live_demo:run_demo(), maps:get(bytes_received, Res) > 0 andalso is_integer(maps:get(port, Res)) end',
+        expectedOutput: 'true',
+        explanation: 'Verifies that run_demo/0 exchanges frames over an allocated port and records positive bytes_received telemetry.',
+      },
     ],
     astRules: {
       requireTailRecursion: ['echo_loop/3'],
@@ -1559,6 +1566,13 @@ solutionExplanation: `### Solution Breakdown: Bounded Flow Control Worker
         erlangCall: 'begin {ok, ListenPid, Port} = tcp_flow_worker:start_server(), {ok, S} = gen_tcp:connect("127.0.0.1", Port, [binary, {packet, raw}, {active, false}], 2000), ok = gen_tcp:send(S, <<"TEST_PING\\r\\n">>), {ok, Rep} = gen_tcp:recv(S, 0, 2000), gen_tcp:close(S), tcp_flow_worker:stop_server(ListenPid), Rep end',
         expectedOutput: '<<"+ACK: TEST_PING\\r\\n">>',
         explanation: 'Verifies server startup, client connection, and bounded echo reply.',
+      },
+      {
+        id: 'tc-ch10-l03-2',
+        title: 'Verify Processed Frame Count Telemetry',
+        erlangCall: 'begin {ok, ListenPid, Port} = tcp_flow_worker:start_server(), {ok, S} = gen_tcp:connect("127.0.0.1", Port, [binary, {packet, raw}, {active, false}], 2000), ok = gen_tcp:send(S, <<"FRAME_1\\r\\n">>), {ok, _} = gen_tcp:recv(S, 0, 2000), ok = gen_tcp:send(S, <<"FRAME_2\\r\\n">>), {ok, _} = gen_tcp:recv(S, 0, 2000), Count = tcp_flow_worker:get_processed_count(tcp_flow_worker), gen_tcp:close(S), tcp_flow_worker:stop_server(ListenPid), Count end',
+        expectedOutput: '2',
+        explanation: 'Transmits 2 frames through flow control worker and verifies monotonic packets_processed tally.',
       },
     ],
     astRules: {

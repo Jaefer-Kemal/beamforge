@@ -355,6 +355,13 @@ print_transcript([#{direction := Dir, xml := Xml, stage := Stage, latency_us := 
         expectedOutput: '{ok, 8}',
         explanation: 'Boots ephemeral C2S mock server, connects bf_xmpp_c2s_harness over TCP, and executes all 5 handshake and stanza routing phases.',
       },
+      {
+        id: 'tc-ch11-l01-2',
+        title: 'Format Wire Transcript Step',
+        erlangCall: 'xmpp_wire_demo:print_transcript([#{direction => <<"c2s">>, xml => <<"<open/>">>, stage => stream_open, latency_us => 42}], 1)',
+        expectedOutput: 'ok',
+        explanation: 'Directly validates print_transcript/2 formatting on structured wire transcript maps.',
+      },
     ],
     astRules: {
       requireTailRecursion: ['print_transcript/2'],
@@ -781,6 +788,13 @@ is_same_bare_jid(_Jid1, _Jid2) ->
         erlangCall: '{xmpp_jid:parse(<<"@localhost">>), xmpp_jid:parse(<<"alice@">>), xmpp_jid:parse(<<"alice@localhost/">>)}',
         expectedOutput: '{{error,invalid_jid},{error,invalid_jid},{error,invalid_jid}}',
         explanation: 'Rejects empty user, empty domain, and trailing slash without resource.',
+      },
+      {
+        id: 'tc-ch11-l02-4',
+        title: 'Extract Bare JID and Compare Equivalences',
+        erlangCall: '{xmpp_jid:to_bare(<<"alice@localhost/work">>), xmpp_jid:is_same_bare_jid(<<"alice@localhost/home">>, <<"alice@localhost/laptop">>)}',
+        expectedOutput: '{<<"alice@localhost">>, true}',
+        explanation: 'Verifies to_bare/1 extracts normalized bare JIDs and is_same_bare_jid/2 recognizes multi-resource session identity.',
       },
     ],
     astRules: {
@@ -1305,6 +1319,13 @@ build_chat_message(_FromJid, _ToJid, _Id, _BodyText) ->
         expectedOutput: '<<"<message from=\'alice@localhost\' to=\'bob@localhost\' id=\'msg_01\' type=\'chat\'><body>Hello BEAM</body></message>">>',
         explanation: 'Constructs standard XMPP chat message with from, to, id, and body.',
       },
+      {
+        id: 'tc-ch11-l03-4',
+        title: 'Build Stream Features XML',
+        erlangCall: 'xmpp_stanza:build_stream_features([<<"PLAIN">>, <<"SCRAM-SHA-1">>])',
+        expectedOutput: '<<"<stream:features><mechanisms xmlns=\'urn:ietf:params:xml:ns:xmpp-sasl\'><mechanism>PLAIN</mechanism><mechanism>SCRAM-SHA-1</mechanism></mechanisms></stream:features>">>',
+        explanation: 'Serializes offered SASL authentication mechanism options into standard XML stream features element.',
+      },
     ],
     astRules: {
       requireTailRecursion: [],
@@ -1784,6 +1805,13 @@ transition_subscription(Current, _)                  -> Current.
         erlangCall: 'begin S1 = xmpp_error_and_roster:transition_subscription(none, outbound_subscribed), S2 = xmpp_error_and_roster:transition_subscription(S1, inbound_subscribed), {S1, S2} end',
         expectedOutput: '{to, both}',
         explanation: 'Verifies mutual subscription transition logic from none to to to both.',
+      },
+      {
+        id: 'tc-ch11-l04-4',
+        title: 'Stream Not Authorized Error Synthesis',
+        erlangCall: 'xmpp_error_and_roster:build_stream_not_authorized()',
+        expectedOutput: '<<"<stream:error><not-authorized xmlns=\'urn:ietf:params:xml:ns:xmpp-streams\'/></stream:error>">>',
+        explanation: 'Verifies construction of RFC 6120 not-authorized stream error element.',
       },
     ],
     solutionExplanation: 'Implements RFC 6120 structured error classification and RFC 6121 presence subscription state machines.',

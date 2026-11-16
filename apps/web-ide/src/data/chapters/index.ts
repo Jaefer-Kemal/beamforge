@@ -10,7 +10,7 @@ import { CHAPTER_8_LESSONS } from './ch08';
 import { CHAPTER_9_LESSONS } from './ch09';
 import { CHAPTER_10_LESSONS } from './ch10';
 import { CHAPTER_11_LESSONS } from './ch11';
-import { CHAPTER_12_LESSONS } from './ch12';
+import { CHAPTER_12_LESSONS, CH12_MILESTONE_LESSONS } from './ch12';
 
 export {
   CHAPTER_1_LESSONS,
@@ -60,7 +60,27 @@ export const ALL_LESSONS_FLAT: LessonContent[] = [
 
 /** Lookup lesson by its unique string ID (e.g. "ch02-l06") */
 export function getLessonById(id: string): LessonContent | undefined {
-  return ALL_LESSONS_FLAT.find((l) => l.id === id);
+  const direct = ALL_LESSONS_FLAT.find((l) => l.id === id);
+  if (direct) return direct;
+
+  // Handle Chapter 12 milestones: ch12-m1..ch12-m6 or ch12-l01..ch12-l06
+  const mMatch = id.match(/^ch12-(?:m|l0?)([1-6])$/);
+  if (mMatch) {
+    const mNum = parseInt(mMatch[1], 10);
+    const mLesson = CH12_MILESTONE_LESSONS.find((m) => m.milestoneNumber === mNum);
+    const capstone = ALL_LESSONS_FLAT.find((l) => l.id === 'ch12-capstone');
+    if (mLesson && capstone) {
+      return {
+        ...capstone,
+        id: `ch12-m${mNum}`,
+        title: mLesson.title,
+        conceptMarkdown: mLesson.conceptMarkdown,
+        mentalModelCheck: mLesson.mentalModelCheck,
+        visibleTestCases: mLesson.visibleTestCases || [],
+      };
+    }
+  }
+  return undefined;
 }
 
 /** Lookup lesson by chapter number (1..12) and lesson number (1..n) */

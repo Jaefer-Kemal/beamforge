@@ -977,7 +977,7 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		var expFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				expFailed = true
 				break
 			}
@@ -1282,7 +1282,7 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		var expFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				expFailed = true
 				break
 			}
@@ -1609,7 +1609,7 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}
@@ -1931,7 +1931,7 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}
@@ -2251,7 +2251,7 @@ code_change(_OldVsn, State, Data, _Extra) ->
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}
@@ -2542,7 +2542,7 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}
@@ -2738,7 +2738,7 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}
@@ -3196,7 +3196,7 @@ code_change(_OldVsn, State, _Extra) ->
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}

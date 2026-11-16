@@ -1047,7 +1047,7 @@ trigger_class(exit, R) -> exit(R).
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}
@@ -1157,7 +1157,7 @@ validate_email(_) -> {error, invalid_email}.
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}
@@ -1402,7 +1402,7 @@ process_transaction_log(_Lines, CloseNotifyPid) ->
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}
@@ -1651,7 +1651,7 @@ worker2_loop() ->
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}
@@ -1843,7 +1843,7 @@ simulate_exit_truth_table(TrappingBool, SignalReason) ->
 		}
 		var astFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "ast_trap_exit_invariants" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "ast_trap_exit_invariants") && st.Status == "failed" {
 				astFailed = true
 				break
 			}
@@ -1930,7 +1930,7 @@ simulate_exit_truth_table(_TrappingBool, _SignalReason) ->
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}
@@ -2163,7 +2163,7 @@ probe_pid_status(_TargetPid) ->
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}
@@ -2336,7 +2336,7 @@ count_lingering_downs() ->
 		}
 		var exportFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				exportFailed = true
 				break
 			}
@@ -2624,7 +2624,7 @@ loop(CallbackMod, State) ->
 		}
 		var expFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				expFailed = true
 				break
 			}
@@ -2887,7 +2887,7 @@ worker_loop() ->
 		}
 		var expFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				expFailed = true
 				break
 			}
@@ -3097,7 +3097,7 @@ worker_loop() -> ok.
 		}
 		var expFailed bool
 		for _, st := range report.Stages {
-			if st.ID == "compile_and_export_audit" && st.Status == "failed" {
+			if (st.ID == "compile" || st.ID == "compile_and_export_audit") && st.Status == "failed" {
 				expFailed = true
 				break
 			}

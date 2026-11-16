@@ -4868,29 +4868,56 @@ CompileStage = case code:ensure_loaded(basic_types) of
     {error, E1} ->
         #{id => <<"compile_and_export_audit">>, title => <<"Module Compilation & Export Audit">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Load failed: ~p", [E1]))}
 end,
-S1_Arithmetic = try {basic_types:calculate_bandwidth(1250, 2), basic_types:calculate_bandwidth(2500, 5), basic_types:calculate_bandwidth(100, 3)} of
-    {5000, 4000, 266} ->
-        #{id => <<"integer_arithmetic">>, title => <<"Integer Division Arithmetic (div)">>, status => <<"passed">>, time_ms => 5, details => <<"Exact and truncating integer bandwidth calculations verified.">>};
-    Got1 ->
-        #{id => <<"integer_arithmetic">>, title => <<"Integer Division Arithmetic (div)">>, status => <<"failed">>, time_ms => 5, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
+S1_Arithmetic = try
+    FuzzArith = lists:all(fun(_) ->
+        Bytes = rand:uniform(50000) + 100,
+        Sec = rand:uniform(30) + 1,
+        basic_types:calculate_bandwidth(Bytes, Sec) =:= ((Bytes * 8) div Sec)
+    end, lists:seq(1, 20)),
+    case {basic_types:calculate_bandwidth(1250, 2), basic_types:calculate_bandwidth(2500, 5), basic_types:calculate_bandwidth(100, 3), FuzzArith} of
+        {5000, 4000, 266, true} ->
+            #{id => <<"integer_arithmetic">>, title => <<"Integer Division Arithmetic (div)">>, status => <<"passed">>, time_ms => 5, details => <<"Exact, truncating, and 20-iteration dynamic property-fuzzed integer bandwidth calculations verified.">>};
+        Got1 ->
+            #{id => <<"integer_arithmetic">>, title => <<"Integer Division Arithmetic (div)">>, status => <<"failed">>, time_ms => 5, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
+    end
 catch C1:R1 ->
     #{id => <<"integer_arithmetic">>, title => <<"Integer Division Arithmetic (div)">>, status => <<"failed">>, time_ms => 5, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
 end,
 S2_Comparisons = try
-    {basic_types:is_exact_match(42, 42.0),
-     basic_types:is_exact_match(100, 100),
-     basic_types:is_exact_match(ok, ok),
-     basic_types:is_within_quota(0, 500, false),
-     basic_types:is_within_quota(450, 500, false),
-     basic_types:is_within_quota(500, 500, false),
-     basic_types:is_within_quota(550, 500, false),
-     basic_types:is_within_quota(-10, 500, false),
-     basic_types:is_within_quota(9999, 100, true)}
-of
-    {false, true, true, true, true, true, false, false, true} ->
-        #{id => <<"comparison_and_logic">>, title => <<"Strict Equality (=:=) & Quota Bounds Logic">>, status => <<"passed">>, time_ms => 6, details => <<"Verified type-safe equality, admin bypass, negative rejection, and inclusive [0, LimitMb] quota boundaries.">>};
-    Got2 ->
-        #{id => <<"comparison_and_logic">>, title => <<"Strict Equality (=:=) & Quota Bounds Logic">>, status => <<"failed">>, time_ms => 6, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got2]))}
+    FuzzQuota = lists:all(fun(_) ->
+        Lim = rand:uniform(1000) + 50,
+        Within = rand:uniform(Lim),
+        Over = Lim + rand:uniform(500),
+        Neg = -rand:uniform(100),
+        (basic_types:is_within_quota(Within, Lim, false) =:= true) andalso
+        (basic_types:is_within_quota(Over, Lim, false) =:= false) andalso
+        (basic_types:is_within_quota(Neg, Lim, false) =:= false) andalso
+        (basic_types:is_within_quota(Over, Lim, true) =:= true) andalso
+        (basic_types:is_within_quota(0, Lim, false) =:= true) andalso
+        (basic_types:is_within_quota(Lim, Lim, false) =:= true)
+    end, lists:seq(1, 20)),
+    FuzzMatch = lists:all(fun(_) ->
+        N = rand:uniform(10000),
+        (basic_types:is_exact_match(N, N) =:= true) andalso
+        (basic_types:is_exact_match(N, float(N)) =:= false)
+    end, lists:seq(1, 15)),
+    case {basic_types:is_exact_match(42, 42.0),
+          basic_types:is_exact_match(100, 100),
+          basic_types:is_exact_match(ok, ok),
+          basic_types:is_within_quota(0, 500, false),
+          basic_types:is_within_quota(450, 500, false),
+          basic_types:is_within_quota(500, 500, false),
+          basic_types:is_within_quota(550, 500, false),
+          basic_types:is_within_quota(-10, 500, false),
+          basic_types:is_within_quota(9999, 100, true),
+          FuzzQuota,
+          FuzzMatch}
+    of
+        {false, true, true, true, true, true, false, false, true, true, true} ->
+            #{id => <<"comparison_and_logic">>, title => <<"Strict Equality (=:=) & Quota Bounds Logic">>, status => <<"passed">>, time_ms => 6, details => <<"Verified type-safe equality, admin bypass, negative rejection, and inclusive [0, LimitMb] quota boundaries across dynamic fuzzing matrix.">>};
+        Got2 ->
+            #{id => <<"comparison_and_logic">>, title => <<"Strict Equality (=:=) & Quota Bounds Logic">>, status => <<"failed">>, time_ms => 6, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got2]))}
+    end
 catch C2:R2 ->
     #{id => <<"comparison_and_logic">>, title => <<"Strict Equality (=:=) & Quota Bounds Logic">>, status => <<"failed">>, time_ms => 6, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2]))}
 end,
@@ -4919,18 +4946,38 @@ S1_Vars = try
     catch
         _:_ -> true
     end,
-    {pattern_vars:rebind_update(10, 5),
-     pattern_vars:rebind_update(100, 50),
-     pattern_vars:rebind_update(0, -7),
-     pattern_vars:extract_middle({alpha, beta, gamma}),
-     pattern_vars:extract_middle({1, 999, "test"}),
-     pattern_vars:extract_middle({tag, [1, 2], done}),
-     NonTripleRejected}
-of
-    {30, 300, -14, beta, 999, [1, 2], true} ->
-        #{id => <<"pattern_vars_suite">>, title => <<"Single Assignment & Tuple Destructuring">>, status => <<"passed">>, time_ms => 6, details => <<"Verified sequential immutable state progression, 3-tuple middle extraction, and non-triple rejection.">>};
-    Got1 ->
-        #{id => <<"pattern_vars_suite">>, title => <<"Single Assignment & Tuple Destructuring">>, status => <<"failed">>, time_ms => 6, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
+    FourTupleRejected = try pattern_vars:extract_middle({one, two, three, four}) of
+        _ -> false
+    catch
+        _:_ -> true
+    end,
+    FuzzRebind = lists:all(fun(_) ->
+        Base = rand:uniform(1000) - 500,
+        Add = rand:uniform(1000) - 500,
+        pattern_vars:rebind_update(Base, Add) =:= ((Base + Add) * 2)
+    end, lists:seq(1, 20)),
+    FuzzMiddle = lists:all(fun(_) ->
+        T1 = list_to_atom("tag_" ++ integer_to_list(rand:uniform(10000))),
+        V2 = rand:uniform(99999),
+        T3 = rand:uniform(1000),
+        pattern_vars:extract_middle({T1, V2, T3}) =:= V2
+    end, lists:seq(1, 20)),
+    case {pattern_vars:rebind_update(10, 5),
+          pattern_vars:rebind_update(100, 50),
+          pattern_vars:rebind_update(0, -7),
+          pattern_vars:extract_middle({alpha, beta, gamma}),
+          pattern_vars:extract_middle({1, 999, "test"}),
+          pattern_vars:extract_middle({tag, [1, 2], done}),
+          NonTripleRejected,
+          FourTupleRejected,
+          FuzzRebind,
+          FuzzMiddle}
+    of
+        {30, 300, -14, beta, 999, [1, 2], true, true, true, true} ->
+            #{id => <<"pattern_vars_suite">>, title => <<"Single Assignment & Tuple Destructuring">>, status => <<"passed">>, time_ms => 6, details => <<"Verified sequential immutable state progression, 3-tuple middle extraction, dynamic property fuzzing, and non-triple rejection.">>};
+        Got1 ->
+            #{id => <<"pattern_vars_suite">>, title => <<"Single Assignment & Tuple Destructuring">>, status => <<"failed">>, time_ms => 6, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
+    end
 catch C1:R1 ->
     #{id => <<"pattern_vars_suite">>, title => <<"Single Assignment & Tuple Destructuring">>, status => <<"failed">>, time_ms => 6, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1]))}
 end,
@@ -4970,10 +5017,21 @@ S1_Events = try
     catch
         _:_ -> true
     end,
-    case {Ev1, Caller1, Swapped1, Ev2, Caller2, Swapped2, WrongTagRejected, WrongArityRejected} of
+    FuzzEvents = lists:all(fun(_) ->
+        Id = rand:uniform(100000),
+        Caller = list_to_atom("user_" ++ integer_to_list(rand:uniform(1000))),
+        Callee = list_to_atom("peer_" ++ integer_to_list(rand:uniform(1000))),
+        Ev = telecom_events:make_event(Id, Caller, Callee),
+        Extracted = telecom_events:extract_caller(Ev),
+        Swapped = telecom_events:swap_endpoints(Ev),
+        (Ev =:= {call_event, Id, Caller, Callee, 0}) andalso
+        (Extracted =:= Caller) andalso
+        (Swapped =:= {call_event, Id, Callee, Caller, 0})
+    end, lists:seq(1, 15)),
+    case {Ev1, Caller1, Swapped1, Ev2, Caller2, Swapped2, WrongTagRejected, WrongArityRejected, FuzzEvents} of
         {{call_event, 101, alice, bob, 0}, alice, {call_event, 101, bob, alice, 0},
-         {call_event, 500, charlie, dave, 0}, server_alpha, {call_event, 777, dst_node, src_node, 360}, true, true} ->
-            #{id => <<"tuple_destructuring">>, title => <<"Tagged Tuple Creation & Endpoint Swapping">>, status => <<"passed">>, time_ms => 8, details => <<"Tagged 5-tuple creation, caller extraction, endpoint swapping, and tag/arity rejection verified.">>};
+         {call_event, 500, charlie, dave, 0}, server_alpha, {call_event, 777, dst_node, src_node, 360}, true, true, true} ->
+            #{id => <<"tuple_destructuring">>, title => <<"Tagged Tuple Creation & Endpoint Swapping">>, status => <<"passed">>, time_ms => 8, details => <<"Tagged 5-tuple creation, caller extraction, endpoint swapping, dynamic fuzzing, and tag/arity rejection verified.">>};
         Got1 ->
             #{id => <<"tuple_destructuring">>, title => <<"Tagged Tuple Creation & Endpoint Swapping">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Tuple mismatch: ~p", [Got1]))}
     end
@@ -5039,9 +5097,21 @@ S2_Lists = try
     catch
         _:_ -> true
     end,
-    case {R1, R2, R3, R4, R5, R6, ShortSwapRejected, EmptyStrRejected} of
-        {[10, 20, 30], [first], [beta, alpha, gamma, delta], [2, 1], {char_code, 69}, {char_code, 66}, true, true} ->
-            #{id => <<"list_head_tail_ops">>, title => <<"Cons Cell [H|T] Head/Tail & Codepoints">>, status => <<"passed">>, time_ms => 8, details => <<"Verified O(1) prepend, element swapping, character codepoints, and under-length rejection.">>};
+    FuzzPrepend = lists:all(fun(_) ->
+        Item = rand:uniform(10000),
+        Len = rand:uniform(10),
+        List = [rand:uniform(100) || _ <- lists:seq(1, Len)],
+        list_ops:prepend_item(Item, List) =:= [Item | List]
+    end, lists:seq(1, 15)),
+    FuzzSwap = lists:all(fun(_) ->
+        A = rand:uniform(1000),
+        B = rand:uniform(1000),
+        Rest = [rand:uniform(100) || _ <- lists:seq(1, rand:uniform(5))],
+        list_ops:swap_first_two([A, B | Rest]) =:= [B, A | Rest]
+    end, lists:seq(1, 15)),
+    case {R1, R2, R3, R4, R5, R6, ShortSwapRejected, EmptyStrRejected, FuzzPrepend, FuzzSwap} of
+        {[10, 20, 30], [first], [beta, alpha, gamma, delta], [2, 1], {char_code, 69}, {char_code, 66}, true, true, true, true} ->
+            #{id => <<"list_head_tail_ops">>, title => <<"Cons Cell [H|T] Head/Tail & Codepoints">>, status => <<"passed">>, time_ms => 8, details => <<"Verified O(1) prepend, element swapping, dynamic fuzzing, character codepoints, and under-length rejection.">>};
         Got1 ->
             #{id => <<"list_head_tail_ops">>, title => <<"Cons Cell [H|T] Head/Tail & Codepoints">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("List ops mismatch: ~p", [Got1]))}
     end
@@ -5103,12 +5173,21 @@ S2_Arity = try
     R2 = arity_calc:connect(localhost, 8080),
     R3 = arity_calc:connect(localhost, 8080, 2500),
     R4 = arity_calc:connect(auth_service, 5222, 30000),
-    case {R1, R2, R3, R4} of
+    FuzzArity = lists:all(fun(_) ->
+        Host = list_to_atom("node_" ++ integer_to_list(rand:uniform(10000))),
+        Port = rand:uniform(60000) + 1024,
+        Timeout = rand:uniform(10000) + 1000,
+        (arity_calc:connect(Host) =:= {connection, arity_calc, Host, 80, 5000}) andalso
+        (arity_calc:connect(Host, Port) =:= {connection, arity_calc, Host, Port, 5000}) andalso
+        (arity_calc:connect(Host, Port, Timeout) =:= {connection, arity_calc, Host, Port, Timeout})
+    end, lists:seq(1, 15)),
+    case {R1, R2, R3, R4, FuzzArity} of
         {{connection, arity_calc, localhost, 80, 5000},
          {connection, arity_calc, localhost, 8080, 5000},
          {connection, arity_calc, localhost, 8080, 2500},
-         {connection, arity_calc, auth_service, 5222, 30000}} ->
-            #{id => <<"arity_delegation">>, title => <<"Function Arity Cascading Defaults & Macros">>, status => <<"passed">>, time_ms => 8, details => <<"connect/1 -> connect/2 -> connect/3 delegation and macros verified.">>};
+         {connection, arity_calc, auth_service, 5222, 30000},
+         true} ->
+            #{id => <<"arity_delegation">>, title => <<"Function Arity Cascading Defaults & Macros">>, status => <<"passed">>, time_ms => 8, details => <<"connect/1 -> connect/2 -> connect/3 delegation, dynamic fuzzing, and macros verified.">>};
         Got1 ->
             #{id => <<"arity_delegation">>, title => <<"Function Arity Cascading Defaults & Macros">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Arity mismatch: ~p", [Got1]))}
     end
@@ -5166,10 +5245,18 @@ S2_Router = try
     P_Diff = clause_router:verify_identical_pair({alpha, beta}),
     P_LooseNum = clause_router:verify_identical_pair({42, 42.0}),
     P_WrongArity = clause_router:verify_identical_pair({1, 2, 3}),
-    case {S_200, S_404, S_500, S_418, H_NonEmpty, H_Empty, H_Num, P_Same, P_Diff, P_LooseNum, P_WrongArity} of
+    FuzzStatus = lists:all(fun(_) ->
+        Code = rand:uniform(400) + 600,
+        clause_router:describe_status(Code) =:= {error, unknown_code}
+    end, lists:seq(1, 15)),
+    FuzzDefault = lists:all(fun(_) ->
+        Def = rand:uniform(100000),
+        clause_router:head_or_default([], Def) =:= Def
+    end, lists:seq(1, 15)),
+    case {S_200, S_404, S_500, S_418, H_NonEmpty, H_Empty, H_Num, P_Same, P_Diff, P_LooseNum, P_WrongArity, FuzzStatus, FuzzDefault} of
         {{ok, success}, {error, not_found}, {error, server_crash}, {error, unknown_code},
-         packet, default_val, 1, {matched, alpha}, mismatch, mismatch, mismatch} ->
-            #{id => <<"multi_clause_routing">>, title => <<"Multi-Clause Routing & Punctuation Triad">>, status => <<"passed">>, time_ms => 8, details => <<"Verified status routing, list head/fallback clauses, strict type pair matching, and non-pair mismatch fallback.">>};
+         packet, default_val, 1, {matched, alpha}, mismatch, mismatch, mismatch, true, true} ->
+            #{id => <<"multi_clause_routing">>, title => <<"Multi-Clause Routing & Punctuation Triad">>, status => <<"passed">>, time_ms => 8, details => <<"Verified status routing, list head/fallback clauses, strict type pair matching, dynamic fuzzing, and non-pair mismatch fallback.">>};
         Got1 ->
             #{id => <<"multi_clause_routing">>, title => <<"Multi-Clause Routing & Punctuation Triad">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
     end
@@ -5247,7 +5334,27 @@ S2_Suite = try
     B2 = telecom_foundations:bill_call(100, premium, 25),
     B3 = telecom_foundations:bill_call(3600, internal),
     B4 = telecom_foundations:bill_call(60, unknown_plan),
-    case {P1, P2, P3, P4, P5, B1, B2, B3, B4} of
+    FuzzBill = lists:all(fun(_) ->
+        Secs = rand:uniform(1000) + 1,
+        Fee = rand:uniform(50),
+        Std = telecom_foundations:bill_call(Secs, standard, Fee),
+        Prem = telecom_foundations:bill_call(Secs, premium, Fee),
+        Int = telecom_foundations:bill_call(Secs, internal, Fee),
+        Unk = telecom_foundations:bill_call(Secs, list_to_atom("plan_" ++ integer_to_list(Secs + 9999)), Fee),
+        (Std =:= {ok, Fee + (Secs * 5)}) andalso
+        (Prem =:= {ok, Fee + (Secs * 3)}) andalso
+        (Int =:= {ok, 0}) andalso
+        (Unk =:= {error, unknown_plan})
+    end, lists:seq(1, 15)),
+    FuzzPackets = lists:all(fun(_) ->
+        Payload = [rand:uniform(255) || _ <- lists:seq(1, rand:uniform(5))],
+        First = hd(Payload),
+        P_v4 = telecom_foundations:classify_packet({ipv4, "1.1.1.1", "2.2.2.2", Payload}),
+        P_v6 = telecom_foundations:classify_packet({ipv6, "::1", "::2", Payload}),
+        (P_v4 =:= {ok, ipv4, "1.1.1.1", "2.2.2.2", First}) andalso
+        (P_v6 =:= {ok, ipv6, "::1", "::2", First})
+    end, lists:seq(1, 10)),
+    case {P1, P2, P3, P4, P5, B1, B2, B3, B4, FuzzBill, FuzzPackets} of
         {{ok, ipv4, "10.0.0.1", "10.0.0.2", ping},
          {ok, ipv6, "fe80::1", "fe80::2", data},
          {error, empty_payload},
@@ -5256,8 +5363,10 @@ S2_Suite = try
          {ok, 310},
          {ok, 325},
          {ok, 0},
-         {error, unknown_plan}} ->
-            #{id => <<"telecom_foundations_engine">>, title => <<"Packet Classifier & CDR Billing Engine">>, status => <<"passed">>, time_ms => 8, details => <<"Full multi-clause packet classifier (including unsupported tag rejection) and CDR billing engine verified.">>};
+         {error, unknown_plan},
+         true,
+         true} ->
+            #{id => <<"telecom_foundations_engine">>, title => <<"Packet Classifier & CDR Billing Engine">>, status => <<"passed">>, time_ms => 8, details => <<"Full multi-clause packet classifier (including unsupported tag rejection), dynamic CDR billing fuzzing, and billing engine verified.">>};
         Got1 ->
             #{id => <<"telecom_foundations_engine">>, title => <<"Packet Classifier & CDR Billing Engine">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("CDR engine mismatch: ~p", [Got1]))}
     end
@@ -5333,7 +5442,25 @@ S2_Match = try
     F1 = deep_match:repackage_envelope(P),
     D1 = deep_match:repackage_envelope({packet, {header, 6, {route, "a", "b"}}, []}),
     D2 = deep_match:repackage_envelope(corrupt),
-    case {R1, R2, R3, R4, R5, F1, D1, D2} of
+    FuzzIPv4 = lists:all(fun(_) ->
+        Src = lists:flatten(io_lib:format("10.0.~p.~p", [rand:uniform(250), rand:uniform(250)])),
+        Dst = lists:flatten(io_lib:format("192.168.~p.~p", [rand:uniform(250), rand:uniform(250)])),
+        Pkt = {packet, {header, 4, {route, Src, Dst}}, [rand:uniform(1000)]},
+        deep_match:extract_route(Pkt) =:= {ok, ipv4, Src, Dst} andalso
+        deep_match:repackage_envelope(Pkt) =:= {forwarded, Dst, Pkt}
+    end, lists:seq(1, 15)),
+    FuzzIPv6 = lists:all(fun(_) ->
+        Src = lists:flatten(io_lib:format("fe80::~p", [rand:uniform(9999)])),
+        Dst = lists:flatten(io_lib:format("fe80::~p", [rand:uniform(9999)])),
+        Pkt = {packet, {header, 6, {route, Src, Dst}}, []},
+        deep_match:extract_route(Pkt) =:= {ok, ipv6, Src, Dst} andalso
+        deep_match:repackage_envelope(Pkt) =:= {dropped, Pkt}
+    end, lists:seq(1, 10)),
+    FuzzUnsupported = lists:all(fun(_) ->
+        V = 7 + rand:uniform(20),
+        deep_match:extract_route({packet, {header, V, {route, "s", "d"}}, []}) =:= {error, {unsupported_version, V}}
+    end, lists:seq(1, 5)),
+    case {R1, R2, R3, R4, R5, F1, D1, D2, FuzzIPv4, FuzzIPv6, FuzzUnsupported} of
         {{ok, ipv4, "10.0.0.1", "10.0.0.2"},
          {ok, ipv6, "fe80::1", "fe80::2"},
          {error, {unsupported_version, 5}},
@@ -5341,7 +5468,8 @@ S2_Match = try
          {error, malformed_envelope},
          {forwarded, "dst_host", P},
          {dropped, {packet, {header, 6, {route, "a", "b"}}, []}},
-         {dropped, corrupt}} ->
+         {dropped, corrupt},
+         true, true, true} ->
             #{id => <<"deep_pattern_matching">>, title => <<"Deep Function Head Pattern Matching & Aliasing">>, status => <<"passed">>, time_ms => 8, details => <<"Nested tuple head pattern destructuring and aliasing verified across valid, unsupported, and malformed cases.">>};
         Got1 ->
             #{id => <<"deep_pattern_matching">>, title => <<"Deep Function Head Pattern Matching & Aliasing">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
@@ -5415,14 +5543,42 @@ S2_Guards = try
     R3 = guard_validator:safe_ratio(10, 0),
     R4 = guard_validator:safe_ratio(foo, 2),
     R5 = guard_validator:safe_ratio(10, "2"),
+    FuzzPorts = lists:all(fun(_) ->
+        Unpriv = 1024 + rand:uniform(64511),
+        Priv = rand:uniform(1023),
+        BadHigh = 65536 + rand:uniform(50000),
+        BadNeg = -rand:uniform(10000),
+        guard_validator:validate_port(Unpriv) =:= {ok, unprivileged_port} andalso
+        guard_validator:validate_port(Priv) =:= {ok, privileged_port} andalso
+        guard_validator:validate_port(BadHigh) =:= {error, invalid_port} andalso
+        guard_validator:validate_port(BadNeg) =:= {error, invalid_port}
+    end, lists:seq(1, 15)),
+    FuzzTemps = lists:all(fun(_) ->
+        Freezing = -rand:uniform(100),
+        Temperate = rand:uniform(24) + 1,
+        Hot = 26 + rand:uniform(100),
+        guard_validator:classify_temperature(Freezing) =:= freezing andalso
+        guard_validator:classify_temperature(Temperate) =:= temperate andalso
+        guard_validator:classify_temperature(Hot) =:= hot
+    end, lists:seq(1, 15)),
+    FuzzRatios = lists:all(fun(_) ->
+        Denom = rand:uniform(50) + 1,
+        HighNum = Denom * (2 + rand:uniform(10)),
+        LowNum = Denom,
+        guard_validator:safe_ratio(HighNum, Denom) =:= high_ratio andalso
+        guard_validator:safe_ratio(LowNum, Denom) =:= normal_ratio andalso
+        guard_validator:safe_ratio(HighNum, 0) =:= {error, invalid_ratio}
+    end, lists:seq(1, 15)),
     case {P1, P1b, P1c, P2, P2b, P2c, P3, P3b, P4, P4b, P5, P6,
           T1, T2, T2b, T3, T3b, T4, T4b, T5,
-          R1, R1b, R1c, R2, R2b, R3, R4, R5} of
+          R1, R1b, R1c, R2, R2b, R3, R4, R5,
+          FuzzPorts, FuzzTemps, FuzzRatios} of
         {{ok, unprivileged_port}, {ok, unprivileged_port}, {ok, unprivileged_port},
          {ok, privileged_port}, {ok, privileged_port}, {ok, privileged_port},
          {error, invalid_port}, {error, invalid_port}, {error, invalid_port}, {error, invalid_port}, {error, invalid_port}, {error, invalid_port},
          freezing, freezing, freezing, temperate, temperate, hot, hot, {error, invalid_temperature},
-         high_ratio, high_ratio, high_ratio, normal_ratio, normal_ratio, {error, invalid_ratio}, {error, invalid_ratio}, {error, invalid_ratio}} ->
+         high_ratio, high_ratio, high_ratio, normal_ratio, normal_ratio, {error, invalid_ratio}, {error, invalid_ratio}, {error, invalid_ratio},
+         true, true, true} ->
             #{id => <<"guard_clause_validation">>, title => <<"Pure Guard Clauses & Silent Guard Failure">>, status => <<"passed">>, time_ms => 10, details => <<"Passed all inclusive boundary port, temperature, negative-divisor, and silent guard failure checks.">>};
         Got1 ->
             #{id => <<"guard_clause_validation">>, title => <<"Pure Guard Clauses & Silent Guard Failure">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Guard mismatch: ~p", [Got1]))}
@@ -5502,11 +5658,29 @@ S2_Flow = try
     L5 = flow_control:grade_latency(200),
     L6 = flow_control:grade_latency(201),
     L7 = flow_control:grade_latency(800),
-    case {R1, R2, R3, R4, R5, R6, R7, R8, R9, L1, L2, L3, L4, L5, L6, L7} of
+    FuzzServerErrors = lists:all(fun(_) ->
+        Code = 500 + rand:uniform(100) - 1,
+        flow_control:handle_http_response({http_response, Code, []}) =:= {error, server_error}
+    end, lists:seq(1, 15)),
+    FuzzUnexpected = lists:all(fun(_) ->
+        Code = 100 + rand:uniform(99),
+        flow_control:handle_http_response({http_response, Code, "body"}) =:= {error, {unexpected_status, Code}}
+    end, lists:seq(1, 10)),
+    FuzzLatencies = lists:all(fun(_) ->
+        Opt = rand:uniform(49),
+        Acc = 50 + rand:uniform(151) - 1,
+        Breach = 201 + rand:uniform(500),
+        flow_control:grade_latency(Opt) =:= optimal andalso
+        flow_control:grade_latency(Acc) =:= acceptable andalso
+        flow_control:grade_latency(Breach) =:= sla_breach
+    end, lists:seq(1, 15)),
+    case {R1, R2, R3, R4, R5, R6, R7, R8, R9, L1, L2, L3, L4, L5, L6, L7,
+          FuzzServerErrors, FuzzUnexpected, FuzzLatencies} of
         {{ok, "OK"}, {error, unauthorized}, {error, unauthorized},
          {error, server_error}, {error, server_error}, {error, server_error},
          {error, {unexpected_status, 301}}, {error, invalid_response}, {error, invalid_response},
-         optimal, optimal, acceptable, acceptable, acceptable, sla_breach, sla_breach} ->
+         optimal, optimal, acceptable, acceptable, acceptable, sla_breach, sla_breach,
+         true, true, true} ->
             #{id => <<"case_and_if_expressions">>, title => <<"Control Expressions (case...of & if...end)">>, status => <<"passed">>, time_ms => 10, details => <<"Branch pattern matching, integer status boundaries, and SLA latency intervals verified.">>};
         Got1 ->
             #{id => <<"case_and_if_expressions">>, title => <<"Control Expressions (case...of & if...end)">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Flow mismatch: ~p", [Got1]))}
@@ -5584,13 +5758,23 @@ S2_Search = try
     Has1b = recursive_search:contains_item([apple, banana, cherry], apple),
     Has2 = recursive_search:contains_item([apple, banana, cherry], date),
     Has3 = recursive_search:contains_item([], date),
-    case {F1, F1b, F1c, F2, F3, Has1, Has1b, Has2, Has3} of
+    FuzzSearch = lists:all(fun(_) ->
+        Catalog = [{product, N, lists:flatten(io_lib:format("item_~p", [N])), N * 10, N} || N <- lists:seq(1, 20)],
+        TargetId = rand:uniform(20),
+        ExpectedProd = {product, TargetId, lists:flatten(io_lib:format("item_~p", [TargetId])), TargetId * 10, TargetId},
+        recursive_search:find_product(Catalog, TargetId) =:= {ok, ExpectedProd} andalso
+        recursive_search:find_product(Catalog, 9999 + rand:uniform(1000)) =:= not_found andalso
+        recursive_search:contains_item([a, b, c, TargetId, z], TargetId) =:= true andalso
+        recursive_search:contains_item([a, b, c], missing_item) =:= false
+    end, lists:seq(1, 15)),
+    case {F1, F1b, F1c, F2, F3, Has1, Has1b, Has2, Has3, FuzzSearch} of
         {{ok, {product, 2, "Mouse", 25, 5}},
          {ok, {product, 2, "Mouse", 25, 5}},
          {ok, {product, 1, "Keyboard", 50, 10}},
          not_found,
          not_found,
-         true, true, false, false} ->
+         true, true, false, false,
+         true} ->
             #{id => <<"recursive_search_invariants">>, title => <<"Recursive Base Cases & Tuple Matching">>, status => <<"passed">>, time_ms => 8, details => <<"Recursive tuple lookup (ignoring non-product decoys), item containment, and [] base cases verified.">>};
         Got1 ->
             #{id => <<"recursive_search_invariants">>, title => <<"Recursive Base Cases & Tuple Matching">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Search mismatch: ~p", [Got1]))}
@@ -5649,8 +5833,15 @@ S2_Tco = try
     Cnt = tco_counter:count_packets([1, 2, 3, 4, 5]),
     CntEmpty = tco_counter:count_packets([]),
     CntBig = tco_counter:count_packets(lists:duplicate(10000, pkt)),
-    case {Sum, SumEmpty, SumSeq, Cnt, CntEmpty, CntBig} of
-        {100, 0, 5050, 5, 0, 10000} ->
+    FuzzTco = lists:all(fun(_) ->
+        Len = 100 + rand:uniform(150),
+        RandList = [rand:uniform(1000) || _ <- lists:seq(1, Len)],
+        ExpectedSum = lists:sum(RandList),
+        tco_counter:sum_packets(RandList) =:= ExpectedSum andalso
+        tco_counter:count_packets(RandList) =:= Len
+    end, lists:seq(1, 10)),
+    case {Sum, SumEmpty, SumSeq, Cnt, CntEmpty, CntBig, FuzzTco} of
+        {100, 0, 5050, 5, 0, 10000, true} ->
             #{id => <<"functional_contract">>, title => <<"Functional Accumulator Correctness">>, status => <<"passed">>, time_ms => 10, details => <<"Empty, standard, sequence (5050), and 10,000-element O(1)-stack TCO batch checks passed.">>};
         Got1 ->
             #{id => <<"functional_contract">>, title => <<"Functional Accumulator Correctness">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Functional mismatch: got ~p", [Got1]))}
@@ -5736,8 +5927,14 @@ S2_Reverse = try
     R2 = acc_filter:keep_valid_orders(Orders2),
     R3 = acc_filter:keep_valid_orders([]),
     R4 = acc_filter:keep_valid_orders(BigOrders),
-    case {R1, R2, R3, R4 =:= ExpectedBig} of
-        {[1, 4], [], [], true} ->
+    FuzzFilter = lists:all(fun(_) ->
+        Statuses = [confirmed, pending, canceled],
+        Batch = [{order, Id, rand:uniform(10) - 1, lists:nth(rand:uniform(3), Statuses)} || Id <- lists:seq(1, 50)],
+        Oracle = [Id || {order, Id, Qty, Status} <- Batch, Status =:= confirmed, Qty > 0],
+        acc_filter:keep_valid_orders(Batch) =:= Oracle
+    end, lists:seq(1, 10)),
+    case {R1, R2, R3, R4 =:= ExpectedBig, FuzzFilter} of
+        {[1, 4], [], [], true, true} ->
             #{id => <<"accumulator_and_reverse">>, title => <<"Accumulator Pattern & lists:reverse/1 Preservation">>, status => <<"passed">>, time_ms => 8, details => <<"Order preserved correctly using O(1) prepend and lists:reverse/1 across standard, empty, and 3,000-order batches.">>};
         Got1 ->
             #{id => <<"accumulator_and_reverse">>, title => <<"Accumulator Pattern & lists:reverse/1 Preservation">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Reverse mismatch: ~p", [Got1]))}
@@ -5819,14 +6016,30 @@ S2_Updater = try
     BigOrders = [{order, N, N rem 6} || N <- lists:seq(1, 2000)],
     ExpectedBig = {[{order, N, N rem 6} || N <- lists:seq(1, 2000), (N rem 6) >= 3], [{order, N, N rem 6} || N <- lists:seq(1, 2000), (N rem 6) < 3]},
     P3 = tuple_updater:partition_orders(BigOrders, 3),
-    case {U1, U1b, U2, U3, P1, P2, P3 =:= ExpectedBig} of
+    FuzzUpdate = lists:all(fun(_) ->
+        Catalog = [{product, N, lists:flatten(io_lib:format("item_~p", [N])), N * 10, N} || N <- lists:seq(1, 15)],
+        TargetId = rand:uniform(15),
+        NewPrice = rand:uniform(500),
+        Updated = tuple_updater:update_product_price(Catalog, TargetId, NewPrice),
+        Expected = [{product, Id, Name, case Id of TargetId -> NewPrice; _ -> P end, S} || {product, Id, Name, P, S} <- Catalog],
+        Updated =:= Expected andalso
+        tuple_updater:update_product_price(Catalog, 9999, 100) =:= Catalog
+    end, lists:seq(1, 10)),
+    FuzzPartition = lists:all(fun(_) ->
+        Batch = [{order, Id, rand:uniform(20)} || Id <- lists:seq(1, 40)],
+        Threshold = rand:uniform(15),
+        Oracle = {[O || O = {order, _, Q} <- Batch, Q >= Threshold], [O || O = {order, _, Q} <- Batch, Q < Threshold]},
+        tuple_updater:partition_orders(Batch, Threshold) =:= Oracle
+    end, lists:seq(1, 10)),
+    case {U1, U1b, U2, U3, P1, P2, P3 =:= ExpectedBig, FuzzUpdate, FuzzPartition} of
         {[{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 30, 5}],
          [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 30, 5}, {product, 3, "Cable", 15, 20}],
          [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 5}],
          [],
          {[{order, 1, 10}, {order, 3, 5}], [{order, 2, 2}, {order, 4, 4}]},
          {[], []},
-         true} ->
+         true,
+         true, true} ->
             #{id => <<"tuple_update_and_partition">>, title => <<"Tail-Recursive Tuple Update & Dual-Accumulator Partitioning">>, status => <<"passed">>, time_ms => 10, details => <<"Middle-element position preservation, MinQty inclusive boundary, and 2,000-order dual-accumulator pass verified.">>};
         Got1 ->
             #{id => <<"tuple_update_and_partition">>, title => <<"Tail-Recursive Tuple Update & Dual-Accumulator Partitioning">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
@@ -5902,8 +6115,18 @@ S1_Closures = try
     VipStrat = hof_basics:choose_pricing_strategy(vip),
     WholesaleStrat = hof_basics:choose_pricing_strategy(wholesale),
     StandardStrat = hof_basics:choose_pricing_strategy(regular),
-    case {R_Mul, R_Mul0, R_MulNeg, R_Twice, R_Abs, R_AbsPos, CaptureInfoOk, VipStrat(100), VipStrat(15), WholesaleStrat(100), WholesaleStrat(15), StandardStrat(100), StandardStrat(15)} of
-        {50, 0, -21, 18, 42, 42, true, 80, 12, 70, 10, 100, 15} ->
+    FuzzClosures = lists:all(fun(_) ->
+        Factor = rand:uniform(50) - 25,
+        Input = rand:uniform(200) - 100,
+        Mult = hof_basics:make_multiplier(Factor),
+        Mult(Input) =:= Factor * Input andalso
+        hof_basics:apply_twice(fun(V) -> V * 2 end, Input) =:= Input * 4 andalso
+        (hof_basics:choose_pricing_strategy(vip))(1000) =:= 800 andalso
+        (hof_basics:choose_pricing_strategy(wholesale))(1000) =:= 700 andalso
+        (hof_basics:choose_pricing_strategy(unknown_tier))(Input) =:= Input
+    end, lists:seq(1, 15)),
+    case {R_Mul, R_Mul0, R_MulNeg, R_Twice, R_Abs, R_AbsPos, CaptureInfoOk, VipStrat(100), VipStrat(15), WholesaleStrat(100), WholesaleStrat(15), StandardStrat(100), StandardStrat(15), FuzzClosures} of
+        {50, 0, -21, 18, 42, 42, true, 80, 12, 70, 10, 100, 15, true} ->
             #{id => <<"closures_and_captures">>, title => <<"First-Class Functions, Closures & Captures">>, status => <<"passed">>, time_ms => 8, details => <<"Lexical closures, external erlang:abs/1 capture, odd-integer truncation, and strategy patterns verified">>};
         {_, _, _, _, _, _, false, _, _, _, _, _, _} ->
             #{id => <<"closures_and_captures">>, title => <<"First-Class Functions, Closures & Captures">>, status => <<"failed">>, time_ms => 8, details => <<"math_capture/0 must return a direct external capture (fun erlang:abs/1), not a local wrapper fun.">>};
@@ -5994,7 +6217,17 @@ S1_Transform = try
     Metrics = hof_transform:sanitize_metrics([{cpu, 10.4}, {temp, -5.0}, {disk, 99.8}]),
     MetricsEdge = hof_transform:sanitize_metrics([{idle, 0.0}, {voltage, -0.5}, {ok_int, 7}]),
     MetricsEmpty = hof_transform:sanitize_metrics([]),
-    case {Discounts, DiscountTrunc, DiscountEmpty, Active, ActiveEmpty, ActiveNone, Metrics, MetricsEdge, MetricsEmpty} of
+    FuzzTransform = lists:all(fun(_) ->
+        DisPct = rand:uniform(50),
+        Prods = [{product, N, lists:flatten(io_lib:format("item_~p", [N])), N * 100} || N <- lists:seq(1, 15)],
+        Discounted = hof_transform:discount_prices(Prods, DisPct),
+        ExpectedDis = [{product, Id, Name, P - ((P * DisPct) div 100)} || {product, Id, Name, P} <- Prods],
+        Sessions = [{session, lists:flatten(io_lib:format("s~p", [N])), case N rem 3 of 0 -> active; 1 -> expired; 2 -> idle end} || N <- lists:seq(1, 20)],
+        Actives = hof_transform:active_sessions(Sessions),
+        ExpectedActives = [S || S = {session, _, St} <- Sessions, St =:= active],
+        Discounted =:= ExpectedDis andalso Actives =:= ExpectedActives
+    end, lists:seq(1, 10)),
+    case {Discounts, DiscountTrunc, DiscountEmpty, Active, ActiveEmpty, ActiveNone, Metrics, MetricsEdge, MetricsEmpty, FuzzTransform} of
         {[{product, 1, "Desk", 80}, {product, 2, "Chair", 40}],
          [{product, 3, "Cable", 23}],
          [],
@@ -6003,7 +6236,8 @@ S1_Transform = try
          [],
          [{cpu, 10}, {disk, 100}],
          [{idle, 0}, {ok_int, 7}],
-         []} ->
+         [],
+         true} ->
             #{id => <<"map_filter_filtermap">>, title => <<"lists:map, filter & filtermap Operations">>, status => <<"passed">>, time_ms => 10, details => <<"Single-pass filtermap, integer truncation, zero-boundary, and empty-list edge cases verified.">>};
         Got_H02 ->
             #{id => <<"map_filter_filtermap">>, title => <<"lists:map, filter & filtermap Operations">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Transform mismatch: ~p", [Got_H02]))}
@@ -6066,8 +6300,24 @@ S1_Predicates = try
     HasCritEmpty = hof_predicates:has_critical_error([]),
     {StdOrders, BulkOrders} = hof_predicates:split_orders_by_stock([{order, 1, 5}, {order, 2, 25}, {order, 3, 10}, {order, 4, 0}, {order, 5, -3}], 10),
     {EmptyStd, EmptyBulk} = hof_predicates:split_orders_by_stock([], 10),
-    case {AllOk, AllEmpty, AllZero, AllNeg, HasCrit, HasNoCrit, HasCritEmpty, StdOrders, BulkOrders, EmptyStd, EmptyBulk} of
-        {true, true, false, false, true, false, false, [{order, 1, 5}, {order, 3, 10}], [{order, 2, 25}, {order, 4, 0}, {order, 5, -3}], [], []} ->
+    FuzzPreds = lists:all(fun(_) ->
+        PosInv = [{product, N, "p", 10, rand:uniform(50)} || N <- lists:seq(1, 10)],
+        ZeroInv = PosInv ++ [{product, 99, "p", 10, 0}],
+        LogsNoCrit = [{log, info, "ok"} || _ <- lists:seq(1, 5)],
+        LogsWithCrit = LogsNoCrit ++ [{log, critical, "fail"}],
+        Batch = [{order, Id, rand:uniform(20) - 5} || Id <- lists:seq(1, 30)],
+        Limit = 10,
+        {Std, Bulk} = hof_predicates:split_orders_by_stock(Batch, Limit),
+        StdOracle = [O || O = {order, _, Q} <- Batch, Q > 0, Q =< Limit],
+        BulkOracle = [O || O = {order, _, Q} <- Batch, not (Q > 0 andalso Q =< Limit)],
+        hof_predicates:all_in_stock(PosInv) =:= true andalso
+        hof_predicates:all_in_stock(ZeroInv) =:= false andalso
+        hof_predicates:has_critical_error(LogsNoCrit) =:= false andalso
+        hof_predicates:has_critical_error(LogsWithCrit) =:= true andalso
+        Std =:= StdOracle andalso Bulk =:= BulkOracle
+    end, lists:seq(1, 10)),
+    case {AllOk, AllEmpty, AllZero, AllNeg, HasCrit, HasNoCrit, HasCritEmpty, StdOrders, BulkOrders, EmptyStd, EmptyBulk, FuzzPreds} of
+        {true, true, false, false, true, false, false, [{order, 1, 5}, {order, 3, 10}], [{order, 2, 25}, {order, 4, 0}, {order, 5, -3}], [], [], true} ->
             #{id => <<"boolean_predicates">>, title => <<"lists:all, any & partition Invariants">>, status => <<"passed">>, time_ms => 10, details => <<"Short-circuit predicates, empty list edge cases, negative-quantity bounds, and single-pass partitioning verified">>};
         Got_H03 ->
             #{id => <<"boolean_predicates">>, title => <<"lists:all, any & partition Invariants">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Predicates mismatch: ~p", [Got_H03]))}
@@ -6149,9 +6399,21 @@ S1_Fold = try
     Reversed = hof_fold:reverse_with_fold([1, 2, 3, 4]),
     ReversedEmpty = hof_fold:reverse_with_fold([]),
     ReversedSingle = hof_fold:reverse_with_fold([solo]),
-    case {Ledger, LedgerNeg, LedgerEmpty, Latencies, LatSingle, LatNeg, Reversed, ReversedEmpty, ReversedSingle} of
+    FuzzFold = lists:all(fun(_) ->
+        Entries = [{entry, rand:uniform(500), case rand:uniform(2) of 1 -> credit; 2 -> debit end} || _ <- lists:seq(1, 25)],
+        TotCred = lists:sum([Amt || {entry, Amt, credit} <- Entries]),
+        TotDeb = lists:sum([Amt || {entry, Amt, debit} <- Entries]),
+        ExpectedLedger = {ledger_summary, TotCred, TotDeb, TotCred - TotDeb},
+        LatList = [rand:uniform(1000) - 500 || _ <- lists:seq(1, 20)],
+        ExpectedMinMax = {lists:min(LatList), lists:max(LatList)},
+        RandSeq = [rand:uniform(1000) || _ <- lists:seq(1, 30)],
+        hof_fold:sum_ledger(Entries) =:= ExpectedLedger andalso
+        hof_fold:min_max_latency(LatList) =:= ExpectedMinMax andalso
+        hof_fold:reverse_with_fold(RandSeq) =:= lists:reverse(RandSeq)
+    end, lists:seq(1, 10)),
+    case {Ledger, LedgerNeg, LedgerEmpty, Latencies, LatSingle, LatNeg, Reversed, ReversedEmpty, ReversedSingle, FuzzFold} of
         {{ledger_summary, 225, 50, 175}, {ledger_summary, 30, 80, -50}, {ledger_summary, 0, 0, 0},
-         {5, 120}, {42, 42}, {-90, -5}, [4, 3, 2, 1], [], [solo]} ->
+         {5, 120}, {42, 42}, {-90, -5}, [4, 3, 2, 1], [], [solo], true} ->
             #{id => <<"foldl_state_reduction">>, title => <<"Tail-Recursive State Aggregation via lists:foldl/3">>, status => <<"passed">>, time_ms => 10, details => <<"Verified ledger reduction (including negative balance & empty), negative-latency min/max bounds, and fold reversal">>};
         Got_H04 ->
             #{id => <<"foldl_state_reduction">>, title => <<"Tail-Recursive State Aggregation via lists:foldl/3">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Fold mismatch: ~p", [Got_H04]))}
@@ -6216,7 +6478,17 @@ S1_Keylists = try
     OptsDefault = keylist_config:read_socket_options([]),
     OptsBinFalse = keylist_config:read_socket_options([{binary, false}, {port, 443}]),
     OptsBinTupleTrue = keylist_config:read_socket_options([{binary, true}, {active, true}]),
-    case {F_Found, F_Miss, F_Empty, Inv1, Inv2, InvEmpty, OptsCustom, OptsDefault, OptsBinFalse, OptsBinTupleTrue} of
+    FuzzKeylists = lists:all(fun(_) ->
+        Inv = [{product, N, lists:flatten(io_lib:format("prod_~p", [N])), N * 5, N * 2} || N <- lists:seq(1, 20)],
+        TargetId = rand:uniform(20),
+        ExpectedProd = {product, TargetId, lists:flatten(io_lib:format("prod_~p", [TargetId])), TargetId * 5, TargetId * 2},
+        RandPort = 1024 + rand:uniform(50000),
+        Cfg = keylist_config:read_socket_options([binary, {port, RandPort}, {active, once}]),
+        keylist_config:find_product_by_id(Inv, TargetId) =:= {ok, ExpectedProd} andalso
+        keylist_config:find_product_by_id(Inv, 9999) =:= {error, not_found} andalso
+        Cfg =:= {socket_cfg, RandPort, once, true}
+    end, lists:seq(1, 10)),
+    case {F_Found, F_Miss, F_Empty, Inv1, Inv2, InvEmpty, OptsCustom, OptsDefault, OptsBinFalse, OptsBinTupleTrue, FuzzKeylists} of
         {{ok, {product, 20, "Gadget", 30, 2}},
          {error, not_found},
          {error, not_found},
@@ -6226,7 +6498,8 @@ S1_Keylists = try
          {socket_cfg, 9999, once, true},
          {socket_cfg, 8080, false, false},
          {socket_cfg, 443, false, false},
-         {socket_cfg, 8080, true, true}} ->
+         {socket_cfg, 8080, true, true},
+         true} ->
             #{id => <<"keylist_and_proplist">>, title => <<"lists:keyfind/keystore & proplists Parsing">>, status => <<"passed">>, time_ms => 10, details => <<"C BIF keylist search/upsert order preservation and proplists tuple/flag defaults verified">>};
         Got_H05 ->
             #{id => <<"keylist_and_proplist">>, title => <<"lists:keyfind/keystore & proplists Parsing">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Keylist mismatch: ~p", [Got_H05]))}
@@ -6306,13 +6579,24 @@ S1_Comprehensions = try
     Receipts = comprehension_queries:fulfilled_order_receipts(InvQ, OrdersQ),
     ReceiptsEdge = comprehension_queries:fulfilled_order_receipts(
         InvQ, [{order, 1, 0}, {order, 1, -2}, {order, 1, 10}, {order, 99, 1}, {order, 2, 2}]),
-    case {Names, NamesNoise, Cartesian, CartesianEmpty, Receipts, ReceiptsEdge} of
+    FuzzComprehensions = lists:all(fun(_) ->
+        Users = [{user, N, lists:flatten(io_lib:format("user_~p", [N])), case N rem 2 of 0 -> active; 1 -> suspended end} || N <- lists:seq(1, 20)],
+        ExpectedNames = [Name || {user, _, Name, active} <- Users],
+        Xs = lists:seq(1, 4),
+        Ys = [a, b, c],
+        Cart = comprehension_queries:matrix_cartesian(Xs, Ys),
+        comprehension_queries:active_user_names(Users) =:= ExpectedNames andalso
+        length(Cart) =:= 12 andalso
+        Cart =:= [{X, Y} || X <- Xs, Y <- Ys]
+    end, lists:seq(1, 10)),
+    case {Names, NamesNoise, Cartesian, CartesianEmpty, Receipts, ReceiptsEdge, FuzzComprehensions} of
         {["Alice", "Charlie"],
          [],
          [{1, a}, {1, b}, {2, a}, {2, b}],
          [],
          [{receipt, 1, "Keyboard", 100}],
-         [{receipt, 1, "Keyboard", 500}, {receipt, 2, "Mouse", 50}]} ->
+         [{receipt, 1, "Keyboard", 500}, {receipt, 2, "Mouse", 50}],
+         true} ->
             #{id => <<"list_comprehensions">>, title => <<"List Comprehension Generators & Predicates">>, status => <<"passed">>, time_ms => 10, details => <<"Verified pattern filters (with silent skips), ordered Cartesian joins, and inclusive stock bounds">>};
         Got_H06 ->
             #{id => <<"list_comprehensions">>, title => <<"List Comprehension Generators & Predicates">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Comprehension mismatch: ~p", [Got_H06]))}
@@ -6378,7 +6662,19 @@ S1_HofSuite = try
     Logs = [{log, auth, 40, ok}, {log, pay, 120, error}, {log, auth, 60, ok}],
     Agg = inventory_hof:aggregate_sla_logs(Logs),
     AggEmpty = inventory_hof:aggregate_sla_logs([]),
-    case {Val, ValEmpty, Alerts, AlertsExact, AlertsEmpty, UpdatedInv, SeqInv, EmptyOrdersInv, Agg, AggEmpty} of
+    FuzzVal = lists:all(fun(_) ->
+        Catalog = [{product, N, lists:flatten(io_lib:format("item_~p", [N])), N * 10, N * 2} || N <- lists:seq(1, 15)],
+        ExpectedTotal = lists:sum([Price * Stock || {product, _, _, Price, Stock} <- Catalog]),
+        inventory_hof:total_inventory_valuation(Catalog) =:= ExpectedTotal
+    end, lists:seq(1, 10)),
+    FuzzAlerts = lists:all(fun(_) ->
+        Catalog = [{product, N, lists:flatten(io_lib:format("item_~p", [N])), 10, N} || N <- lists:seq(1, 15)],
+        Thresh = rand:uniform(10),
+        AlertsRes = inventory_hof:critical_stock_alerts(Catalog, Thresh),
+        AlertsExpected = [{alert, Id, Name, Stk} || {product, Id, Name, _, Stk} <- Catalog, Stk =< Thresh],
+        AlertsRes =:= AlertsExpected
+    end, lists:seq(1, 10)),
+    case {Val, ValEmpty, Alerts, AlertsExact, AlertsEmpty, UpdatedInv, SeqInv, EmptyOrdersInv, Agg, AggEmpty, FuzzVal, FuzzAlerts} of
         {550, 0,
          [{alert, 2, "Mouse", 2}],
          [{alert, 2, "Mouse", 2}],
@@ -6387,7 +6683,8 @@ S1_HofSuite = try
          [{product, 1, "Keyboard", 50, 0}, {product, 2, "Mouse", 25, 2}],
          [{product, 1, "Keyboard", 50, 10}, {product, 2, "Mouse", 25, 2}],
          {sla_summary, 3, 1, 220},
-         {sla_summary, 0, 0, 0}} ->
+         {sla_summary, 0, 0, 0},
+         true, true} ->
             #{id => <<"hof_inventory_suite">>, title => <<"Refactored Inventory & SLA Aggregator Pipeline">>, status => <<"passed">>, time_ms => 12, details => <<"Passed empty inputs, valuation, inclusive stock bounds, sequential stateful order depletion, and SLA log aggregation">>};
         Got_H07 ->
             #{id => <<"hof_inventory_suite">>, title => <<"Refactored Inventory & SLA Aggregator Pipeline">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("HOF Suite mismatch: ~p", [Got_H07]))}
@@ -6469,14 +6766,32 @@ S1_Maps = try
     AdminCheck3 = map_registry:is_admin_session(#{role => member, presence => online}),
     AdminCheck4 = map_registry:is_admin_session(#{role => admin}),
     AdminCheck5 = map_registry:is_admin_session(not_a_map),
-    case {S0, SInt, S1, S2, Mismatch, NonMapUpd, AdminCheck1, AdminCheck2, AdminCheck3, AdminCheck4, AdminCheck5} of
+    FuzzMaps = lists:all(fun(_) ->
+        UserId = list_to_atom(lists:flatten(io_lib:format("user_~p", [rand:uniform(1000)]))),
+        Role = case rand:uniform(2) of 1 -> admin; 2 -> member end,
+        S_Init = map_registry:create_session(UserId, Role),
+        S_Online = map_registry:update_presence(S_Init, UserId, online),
+        S_Busy = map_registry:update_presence(S_Online, UserId, busy),
+        IsAdminOnline = map_registry:is_admin_session(S_Online),
+        IsAdminBusy = map_registry:is_admin_session(S_Busy),
+        ExpectedAdmin = (Role =:= admin),
+        map_size(S_Init) =:= 4 andalso
+        maps:get(presence, S_Init) =:= offline andalso
+        maps:get(login_count, S_Init) =:= 0 andalso
+        maps:get(presence, S_Busy) =:= busy andalso
+        maps:get(login_count, S_Busy) =:= 2 andalso
+        IsAdminOnline =:= ExpectedAdmin andalso
+        IsAdminBusy =:= false andalso
+        map_registry:update_presence(S_Init, wrong_user, online) =:= {error, session_mismatch}
+    end, lists:seq(1, 10)),
+    case {S0, SInt, S1, S2, Mismatch, NonMapUpd, AdminCheck1, AdminCheck2, AdminCheck3, AdminCheck4, AdminCheck5, FuzzMaps} of
         {#{user_id := alice, role := admin, presence := offline, login_count := 0},
          #{user_id := 42, role := guest, presence := offline, login_count := 0},
          #{user_id := alice, role := admin, presence := online, login_count := 1},
          #{user_id := alice, role := admin, presence := busy, login_count := 2},
          {error, session_mismatch},
          {error, session_mismatch},
-         true, false, false, false, false} when map_size(S0) =:= 4, map_size(SInt) =:= 4 ->
+         true, false, false, false, false, true} when map_size(S0) =:= 4, map_size(SInt) =:= 4 ->
             #{id => <<"maps_operations">>, title => <<"Map Creation, Exact Matching (:=), & Login Presence Counter">>, status => <<"passed">>, time_ms => 8, details => <<"Verified #{key := Val} exact matching, bound variable checks, non-map safety, incomplete-map rejection, and login counter">>};
         Got_M01 ->
             #{id => <<"maps_operations">>, title => <<"Map Creation, Exact Matching (:=), & Login Presence Counter">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Map mismatch: ~p", [Got_M01]))}
@@ -6540,12 +6855,25 @@ S1_Stdlib = try
     MergedCfg = map_stdlib:merge_configs(DefaultCfg, UserCfg),
     SumVal = map_stdlib:sum_map_values(#{core1 => 10, core2 => 20, core3 => 30, core4 => 40}),
     SumEmpty = map_stdlib:sum_map_values(#{}),
-    case {L1, L2, Counts, CountsEmpty, MergedCfg, SumVal, SumEmpty} of
+    FuzzStdlib = lists:all(fun(_) ->
+        MapData = #{k1 => rand:uniform(100), k2 => rand:uniform(100)},
+        SafeK1 = map_stdlib:safe_get_load(MapData, k1),
+        SafeMissing = map_stdlib:safe_get_load(MapData, non_existent),
+        TagsSample = [tag1, tag2, tag1, tag3, tag2, tag1],
+        CountsRes = map_stdlib:increment_tag_counts(TagsSample, #{tag1 => 10}),
+        SumRes = map_stdlib:sum_map_values(MapData),
+        ExpectedSum = maps:get(k1, MapData) + maps:get(k2, MapData),
+        SafeK1 =:= maps:get(k1, MapData) andalso
+        SafeMissing =:= 0 andalso
+        CountsRes =:= #{tag1 => 13, tag2 => 2, tag3 => 1} andalso
+        SumRes =:= ExpectedSum
+    end, lists:seq(1, 10)),
+    case {L1, L2, Counts, CountsEmpty, MergedCfg, SumVal, SumEmpty, FuzzStdlib} of
         {75, 0,
          #{auth := 3, db := 7, cache := 1},
          #{db := 5},
          #{timeout := 15000, port := 80, retries := 3},
-         100, 0} when map_size(Counts) =:= 3 andalso map_size(CountsEmpty) =:= 1 andalso map_size(MergedCfg) =:= 3 andalso not is_map_key(secret_key, MergedCfg) andalso not is_map_key(debug_token, MergedCfg) ->
+         100, 0, true} when map_size(Counts) =:= 3 andalso map_size(CountsEmpty) =:= 1 andalso map_size(MergedCfg) =:= 3 andalso not is_map_key(secret_key, MergedCfg) andalso not is_map_key(debug_token, MergedCfg) ->
             #{id => <<"maps_stdlib_functions">>, title => <<"Standard Library Functions: get/3, update_with/4, merge/2, without/2, fold/3">>, status => <<"passed">>, time_ms => 8, details => <<"Verified maps:get fallback, maps:update_with counter accumulation, maps:merge override with sensitive key stripping, empty-map edges, and maps:fold sum">>};
         Got_M02 ->
             #{id => <<"maps_stdlib_functions">>, title => <<"Standard Library Functions: get/3, update_with/4, merge/2, without/2, fold/3">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Stdlib mismatch: ~p", [Got_M02]))}
@@ -6642,7 +6970,20 @@ S1_Records = try
     FindFirst = record_frames:find_frame_by_seq([F0, F2, {frame, 3, ack, dup}], 3),
     FindMissing = record_frames:find_frame_by_seq([F0, F1, F2], 99),
     FindEmpty = record_frames:find_frame_by_seq([], 1),
-    case {F0, F1, F01, SeqIdx, FindOk, FindFirst, FindMissing, FindEmpty} of
+    FuzzRecords = lists:all(fun(_) ->
+        InitSeq = rand:uniform(100),
+        F_Start = record_frames:new_frame(InitSeq, ping, rand:uniform(500)),
+        F_Next1 = record_frames:advance_seq(F_Start),
+        F_Next2 = record_frames:advance_seq(F_Next1),
+        FramesList = [F_Start, F_Next1, F_Next2],
+        TargetSeq = InitSeq + 1,
+        FindRes = record_frames:find_frame_by_seq(FramesList, TargetSeq),
+        FindMissingRes = record_frames:find_frame_by_seq(FramesList, 99999),
+        element(2, F_Next2) =:= InitSeq + 2 andalso
+        FindRes =:= {ok, F_Next1} andalso
+        FindMissingRes =:= not_found
+    end, lists:seq(1, 10)),
+    case {F0, F1, F01, SeqIdx, FindOk, FindFirst, FindMissing, FindEmpty, FuzzRecords} of
         {{frame, 1, ack, ok},
          {frame, 2, ack, ok},
          {frame, 1, heartbeat, {tag, 99}},
@@ -6650,7 +6991,8 @@ S1_Records = try
          {ok, {frame, 2, ack, ok}},
          {ok, {frame, 3, data, ping}},
          not_found,
-         not_found} ->
+         not_found,
+         true} ->
             #{id => <<"record_definitions_and_indices">>, title => <<"Record Macro Definition, Sugar & Field Tuple Indices">>, status => <<"passed">>, time_ms => 8, details => <<"Verified -record(frame, ...) compile-time sugar, immutable seq increment, #frame.seq evaluation to 2, and lists:keyfind search with empty/missing edges">>};
         Got_M03 ->
             #{id => <<"record_definitions_and_indices">>, title => <<"Record Macro Definition, Sugar & Field Tuple Indices">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Record mismatch: ~p", [Got_M03]))}
@@ -6711,14 +7053,29 @@ S1_IoList = try
     {IoSz, FlatBin} = iolist_builder:flatten_iolist(RespIoList),
     FlatNested = iolist_builder:flatten_iolist([<<"PING">>, [<<"-">>, <<"PONG">>]]),
     FlatEmpty = iolist_builder:flatten_iolist([]),
+    FuzzIoList = lists:all(fun(_) ->
+        RandWord = lists:flatten(io_lib:format("data_~p", [rand:uniform(1000)])),
+        {size_comparison, StringBytes, BinaryBytes, BinaryForm} = iolist_builder:string_vs_binary_bytes(RandWord),
+        BinaryBytes =:= byte_size(list_to_binary(RandWord)) andalso
+        BinaryForm =:= list_to_binary(RandWord) andalso
+        StringBytes =:= length(RandWord) * 16 andalso
+        begin
+            Code = 200,
+            BodyBin = list_to_binary(RandWord),
+            Resp = iolist_builder:build_http_response_iolist(Code, BodyBin),
+            {Sz, Flat} = iolist_builder:flatten_iolist(Resp),
+            Sz =:= byte_size(Flat) andalso is_list(Resp)
+        end
+    end, lists:seq(1, 10)),
     ExpectedBin = <<"HTTP/1.1 200 OK\r\nContent-Length: 15\r\n\r\n{\"status\":\"ok\"}">>,
     ExpectedEmptyBin = <<"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n">>,
-    case {Comp, CompEmpty, is_list(RespIoList), is_list(EmptyResp), IoSz, FlatBin =:= ExpectedBin, iolist_to_binary(EmptyResp) =:= ExpectedEmptyBin, FlatNested, FlatEmpty} of
+    case {Comp, CompEmpty, is_list(RespIoList), is_list(EmptyResp), IoSz, FlatBin =:= ExpectedBin, iolist_to_binary(EmptyResp) =:= ExpectedEmptyBin, FlatNested, FlatEmpty, FuzzIoList} of
         {{size_comparison, 144, 9, <<"beamforge">>},
          {size_comparison, 0, 0, <<>>},
          true, true, 54, true, true,
          {9, <<"PING-PONG">>},
-         {0, <<>>}} ->
+         {0, <<>>},
+         true} ->
             #{id => <<"binary_and_iolist_construction">>, title => <<"CharLists vs Binaries & Zero-Copy Nested IOLists">>, status => <<"passed">>, time_ms => 8, details => <<"Verified 16x heap footprint accounting, unflattened HTTP IOList structure (is_list), empty edges, and iolist_size/iolist_to_binary">>};
         Got_M04 ->
             #{id => <<"binary_and_iolist_construction">>, title => <<"CharLists vs Binaries & Zero-Copy Nested IOLists">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("IOList mismatch: ~p", [Got_M04]))}
@@ -6853,7 +7210,19 @@ S1_Bits = try
         error:function_clause -> guard_ok;
         OtherClass:OtherReason -> {wrong_error, OtherClass, OtherReason}
     end,
-    case {H1, H2, H0, U1, UExact, U2, UShort, UEmpty, T1, TEmpty, TUtf8, GuardRes} of
+    FuzzBits = lists:all(fun(_) ->
+        V = rand:uniform(16) - 1,
+        F = rand:uniform(16) - 1,
+        L = rand:uniform(65536) - 1,
+        Payload = crypto:strong_rand_bytes(rand:uniform(20)),
+        H = bit_packer:pack_header(V, F, L),
+        UnpackExact = bit_packer:unpack_header(H),
+        UnpackWithPayload = bit_packer:unpack_header(<<H/binary, Payload/binary>>),
+        UnpackExact =:= {ok, V, F, L, <<>>} andalso
+        UnpackWithPayload =:= {ok, V, F, L, Payload} andalso
+        byte_size(H) =:= 3
+    end, lists:seq(1, 15)),
+    case {H1, H2, H0, U1, UExact, U2, UShort, UEmpty, T1, TEmpty, TUtf8, GuardRes, FuzzBits} of
         {<<66, 4, 0>>, <<31, 255, 255>>, <<0, 0, 0>>,
          {ok, 4, 2, 1024, <<"PAYLOAD_DATA">>},
          {ok, 1, 15, 65535, <<>>},
@@ -6863,7 +7232,8 @@ S1_Bits = try
          <<16#01:8, 9:16/big, "HELLO_OTP">>,
          <<1, 0, 0>>,
          <<1, 0, 2, 206, 169>>,
-         guard_ok} ->
+         guard_ok,
+         true} ->
             #{id => <<"bit_syntax_wire_format">>, title => <<"Bit Syntax <<...>> Protocol Packing & Endianness">>, status => <<"passed">>, time_ms => 8, details => <<"Verified 24-bit big-endian packing, exact 3-byte & trailing-payload unpacking, truncated stream errors, UTF-8 length tagging, and is_binary/1 guard enforcement">>};
         Got_M05 ->
             #{id => <<"bit_syntax_wire_format">>, title => <<"Bit Syntax <<...>> Protocol Packing & Endianness">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Bit mismatch: ~p", [Got_M05]))}
@@ -6966,7 +7336,19 @@ S1_Scanner = try
     Unmasked = binary_scanner:xor_mask_payload(Masked, 16#AA),
     XorCase = binary_scanner:xor_mask_payload(<<"ABC">>, 16#20),
     XorEmpty = binary_scanner:xor_mask_payload(<<>>, 16#FF),
-    case {H1, HMulti, H2, Lines, LinesLead, LinesEmpty, Unmasked =:= <<"super_secret_payload">>, XorCase, XorEmpty} of
+    FuzzScanner = lists:all(fun(_) ->
+        KeyStr = lists:flatten(io_lib:format("X-Header-~p", [rand:uniform(500)])),
+        ValStr = lists:flatten(io_lib:format("Value:~p", [rand:uniform(500)])),
+        RawHeader = list_to_binary(lists:flatten(io_lib:format("~s: ~s", [KeyStr, ValStr]))),
+        SplitRes = binary_scanner:split_key_value(RawHeader),
+        Payload = crypto:strong_rand_bytes(32),
+        Mask = rand:uniform(255),
+        Masked1 = binary_scanner:xor_mask_payload(Payload, Mask),
+        Unmasked1 = binary_scanner:xor_mask_payload(Masked1, Mask),
+        SplitRes =:= {ok, list_to_binary(KeyStr), list_to_binary(ValStr)} andalso
+        Unmasked1 =:= Payload
+    end, lists:seq(1, 10)),
+    case {H1, HMulti, H2, Lines, LinesLead, LinesEmpty, Unmasked =:= <<"super_secret_payload">>, XorCase, XorEmpty, FuzzScanner} of
         {{ok, <<"Content-Type">>, <<"application/json">>},
          {ok, <<"X-Meta">>, <<"foo: bar">>},
          {error, malformed_header},
@@ -6975,7 +7357,8 @@ S1_Scanner = try
          [],
          true,
          <<"abc">>,
-         <<>>} ->
+         <<>>,
+         true} ->
             #{id => <<"binary_scanner_and_comprehension">>, title => <<"Binary Scanning (binary:split) & Binary Comprehensions (<=)">>, status => <<"passed">>, time_ms => 8, details => <<"Verified first-occurrence header splitting, multi-colon preservation, trim_all empty-line pruning, empty binary edges, and XOR comprehension roundtrip">>};
         Got_M06 ->
             #{id => <<"binary_scanner_and_comprehension">>, title => <<"Binary Scanning (binary:split) & Binary Comprehensions (<=)">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Scanner mismatch: ~p", [Got_M06]))}
@@ -7105,8 +7488,15 @@ S1_Unpin = try
         error:function_clause -> ok;
         Cg3:Rg3 -> {wrong_nonbin_err, Cg3, Rg3}
     end,
-    case {byte_size(SafeToken), byte_size(SafeSlice), ZeroSlice, Exact16, TooShort, PinnedRatio, TokenRatio, SliceRatio, RealTokRefc, RealSliceRefc, RealZeroRefc, GuardNeg, GuardShort, GuardNonBin} of
-        {16, 128, <<>>, {ok, <<1:128>>}, {error, insufficient_data}, {128, 4096}, {16, 16}, {128, 128}, 16, 128, 0, ok, ok, ok} ->
+    FuzzUnpin = lists:all(fun(_) ->
+        ParentBuf = crypto:strong_rand_bytes(2048),
+        SliceLen = 64 + rand:uniform(64),
+        Sliced = binary_unpinner:slice_packet_safe(ParentBuf, SliceLen),
+        byte_size(Sliced) =:= SliceLen andalso
+        binary:referenced_byte_size(Sliced) =:= SliceLen
+    end, lists:seq(1, 10)),
+    case {byte_size(SafeToken), byte_size(SafeSlice), ZeroSlice, Exact16, TooShort, PinnedRatio, TokenRatio, SliceRatio, RealTokRefc, RealSliceRefc, RealZeroRefc, GuardNeg, GuardShort, GuardNonBin, FuzzUnpin} of
+        {16, 128, <<>>, {ok, <<1:128>>}, {error, insufficient_data}, {128, 4096}, {16, 16}, {128, 128}, 16, 128, 0, ok, ok, ok, true} ->
             #{id => <<"procbin_subbinary_unpinning">>, title => <<"ProcBin Unpinning via binary:copy/1 & SubBinary Memory Safety">>, status => <<"passed">>, time_ms => 10, details => <<"binary:copy/1 confirmed: 128-byte sub-binary & 16-byte token severed from 4096-byte parent buffer (referenced_byte_size == 128/16/0 vs pinned {128,4096}), and bounds guards verified">>};
         Got_M07 ->
             #{id => <<"procbin_subbinary_unpinning">>, title => <<"ProcBin Unpinning via binary:copy/1 & SubBinary Memory Safety">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Unpin mismatch: ~p", [Got_M07]))}
@@ -7228,7 +7618,18 @@ S1_Tlv = try
     {error, incomplete_frame} = packet_parser:parse_frame(<<>>),
     {error, incomplete_frame} = packet_parser:parse_frame(<<1:4, 2:4, 5:16/big, "AB">>),
     {partial, [{tlv_frame, 1, 2, 4, <<"PING">>}, {tlv_frame, 1, 7, 128, BigDecPayload}], BigTrailing} = ResBig,
-    case {FStaleLen, ResFull, ResEmpty, ResPartial, BigDecPayload =:= BigPayload, binary:referenced_byte_size(BigDecPayload), BigTrailing =:= BigFrag, binary:referenced_byte_size(BigTrailing)} of
+    FuzzTlv = lists:all(fun(_) ->
+        PayloadA = crypto:strong_rand_bytes(10),
+        PayloadB = crypto:strong_rand_bytes(15),
+        Fr1 = {tlv_frame, 1, 1, 10, PayloadA},
+        Fr2 = {tlv_frame, 2, 3, 15, PayloadB},
+        Enc1 = packet_parser:encode_frame(Fr1),
+        Enc2 = packet_parser:encode_frame(Fr2),
+        Combined = <<Enc1/binary, Enc2/binary>>,
+        ParseRes = packet_parser:parse_tlv_stream(Combined),
+        ParseRes =:= {ok, [Fr1, Fr2]}
+    end, lists:seq(1, 10)),
+    case {FStaleLen, ResFull, ResEmpty, ResPartial, BigDecPayload =:= BigPayload, binary:referenced_byte_size(BigDecPayload), BigTrailing =:= BigFrag, binary:referenced_byte_size(BigTrailing), FuzzTlv} of
         {<<37, 0, 2, "HI">>,
          {ok, [{tlv_frame, 1, 2, 4, <<"PING">>},
                {tlv_frame, 1, 3, 4, <<"PONG">>},
@@ -7237,7 +7638,7 @@ S1_Tlv = try
          {partial, [{tlv_frame, 1, 2, 4, <<"PING">>},
                     {tlv_frame, 1, 3, 4, <<"PONG">>}],
           Trailing},
-         true, 128, true, 83} when byte_size(Trailing) =:= 12 ->
+         true, 128, true, 83, true} when byte_size(Trailing) =:= 12 ->
             #{id => <<"tlv_stream_parsing">>, title => <<"Binary Network Packet & Multi-Frame TLV Stream Parser">>, status => <<"passed">>, time_ms => 12, details => <<"All frames extracted in order with unpinned 128-byte payload (refc=128) & 83-byte trailing fragment (refc=83), empty/truncated edges, and byte_size encoding verified">>};
         Got_M08 ->
             #{id => <<"tlv_stream_parsing">>, title => <<"Binary Network Packet & Multi-Frame TLV Stream Parser">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("TLV mismatch: ~p", [Got_M08]))}
@@ -7280,6 +7681,11 @@ catch C_Ast:R_Ast ->
     #{id => <<"ast_process_bench_audit">>, title => <<"AST Analysis: BIF Introspection & List Comprehension Audit">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C_Ast, R_Ast]))}
 end,
 S1_Bench = try
+    FuzzCount = 100 + rand:uniform(200),
+    case process_bench:run_bench(FuzzCount) of
+        #{spawned := FuzzCount, avg_memory_bytes := FuzzMem} when FuzzMem < 4096 -> ok;
+        _ -> error(dynamic_bench_fuzz_failed)
+    end,
     case process_bench:run_bench(2000) of
         #{spawned := 2000, avg_memory_bytes := AvgMem, elapsed_us := ElapsedUs} when AvgMem < 4096, ElapsedUs >= 0 ->
             #{id => <<"process_spawn_benchmark">>, title => <<"2,000 Concurrent BEAM Processes Spawn Benchmark">>, status => <<"passed">>, time_ms => 25, details => list_to_binary(io_lib:format("Spawned 2,000 processes in ~p us; avg memory: ~p bytes (~.2f KB)", [ElapsedUs, AvgMem, AvgMem / 1024]))};
@@ -7337,30 +7743,39 @@ catch C1:R1 ->
 end,
 S2_PingPong = try
     P = ping_actor:start_responder(),
+    RandInt = rand:uniform(100000),
+    RandBin = list_to_binary("token_" ++ integer_to_list(rand:uniform(10000))),
     Res1 = ping_actor:ping(P, <<"syn">>),
-    Res2 = ping_actor:ping(P, {metric, 42}),
-    Res3 = ping_actor:ping(P, 12345),
+    Res2 = ping_actor:ping(P, {metric, RandInt}),
+    Res3 = ping_actor:ping(P, RandBin),
     P ! stop,
     case {Res1, Res2, Res3} of
-        {{ok, <<"syn">>}, {ok, {metric, 42}}, {ok, 12345}} ->
-            #{id => <<"ping_pong_roundtrip">>, title => <<"Asynchronous Message Passing & State Machine Roundtrip">>, status => <<"passed">>, time_ms => 18, details => <<"Verified sequential request-response exchange with binary, tuple, and integer payloads.">>};
+        {{ok, <<"syn">>}, {ok, {metric, RandInt}}, {ok, RandBin}} ->
+            #{id => <<"ping_pong_roundtrip">>, title => <<"Asynchronous Message Passing & Dynamic Payload Roundtrip">>, status => <<"passed">>, time_ms => 18, details => <<"Verified sequential request-response exchange with dynamic binary, tuple, and integer payloads.">>};
         Got ->
-            #{id => <<"ping_pong_roundtrip">>, title => <<"Asynchronous Message Passing & State Machine Roundtrip">>, status => <<"failed">>, time_ms => 18, details => list_to_binary(io_lib:format("Ping pong mismatch: ~p", [Got]))}
+            #{id => <<"ping_pong_roundtrip">>, title => <<"Asynchronous Message Passing & Dynamic Payload Roundtrip">>, status => <<"failed">>, time_ms => 18, details => list_to_binary(io_lib:format("Ping pong mismatch: ~p", [Got]))}
     end
 catch C2:R2 ->
-    #{id => <<"ping_pong_roundtrip">>, title => <<"Asynchronous Message Passing & State Machine Roundtrip">>, status => <<"failed">>, time_ms => 18, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2]))}
+    #{id => <<"ping_pong_roundtrip">>, title => <<"Asynchronous Message Passing & Dynamic Payload Roundtrip">>, status => <<"failed">>, time_ms => 18, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2]))}
 end,
 S3_Broadcast = try
-    P1 = ping_actor:start_responder(),
-    P2 = ping_actor:start_responder(),
-    case ping_actor:broadcast([P1, P2], stop) of
-        {sent, 2} ->
-            #{id => <<"broadcast_fanout">>, title => <<"Asynchronous Broadcast Fanout Verification">>, status => <<"passed">>, time_ms => 12, details => <<"Broadcast asynchronously sent to 2 subscriber PIDs.">>};
+    FanoutCount = 3 + rand:uniform(3),
+    Responders = [ping_actor:start_responder() || _ <- lists:seq(1, FanoutCount)],
+    case ping_actor:broadcast(Responders, stop) of
+        {sent, FanoutCount} ->
+            timer:sleep(30),
+            AllDead = lists:all(fun(Pid) -> not is_process_alive(Pid) end, Responders),
+            case AllDead of
+                true ->
+                    #{id => <<"broadcast_fanout">>, title => <<"Asynchronous Broadcast Fanout & Clean Termination">>, status => <<"passed">>, time_ms => 15, details => list_to_binary(io_lib:format("Broadcast asynchronously sent to ~p subscriber PIDs and cleanly stopped.", [FanoutCount]))};
+                false ->
+                    #{id => <<"broadcast_fanout">>, title => <<"Asynchronous Broadcast Fanout & Clean Termination">>, status => <<"failed">>, time_ms => 15, details => <<"Not all broadcast recipients stopped cleanly.">>}
+            end;
         OtherB ->
-            #{id => <<"broadcast_fanout">>, title => <<"Asynchronous Broadcast Fanout Verification">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Broadcast returned unexpected result: ~p", [OtherB]))}
+            #{id => <<"broadcast_fanout">>, title => <<"Asynchronous Broadcast Fanout & Clean Termination">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Broadcast returned unexpected result: ~p", [OtherB]))}
     end
 catch C3:R3 ->
-    #{id => <<"broadcast_fanout">>, title => <<"Asynchronous Broadcast Fanout Verification">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Broadcast Crash: ~p:~p", [C3, R3]))}
+    #{id => <<"broadcast_fanout">>, title => <<"Asynchronous Broadcast Fanout & Clean Termination">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Broadcast Crash: ~p:~p", [C3, R3]))}
 end,
 Stages = [CompileStage, S1_Ast, S2_PingPong, S3_Broadcast]
 `, wsDir, wsDir), true
@@ -7396,15 +7811,19 @@ catch C1:Err1 ->
     #{id => <<"ast_receive_after_audit">>, title => <<"AST Analysis: receive...after Construct Verification">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, Err1]))}
 end,
 S2_Priority = try
-    self() ! {normal, "low1"},
-    self() ! {urgent, "crit1"},
-    self() ! {normal, "low2"},
-    self() ! {urgent, "crit2"},
-    case priority_mailbox:receive_urgent_first(4) of
-        ["crit1", "crit2", "low1", "low2"] ->
-            #{id => <<"selective_receive_priority">>, title => <<"Mailbox Selective Receive & Priority Queue Reordering">>, status => <<"passed">>, time_ms => 12, details => <<"Urgent messages drained and processed ahead of normal messages.">>};
-        GotP ->
-            #{id => <<"selective_receive_priority">>, title => <<"Mailbox Selective Receive & Priority Queue Reordering">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Priority sequence mismatch: ~p", [GotP]))}
+    SelfP = self(),
+    Urgents = [{urgent, rand:uniform(1000) + 1000} || _ <- lists:seq(1, 8)],
+    Normals = [{normal, rand:uniform(500)} || _ <- lists:seq(1, 8)],
+    [begin SelfP ! N, SelfP ! U end || {N, U} <- lists:zip(Normals, Urgents)],
+    Received = priority_mailbox:receive_urgent_first(16),
+    ExpectedU = [V || {urgent, V} <- Urgents],
+    ExpectedN = [V || {normal, V} <- Normals],
+    ExpectedAll = ExpectedU ++ ExpectedN,
+    case Received =:= ExpectedAll of
+        true ->
+            #{id => <<"selective_receive_priority">>, title => <<"Mailbox Selective Receive & Priority Queue Reordering">>, status => <<"passed">>, time_ms => 12, details => <<"16 interleaved priority messages drained with strict urgent prioritization and FIFO stability.">>};
+        false ->
+            #{id => <<"selective_receive_priority">>, title => <<"Mailbox Selective Receive & Priority Queue Reordering">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Priority sequence mismatch: ~p", [Received]))}
     end
 catch C2:Err2 ->
     #{id => <<"selective_receive_priority">>, title => <<"Mailbox Selective Receive & Priority Queue Reordering">>, status => <<"failed">>, time_ms => 12, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2]))}
@@ -7481,20 +7900,25 @@ catch C1:Err1 ->
     #{id => <<"ast_tco_loop_audit">>, title => <<"AST Analysis: Tail-Recursive loop/1 (O(1) Stack Memory)">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1, Err1]))}
 end,
 S2_State = try
-    P = counter_actor:start(100),
-    ok = counter_actor:increment(P, 50),
-    ok = counter_actor:decrement(P, 30),
-    ok = counter_actor:increment(P, 10),
+    Initial = rand:uniform(100) + 50,
+    P = counter_actor:start(Initial),
+    Deltas = [(rand:uniform(40) - 20) || _ <- lists:seq(1, 20)],
+    lists:foreach(fun(D) ->
+        if D >= 0 -> counter_actor:increment(P, D);
+           true -> counter_actor:decrement(P, -D)
+        end
+    end, Deltas),
+    Expected = Initial + lists:sum(Deltas),
     case counter_actor:get_value(P) of
-        {ok, 130} ->
+        {ok, Expected} ->
             counter_actor:stop(P),
-            #{id => <<"actor_state_accumulation">>, title => <<"Immutable State Accumulation across Concurrent Increments">>, status => <<"passed">>, time_ms => 14, details => <<"Counter accurately preserved state changes: 100 + 50 - 30 + 10 = 130.">>};
+            #{id => <<"actor_state_accumulation">>, title => <<"Immutable State Accumulation across 20-Step Random Concurrent Operations">>, status => <<"passed">>, time_ms => 14, details => list_to_binary(io_lib:format("Counter accurately accumulated 20 randomized operations to ~p.", [Expected]))};
         GotVal ->
             counter_actor:stop(P),
-            #{id => <<"actor_state_accumulation">>, title => <<"Immutable State Accumulation across Concurrent Increments">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Value mismatch: ~p", [GotVal]))}
+            #{id => <<"actor_state_accumulation">>, title => <<"Immutable State Accumulation across 20-Step Random Concurrent Operations">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Value mismatch: expected ~p, got ~p", [Expected, GotVal]))}
     end
 catch C2:Err2 ->
-    #{id => <<"actor_state_accumulation">>, title => <<"Immutable State Accumulation across Concurrent Increments">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2]))}
+    #{id => <<"actor_state_accumulation">>, title => <<"Immutable State Accumulation across 20-Step Random Concurrent Operations">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, Err2]))}
 end,
 S3_Timeout = try
     Self3 = self(),
@@ -7559,15 +7983,24 @@ S2_Kv = try
     catch named_kv_actor:stop(),
     {ok, _Pid} = named_kv_actor:start_registered(),
     {error, already_started} = named_kv_actor:start_registered(),
-    ok = named_kv_actor:put(<<"k1">>, <<"v1">>),
-    ok = named_kv_actor:put(<<"k2">>, 42),
-    {ok, <<"v1">>} = named_kv_actor:get(<<"k1">>),
-    {ok, 42} = named_kv_actor:get(<<"k2">>),
+    Pairs = [{list_to_binary("key_" ++ integer_to_list(I)), rand:uniform(10000)} || I <- lists:seq(1, 8)],
+    lists:foreach(fun({K, V}) -> ok = named_kv_actor:put(K, V) end, Pairs),
+    AllMatched = lists:all(fun({K, V}) ->
+        case named_kv_actor:get(K) of
+            {ok, V} -> true;
+            _ -> false
+        end
+    end, Pairs),
     {error, not_found} = named_kv_actor:get(<<"missing">>),
     ok = named_kv_actor:stop(),
     timer:sleep(20),
     undefined = whereis(named_kv_actor),
-    #{id => <<"named_registry_operations">>, title => <<"Atom Registry Lifecycle, Map Storage & make_ref() Verification">>, status => <<"passed">>, time_ms => 20, details => <<"Named process lifecycle, key-value retrieval, and clean unregistering verified.">>}
+    case AllMatched of
+        true ->
+            #{id => <<"named_registry_operations">>, title => <<"Atom Registry Lifecycle, Map Storage & make_ref() Verification">>, status => <<"passed">>, time_ms => 20, details => <<"Named process lifecycle, dynamic key-value retrieval, and clean unregistering verified.">>};
+        false ->
+            #{id => <<"named_registry_operations">>, title => <<"Atom Registry Lifecycle, Map Storage & make_ref() Verification">>, status => <<"failed">>, time_ms => 20, details => <<"Dynamic key-value pairs mismatch.">>}
+    end
 catch C2:Err2 ->
     catch named_kv_actor:stop(),
     #{id => <<"named_registry_operations">>, title => <<"Atom Registry Lifecycle, Map Storage & make_ref() Verification">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("KV error: ~p:~p", [C2, Err2]))}
@@ -7642,19 +8075,21 @@ catch C1_D:R1_D ->
     #{id => <<"ast_mutual_tail_recursion">>, title => <<"AST Analysis: Mutual Tail Recursion in locked/2 and unlocked/1">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("AST Crash: ~p:~p", [C1_D, R1_D]))}
 end,
 S2_Fsm_Door = try
-    P_D = door_lock_fsm:start(<<"4321">>),
+    RandomCodeInt = rand:uniform(8999) + 1000,
+    CodeBin = integer_to_binary(RandomCodeInt),
+    P_D = door_lock_fsm:start(CodeBin),
     {locked, 0} = door_lock_fsm:get_state(P_D),
-    {error, {wrong_code, 1}} = door_lock_fsm:enter_code(P_D, <<"0000">>),
-    {error, {wrong_code, 2}} = door_lock_fsm:enter_code(P_D, <<"9999">>),
+    {error, {wrong_code, 1}} = door_lock_fsm:enter_code(P_D, <<"0000_wrong">>),
+    {error, {wrong_code, 2}} = door_lock_fsm:enter_code(P_D, <<"9999_wrong">>),
     {locked, 2} = door_lock_fsm:get_state(P_D),
-    {ok, unlocked} = door_lock_fsm:enter_code(P_D, <<"4321">>),
+    {ok, unlocked} = door_lock_fsm:enter_code(P_D, CodeBin),
     unlocked = door_lock_fsm:get_state(P_D),
     {ok, already_unlocked} = door_lock_fsm:enter_code(P_D, <<"anything">>),
     ok = door_lock_fsm:lock(P_D),
     {locked, 0} = door_lock_fsm:get_state(P_D),
     ok = door_lock_fsm:lock(P_D),
     ok = door_lock_fsm:stop(P_D),
-    #{id => <<"fsm_state_transitions">>, title => <<"Mutual Recursion State Machine Transitions & Failure Counter">>, status => <<"passed">>, time_ms => 20, details => <<"Verified locked -> unlocked -> relocked transitions and failed attempts counter.">>}
+    #{id => <<"fsm_state_transitions">>, title => <<"Mutual Recursion State Machine Transitions & Failure Counter">>, status => <<"passed">>, time_ms => 20, details => <<"Verified locked -> unlocked -> relocked transitions and failed attempts counter with dynamic PIN.">>}
 catch C2_D:R2_D ->
     #{id => <<"fsm_state_transitions">>, title => <<"Mutual Recursion State Machine Transitions & Failure Counter">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("FSM Crash: ~p:~p", [C2_D, R2_D]))}
 end,
@@ -7846,6 +8281,19 @@ S2_DomainChecks = try
     {rejected, {unsupported_currency, gbp}} = exception_classifier:safe_check({payment, 50, gbp}),
     {bug_detected, bad_amount_type} = exception_classifier:safe_check({payment, "not_int", usd}),
     {bug_detected, invalid_payment_tuple} = exception_classifier:safe_check(invalid_tuple_payload),
+    [begin
+        RandAmt = 100 + rand:uniform(900),
+        RandCurr = lists:nth(rand:uniform(3), [usd, eur, etb]),
+        {approved, RandAmt, RandCurr} = exception_classifier:safe_check({payment, RandAmt, RandCurr})
+     end || _ <- lists:seq(1, 10)],
+    [begin
+        RandNeg = -rand:uniform(1000),
+        {rejected, negative_amount} = exception_classifier:safe_check({payment, RandNeg, usd})
+     end || _ <- lists:seq(1, 5)],
+    [begin
+        RandBadCurr = list_to_atom("curr_" ++ integer_to_list(rand:uniform(10000))),
+        {rejected, {unsupported_currency, RandBadCurr}} = exception_classifier:safe_check({payment, 50, RandBadCurr})
+     end || _ <- lists:seq(1, 5)],
     #{id => <<"domain_exception_classification">>, title => <<"Domain Exception Classification (throw, error, exit)">>, status => <<"passed">>, time_ms => 14, details => <<"All payment domain conditions mapped cleanly to approved, rejected, bug_detected, or process_aborted.">>}
 catch C2:R2 ->
     #{id => <<"domain_exception_classification">>, title => <<"Domain Exception Classification (throw, error, exit)">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Domain check error: ~p:~p", [C2, R2]))}
@@ -7857,6 +8305,12 @@ S3_TriggerClass = try
     {caught_error, custom_err} = ErrRes,
     ExitRes = try exception_classifier:trigger_class(exit, custom_exit) catch exit:V_Exit -> {caught_exit, V_Exit} end,
     {caught_exit, custom_exit} = ExitRes,
+    [begin
+        RandVal = {fuzz_tag, rand:uniform(100000)},
+        {caught_throw, RandVal} = try exception_classifier:trigger_class(throw, RandVal) catch throw:V1 -> {caught_throw, V1} end,
+        {caught_error, RandVal} = try exception_classifier:trigger_class(error, RandVal) catch error:V2 -> {caught_error, V2} end,
+        {caught_exit, RandVal} = try exception_classifier:trigger_class(exit, RandVal) catch exit:V3 -> {caught_exit, V3} end
+     end || _ <- lists:seq(1, 10)],
     #{id => <<"trigger_class_verification">>, title => <<"Direct Exception Trigger Verification">>, status => <<"passed">>, time_ms => 14, details => <<"Verified trigger_class/2 triggers exact throw, error, and exit exception classes.">>}
 catch C3:R3 ->
     #{id => <<"trigger_class_verification">>, title => <<"Direct Exception Trigger Verification">>, status => <<"failed">>, time_ms => 14, details => list_to_binary(io_lib:format("Trigger test error: ~p:~p", [C3, R3]))}
@@ -7902,6 +8356,23 @@ S2_SafeDivideAndAmount = try
             {error, non_positive_amount} = domain_validator:check_amount(-50),
             {error, non_positive_amount} = domain_validator:check_amount(0),
             {error, invalid_type} = domain_validator:check_amount(<<"500">>),
+            [begin
+                RandA = rand:uniform(1000),
+                RandB = rand:uniform(50),
+                ExpectedDiv = RandA / RandB,
+                {ok, ResDiv} = domain_validator:safe_divide(RandA, RandB),
+                true = abs(ResDiv - ExpectedDiv) < 0.0001
+             end || _ <- lists:seq(1, 10)],
+            [begin
+                RandZeroNum = rand:uniform(1000),
+                {error, division_by_zero} = domain_validator:safe_divide(RandZeroNum, 0)
+             end || _ <- lists:seq(1, 5)],
+            [begin
+                RandPos = rand:uniform(10000),
+                {ok, RandPos} = domain_validator:check_amount(RandPos),
+                RandNeg = -rand:uniform(1000),
+                {error, non_positive_amount} = domain_validator:check_amount(RandNeg)
+             end || _ <- lists:seq(1, 10)],
             #{id => <<"safe_return_tuples">>, title => <<"Safe Return Tuple Invariants ({ok, Val} | {error, Reason})">>, status => <<"passed">>, time_ms => 14, details => <<"safe_divide/2 and check_amount/1 return clean tagged tuples without crashing.">>};
         false ->
             #{id => <<"safe_return_tuples">>, title => <<"Safe Return Tuple Invariants">>, status => <<"failed">>, time_ms => 14, details => <<"domain_validator not loaded.">>}
@@ -7917,6 +8388,15 @@ S3_ValidateEmail = try
             {error, invalid_email} = domain_validator:validate_email(<<"@nodomain.com">>),
             {error, invalid_email} = domain_validator:validate_email(<<"user@nodot">>),
             {error, invalid_email} = domain_validator:validate_email("string_not_bin"),
+            [begin
+                RandUser = integer_to_list(1000 + rand:uniform(9000)),
+                RandEmail = list_to_binary("user_" ++ RandUser ++ "@beamforge.org"),
+                {ok, RandEmail} = domain_validator:validate_email(RandEmail)
+             end || _ <- lists:seq(1, 5)],
+            [begin
+                RandBad = list_to_binary("bademail_" ++ integer_to_list(rand:uniform(1000))),
+                {error, invalid_email} = domain_validator:validate_email(RandBad)
+             end || _ <- lists:seq(1, 5)],
             #{id => <<"email_binary_validation">>, title => <<"Email Binary Parsing & Domain Defense">>, status => <<"passed">>, time_ms => 14, details => <<"validate_email/1 successfully parsed binaries and enforced @ and domain dot constraints.">>};
         false ->
             #{id => <<"email_binary_validation">>, title => <<"Email Binary Validation">>, status => <<"failed">>, time_ms => 14, details => <<"domain_validator not loaded.">>}
@@ -7931,6 +8411,14 @@ S4_CheckoutPipeline = try
             {error, invalid_email} = domain_validator:process_checkout_input(<<"bad_email">>, 300, 3),
             {error, non_positive_amount} = domain_validator:process_checkout_input(<<"alice@beamforge.org">>, -10, 3),
             {error, division_by_zero} = domain_validator:process_checkout_input(<<"alice@beamforge.org">>, 300, 0),
+            [begin
+                RandPeople = rand:uniform(5) + 1,
+                RandAmt = RandPeople * (10 + rand:uniform(100)),
+                ExpectedPer = RandAmt / RandPeople,
+                RandEmail2 = list_to_binary("buyer_" ++ integer_to_list(rand:uniform(1000)) ++ "@domain.com"),
+                {ok, #{email := RandEmail2, per_person := ActualPer}} = domain_validator:process_checkout_input(RandEmail2, RandAmt, RandPeople),
+                true = abs(ActualPer - ExpectedPer) < 0.0001
+             end || _ <- lists:seq(1, 5)],
             #{id => <<"checkout_pipeline">>, title => <<"Integrated Checkout Pipeline & Short-Circuit Failures">>, status => <<"passed">>, time_ms => 15, details => <<"process_checkout_input/3 coordinates validation and returns on first failure.">>};
         false ->
             #{id => <<"checkout_pipeline">>, title => <<"Checkout Pipeline">>, status => <<"failed">>, time_ms => 15, details => <<"domain_validator not loaded.">>}
@@ -7984,6 +8472,15 @@ S2_SafeParse = try
             {ok, T1} = boundary_parser:safe_parse_payload(B1),
             {error, {error, badarg}} = boundary_parser:safe_parse_payload(<<"invalid_bytes_xyz">>),
             {error, {error, badarg}} = boundary_parser:safe_parse_payload(12345),
+            [begin
+                RandPayload = {order, rand:uniform(100000), [item_alpha, item_beta], rand:uniform(500) * 1.25},
+                RandBin = term_to_binary(RandPayload),
+                {ok, RandPayload} = boundary_parser:safe_parse_payload(RandBin)
+             end || _ <- lists:seq(1, 10)],
+            [begin
+                CorruptBin = crypto:strong_rand_bytes(16 + rand:uniform(32)),
+                {error, {error, badarg}} = boundary_parser:safe_parse_payload(CorruptBin)
+             end || _ <- lists:seq(1, 5)],
             #{id => <<"safe_binary_parsing">>, title => <<"Safe Term Deserialization & Corrupt Input Protection">>, status => <<"passed">>, time_ms => 14, details => <<"Valid binaries safely decoded; corrupt binaries and non-binary inputs caught gracefully.">>};
         false ->
             #{id => <<"safe_binary_parsing">>, title => <<"Safe Binary Parsing">>, status => <<"failed">>, time_ms => 14, details => <<"boundary_parser not loaded.">>}
@@ -8003,6 +8500,14 @@ S3_ResourceCleanup = try
             ActionCrash = fun(_) -> error(deliberate_db_disconnect) end,
             {error, {error, deliberate_db_disconnect}} = boundary_parser:with_resource_cleanup(Acquire, ActionCrash, Release),
             receive {released, resource_ref_123} -> ok after 500 -> error(missing_release_on_crash) end,
+            [begin
+                RandResId = list_to_atom("res_" ++ integer_to_list(rand:uniform(100000))),
+                Acq = fun() -> RandResId end,
+                Act = fun(R) -> {ok_res, R} end,
+                Rel = fun(R) -> Self ! {released_fuzz, R} end,
+                {ok, {ok_res, RandResId}} = boundary_parser:with_resource_cleanup(Acq, Act, Rel),
+                receive {released_fuzz, RandResId} -> ok after 500 -> error(missing_release) end
+             end || _ <- lists:seq(1, 5)],
             #{id => <<"guaranteed_resource_cleanup">>, title => <<"Guaranteed Cleanup via 'after' Construct Across Errors">>, status => <<"passed">>, time_ms => 16, details => <<"Resource release callback guaranteed to execute on both success and deliberate crash.">>};
         false ->
             #{id => <<"guaranteed_resource_cleanup">>, title => <<"Guaranteed Cleanup">>, status => <<"failed">>, time_ms => 16, details => <<"boundary_parser not loaded.">>}
@@ -8069,6 +8574,11 @@ S2_Compute = try
             {ok, W1, W2} = linked_pipeline:start_linked_pipeline(),
             {ok, 36} = linked_pipeline:compute(W1, 3),
             {ok, 100} = linked_pipeline:compute(W1, 5),
+            [begin
+                RandInput = rand:uniform(30),
+                ExpectedComp = (RandInput * 2) * (RandInput * 2),
+                {ok, ExpectedComp} = linked_pipeline:compute(W1, RandInput)
+             end || _ <- lists:seq(1, 10)],
             true = is_process_alive(W1),
             true = is_process_alive(W2),
             #{id => <<"two_stage_computation">>, title => <<"Two-Stage Pipeline Forwarding & Transformation">>, status => <<"passed">>, time_ms => 14, details => <<"Numbers cleanly doubled by Stage 1, squared by Stage 2, and returned to caller.">>};
@@ -8168,7 +8678,8 @@ S2_Supervised = try
             true = (W1 =:= W1Reported),
             true = is_process_alive(Sup),
             true = is_process_alive(W1),
-            exit_trapper:kill_worker(Sup, badarith),
+            RandErr = list_to_atom("err_" ++ integer_to_list(rand:uniform(10000))),
+            exit_trapper:kill_worker(Sup, RandErr),
             timer:sleep(60),
             {ok, W2} = exit_trapper:get_worker_pid(Sup),
             SupAlive = is_process_alive(Sup),
@@ -8272,6 +8783,11 @@ S2_Success = try
     case code:is_loaded(worker_watcher) of
         {file, _} ->
             {ok, 42} = worker_watcher:run_monitored_task(fun() -> 21 * 2 end, 1000),
+            [begin
+                RandVal = rand:uniform(1000),
+                {ok, ResultVal} = worker_watcher:run_monitored_task(fun() -> RandVal * 3 end, 1000),
+                true = (ResultVal =:= RandVal * 3)
+             end || _ <- lists:seq(1, 5)],
             #{id => <<"successful_execution">>, title => <<"Successful Monitored Execution & Mailbox Flush">>, status => <<"passed">>, time_ms => 12, details => <<"Monitored task executed cleanly; monitor flushed.">>};
         false ->
             #{id => <<"successful_execution">>, title => <<"Successful Monitored Execution & Mailbox Flush">>, status => <<"failed">>, time_ms => 12, details => <<"worker_watcher module not loaded.">>}
@@ -8353,6 +8869,11 @@ end,
 S2_RaceAndFlush = try
     {ok, 84, 0} = monitor_hygiene:call_with_clean_mailbox(fun(X) -> X * 2 end, 42),
     {ok, 100, 0} = monitor_hygiene:call_with_clean_mailbox(fun(X) -> X + 1 end, 99),
+    [begin
+        RandArg = rand:uniform(500),
+        {ok, ResVal, 0} = monitor_hygiene:call_with_clean_mailbox(fun(X) -> X * 2 end, RandArg),
+        true = (ResVal =:= RandArg * 2)
+     end || _ <- lists:seq(1, 5)],
     LingeringAfter = monitor_hygiene:count_lingering_downs(),
     0 = LingeringAfter,
     #{id => <<"monitor_race_and_flush">>, title => <<"Monitor Race Condition: demonitor [flush] Mailbox Drain">>, status => <<"passed">>, time_ms => 20, details => <<"Worker reply and DOWN arrived simultaneously; [flush] successfully cleaned mailbox with 0 lingering downs.">>}
@@ -8364,9 +8885,9 @@ S3_TimeoutAndDrain = try
     {error, timeout} = monitor_hygiene:call_with_clean_mailbox(fun(_) -> timer:sleep(1500) end, timeout_arg),
     0 = monitor_hygiene:count_lingering_downs(),
     %% Verify count_lingering_downs/0 drains synthetic messages completely
-    self() ! {'DOWN', make_ref(), process, self(), killed},
-    self() ! {'DOWN', make_ref(), process, self(), abnormal},
-    2 = monitor_hygiene:count_lingering_downs(),
+    RandMsgCount = rand:uniform(4) + 1,
+    [self() ! {'DOWN', make_ref(), process, self(), list_to_atom("reason_" ++ integer_to_list(I))} || I <- lists:seq(1, RandMsgCount)],
+    RandMsgCount = monitor_hygiene:count_lingering_downs(),
     0 = monitor_hygiene:count_lingering_downs(),
     #{id => <<"timeout_and_drain_isolation">>, title => <<"Timeout Handling & Selective Mailbox Draining">>, status => <<"passed">>, time_ms => 25, details => <<"Verified timeout cleans up monitor reference and count_lingering_downs/0 drains synthetic exit messages.">>}
 catch C3:R3 ->
@@ -8437,9 +8958,14 @@ S3_Protocol = try
     {ok, Pid} = my_gen_server:start(Cb, 10),
     15 = my_gen_server:call(Pid, {add, 5}, 1000),
     15 = my_gen_server:call(Pid, get, 1000),
-    ok = my_gen_server:cast(Pid, {set, 100}),
+    RandAdd = rand:uniform(50),
+    ExpectedSum = 15 + RandAdd,
+    ExpectedSum = my_gen_server:call(Pid, {add, RandAdd}, 1000),
+    ExpectedSum = my_gen_server:call(Pid, get, 1000),
+    RandSet = 100 + rand:uniform(500),
+    ok = my_gen_server:cast(Pid, {set, RandSet}),
     timer:sleep(20),
-    100 = my_gen_server:call(Pid, get, 1000),
+    RandSet = my_gen_server:call(Pid, get, 1000),
     ok = my_gen_server:stop(Pid),
     timer:sleep(20),
     false = is_process_alive(Pid),
@@ -8503,6 +9029,14 @@ S2_ChargeSuccess = try
     {ok, W} = payment_system:start_system(3),
     Res1 = payment_system:charge(W, <<"req_101">>, 250, usd),
     ExpectedReceipt = {ok, #{tx_id => <<"req_101">>, amount => 250, currency => usd, status => settled}},
+    [begin
+        RandReqId = list_to_binary("req_" ++ integer_to_list(rand:uniform(100000))),
+        RandAmt = 100 + rand:uniform(900),
+        RandCurr = lists:nth(rand:uniform(3), [usd, eur, etb]),
+        ResFuzz = payment_system:charge(W, RandReqId, RandAmt, RandCurr),
+        ExpectedFuzz = {ok, #{tx_id => RandReqId, amount => RandAmt, currency => RandCurr, status => settled}},
+        true = (ResFuzz =:= ExpectedFuzz)
+     end || _ <- lists:seq(1, 5)],
     payment_system:stop_system(W),
     case Res1 of
         ExpectedReceipt ->
@@ -8518,6 +9052,10 @@ S3_ValidationDefense = try
     {error, invalid_amount} = payment_system:charge(W2, <<"req_102">>, -50, usd),
     {error, invalid_amount} = payment_system:charge(W2, <<"req_103">>, 0, usd),
     {error, unsupported_currency} = payment_system:charge(W2, <<"req_104">>, 100, gbp),
+    [begin
+        BadAmt = -rand:uniform(500),
+        {error, invalid_amount} = payment_system:charge(W2, <<"bad_amt">>, BadAmt, usd)
+     end || _ <- lists:seq(1, 5)],
     {ok, WorkerPid, 0} = payment_system:get_active_worker(W2),
     true = is_process_alive(WorkerPid),
     payment_system:stop_system(W2),
@@ -8625,13 +9163,14 @@ catch C2:R2 ->
 end,
 S3_SysGetState = try
     {ok, Pid} = otp_intro_demo:start_link(),
-    otp_intro_demo:increment(Pid, 100),
+    RandInc = 50 + rand:uniform(200),
+    otp_intro_demo:increment(Pid, RandInc),
     timer:sleep(15),
     SysState = sys:get_state(Pid),
     SysStatus = sys:get_status(Pid),
     otp_intro_demo:stop(Pid),
     case SysState of
-        #{counter := 100} ->
+        #{counter := RandInc} ->
             #{id => <<"live_sys_introspection">>, title => <<"Live System Introspection (sys:get_state/1 & sys:get_status/1)">>, status => <<"passed">>, time_ms => 20, details => <<"sys:get_state and sys:get_status inspected live process state without disruption.">>};
         Other3 ->
             #{id => <<"live_sys_introspection">>, title => <<"Live System Introspection (sys:get_state/1 & sys:get_status/1)">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Unexpected sys:get_state: ~p", [Other3]))}
@@ -8673,13 +9212,15 @@ catch C1:R1 ->
 end,
 S2_MultiCurrency = try
     {ok, W} = wallet_server:start_link(#{<<"USD">> => 500, <<"EUR">> => 200}),
-    wallet_server:credit(W, <<"GBP">>, 150),
+    RandCredit = 100 + rand:uniform(400),
+    wallet_server:credit(W, <<"GBP">>, RandCredit),
     timer:sleep(20),
     {ok, 450} = wallet_server:debit(W, <<"USD">>, 50),
-    {ok, 100} = wallet_server:debit(W, <<"GBP">>, 50),
+    ExpectedGBP = RandCredit - 50,
+    {ok, ExpectedGBP} = wallet_server:debit(W, <<"GBP">>, 50),
     Bals = wallet_server:get_balances(W),
     wallet_server:stop(W),
-    Expected = #{<<"USD">> => 450, <<"EUR">> => 200, <<"GBP">> => 100},
+    Expected = #{<<"USD">> => 450, <<"EUR">> => 200, <<"GBP">> => ExpectedGBP},
     case Bals of
         Expected ->
             #{id => <<"multicurrency_ledger">>, title => <<"Multi-Currency Ledger Operations (credit & debit)">>, status => <<"passed">>, time_ms => 30, details => <<"Correctly managed balances across USD, EUR, and newly credited GBP.">>};
@@ -8765,10 +9306,13 @@ catch C2:R2 ->
 end,
 S3_SessionLifecycle = try
     {ok, S2} = session_ttl_server:start_link(60),
-    ok = session_ttl_server:create_session(S2, <<"sess_alpha">>),
-    ok = session_ttl_server:create_session(S2, <<"sess_beta">>),
-    V1 = session_ttl_server:is_valid(S2, <<"sess_alpha">>),
-    V2 = session_ttl_server:is_valid(S2, <<"sess_gamma">>),
+    RandAlpha = list_to_binary("sess_" ++ integer_to_list(rand:uniform(100000))),
+    RandBeta = list_to_binary("sess_" ++ integer_to_list(rand:uniform(100000))),
+    RandGamma = list_to_binary("sess_unknown_" ++ integer_to_list(rand:uniform(100000))),
+    ok = session_ttl_server:create_session(S2, RandAlpha),
+    ok = session_ttl_server:create_session(S2, RandBeta),
+    V1 = session_ttl_server:is_valid(S2, RandAlpha),
+    V2 = session_ttl_server:is_valid(S2, RandGamma),
     Count2 = session_ttl_server:get_active_count(S2),
     session_ttl_server:stop(S2),
     case {V1, V2, Count2} of
@@ -8830,14 +9374,16 @@ end,
 S2_AsyncOffloading = try
     {ok, P1} = async_report_server:start_link(),
     StartTime = erlang:system_time(millisecond),
-    ComputeFun = fun() -> timer:sleep(40), 42 * 10 end,
+    RandMultiplier = rand:uniform(20) + 1,
+    ComputeFun = fun() -> timer:sleep(40), 42 * RandMultiplier end,
     Res = async_report_server:generate_report(P1, <<"report_alpha">>, ComputeFun),
     Elapsed = erlang:system_time(millisecond) - StartTime,
     timer:sleep(20),
     CountRes = async_report_server:get_completed_count(P1),
     async_report_server:stop(P1),
+    ExpectedVal = 42 * RandMultiplier,
     case {Res, CountRes} of
-        {{ok, <<"report_alpha">>, 420}, {ok, #{in_flight := 0, completed := 1}}} ->
+        {{ok, <<"report_alpha">>, ExpectedVal}, {ok, #{in_flight := 0, completed := 1}}} ->
             #{id => <<"async_offloading_verification">>, title => <<"Asynchronous Worker Offloading & Non-Blocking Call Execution">>, status => <<"passed">>, time_ms => Elapsed, details => <<"Spawned worker returned result directly via gen_server:reply/2 and notified coordinator.">>};
         Other2 ->
             #{id => <<"async_offloading_verification">>, title => <<"Asynchronous Worker Offloading & Non-Blocking Call Execution">>, status => <<"failed">>, time_ms => Elapsed, details => list_to_binary(io_lib:format("Unexpected execution result: ~p", [Other2]))}
@@ -8925,8 +9471,10 @@ end,
 S2_ClosedExecution = try
     {ok, CB} = circuit_breaker_statem:start_link(3, 500),
     closed = circuit_breaker_statem:get_state_name(CB),
-    {ok, 100} = circuit_breaker_statem:execute(CB, fun() -> {ok, 100} end),
-    {ok, 200} = circuit_breaker_statem:execute(CB, fun() -> {ok, 200} end),
+    Rand1 = rand:uniform(500),
+    Rand2 = rand:uniform(500),
+    {ok, Rand1} = circuit_breaker_statem:execute(CB, fun() -> {ok, Rand1} end),
+    {ok, Rand2} = circuit_breaker_statem:execute(CB, fun() -> {ok, Rand2} end),
     closed = circuit_breaker_statem:get_state_name(CB),
     circuit_breaker_statem:stop(CB),
     #{id => <<"closed_state_execution">>, title => <<"Closed State: Normal Passthrough Execution">>, status => <<"passed">>, time_ms => 20, details => <<"Pass-through executions succeeded while maintaining closed state.">>}
@@ -9055,6 +9603,14 @@ catch C3:R3 ->
 end,
 S4_Budget = try
     B1 = strategy_planner:calculate_restart_budget(12, 4),
+    [begin
+        RandPeriod = 2 + rand:uniform(8),
+        RandMultiplier = rand:uniform(5) + 1,
+        RandIntensity = RandPeriod * RandMultiplier,
+        ExpectedRate = float(RandMultiplier),
+        #{intensity := RandIntensity, period := RandPeriod, max_rate_per_sec := ActualRate} = strategy_planner:calculate_restart_budget(RandIntensity, RandPeriod),
+        true = abs(ActualRate - ExpectedRate) < 0.001
+     end || _ <- lists:seq(1, 5)],
     case B1 of
         #{intensity := 12, period := 4, max_rate_per_sec := Rate, tolerated_downtime := ok} when is_float(Rate), abs(Rate - 3.0) < 0.001 ->
             #{id => <<"restart_budget_telemetry">>, title => <<"Crash Tolerance Budget & Rate Telemetry">>, status => <<"passed">>, time_ms => 10, details => <<"Calculated exact restart frequency budget (3.0 crashes/sec) over sliding time window.">>};
@@ -9099,6 +9655,13 @@ end,
 S2_WorkerSpecs = try
     W1 = child_spec_factory:worker_spec(task_worker, task_runner, [1], transient),
     W2 = child_spec_factory:worker_spec(listener, tcp_listener, [4000], permanent),
+    [begin
+        RandId = list_to_atom("worker_" ++ integer_to_list(rand:uniform(10000))),
+        RandMod = list_to_atom("mod_" ++ integer_to_list(rand:uniform(10000))),
+        RandArg = rand:uniform(5000),
+        Spec = child_spec_factory:worker_spec(RandId, RandMod, [RandArg], transient),
+        #{id := RandId, start := {RandMod, start_link, [RandArg]}, restart := transient, type := worker, modules := [RandMod]} = Spec
+     end || _ <- lists:seq(1, 5)],
     InvalidRejection = try
         child_spec_factory:worker_spec(bad_w, "not_an_atom", not_a_list, invalid_restart),
         false
@@ -9200,6 +9763,11 @@ S2_Burst = try
     B2 = escalation_analyzer:evaluate_crash_burst([1, 2, 3], 3, 5),
     B3 = escalation_analyzer:evaluate_crash_burst([1, 2, 10, 11], 2, 5),
     B4 = escalation_analyzer:evaluate_crash_burst([10, 11, 12, 13, 14], 3, 5),
+    [begin
+        RandInt = rand:uniform(5) + 2,
+        RandPer = rand:uniform(10) + 5,
+        {within_budget, 0, RandInt} = escalation_analyzer:evaluate_crash_burst([], RandInt, RandPer)
+     end || _ <- lists:seq(1, 5)],
     HasGuard1 = case (catch escalation_analyzer:evaluate_crash_burst([], -1, 5)) of
         {'EXIT', {function_clause, _}} -> true;
         _ -> false
@@ -9311,8 +9879,13 @@ S3_DynamicLifecycle = try
     {ok, P2} = dynamic_session_sup:start_session(Sup, <<"sess_102">>, <<"usr_beta">>),
     {ok, _P3} = dynamic_session_sup:start_session(Sup, <<"sess_103">>, <<"usr_gamma">>),
     3 = dynamic_session_sup:count_sessions(Sup),
+    [begin
+        RandSess = list_to_binary("sess_fuzz_" ++ integer_to_list(rand:uniform(100000))),
+        RandUser = list_to_binary("usr_fuzz_" ++ integer_to_list(rand:uniform(100000))),
+        {ok, _FuzzPid} = dynamic_session_sup:start_session(Sup, RandSess, RandUser)
+     end || _ <- lists:seq(1, 3)],
     ok = dynamic_session_sup:terminate_session(Sup, P2),
-    2 = dynamic_session_sup:count_sessions(Sup),
+    5 = dynamic_session_sup:count_sessions(Sup),
     exit(Sup, shutdown),
     #{id => <<"dynamic_lifecycle_pool">>, title => <<"Live Dynamic Process Pool Lifecycle (Spawn, Count, Terminate)">>, status => <<"passed">>, time_ms => 35, details => <<"Spawned 3 dynamic sessions on demand; verified count_sessions/1 increment/decrement and graceful cleanup.">>}
 catch C3:R3 ->
@@ -9367,6 +9940,14 @@ S3_ConfigEnv = try
     ValDefault = commerce_app:get_app_config(worker_pool_size, 32),
     ok = commerce_app:set_app_config(worker_pool_size, 64),
     ValOverride = commerce_app:get_app_config(worker_pool_size, 32),
+    [begin
+        RandKey = list_to_atom("key_fuzz_" ++ integer_to_list(rand:uniform(10000))),
+        RandDefault = rand:uniform(100),
+        RandDefault = commerce_app:get_app_config(RandKey, RandDefault),
+        RandOverride = RandDefault + 50,
+        ok = commerce_app:set_app_config(RandKey, RandOverride),
+        RandOverride = commerce_app:get_app_config(RandKey, RandDefault)
+     end || _ <- lists:seq(1, 3)],
     case {ValDefault, ValOverride} of
         {32, 64} ->
             #{id => <<"runtime_config_env">>, title => <<"Application Environment Configuration Management">>, status => <<"passed">>, time_ms => 15, details => <<"Successfully resolved fallback default (32) and dynamic runtime override (64).">>};
@@ -9529,7 +10110,17 @@ S3_AtomicCounters = try
     10 = ets_telemetry:record_endpoint_hit(<<"/auth">>, 9),
     10 = ets_telemetry:get_endpoint_hits(<<"/auth">>),
     0 = ets_telemetry:get_endpoint_hits(<<"/unknown">>),
-    #{id => <<"atomic_counter_operations">>, title => <<"Atomic Counter & Default Tuple Insertion">>, status => <<"passed">>, time_ms => 15, details => <<"Verified ets:update_counter/4 default tuple insertion and atomic increments.">>}
+    %% Dynamic property-based fuzzing: random endpoint hits & accumulation
+    RandSuffix = integer_to_binary(rand:uniform(100000)),
+    DynEndpoint = <<"/api/dynamic_", RandSuffix/binary>>,
+    0 = ets_telemetry:get_endpoint_hits(DynEndpoint),
+    H1 = rand:uniform(50),
+    H1 = ets_telemetry:record_endpoint_hit(DynEndpoint, H1),
+    H2 = rand:uniform(50),
+    ExpTotal = H1 + H2,
+    ExpTotal = ets_telemetry:record_endpoint_hit(DynEndpoint, H2),
+    ExpTotal = ets_telemetry:get_endpoint_hits(DynEndpoint),
+    #{id => <<"atomic_counter_operations">>, title => <<"Atomic Counter & Default Tuple Insertion">>, status => <<"passed">>, time_ms => 15, details => <<"Verified ets:update_counter/4 default tuple insertion, atomic increments, and dynamic property fuzzing.">>}
 catch C3:R3 ->
     #{id => <<"atomic_counter_operations">>, title => <<"Atomic Counter & Default Tuple Insertion">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Counter error: ~p:~p", [C3, R3]))}
 end,
@@ -9537,9 +10128,16 @@ S4_UserProfiles = try
     ok = ets_telemetry:put_user_profile(501, <<"Bob">>, editor),
     {ok, P1} = ets_telemetry:get_user_profile(501),
     NotFound = ets_telemetry:get_user_profile(9999),
-    case {maps:get(name, P1), maps:get(role, P1), NotFound} of
-        {<<"Bob">>, editor, {error, not_found}} ->
-            #{id => <<"profile_storage_and_lookup">>, title => <<"Composite Key Profile Storage & Lookup">>, status => <<"passed">>, time_ms => 10, details => <<"Composite key tuples correctly stored and returned as clean maps.">>};
+    %% Dynamic property-based profile verification
+    RandId = 10000 + rand:uniform(50000),
+    RandName = list_to_binary("User_" ++ integer_to_list(rand:uniform(10000))),
+    RandRole = lists:nth(rand:uniform(3), [admin, viewer, billing]),
+    ok = ets_telemetry:put_user_profile(RandId, RandName, RandRole),
+    {ok, DynProfile} = ets_telemetry:get_user_profile(RandId),
+    DynMatch = (maps:get(name, DynProfile) =:= RandName) andalso (maps:get(role, DynProfile) =:= RandRole),
+    case {maps:get(name, P1), maps:get(role, P1), NotFound, DynMatch} of
+        {<<"Bob">>, editor, {error, not_found}, true} ->
+            #{id => <<"profile_storage_and_lookup">>, title => <<"Composite Key Profile Storage & Lookup">>, status => <<"passed">>, time_ms => 10, details => <<"Composite key tuples correctly stored and returned as clean maps across static and dynamic IDs.">>};
         Other4 ->
             #{id => <<"profile_storage_and_lookup">>, title => <<"Composite Key Profile Storage & Lookup">>, status => <<"failed">>, time_ms => 10, details => list_to_binary(io_lib:format("Profile mismatch: ~p", [Other4]))}
     end
@@ -9599,9 +10197,13 @@ S3_RoleQueries = try
     Admins = ets_query_engine:find_users_by_role(admin),
     Members = ets_query_engine:find_users_by_role(member),
     Guests = ets_query_engine:find_users_by_role(guest),
-    case {Admins, Members, Guests} of
-        {[10, 30], [20], []} ->
-            #{id => <<"pattern_matching_roles">>, title => <<"Pattern Matching Role Filter & Deduplication">>, status => <<"passed">>, time_ms => 15, details => <<"Correctly matched records by role and returned deduplicated sorted user IDs.">>};
+    %% Dynamic role fuzzing: insert random auditor tokens
+    AuditorIds = lists:usort([1000 + rand:uniform(500) || _ <- lists:seq(1, 10)]),
+    [ok = ets_query_engine:store_token(list_to_binary("t_aud_" ++ integer_to_list(Uid)), Uid, auditor, 9999) || Uid <- AuditorIds],
+    GotAuditors = ets_query_engine:find_users_by_role(auditor),
+    case {Admins, Members, Guests, GotAuditors =:= AuditorIds} of
+        {[10, 30], [20], [], true} ->
+            #{id => <<"pattern_matching_roles">>, title => <<"Pattern Matching Role Filter & Deduplication">>, status => <<"passed">>, time_ms => 15, details => <<"Correctly matched records by role and returned deduplicated sorted user IDs across static and dynamic roles.">>};
         Other3 ->
             #{id => <<"pattern_matching_roles">>, title => <<"Pattern Matching Role Filter & Deduplication">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Role filter mismatch: ~p", [Other3]))}
     end
@@ -9615,9 +10217,20 @@ S4_TtlEviction = try
     Deleted = ets_query_engine:delete_expired_tokens(500),
     Remaining = ets:lookup(auth_token_table, <<"t_keep">>),
     ExpiredGone = (ets:lookup(auth_token_table, <<"t_old1">>) =:= []) andalso (ets:lookup(auth_token_table, <<"t_old2">>) =:= []),
-    case {Deleted, length(Remaining), ExpiredGone} of
-        {2, 1, true} ->
-            #{id => <<"select_delete_ttl">>, title => <<"Atomic TTL Eviction with select_delete">>, status => <<"passed">>, time_ms => 15, details => <<"select_delete atomically deleted 2 expired tokens while retaining valid token.">>};
+    ets:delete(auth_token_table, <<"t_keep">>),
+    %% Dynamic TTL eviction fuzzing
+    DynBase = 1000,
+    DynCutoff = 1500,
+    DynOldTokens = [list_to_binary("t_dyn_old_" ++ integer_to_list(I)) || I <- lists:seq(1, 5)],
+    DynNewTokens = [list_to_binary("t_dyn_new_" ++ integer_to_list(I)) || I <- lists:seq(1, 3)],
+    [ok = ets_query_engine:store_token(T, 99, guest, DynBase + rand:uniform(400)) || T <- DynOldTokens],
+    [ok = ets_query_engine:store_token(T, 99, guest, DynCutoff + rand:uniform(400)) || T <- DynNewTokens],
+    DynDeleted = ets_query_engine:delete_expired_tokens(DynCutoff),
+    DynRemainingAll = lists:all(fun(T) -> ets:lookup(auth_token_table, T) =/= [] end, DynNewTokens),
+    DynOldAllGone = lists:all(fun(T) -> ets:lookup(auth_token_table, T) =:= [] end, DynOldTokens),
+    case {Deleted, length(Remaining), ExpiredGone, DynDeleted =:= 5, DynRemainingAll, DynOldAllGone} of
+        {2, 1, true, true, true, true} ->
+            #{id => <<"select_delete_ttl">>, title => <<"Atomic TTL Eviction with select_delete">>, status => <<"passed">>, time_ms => 15, details => <<"select_delete atomically deleted expired tokens while retaining valid tokens across static and dynamic thresholds.">>};
         Other4 ->
             #{id => <<"select_delete_ttl">>, title => <<"Atomic TTL Eviction with select_delete">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Eviction mismatch: ~p", [Other4]))}
     end
@@ -9659,10 +10272,13 @@ end,
 S2_HeirTransferOnCrash = try
     catch ets:delete(test_resilient_tab),
     {ok, Guardian} = ets_heir_handshake:start_guardian(),
+    RandKey = list_to_atom("k_dyn_" ++ integer_to_list(rand:uniform(100000))),
+    RandVal = integer_to_binary(rand:uniform(1000000)),
     _Creator = spawn(fun() ->
         Tab = ets_heir_handshake:create_resilient_table(test_resilient_tab, Guardian),
         ets:insert(Tab, {k_a, <<"persisted_a">>}),
         ets:insert(Tab, {k_b, <<"persisted_b">>}),
+        ets:insert(Tab, {RandKey, RandVal}),
         timer:sleep(20),
         exit(simulated_worker_crash)
     end),
@@ -9672,10 +10288,11 @@ S2_HeirTransferOnCrash = try
     ok = ets_heir_handshake:reclaim_table(Guardian, test_resilient_tab),
     [{k_a, Va}] = ets:lookup(test_resilient_tab, k_a),
     [{k_b, Vb}] = ets:lookup(test_resilient_tab, k_b),
+    [{RandKey, Vdyn}] = ets:lookup(test_resilient_tab, RandKey),
     Guardian ! stop,
-    case {GuardianIsOwner, Va, Vb} of
-        {true, <<"persisted_a">>, <<"persisted_b">>} ->
-            #{id => <<"heir_failover_test">>, title => <<"ETS Heir Ownership Transfer Across Crash">>, status => <<"passed">>, time_ms => 70, details => <<"BEAM transferred table to guardian on crash; caller successfully reclaimed table with all records.">>};
+    case {GuardianIsOwner, Va, Vb, Vdyn =:= RandVal} of
+        {true, <<"persisted_a">>, <<"persisted_b">>, true} ->
+            #{id => <<"heir_failover_test">>, title => <<"ETS Heir Ownership Transfer Across Crash">>, status => <<"passed">>, time_ms => 70, details => <<"BEAM transferred table to guardian on crash; caller successfully reclaimed table with all static and dynamic records.">>};
         Other2 ->
             #{id => <<"heir_failover_test">>, title => <<"ETS Heir Ownership Transfer Across Crash">>, status => <<"failed">>, time_ms => 70, details => list_to_binary(io_lib:format("Heir transfer failed: ~p", [Other2]))}
     end
@@ -9733,9 +10350,21 @@ S2_PubSubLifecycle = try
     ok = cluster_pubsub_pg:leave_topic(<<"metrics">>, Self),
     Subscribers2 = pg:get_members(<<"metrics">>),
     LeftGroup = not lists:member(Self, Subscribers2),
-    case {is_map(Info), Alive =:= is_alive(), HasSelf, GotMsg, LeftGroup} of
-        {true, true, true, true, true} ->
-            #{id => <<"pubsub_broadcast_and_leave">>, title => <<"Decentralized Topic Join, Broadcast & Leave">>, status => <<"passed">>, time_ms => 20, details => <<"Verified node info, rpc dispatch, and pg membership lifecycle.">>};
+    %% Dynamic property-based topic and payload verification
+    DynTopic = list_to_binary("dyn_topic_" ++ integer_to_list(rand:uniform(100000))),
+    DynPayload = #{fuzz_metric => rand:uniform(999999)},
+    ok = cluster_pubsub_pg:join_topic(DynTopic, Self),
+    {published, 1} = cluster_pubsub_pg:publish_to_topic(DynTopic, DynPayload),
+    GotDynMsg = receive
+        {pubsub, DynTopic, DynPayload} -> true;
+        {pubsub_msg, DynTopic, DynPayload} -> true
+    after 200 -> false
+    end,
+    ok = cluster_pubsub_pg:leave_topic(DynTopic, Self),
+    DynLeft = not lists:member(Self, pg:get_members(DynTopic)),
+    case {is_map(Info), Alive =:= is_alive(), HasSelf, GotMsg, LeftGroup, GotDynMsg, DynLeft} of
+        {true, true, true, true, true, true, true} ->
+            #{id => <<"pubsub_broadcast_and_leave">>, title => <<"Decentralized Topic Join, Broadcast & Leave">>, status => <<"passed">>, time_ms => 20, details => <<"Verified node info, rpc dispatch, and pg membership lifecycle across static and dynamic topic payloads.">>};
         Other2 ->
             #{id => <<"pubsub_broadcast_and_leave">>, title => <<"Decentralized Topic Join, Broadcast & Leave">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("PubSub mismatch: ~p", [Other2]))}
     end
@@ -9786,9 +10415,17 @@ S2_MnesiaTxn = try
     {ok, BalA2} = mnesia_ledger:get_wallet_balance(user_alice),
     {ok, BalB2} = mnesia_ledger:get_wallet_balance(user_bob),
     ErrMissing = mnesia_ledger:atomic_transfer(user_alice, ghost_user, 10),
-    case {BalA1 =:= 140 andalso BalB1 =:= 110, ErrOverdraft =:= {error, insufficient_funds}, BalA2 =:= 140 andalso BalB2 =:= 110, ErrMissing =:= {error, account_not_found}} of
-        {true, true, true, true} ->
-            #{id => <<"mnesia_acid_rollback">>, title => <<"Mnesia ACID Commitment & Abort Rollback Verification">>, status => <<"passed">>, time_ms => 25, details => <<"Verified atomic transfers and confirmed that overdrafts roll back 100 percent of mutations.">>};
+    %% Dynamic property-based balance conservation
+    InitA = 200 + rand:uniform(100),
+    InitB = 50 + rand:uniform(50),
+    Xfer = 10 + rand:uniform(30),
+    ok = mnesia_ledger:upsert_wallet(user_fuzz_a, InitA),
+    ok = mnesia_ledger:upsert_wallet(user_fuzz_b, InitB),
+    {ok, PostA, PostB} = mnesia_ledger:atomic_transfer(user_fuzz_a, user_fuzz_b, Xfer),
+    Conserved = (PostA + PostB =:= InitA + InitB) andalso (PostA =:= InitA - Xfer) andalso (PostB =:= InitB + Xfer),
+    case {BalA1 =:= 140 andalso BalB1 =:= 110, ErrOverdraft =:= {error, insufficient_funds}, BalA2 =:= 140 andalso BalB2 =:= 110, ErrMissing =:= {error, account_not_found}, Conserved} of
+        {true, true, true, true, true} ->
+            #{id => <<"mnesia_acid_rollback">>, title => <<"Mnesia ACID Commitment & Abort Rollback Verification">>, status => <<"passed">>, time_ms => 25, details => <<"Verified atomic transfers, overdraft rollbacks, and mathematical balance conservation under dynamic fuzzing.">>};
         Other2 ->
             #{id => <<"mnesia_acid_rollback">>, title => <<"Mnesia ACID Commitment & Abort Rollback Verification">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Mnesia txn mismatch: ~p", [Other2]))}
     end
@@ -9819,9 +10456,20 @@ S1_SpecValidation = try
     {ok, Rem1} = ledger_specs_and_tests:validate_transfer_spec(1000, 500, usd),
     Err1 = ledger_specs_and_tests:validate_transfer_spec(100, 200, usd),
     Err2 = ledger_specs_and_tests:validate_transfer_spec(100, -5, usd),
-    case {Fee1, Fee2, Fee3, Rem1, Err1, Err2} of
-        {15, 20, 10, 493, {error, insufficient_funds}, {error, invalid_amount}} ->
-            #{id => <<"boundary_contract_verification">>, title => <<"Boundary Conditions & Contract Invariant Enforcement">>, status => <<"passed">>, time_ms => 15, details => <<"Fee calculations and transfer boundaries strictly enforce spec contracts.">>};
+    %% Dynamic fee validation across randomized amounts
+    RandUsd = 100 + rand:uniform(900),
+    ExpUsdFee = trunc(RandUsd * 0.015),
+    FeeRandUsd = ledger_specs_and_tests:calculate_fee(RandUsd, usd),
+    RandEur = 100 + rand:uniform(900),
+    ExpEurFee = trunc(RandEur * 0.02),
+    FeeRandEur = ledger_specs_and_tests:calculate_fee(RandEur, eur),
+    RandEtb = 100 + rand:uniform(900),
+    ExpEtbFee = trunc(RandEtb * 0.01),
+    FeeRandEtb = ledger_specs_and_tests:calculate_fee(RandEtb, etb),
+    FeesMatch = (FeeRandUsd =:= ExpUsdFee) andalso (FeeRandEur =:= ExpEurFee) andalso (FeeRandEtb =:= ExpEtbFee),
+    case {Fee1, Fee2, Fee3, Rem1, Err1, Err2, FeesMatch} of
+        {15, 20, 10, 493, {error, insufficient_funds}, {error, invalid_amount}, true} ->
+            #{id => <<"boundary_contract_verification">>, title => <<"Boundary Conditions & Contract Invariant Enforcement">>, status => <<"passed">>, time_ms => 15, details => <<"Fee calculations and transfer boundaries strictly enforce spec contracts across static and dynamic amounts.">>};
         Other1 ->
             #{id => <<"boundary_contract_verification">>, title => <<"Boundary Conditions & Contract Invariant Enforcement">>, status => <<"failed">>, time_ms => 15, details => list_to_binary(io_lib:format("Contract breach: ~p", [Other1]))}
     end
@@ -9893,11 +10541,18 @@ S2_PipelineStartupAndOps = try
     {ok, 2} = session_cache:increment_hits(<<"s_alpha">>),
     {ok, 3} = session_cache:increment_hits(<<"s_alpha">>),
     {ok, 1} = session_cache:increment_hits(<<"s_beta">>),
+    %% Dynamic property-based session creation & atomic hit tracking
+    DynSessKey = list_to_binary("s_dyn_" ++ integer_to_list(rand:uniform(100000))),
+    DynUid = 2000 + rand:uniform(5000),
+    ok = session_cache:put_session(DynSessKey, DynUid, #{dyn => true}),
+    {ok, 1} = session_cache:increment_hits(DynSessKey),
+    {ok, 2} = session_cache:increment_hits(DynSessKey),
     Total1 = session_cache:count_sessions(),
     {ok, SA} = session_cache:get_session(<<"s_alpha">>),
-    case {Total1, maps:get(hit_count, SA), maps:get(user_id, SA)} of
-        {2, 3, 1001} ->
-            #{id => <<"session_pipeline_ops">>, title => <<"Session Cache Startup, Writes & Atomic Hit Tracking">>, status => <<"passed">>, time_ms => 20, details => <<"Pipeline booted; sessions inserted and atomic hit counters verified.">>};
+    {ok, SDyn} = session_cache:get_session(DynSessKey),
+    case {Total1, maps:get(hit_count, SA), maps:get(user_id, SA), maps:get(hit_count, SDyn), maps:get(user_id, SDyn)} of
+        {3, 3, 1001, 2, DynUid} ->
+            #{id => <<"session_pipeline_ops">>, title => <<"Session Cache Startup, Writes & Atomic Hit Tracking">>, status => <<"passed">>, time_ms => 20, details => <<"Pipeline booted; sessions inserted and atomic hit counters verified across static and dynamic sessions.">>};
         Other2 ->
             #{id => <<"session_pipeline_ops">>, title => <<"Session Cache Startup, Writes & Atomic Hit Tracking">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Pipeline ops mismatch: ~p", [Other2]))}
     end
@@ -9913,9 +10568,9 @@ S3_ChaosHeirFailover = try
     {ok, SA_After} = session_cache:get_session(<<"s_alpha">>),
     {ok, SB_After} = session_cache:get_session(<<"s_beta">>),
     HitsPreserved = (maps:get(hit_count, SA_After) =:= 3) andalso (maps:get(hit_count, SB_After) =:= 1),
-    CountPreserved = (session_cache:count_sessions() =:= 2),
+    CountPreserved = (session_cache:count_sessions() =:= 3),
     ok = session_cache:delete_session(<<"s_beta">>),
-    CountAfterDelete = (session_cache:count_sessions() =:= 1),
+    CountAfterDelete = (session_cache:count_sessions() =:= 2),
     session_cache:stop_pipeline(),
     case {Restarted, HitsPreserved, CountPreserved, CountAfterDelete} of
         {true, true, true, true} ->
@@ -10019,17 +10674,25 @@ S3_EventAndFraming = try
     E4 = tcp_socket_opts:classify_socket_event(bogus_event),
     F1 = tcp_socket_opts:encode_length_prefixed(<<"PING">>),
     F2 = tcp_socket_opts:encode_length_prefixed(<<>>),
+    %% Dynamic property fuzzing: randomized binary payload framing and event classification
+    RandPayload = list_to_binary("DYN_STANZA_" ++ integer_to_list(rand:uniform(100000))),
+    RandSize = byte_size(RandPayload),
+    EDyn = tcp_socket_opts:classify_socket_event({tcp, DummySock, RandPayload}),
+    FDyn = tcp_socket_opts:encode_length_prefixed(RandPayload),
+    <<DynPrefixLen:32/big, RandPayload/binary>> = FDyn,
+    DynPass = (EDyn =:= {data, RandSize, RandPayload}) andalso (DynPrefixLen =:= RandSize),
     PassEvents = (E1 =:= {data, 11, <<"STANZA_DATA">>})
                  andalso (E2 =:= {disconnected, normal_eof})
                  andalso (E3 =:= {disconnected, {socket_error, econnreset}})
                  andalso (E4 =:= {error, unknown_event})
                  andalso (F1 =:= <<0, 0, 0, 4, 80, 73, 78, 71>>)
-                 andalso (F2 =:= <<0, 0, 0, 0>>),
+                 andalso (F2 =:= <<0, 0, 0, 0>>)
+                 andalso DynPass,
     case PassEvents of
         true ->
-            #{id => <<"event_and_framing">>, title => <<"Event Classification & {packet, 4} Wire Encoding">>, status => <<"passed">>, time_ms => 20, details => <<"Classified {tcp, ...}, {tcp_closed, ...}, {tcp_error, ...} and encoded length-prefixed wire binaries.">>};
+            #{id => <<"event_and_framing">>, title => <<"Event Classification & {packet, 4} Wire Encoding">>, status => <<"passed">>, time_ms => 20, details => <<"Classified {tcp, ...}, {tcp_closed, ...}, {tcp_error, ...} and encoded length-prefixed wire binaries across static and dynamic payloads.">>};
         false ->
-            #{id => <<"event_and_framing">>, title => <<"Event Classification & {packet, 4} Wire Encoding">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Classification/framing failed: E1=~p, F1=~p", [E1, F1]))}
+            #{id => <<"event_and_framing">>, title => <<"Event Classification & {packet, 4} Wire Encoding">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Classification/framing failed: E1=~p, F1=~p, DynPass=~p", [E1, F1, DynPass]))}
     end
 catch C3:R3 ->
     #{id => <<"event_and_framing">>, title => <<"Event Classification & {packet, 4} Wire Encoding">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Classification crashed: ~p:~p", [C3, R3]))}
@@ -10081,14 +10744,20 @@ S3_EchoAndLifecycle = try
     {ok, CSock3} = gen_tcp:connect("127.0.0.1", Port3, [binary, {packet, raw}, {active, false}], 2000),
     ok = gen_tcp:send(CSock3, <<"PING_DATA\r\n">>),
     {ok, <<"+ACK: PING_DATA\r\n">>} = gen_tcp:recv(CSock3, 0, 2000),
+    %% Dynamic property fuzzing: randomized echo packet & byte counter tracking
+    RandEcho = list_to_binary("DYN_MSG_" ++ integer_to_list(rand:uniform(10000))),
+    ok = gen_tcp:send(CSock3, <<RandEcho/binary, "\r\n">>),
+    ExpectedDyn = <<"+ACK: ", RandEcho/binary, "\r\n">>,
+    {ok, ExpectedDyn} = gen_tcp:recv(CSock3, 0, 2000),
     timer:sleep(30),
-    #{packets_processed := 1, bytes_processed := 11, closed := false} = tcp_flow_worker:get_stats(tcp_flow_worker),
-    1 = tcp_flow_worker:get_processed_count(tcp_flow_worker),
+    ExpectedBytes = 11 + byte_size(RandEcho) + 2,
+    #{packets_processed := 2, bytes_processed := ExpectedBytes, closed := false} = tcp_flow_worker:get_stats(tcp_flow_worker),
+    2 = tcp_flow_worker:get_processed_count(tcp_flow_worker),
     ok = gen_tcp:close(CSock3),
     timer:sleep(30),
-    #{packets_processed := 1, bytes_processed := 11, closed := true} = tcp_flow_worker:get_stats(tcp_flow_worker),
+    #{packets_processed := 2, bytes_processed := ExpectedBytes, closed := true} = tcp_flow_worker:get_stats(tcp_flow_worker),
     ok = tcp_flow_worker:stop_server(LPid3),
-    #{id => <<"echo_and_lifecycle">>, title => <<"Echo Protocol, Counters & Close Lifecycle">>, status => <<"passed">>, time_ms => 40, details => <<"Verified +ACK echo prefix, packet/byte counters, and {tcp_closed, Sock} state transition.">>}
+    #{id => <<"echo_and_lifecycle">>, title => <<"Echo Protocol, Counters & Close Lifecycle">>, status => <<"passed">>, time_ms => 40, details => <<"Verified +ACK echo prefix, dynamic packet/byte counters, and {tcp_closed, Sock} state transition.">>}
 catch C3:R3 ->
     (case whereis(tcp_flow_worker) of undefined -> ok; OldP3 -> catch gen_server:stop(OldP3) end),
     #{id => <<"echo_and_lifecycle">>, title => <<"Echo Protocol, Counters & Close Lifecycle">>, status => <<"failed">>, time_ms => 40, details => list_to_binary(io_lib:format("Lifecycle verification failed: ~p:~p", [C3, R3]))}
@@ -10123,15 +10792,21 @@ S2_FramingEdgeCases = try
     {L2, B2} = tcp_frame_buffer:append_and_extract_lines(B1, <<"_END\r\nLINE_TWO\r\nLINE_THREE\r\nPARTIAL">>),
     {L3, B3} = tcp_frame_buffer:append_and_extract_lines(B2, <<"_COMPLETED\r\n">>),
     ExpectedL2 = [<<"FRAGMENT_WITHOUT_DELIM_END">>, <<"LINE_TWO">>, <<"LINE_THREE">>],
+    %% Dynamic property fuzzing: randomized line fragmented across packet boundary
+    RandPayload1 = list_to_binary("DYN_LINE_" ++ integer_to_list(rand:uniform(10000))),
+    {DL1, DB1} = tcp_frame_buffer:append_and_extract_lines(<<>>, <<RandPayload1/binary, "\r">>),
+    {DL2, DB2} = tcp_frame_buffer:append_and_extract_lines(DB1, <<"\n">>),
+    DynPass = (DL1 =:= []) andalso (DB1 =:= <<RandPayload1/binary, "\r">>) andalso (DL2 =:= [RandPayload1]) andalso (DB2 =:= <<>>),
     Pass = (L0 =:= []) andalso (B0 =:= <<>>)
            andalso (L1 =:= []) andalso (B1 =:= <<"FRAGMENT_WITHOUT_DELIM">>)
            andalso (L2 =:= ExpectedL2) andalso (B2 =:= <<"PARTIAL">>)
-           andalso (L3 =:= [<<"PARTIAL_COMPLETED">>]) andalso (B3 =:= <<>>),
+           andalso (L3 =:= [<<"PARTIAL_COMPLETED">>]) andalso (B3 =:= <<>>)
+           andalso DynPass,
     case Pass of
         true ->
-            #{id => <<"framing_edge_cases">>, title => <<"Verify Stream Framing: Fragmented & Coalesced Chunks">>, status => <<"passed">>, time_ms => 25, details => <<"All fragmented and coalesced chunks correctly extracted without delimiter leaks.">>};
+            #{id => <<"framing_edge_cases">>, title => <<"Verify Stream Framing: Fragmented & Coalesced Chunks">>, status => <<"passed">>, time_ms => 25, details => <<"All fragmented and coalesced chunks correctly extracted without delimiter leaks across static and dynamic lines.">>};
         false ->
-            #{id => <<"framing_edge_cases">>, title => <<"Verify Stream Framing: Fragmented & Coalesced Chunks">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Framing assertion failed: L2=~p, B2=~p, L3=~p", [L2, B2, L3]))}
+            #{id => <<"framing_edge_cases">>, title => <<"Verify Stream Framing: Fragmented & Coalesced Chunks">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Framing assertion failed: L2=~p, B2=~p, L3=~p, DynPass=~p", [L2, B2, L3, DynPass]))}
     end
 catch C:R ->
     #{id => <<"framing_edge_cases">>, title => <<"Verify Stream Framing: Fragmented & Coalesced Chunks">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Framing test crashed: ~p:~p", [C, R]))}
@@ -10293,8 +10968,19 @@ S2_UnitParserAndExec = try
     <<"$-1\r\n">> = tcp_kv_backend:execute_command({get, <<"u1">>}, Tab),
     <<":0\r\n">> = tcp_kv_backend:execute_command({del, <<"u1">>}, Tab),
     <<"-ERR unknown command\r\n">> = tcp_kv_backend:execute_command({error, unknown_command}, Tab),
+    %% Dynamic property fuzzing: randomized SET, GET, DEL round-trip
+    RandK = list_to_binary("dyn_user_" ++ integer_to_list(rand:uniform(10000))),
+    RandV = list_to_binary("dyn_val_" ++ integer_to_list(rand:uniform(10000))),
+    {ok, {set, RandK, RandV}} = tcp_kv_backend:parse_command(<<"SET ", RandK/binary, " ", RandV/binary>>),
+    <<"+OK\r\n">> = tcp_kv_backend:execute_command({set, RandK, RandV}, Tab),
+    {ok, {get, RandK}} = tcp_kv_backend:parse_command(<<"GET ", RandK/binary>>),
+    ExpDynGet = <<"$", RandV/binary, "\r\n">>,
+    ExpDynGet = tcp_kv_backend:execute_command({get, RandK}, Tab),
+    {ok, {del, RandK}} = tcp_kv_backend:parse_command(<<"DEL ", RandK/binary>>),
+    <<":1\r\n">> = tcp_kv_backend:execute_command({del, RandK}, Tab),
+    <<"$-1\r\n">> = tcp_kv_backend:execute_command({get, RandK}, Tab),
     ets:delete(Tab),
-    #{id => <<"unit_parser_and_exec">>, title => <<"Unit Tests: Parser & Wire Command Execution">>, status => <<"passed">>, time_ms => 20, details => <<"All 5 wire protocol commands parsed and executed accurately.">>}
+    #{id => <<"unit_parser_and_exec">>, title => <<"Unit Tests: Parser & Wire Command Execution">>, status => <<"passed">>, time_ms => 20, details => <<"All wire protocol commands parsed and executed accurately across static and dynamic operations.">>}
 catch C2:R2 ->
     #{id => <<"unit_parser_and_exec">>, title => <<"Unit Tests: Parser & Wire Command Execution">>, status => <<"failed">>, time_ms => 20, details => list_to_binary(io_lib:format("Unit test failed: ~p:~p", [C2, R2]))}
 end,
@@ -10431,8 +11117,19 @@ S2_UnitJidParsing = try
     Diff1 = xmpp_jid:is_same_bare_jid(<<"alice@localhost">>, <<"bob@localhost">>),
     DiffBad = xmpp_jid:is_same_bare_jid(<<"alice@localhost">>, <<"malformed">>),
     CheckSame = (Same1 =:= true) andalso (Same2 =:= true) andalso (Diff1 =:= false) andalso (DiffBad =:= false),
-    case Check1 andalso Check2 andalso CheckErrs andalso CheckBare andalso CheckFmt andalso CheckSame of
-        true -> #{id => <<"unit_jid_parsing">>, title => <<"Unit Tests: JID Parsing, Normalization & RFC 7622 Validation">>, status => <<"passed">>, time_ms => 20, details => <<"Full and bare JIDs parsed, malformed inputs rejected, bare extraction, formatting, and comparison verified.">>};
+    %% Dynamic property fuzzing: randomized full and bare JID round-trip
+    RandU = list_to_binary("u_" ++ integer_to_list(rand:uniform(10000))),
+    RandD = list_to_binary("d_" ++ integer_to_list(rand:uniform(10000)) ++ ".org"),
+    RandR = list_to_binary("r_" ++ integer_to_list(rand:uniform(10000))),
+    FullJidDyn = <<RandU/binary, "@", RandD/binary, "/", RandR/binary>>,
+    BareJidDyn = <<RandU/binary, "@", RandD/binary>>,
+    {ok, JDyn} = xmpp_jid:parse(FullJidDyn),
+    CheckDyn1 = (maps:get(user, JDyn) =:= RandU) andalso (maps:get(domain, JDyn) =:= RandD) andalso (maps:get(resource, JDyn) =:= RandR) andalso (maps:get(bare, JDyn) =:= BareJidDyn),
+    CheckDyn2 = (xmpp_jid:to_bare(FullJidDyn) =:= BareJidDyn),
+    CheckDyn3 = (xmpp_jid:format_jid(JDyn) =:= FullJidDyn),
+    CheckDyn4 = xmpp_jid:is_same_bare_jid(FullJidDyn, <<BareJidDyn/binary, "/alt_res">>),
+    case Check1 andalso Check2 andalso CheckErrs andalso CheckBare andalso CheckFmt andalso CheckSame andalso CheckDyn1 andalso CheckDyn2 andalso CheckDyn3 andalso CheckDyn4 of
+        true -> #{id => <<"unit_jid_parsing">>, title => <<"Unit Tests: JID Parsing, Normalization & RFC 7622 Validation">>, status => <<"passed">>, time_ms => 20, details => <<"Full and bare JIDs parsed, malformed inputs rejected, bare extraction, formatting, and comparison verified across static and dynamic JIDs.">>};
         false -> #{id => <<"unit_jid_parsing">>, title => <<"Unit Tests: JID Parsing, Normalization & RFC 7622 Validation">>, status => <<"failed">>, time_ms => 20, details => <<"JID parser validation assertion failed.">>}
     end
 catch CatchClass_L02_2:CatchReason_L02_2 ->
@@ -10477,6 +11174,12 @@ S2_UnitStanzaClassification = try
     Cl7 = xmpp_stanza:classify_xml_packet(<<"<unknown_tag/>">>),
     Cl8 = xmpp_stanza:classify_xml_packet(<<"</stream:stream>">>),
     Cl9 = xmpp_stanza:classify_xml_packet(not_a_binary),
+    %% Dynamic property fuzzing: randomized XML stanza classification
+    RandMsgId = list_to_binary("m_" ++ integer_to_list(rand:uniform(10000))),
+    RandTarget = list_to_binary("carol_" ++ integer_to_list(rand:uniform(1000)) ++ "@chat.org"),
+    RandXml = <<"<message to='", RandTarget/binary, "' id='", RandMsgId/binary, "' type='chat'><body>Hi there</body></message>">>,
+    ClDyn = xmpp_stanza:classify_xml_packet(RandXml),
+    PassDyn = (ClDyn =:= {message, RandMsgId, <<"chat">>, RandTarget}),
     Pass = (Cl1 =:= {stream_open, <<"chat.org">>}) andalso
            (Cl2 =:= {auth_plain, <<"dGVzdA==">>}) andalso
            (Cl3 =:= {iq, <<"bind_99">>, <<"set">>}) andalso
@@ -10485,10 +11188,11 @@ S2_UnitStanzaClassification = try
            (Cl6 =:= {message, <<"m_1">>, <<"chat">>, <<"bob@chat.org">>}) andalso
            (Cl7 =:= unknown) andalso
            (Cl8 =:= unknown) andalso
-           (Cl9 =:= unknown),
+           (Cl9 =:= unknown) andalso
+           PassDyn,
     case Pass of
-        true -> #{id => <<"unit_stanza_classification">>, title => <<"Unit Tests: Stanza XML Classification">>, status => <<"passed">>, time_ms => 18, details => <<"All 9 XML packet variants and edge cases accurately classified.">>};
-        false -> #{id => <<"unit_stanza_classification">>, title => <<"Unit Tests: Stanza XML Classification">>, status => <<"failed">>, time_ms => 18, details => list_to_binary(io_lib:format("Classification mismatch: ~p", [{Cl1, Cl2, Cl3, Cl4, Cl5, Cl6, Cl7, Cl8, Cl9}]))}
+        true -> #{id => <<"unit_stanza_classification">>, title => <<"Unit Tests: Stanza XML Classification">>, status => <<"passed">>, time_ms => 18, details => <<"All XML packet variants and dynamic edge cases accurately classified.">>};
+        false -> #{id => <<"unit_stanza_classification">>, title => <<"Unit Tests: Stanza XML Classification">>, status => <<"failed">>, time_ms => 18, details => list_to_binary(io_lib:format("Classification mismatch: ~p", [{Cl1, Cl2, Cl3, Cl4, Cl5, Cl6, Cl7, Cl8, Cl9, ClDyn}]))}
     end
 catch CatchClass_S2:CatchReason_S2 ->
     #{id => <<"unit_stanza_classification">>, title => <<"Unit Tests: Stanza XML Classification">>, status => <<"failed">>, time_ms => 18, details => list_to_binary(io_lib:format("Classification error: ~p:~p", [CatchClass_S2, CatchReason_S2]))}
@@ -10505,7 +11209,12 @@ S3_UnitStanzaBuilders = try
     Msg = xmpp_stanza:build_chat_message(<<"alice@h">>, <<"bob@h">>, <<"m44">>, <<"Hello world">>),
     ExpectedMsg = <<"<message from='alice@h' to='bob@h' id='m44' type='chat'><body>Hello world</body></message>">>,
     CheckMsg = (Msg =:= ExpectedMsg),
-    case CheckFeat andalso CheckBind andalso CheckMsg of
+    %% Dynamic property fuzzing: randomized chat message builder
+    RandBodyDyn = list_to_binary("Dynamic payload " ++ integer_to_list(rand:uniform(100000))),
+    MsgDyn = xmpp_stanza:build_chat_message(<<"alice@h">>, <<"bob@h">>, <<"m_dyn">>, RandBodyDyn),
+    ExpectedMsgDyn = <<"<message from='alice@h' to='bob@h' id='m_dyn' type='chat'><body>", RandBodyDyn/binary, "</body></message>">>,
+    CheckMsgDyn = (MsgDyn =:= ExpectedMsgDyn),
+    case CheckFeat andalso CheckBind andalso CheckMsg andalso CheckMsgDyn of
         true -> #{id => <<"unit_stanza_builders">>, title => <<"Unit Tests: XML Stanza Serialization Builders">>, status => <<"passed">>, time_ms => 18, details => <<"Stream features, bind results, and chat messages generated with exact RFC 6120 XML.">>};
         false -> #{id => <<"unit_stanza_builders">>, title => <<"Unit Tests: XML Stanza Serialization Builders">>, status => <<"failed">>, time_ms => 18, details => <<"Builder XML mismatch.">>}
     end
@@ -10558,8 +11267,12 @@ S2_UnitErrorConditions = try
     StreamErr = xmpp_error_and_roster:build_stream_not_authorized(),
     CheckStreamErr = (binary:match(StreamErr, <<"stream:error">>) =/= nomatch) andalso
                      (binary:match(StreamErr, <<"not-authorized">>) =/= nomatch),
-    case CheckClassify andalso CheckErrXml andalso CheckStreamErr of
-        true -> #{id => <<"unit_error_conditions">>, title => <<"Unit Tests: RFC 6120 Stanza & Stream Errors">>, status => <<"passed">>, time_ms => 15, details => <<"Classified 6 RFC error conditions; generated valid stanza and stream errors.">>};
+    %% Dynamic property fuzzing: randomized stanza error generation
+    RandErrId = list_to_binary("iq_dyn_" ++ integer_to_list(rand:uniform(10000))),
+    DynErrXml = xmpp_error_and_roster:build_stanza_error(<<"iq">>, RandErrId, <<"client@host">>, forbidden),
+    CheckDynErr = (binary:match(DynErrXml, RandErrId) =/= nomatch) andalso (binary:match(DynErrXml, <<"forbidden">>) =/= nomatch),
+    case CheckClassify andalso CheckErrXml andalso CheckStreamErr andalso CheckDynErr of
+        true -> #{id => <<"unit_error_conditions">>, title => <<"Unit Tests: RFC 6120 Stanza & Stream Errors">>, status => <<"passed">>, time_ms => 15, details => <<"Classified 6 RFC error conditions; generated valid stanza and stream errors across static and dynamic errors.">>};
         false -> #{id => <<"unit_error_conditions">>, title => <<"Unit Tests: RFC 6120 Stanza & Stream Errors">>, status => <<"failed">>, time_ms => 15, details => <<"Error classification or builder assertion failed.">>}
     end
 catch CatchClass_L04_2:CatchReason_L04_2 ->
@@ -10625,9 +11338,17 @@ S2_UnitFragmentedStreamFraming = try
     Check3 = (F3 =:= ExpectedF3) andalso (Rem3 =:= <<"<message to='b'>hel">>),
     {F4, Rem4} = xmpp_xml_framer:extract_frames(Rem3, <<"lo</message>   \r\n">>),
     Check4 = (F4 =:= [<<"<message to='b'>hello</message>">>]) andalso (Rem4 =:= <<>>),
-    case Check1 andalso Check2 andalso Check3 andalso Check4 of
-        true -> #{id => <<"unit_fragmented_stream_framing">>, title => <<"Unit Tests: Fragmented Chunks & Coalesced XML Frames">>, status => <<"passed">>, time_ms => 25, details => <<"Split stream header, paired tags, self-closing stanzas, and coalesced fragments framed in FIFO order.">>};
-        false -> #{id => <<"unit_fragmented_stream_framing">>, title => <<"Unit Tests: Fragmented Chunks & Coalesced XML Frames">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Framing assertion failed: ~p", [{F1, Rem1, F2, Rem2, F3, Rem3, F4, Rem4}]))}
+    %% Dynamic property fuzzing: randomized split stanza reassembly
+    RandTag = list_to_binary("dyn_msg_" ++ integer_to_list(rand:uniform(10000))),
+    FullStanza = <<"<message to='target'><body>", RandTag/binary, "</body></message>">>,
+    SplitIdx = 6 + rand:uniform(byte_size(FullStanza) - 12),
+    <<Chunk1:SplitIdx/binary, Chunk2/binary>> = FullStanza,
+    {FDyn1, RemD1} = xmpp_xml_framer:extract_frames(<<>>, Chunk1),
+    {FDyn2, RemD2} = xmpp_xml_framer:extract_frames(RemD1, <<Chunk2/binary, " \r\n">>),
+    CheckDynFramer = (FDyn1 =:= []) andalso (FDyn2 =:= [FullStanza]) andalso (RemD2 =:= <<>>),
+    case Check1 andalso Check2 andalso Check3 andalso Check4 andalso CheckDynFramer of
+        true -> #{id => <<"unit_fragmented_stream_framing">>, title => <<"Unit Tests: Fragmented Chunks & Coalesced XML Frames">>, status => <<"passed">>, time_ms => 25, details => <<"Split stream header, paired tags, self-closing stanzas, and coalesced fragments framed in FIFO order across static and dynamic chunks.">>};
+        false -> #{id => <<"unit_fragmented_stream_framing">>, title => <<"Unit Tests: Fragmented Chunks & Coalesced XML Frames">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Framing assertion failed: ~p", [{F1, Rem1, F2, Rem2, F3, Rem3, F4, Rem4, CheckDynFramer}]))}
     end
 catch CatchClass_L05_2:CatchReason_L05_2 ->
     #{id => <<"unit_fragmented_stream_framing">>, title => <<"Unit Tests: Fragmented Chunks & Coalesced XML Frames">>, status => <<"failed">>, time_ms => 25, details => list_to_binary(io_lib:format("Framing test error: ~p:~p", [CatchClass_L05_2, CatchReason_L05_2]))}
@@ -10686,8 +11407,19 @@ S2_UnitFsmHandshake = try
     %% 7. Chat message & presence in session_established
     {ok, {routed, <<"bob@localhost">>}, S3} = xmpp_c2s_fsm:handle_event({chat_message, <<"bob@localhost">>, <<"m_2">>, <<"Hey!">>}, S3),
     {ok, {presence_updated, <<"available">>}, S3} = xmpp_c2s_fsm:handle_event({presence, <<"available">>}, S3),
-    case CheckState1 andalso CheckState2 andalso CheckState3 of
-        true -> #{id => <<"unit_fsm_handshake">>, title => <<"Unit Tests: Complete C2S Handshake Transitions & Security Gates">>, status => <<"passed">>, time_ms => 20, details => <<"Strict state sequence enforced; pre-auth stanzas rejected; SASL PLAIN decoded; Full JID bound and stanzas routed.">>};
+    %% Dynamic property fuzzing: randomized SASL auth credentials and resource binding
+    RandUserFsm = list_to_binary("fsm_u_" ++ integer_to_list(rand:uniform(10000))),
+    RandPassFsm = list_to_binary("fsm_p_" ++ integer_to_list(rand:uniform(10000))),
+    RandTokenFsm = base64:encode(<<0, RandUserFsm/binary, 0, RandPassFsm/binary>>),
+    RandResFsm = list_to_binary("res_" ++ integer_to_list(rand:uniform(10000))),
+    FsmS0 = xmpp_c2s_fsm:init(<<"localhost">>),
+    {reply, _, FsmS1} = xmpp_c2s_fsm:handle_event({stream_open, <<"localhost">>}, FsmS0),
+    {reply, _, FsmS2} = xmpp_c2s_fsm:handle_event({auth_plain, RandTokenFsm}, FsmS1),
+    {reply, FsmBindReply, FsmS3} = xmpp_c2s_fsm:handle_event({bind_resource, <<"bind_dyn">>, RandResFsm}, FsmS2),
+    ExpFullJid = <<RandUserFsm/binary, "@localhost/", RandResFsm/binary>>,
+    CheckDynFsm = (maps:get(full_jid, FsmS3) =:= ExpFullJid) andalso (binary:match(FsmBindReply, ExpFullJid) =/= nomatch),
+    case CheckState1 andalso CheckState2 andalso CheckState3 andalso CheckDynFsm of
+        true -> #{id => <<"unit_fsm_handshake">>, title => <<"Unit Tests: Complete C2S Handshake Transitions & Security Gates">>, status => <<"passed">>, time_ms => 20, details => <<"Strict state sequence enforced; pre-auth stanzas rejected; SASL PLAIN decoded; Full JID bound and stanzas routed across static and dynamic sessions.">>};
         false -> #{id => <<"unit_fsm_handshake">>, title => <<"Unit Tests: Complete C2S Handshake Transitions & Security Gates">>, status => <<"failed">>, time_ms => 20, details => <<"FSM handshake assertion failed.">>}
     end
 catch CatchClass_L06_2:CatchReason_L06_2 ->
@@ -10749,8 +11481,16 @@ S2_UnitLifecycleAndRouting = try
     S7 = xmpp_presence_router:remove_session_by_pid(S6, PPhone),
     OfflineRes = xmpp_presence_router:resolve_message_targets(S7, <<"alice@host">>),
     CheckNeg = (OfflineRes =:= {store_offline, <<"alice@host">>}),
-    case CheckClamp andalso CheckOverwrite andalso CheckFull andalso CheckTied andalso CheckNeg of
-        true -> #{id => <<"unit_priority_routing">>, title => <<"Unit Tests: RFC 6121 Priority Routing & Negative Priority Exclusion">>, status => <<"passed">>, time_ms => 20, details => <<"Priority clamping (-128..127), Full JID routing, tied priorities, and negative priority offline fallback verified.">>};
+    %% Dynamic property fuzzing: randomized priority tie-breaking
+    PDynA = spawn(fun() -> ok end),
+    PDynB = spawn(fun() -> ok end),
+    RandPrioRouter = 15 + rand:uniform(40),
+    DynRouterS1 = xmpp_presence_router:upsert_session([], <<"dyn_user@host/resA">>, RandPrioRouter, PDynA, #{}),
+    DynRouterS2 = xmpp_presence_router:upsert_session(DynRouterS1, <<"dyn_user@host/resB">>, RandPrioRouter, PDynB, #{}),
+    {route_online, DynTiedPids} = xmpp_presence_router:resolve_message_targets(DynRouterS2, <<"dyn_user@host">>),
+    CheckDynTied = (lists:sort(DynTiedPids) =:= lists:sort([PDynA, PDynB])),
+    case CheckClamp andalso CheckOverwrite andalso CheckFull andalso CheckTied andalso CheckNeg andalso CheckDynTied of
+        true -> #{id => <<"unit_priority_routing">>, title => <<"Unit Tests: RFC 6121 Priority Routing & Negative Priority Exclusion">>, status => <<"passed">>, time_ms => 20, details => <<"Priority clamping (-128..127), Full JID routing, tied priorities, and negative priority offline fallback verified across static and dynamic sessions.">>};
         false -> #{id => <<"unit_priority_routing">>, title => <<"Unit Tests: RFC 6121 Priority Routing & Negative Priority Exclusion">>, status => <<"failed">>, time_ms => 20, details => <<"Priority routing or clamping assertion failed.">>}
     end
 catch CatchClass_L08_2:CatchReason_L08_2 ->
@@ -11008,17 +11748,23 @@ end,
 S4 = try
     AttrVal = xmpp_stream_parser:extract_attr(<<"<stream:stream to='example.org' version='1.0'>">>, <<"to">>),
     BodyVal = xmpp_stream_parser:extract_tag_body(<<"<message><body>Hello BeamForge!</body></message>">>, <<"body">>),
-    case (AttrVal =:= <<"example.org">>) andalso (BodyVal =:= <<"Hello BeamForge!">>) of
+    %% Dynamic property fuzzing: randomized attribute and body extraction
+    RandDomain = list_to_binary("dyn" ++ integer_to_list(rand:uniform(1000)) ++ ".org"),
+    RandTagVal = list_to_binary("Val_" ++ integer_to_list(rand:uniform(10000))),
+    DynAttrVal = xmpp_stream_parser:extract_attr(<<"<stream:stream to='", RandDomain/binary, "' version='1.0'>">>, <<"to">>),
+    DynBodyVal = xmpp_stream_parser:extract_tag_body(<<"<message><body>", RandTagVal/binary, "</body></message>">>, <<"body">>),
+    DynHelpersOk = (DynAttrVal =:= RandDomain) andalso (DynBodyVal =:= RandTagVal),
+    case (AttrVal =:= <<"example.org">>) andalso (BodyVal =:= <<"Hello BeamForge!">>) andalso DynHelpersOk of
         true ->
             #{id => <<"m2_subbinary_heap_retention">>,
               title => <<"XML Helpers: Tag Body & Attribute Extractors">>,
               status => <<"passed">>, time_ms => 15,
-              details => <<"extract_attr/2 and extract_tag_body/2 accurately parsed values with boundary safety.">>};
+              details => <<"extract_attr/2 and extract_tag_body/2 accurately parsed values with boundary safety across static and dynamic tags.">>};
         false ->
             #{id => <<"m2_subbinary_heap_retention">>,
               title => <<"XML Helpers: Tag Body & Attribute Extractors">>,
               status => <<"failed">>, time_ms => 15,
-              details => list_to_binary(io_lib:format("Attr: ~p, Body: ~p", [AttrVal, BodyVal]))}
+              details => list_to_binary(io_lib:format("Attr: ~p, Body: ~p, DynHelpersOk: ~p", [AttrVal, BodyVal, DynHelpersOk]))}
     end
 catch C4:R4 ->
     #{id => <<"m2_subbinary_heap_retention">>,
@@ -11106,19 +11852,28 @@ S3 = try
     ParsedBare = xmpp_session_registry:parse_jid(<<"carol@localhost">>),
     ok = xmpp_session_registry:unregister_session(<<"carol@localhost/phone">>),
     AfterUnreg = xmpp_session_registry:lookup_by_jid(<<"carol@localhost/phone">>),
+    %% Dynamic property fuzzing: randomized Full JID lookup
+    RandPrioDesk = 20 + rand:uniform(30),
+    RandUser = list_to_binary("dyn_user_" ++ integer_to_list(rand:uniform(10000))),
+    DynFullJid = <<RandUser/binary, "@localhost/desktop">>,
+    DynBareJid = <<RandUser/binary, "@localhost">>,
+    ok = xmpp_session_registry:register_session(DynFullJid, RandPrioDesk, PDesk),
+    DynLookedUp = xmpp_session_registry:lookup_by_jid(DynBareJid),
+    DynRegOk = (DynLookedUp =:= [PDesk]),
     exit(PDesk, kill),
     exit(PPhone, kill),
     CheckAll = (Highest =:= [PDesk]) andalso (ExactPhone =:= [PPhone]) andalso
         (length(AllSessions) >= 2) andalso
         (ParsedWithRes =:= {<<"carol@localhost">>, <<"desktop">>}) andalso
         (ParsedBare =:= {<<"carol@localhost">>, <<>>}) andalso
-        (AfterUnreg =:= []),
+        (AfterUnreg =:= []) andalso
+        DynRegOk,
     case CheckAll of
         true ->
             #{id => <<"m3_priority_routing">>,
               title => <<"Priority, Full JID, Unregister & JID Parse Verification">>,
               status => <<"passed">>, time_ms => 25,
-              details => <<"Verified bare highest-priority lookup, exact Full JID lookup, parse_jid/1, list_all_sessions/0, and unregister_session/1.">>};
+              details => <<"Verified bare highest-priority lookup, exact Full JID lookup, parse_jid/1, list_all_sessions/0, and unregister_session/1 across static and dynamic sessions.">>};
         false ->
             #{id => <<"m3_priority_routing">>,
               title => <<"Priority, Full JID, Unregister & JID Parse Verification">>,
@@ -11238,12 +11993,22 @@ S3 = try
     Check1 = binary:match(Resp1, <<"stream:features">>) =/= nomatch,
     Check2 = binary:match(Resp2, <<"success">>) =/= nomatch,
     Check3 = binary:match(Resp3, <<"erin@localhost/mobile">>) =/= nomatch,
-    case Check1 andalso Check2 andalso Check3 of
+    %% Dynamic property fuzzing: randomized C2S username and resource
+    RandUsername = list_to_binary("c2s_u_" ++ integer_to_list(rand:uniform(10000))),
+    RandRes = list_to_binary("res_" ++ integer_to_list(rand:uniform(10000))),
+    {ok, C2sDyn} = xmpp_c2s_statem:start_link(#{username => RandUsername, domain => <<"localhost">>}),
+    {ok, wait_for_sasl, _} = xmpp_c2s_statem:feed_xml(C2sDyn, <<"<stream:stream to='localhost'>">>),
+    {ok, authenticated, _} = xmpp_c2s_statem:feed_xml(C2sDyn, <<"<auth mechanism='PLAIN'>", RandUsername/binary, "</auth>">>),
+    {ok, session_established, [RespDyn]} = xmpp_c2s_statem:feed_xml(C2sDyn, <<"<iq id='b_dyn'><resource>", RandRes/binary, "</resource></iq>">>),
+    xmpp_c2s_statem:stop(C2sDyn),
+    DynFullJidExp = <<RandUsername/binary, "@localhost/", RandRes/binary>>,
+    DynCheck = binary:match(RespDyn, DynFullJidExp) =/= nomatch,
+    case Check1 andalso Check2 andalso Check3 andalso DynCheck of
         true ->
             #{id => <<"m4_four_phase_lifecycle">>,
               title => <<"FSM Lifecycle: wait_for_stream -> sasl -> session_established">>,
               status => <<"passed">>, time_ms => 35,
-              details => <<"Successfully completed stream negotiation, SASL plain auth, and IQ resource binding.">>};
+              details => <<"Successfully completed stream negotiation, SASL plain auth, and IQ resource binding across static and dynamic sessions.">>};
         false ->
             #{id => <<"m4_four_phase_lifecycle">>,
               title => <<"FSM Lifecycle: wait_for_stream -> sasl -> session_established">>,
@@ -11402,12 +12167,20 @@ S4 = try
     CountBefore = xmpp_router:get_offline_count(OfflineJid),
     {ok, Popped} = xmpp_router:pop_offline_messages(OfflineJid),
     CountAfter = xmpp_router:get_offline_count(OfflineJid),
-    case (CountBefore =:= 2) andalso (Popped =:= [Msg1, Msg2]) andalso (CountAfter =:= 0) of
+    %% Dynamic property fuzzing: randomized offline spooling and draining
+    RandOfflineUser = list_to_binary("dyn_offline_" ++ integer_to_list(rand:uniform(10000)) ++ "@localhost"),
+    RandOfflineMsg = list_to_binary("<message>dyn_" ++ integer_to_list(rand:uniform(10000)) ++ "</message>"),
+    {queued_offline, RandOfflineUser} = xmpp_router:route_stanza(<<"alice@localhost">>, RandOfflineUser, RandOfflineMsg),
+    DynCountBefore = xmpp_router:get_offline_count(RandOfflineUser),
+    {ok, [RandOfflineMsg]} = xmpp_router:pop_offline_messages(RandOfflineUser),
+    DynCountAfter = xmpp_router:get_offline_count(RandOfflineUser),
+    DynOfflineOk = (DynCountBefore =:= 1) andalso (DynCountAfter =:= 0),
+    case (CountBefore =:= 2) andalso (Popped =:= [Msg1, Msg2]) andalso (CountAfter =:= 0) andalso DynOfflineOk of
         true ->
             #{id => <<"m5_offline_spool_and_drain">>,
               title => <<"Offline Queue: FIFO Message Spooling & Drain On Reconnect">>,
               status => <<"passed">>, time_ms => 30,
-              details => <<"Spooling to offline user preserved FIFO order; pop_offline_messages drained queue to zero.">>};
+              details => <<"Spooling to offline user preserved FIFO order; pop_offline_messages drained queue to zero across static and dynamic messages.">>};
         false ->
             #{id => <<"m5_offline_spool_and_drain">>,
               title => <<"Offline Queue: FIFO Message Spooling & Drain On Reconnect">>,
@@ -11879,8 +12652,9 @@ end,
 S2_FailureNotification = try
     {ok, Mgr} = gen_event:start_link(),
     ok = security_audit_handler:add_to_manager(Mgr, 3),
-    gen_event:notify(Mgr, {login_failed, <<"10.0.0.1">>}),
-    {ok, #{attempts := 1, alert := false}} = security_audit_handler:get_ip_status(Mgr, <<"10.0.0.1">>),
+    RandIP = list_to_binary("10.0.0." ++ integer_to_list(rand:uniform(200))),
+    gen_event:notify(Mgr, {login_failed, RandIP}),
+    {ok, #{attempts := 1, alert := false}} = security_audit_handler:get_ip_status(Mgr, RandIP),
     gen_event:stop(Mgr),
     #{id => <<"single_failure_tracking">>, title => <<"Single Failure Event Subscription Tracking">>, status => <<"passed">>, time_ms => 20, details => <<"Event notify updated failure counter without triggering premature alert.">>}
 catch C2:R2 ->
@@ -11948,6 +12722,11 @@ S2_TokenConsumption = try
     {allow, 6} = rate_limiter_srv:check_request(RL, <<"cli_1">>, 4),
     {allow, 1} = rate_limiter_srv:check_request(RL, <<"cli_1">>, 5),
     DenyRes = rate_limiter_srv:check_request(RL, <<"cli_1">>, 2),
+    [begin
+        RandCli = list_to_binary("cli_fuzz_" ++ integer_to_list(I)),
+        {allow, 5} = rate_limiter_srv:check_request(RL, RandCli, 5),
+        {deny, 5} = rate_limiter_srv:check_request(RL, RandCli, 6)
+     end || I <- lists:seq(1, 3)],
     rate_limiter_srv:stop(RL),
     case DenyRes of
         {deny, 1} ->
