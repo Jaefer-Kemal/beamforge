@@ -4738,4 +4738,29 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Verified `TestDynamicVisibleTestsCurriculum` for Chapter 1 (100% passed).
   - Verified Next.js `npx tsc --noEmit` and `npm run build` (10/10 static pages generated with 0 errors).
 
+## Phase 276: Erlang Function/Atom Autocomplete, Mobile Tab/Operators Accessory Bar & Word-Wrap Preference
+- [x] **276.1: Erlang Function Atoms, In-Scope Atoms & Standard BIF Autocomplete (`monacoErlang.tsx`)**:
+  - Resolved IntelliSense gap where Monaco only suggested uppercase variables (`/\b[A-Z_][a-zA-Z0-9_]*\b/g`), leaving lowercase module functions, standard auto-imported BIFs, and symbol atoms without completion.
+  - Implemented `-export([fun/arity, ...])` parser extracting public module function heads with arity snippets (e.g. `describe_status(${1:Arg})`).
+  - Implemented local function definition parser (`^[ \t]*([a-z][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*(?:when[\s\S]*?)?->`) extracting local functions with parameter snippet placeholders.
+  - Added catalog of 35+ auto-imported standard Erlang BIFs (`length/1`, `hd/1`, `tl/1`, `element/2`, `setelement/3`, `tuple_size/1`, `byte_size/1`, `is_atom/1`, `is_list/1`, `is_tuple/1`, etc.) with full documentation.
+  - Implemented in-scope atom extractor scanning module content for lowercase atoms (`ok`, `error`, `success`, `not_found`, `server_crash`, `unknown_code`, `matched`, `mismatch`, etc.) filtering out keywords and directives.
+- [x] **276.2: Mobile Quick-Syntax Accessory Bar Expansion with Tab & Erlang Operators (`LessonSplitView.tsx`)**:
+  - Added dedicated `⇥ Tab` button inserting 4 spaces (`'    '`) at cursor position to solve mobile soft keyboards' lack of Tab and newline indentation.
+  - Added missing Erlang operators: single assignment/pattern match `'='`, less-than `'<'`, and greater-than `'>'`.
+  - Retained existing syntax tokens (`->`, `>>`, `<<`, `:=`, `=>`, `,`, `;`, `.`, `_`, `|`, `{`, `}`, `[`, `]`, `?`, `ok`, `error`).
+- [x] **276.3: Configurable Word Wrap vs Horizontal Scroll with Persistent State (`useWorkspaceStore.ts`, `BootDevTopBar.tsx`, etc.)**:
+  - Added `editorWordWrap: 'on' | 'off'` with `setEditorWordWrap` and `toggleEditorWordWrap` to Zustand store.
+  - Persisted user preference to `localStorage.getItem('beamforge_editor_word_wrap')` with SSR-safe hydration.
+  - Default set to `'off'` (clean 1:1 physical line numbers and horizontal scrolling), with `'on'` using `wrappingIndent: 'indent'` when enabled.
+  - Wired into Monaco editor instances across `LessonSplitView.tsx`, `ErlangEditor.tsx`, and `CapstoneStudioView.tsx`.
+  - Added Apple glassmorphic segmented toggle in Settings & Preferences popover in `BootDevTopBar.tsx` (`[Off (Scroll)]` vs `[On (Wrap)]`).
+- [x] **276.4: Full Test Suite & Verification Audit**:
+  - `npx tsc --noEmit` passed with 0 errors.
+  - `npm run build` generated 10/10 static/dynamic pages with 0 errors.
+  - Go test `TestChapter1Verification` passed 18/18 subtests (100%).
+  - Go test `TestDynamicVisibleTestsCurriculum` passed across all 12 chapters (68/68 lessons, 100%).
+  - Node regex test verified sample module exports and atom extraction with 100% assertions satisfied.
+
+
 

@@ -26,6 +26,8 @@ import {
   Sparkles,
   User,
   LogOut,
+  AlignLeft,
+  WrapText,
 } from 'lucide-react';
 import { BeamForgeLogo } from './BeamForgeLogo';
 import { UserAvatar } from './UserAvatar';
@@ -198,6 +200,8 @@ export function BootDevTopBar() {
     switchExercise,
     isAuthModalOpen,
     setIsAuthModalOpen,
+    editorWordWrap,
+    setEditorWordWrap,
   } = useWorkspaceStore();
 
   const [mounted, setMounted] = useState(false);
@@ -1087,6 +1091,64 @@ export function BootDevTopBar() {
                     >
                       <Moon className="w-4 h-4 text-purple-400" />
                       <span>Midnight Glass</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Editor Word Wrap Toggle */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-[11px] font-semibold" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                      Editor Word Wrap
+                    </div>
+                    <span
+                      className="text-[10px] font-mono px-1.5 py-0.5 rounded"
+                      style={{
+                        background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
+                        color: isDark ? '#94A3B8' : '#64748B',
+                      }}
+                    >
+                      {editorWordWrap === 'on' ? 'Soft Wrap' : 'Horizontal Scroll'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      id="wrap-off-btn"
+                      onClick={() => setEditorWordWrap('off')}
+                      className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${editorWordWrap === 'off' ? 'border shadow-xs' : 'opacity-60 hover:opacity-100'}`}
+                      style={{
+                        background: editorWordWrap === 'off'
+                          ? (isDark ? 'rgba(56, 189, 248, 0.18)' : 'rgba(2, 132, 199, 0.12)')
+                          : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.05)'),
+                        borderColor: editorWordWrap === 'off'
+                          ? (isDark ? 'rgba(56, 189, 248, 0.40)' : 'rgba(2, 132, 199, 0.40)')
+                          : 'transparent',
+                        color: editorWordWrap === 'off'
+                          ? (isDark ? '#7DD3FC' : '#0284C7')
+                          : (isDark ? '#94A3B8' : '#64748B'),
+                      }}
+                    >
+                      <AlignLeft className="w-4 h-4 text-sky-400" />
+                      <span>Off (Scroll)</span>
+                    </button>
+                    <button
+                      id="wrap-on-btn"
+                      onClick={() => setEditorWordWrap('on')}
+                      className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${editorWordWrap === 'on' ? 'border shadow-xs' : 'opacity-60 hover:opacity-100'}`}
+                      style={{
+                        background: editorWordWrap === 'on'
+                          ? (isDark ? 'rgba(56, 189, 248, 0.18)' : 'rgba(2, 132, 199, 0.12)')
+                          : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.05)'),
+                        borderColor: editorWordWrap === 'on'
+                          ? (isDark ? 'rgba(56, 189, 248, 0.40)' : 'rgba(2, 132, 199, 0.40)')
+                          : 'transparent',
+                        color: editorWordWrap === 'on'
+                          ? (isDark ? '#7DD3FC' : '#0284C7')
+                          : (isDark ? '#94A3B8' : '#64748B'),
+                      }}
+                    >
+                      <WrapText className="w-4 h-4 text-sky-400" />
+                      <span>On (Wrap)</span>
                     </button>
                   </div>
                 </div>

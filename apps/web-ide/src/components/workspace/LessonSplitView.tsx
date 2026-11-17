@@ -645,6 +645,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
     switchExercise,
     currentUser,
     setIsAuthModalOpen,
+    editorWordWrap,
   } = useWorkspaceStore();
 
   const router = useRouter();
@@ -1474,7 +1475,8 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                 glyphMargin: false,
                 lineNumbersMinChars: 2,
                 scrollBeyondLastLine: false,
-                wordWrap: 'on',
+                wordWrap: editorWordWrap,
+                wrappingIndent: 'indent',
                 padding: { top: 12, bottom: 12 },
                 renderLineHighlight: 'gutter',
                 smoothScrolling: true,
@@ -1502,12 +1504,31 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           }}
         >
           {[
-            '->', '>>', '<<', ':=', '=>', ',', ';', '.', '_', '|',
-            '{', '}', '[', ']', '?', 'ok', 'error',
-          ].map((token) => (
+            { label: '⇥ Tab', text: '    ' },
+            { label: '->', text: '->' },
+            { label: '=', text: '=' },
+            { label: '<', text: '<' },
+            { label: '>', text: '>' },
+            { label: '>>', text: '>>' },
+            { label: '<<', text: '<<' },
+            { label: ':=', text: ':=' },
+            { label: '=>', text: '=>' },
+            { label: ',', text: ',' },
+            { label: ';', text: ';' },
+            { label: '.', text: '.' },
+            { label: '_', text: '_' },
+            { label: '|', text: '|' },
+            { label: '{', text: '{' },
+            { label: '}', text: '}' },
+            { label: '[', text: '[' },
+            { label: ']', text: ']' },
+            { label: '?', text: '?' },
+            { label: 'ok', text: 'ok' },
+            { label: 'error', text: 'error' },
+          ].map((item) => (
             <button
-              key={token}
-              onClick={() => insertTokenAtCursor(token)}
+              key={item.label}
+              onClick={() => insertTokenAtCursor(item.text)}
               className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all flex-shrink-0 active:scale-95"
               style={{
                 background: isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF',
@@ -1516,7 +1537,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                 boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
               }}
             >
-              {token}
+              {item.label}
             </button>
           ))}
         </div>

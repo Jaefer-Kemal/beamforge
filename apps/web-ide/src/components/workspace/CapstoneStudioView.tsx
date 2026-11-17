@@ -369,6 +369,7 @@ export function CapstoneStudioView() {
     completedLevelIds,
     unlockedSolutionLessonIds,
     unlockSolutionForLesson,
+    editorWordWrap,
   } = useWorkspaceStore();
 
   const isDark = theme === 'dark';
@@ -1165,7 +1166,8 @@ export function CapstoneStudioView() {
                 bracketPairColorization: { enabled: true },
                 tabSize: 4,
                 insertSpaces: true,
-                wordWrap: 'on',
+                wordWrap: editorWordWrap,
+                wrappingIndent: 'indent',
                 cursorBlinking: 'smooth',
                 cursorSmoothCaretAnimation: 'on',
                 padding: { top: 16, bottom: 16 },

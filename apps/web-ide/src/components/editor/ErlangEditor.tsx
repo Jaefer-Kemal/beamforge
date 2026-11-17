@@ -16,6 +16,7 @@ export const ErlangEditor: React.FC = () => {
     closeTab,
     updateFileContent,
     theme,
+    editorWordWrap,
   } = useWorkspaceStore();
   const activeFile = files.find((f) => f.path === activeFilePath) || files[0];
   const monacoRef = useRef<Monaco | null>(null);
@@ -95,7 +96,8 @@ export const ErlangEditor: React.FC = () => {
               automaticLayout: true,
               tabSize: 4,
               insertSpaces: true,
-              wordWrap: 'on',
+              wordWrap: editorWordWrap,
+              wrappingIndent: 'indent',
               cursorBlinking: 'smooth',
               cursorSmoothCaretAnimation: 'on',
               padding: { top: 12, bottom: 12 },

@@ -163,6 +163,11 @@ interface WorkspaceState {
   setTheme: (theme: AppTheme) => void;
   toggleTheme: () => void;
 
+  /** Editor word wrapping: 'off' (horizontal scroll) or 'on' (soft wrap) */
+  editorWordWrap: 'on' | 'off';
+  setEditorWordWrap: (wrap: 'on' | 'off') => void;
+  toggleEditorWordWrap: () => void;
+
   /** Boot.dev top-bar view switcher: lesson workspace / syllabus */
   bootDevView: 'lesson' | 'syllabus';
   setBootDevView: (view: 'lesson' | 'syllabus') => void;
@@ -618,6 +623,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       get().setTheme(next);
     },
 
+    editorWordWrap: 'off' as 'on' | 'off',
+    setEditorWordWrap: (wrap: 'on' | 'off') => {
+      set({ editorWordWrap: wrap });
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('beamforge_editor_word_wrap', wrap);
+        } catch {}
+      }
+    },
+    toggleEditorWordWrap: () => {
+      const next = get().editorWordWrap === 'on' ? 'off' : 'on';
+      get().setEditorWordWrap(next);
+    },
+
     bootDevView: 'lesson',
     setBootDevView: (view) => set({ bootDevView: view }),
 
@@ -948,6 +967,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           set({ theme: storedTheme });
           document.documentElement.classList.toggle('dark', storedTheme === 'dark');
           document.documentElement.classList.toggle('theme-dark', storedTheme === 'dark');
+        }
+
+        // Editor word wrap hydration: restore persisted preference from localStorage
+        const storedWrap = localStorage.getItem('beamforge_editor_word_wrap');
+        if (storedWrap === 'on' || storedWrap === 'off') {
+          set({ editorWordWrap: storedWrap });
         }
 
         // 0. Detect active Neon Auth session (handles Google OAuth redirect & returning authenticated sessions)
@@ -2508,6 +2533,10 @@ if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('bf_theme');
       if (stored === 'dark' && useWorkspaceStore.getState().theme !== 'dark') {
         useWorkspaceStore.getState().setTheme('dark');
+      }
+      const storedWrap = localStorage.getItem('beamforge_editor_word_wrap');
+      if ((storedWrap === 'on' || storedWrap === 'off') && useWorkspaceStore.getState().editorWordWrap !== storedWrap) {
+        useWorkspaceStore.getState().setEditorWordWrap(storedWrap as 'on' | 'off');
       }
     } catch {}
   }, 0);

@@ -224,6 +224,69 @@ export function configureMonacoErlang(monaco: any) {
   }
 }
 
+// ── Erlang Language Constants & BIF Catalog ──────────────────────────────
+export const ERLANG_RESERVED_KEYWORDS = new Set([
+  'after', 'and', 'andalso', 'band', 'begin', 'bnot', 'bor', 'bsl', 'bsr',
+  'bxor', 'case', 'catch', 'cond', 'div', 'end', 'fun', 'if', 'let', 'not',
+  'of', 'or', 'orelse', 'query', 'receive', 'rem', 'try', 'when', 'xor',
+  'module', 'export', 'export_type', 'import', 'compile', 'record',
+  'include', 'include_lib', 'define', 'undef', 'ifdef', 'ifndef',
+  'else', 'endif', 'type', 'opaque', 'spec', 'callback', 'behavior', 'behaviour'
+]);
+
+export const COMMON_ERLANG_ATOMS = [
+  'ok', 'error', 'true', 'false', 'undefined', 'nil',
+  'matched', 'mismatch', 'success', 'not_found', 'server_crash', 'unknown_code',
+  'timeout', 'normal', 'reply', 'noreply', 'stop', 'continue', 'halt',
+  'badarg', 'badmatch', 'function_clause', 'case_clause'
+];
+
+export const ERLANG_BUILTIN_FUNCTIONS = [
+  { label: 'length', arity: 1, snippet: 'length(${1:List})', detail: 'length/1 (BIF)', doc: 'Returns the length of List.' },
+  { label: 'hd', arity: 1, snippet: 'hd(${1:List})', detail: 'hd/1 (BIF)', doc: 'Returns the head of a non-empty list.' },
+  { label: 'tl', arity: 1, snippet: 'tl(${1:List})', detail: 'tl/1 (BIF)', doc: 'Returns the tail of a non-empty list.' },
+  { label: 'element', arity: 2, snippet: 'element(${1:Index}, ${2:Tuple})', detail: 'element/2 (BIF)', doc: 'Returns the Nth element (1-based) of Tuple.' },
+  { label: 'setelement', arity: 3, snippet: 'setelement(${1:Index}, ${2:Tuple}, ${3:Value})', detail: 'setelement/3 (BIF)', doc: 'Returns a copy of Tuple with the Nth element replaced.' },
+  { label: 'tuple_size', arity: 1, snippet: 'tuple_size(${1:Tuple})', detail: 'tuple_size/1 (BIF)', doc: 'Returns the number of elements in Tuple.' },
+  { label: 'byte_size', arity: 1, snippet: 'byte_size(${1:Binary})', detail: 'byte_size/1 (BIF)', doc: 'Returns the number of bytes in Binary.' },
+  { label: 'bit_size', arity: 1, snippet: 'bit_size(${1:Bitstring})', detail: 'bit_size/1 (BIF)', doc: 'Returns the number of bits in Bitstring.' },
+  { label: 'map_size', arity: 1, snippet: 'map_size(${1:Map})', detail: 'map_size/1 (BIF)', doc: 'Returns the number of key-value pairs in Map.' },
+  { label: 'is_atom', arity: 1, snippet: 'is_atom(${1:Term})', detail: 'is_atom/1 (guard/BIF)', doc: 'Returns true if Term is an atom; otherwise false.' },
+  { label: 'is_binary', arity: 1, snippet: 'is_binary(${1:Term})', detail: 'is_binary/1 (guard/BIF)', doc: 'Returns true if Term is a binary; otherwise false.' },
+  { label: 'is_boolean', arity: 1, snippet: 'is_boolean(${1:Term})', detail: 'is_boolean/1 (guard/BIF)', doc: 'Returns true if Term is boolean (true or false); otherwise false.' },
+  { label: 'is_float', arity: 1, snippet: 'is_float(${1:Term})', detail: 'is_float/1 (guard/BIF)', doc: 'Returns true if Term is a floating-point number.' },
+  { label: 'is_function', arity: 1, snippet: 'is_function(${1:Term})', detail: 'is_function/1 (guard/BIF)', doc: 'Returns true if Term is a fun.' },
+  { label: 'is_function', arity: 2, snippet: 'is_function(${1:Term}, ${2:Arity})', detail: 'is_function/2 (guard/BIF)', doc: 'Returns true if Term is a fun of arity Arity.' },
+  { label: 'is_integer', arity: 1, snippet: 'is_integer(${1:Term})', detail: 'is_integer/1 (guard/BIF)', doc: 'Returns true if Term is an integer.' },
+  { label: 'is_list', arity: 1, snippet: 'is_list(${1:Term})', detail: 'is_list/1 (guard/BIF)', doc: 'Returns true if Term is a list.' },
+  { label: 'is_map', arity: 1, snippet: 'is_map(${1:Term})', detail: 'is_map/1 (guard/BIF)', doc: 'Returns true if Term is a map.' },
+  { label: 'is_number', arity: 1, snippet: 'is_number(${1:Term})', detail: 'is_number/1 (guard/BIF)', doc: 'Returns true if Term is an integer or float.' },
+  { label: 'is_pid', arity: 1, snippet: 'is_pid(${1:Term})', detail: 'is_pid/1 (guard/BIF)', doc: 'Returns true if Term is a process identifier (PID).' },
+  { label: 'is_reference', arity: 1, snippet: 'is_reference(${1:Term})', detail: 'is_reference/1 (guard/BIF)', doc: 'Returns true if Term is a reference.' },
+  { label: 'is_tuple', arity: 1, snippet: 'is_tuple(${1:Term})', detail: 'is_tuple/1 (guard/BIF)', doc: 'Returns true if Term is a tuple.' },
+  { label: 'is_record', arity: 2, snippet: 'is_record(${1:Term}, ${2:RecordTag})', detail: 'is_record/2 (guard/BIF)', doc: 'Returns true if Term is a tuple matching RecordTag.' },
+  { label: 'make_ref', arity: 0, snippet: 'make_ref()', detail: 'make_ref/0 (BIF)', doc: 'Creates and returns an almost unique reference.' },
+  { label: 'self', arity: 0, snippet: 'self()', detail: 'self/0 (BIF)', doc: 'Returns the process identifier (PID) of the calling process.' },
+  { label: 'node', arity: 0, snippet: 'node()', detail: 'node/0 (BIF)', doc: 'Returns the name of the local node.' },
+  { label: 'atom_to_list', arity: 1, snippet: 'atom_to_list(${1:Atom})', detail: 'atom_to_list/1 (BIF)', doc: 'Converts an atom to a list/string.' },
+  { label: 'list_to_atom', arity: 1, snippet: 'list_to_atom(${1:String})', detail: 'list_to_atom/1 (BIF)', doc: 'Converts a string/list to an atom.' },
+  { label: 'list_to_existing_atom', arity: 1, snippet: 'list_to_existing_atom(${1:String})', detail: 'list_to_existing_atom/1 (BIF)', doc: 'Converts a string to an existing atom.' },
+  { label: 'integer_to_list', arity: 1, snippet: 'integer_to_list(${1:Integer})', detail: 'integer_to_list/1 (BIF)', doc: 'Converts an integer to a string.' },
+  { label: 'list_to_integer', arity: 1, snippet: 'list_to_integer(${1:String})', detail: 'list_to_integer/1 (BIF)', doc: 'Converts a string to an integer.' },
+  { label: 'term_to_binary', arity: 1, snippet: 'term_to_binary(${1:Term})', detail: 'term_to_binary/1 (BIF)', doc: 'Encodes an Erlang term into external binary format.' },
+  { label: 'binary_to_term', arity: 1, snippet: 'binary_to_term(${1:Binary})', detail: 'binary_to_term/1 (BIF)', doc: 'Decodes a binary into an Erlang term.' },
+  { label: 'throw', arity: 1, snippet: 'throw(${1:Reason})', detail: 'throw/1 (BIF)', doc: 'Throws an exception with reason.' },
+  { label: 'exit', arity: 1, snippet: 'exit(${1:Reason})', detail: 'exit/1 (BIF)', doc: 'Terminates calling process with reason.' },
+  { label: 'error', arity: 1, snippet: 'error(${1:Reason})', detail: 'error/1 (BIF)', doc: 'Stops execution of calling process with runtime error reason.' },
+  { label: 'error', arity: 2, snippet: 'error(${1:Reason}, ${2:Args})', detail: 'error/2 (BIF)', doc: 'Stops execution of calling process with runtime error reason and arguments.' },
+];
+
+const buildArgsSnippet = (arity: number): string => {
+  if (arity === 0) return '';
+  if (arity === 1) return '${1:Arg}';
+  return Array.from({ length: arity }, (_, i) => `\${${i + 1}:Arg${i + 1}}`).join(', ');
+};
+
 /**
  * Erlang Completion Provider
  * Dispatches contextual completions based on cursor prefix:
@@ -351,10 +414,11 @@ export function getErlangCompletionItems(model: any, position: any, monaco?: any
     };
   }
 
-  // 4. General Scope: Expressions, Control Flow, Modules & In-Scope Variables
+  // 4. General Scope: Expressions, Control Flow, Modules, Functions, Atoms & Variables
   const suggestions: any[] = [];
+  const fullContent = model.getValue();
 
-  // Control flow snippets (exclude directives like -module, -export when not at start of line with hyphen)
+  // A. Control flow snippets (exclude directives like -module, -export when not at start of line with hyphen)
   for (const s of ERLANG_SNIPPETS) {
     if (!s.label.startsWith('-')) {
       suggestions.push({
@@ -365,11 +429,124 @@ export function getErlangCompletionItems(model: any, position: any, monaco?: any
         insertText: s.insertText,
         insertTextRules: InsertAsSnippet,
         range,
+        sortText: `05_${s.label}`,
       });
     }
   }
 
-  // Standard OTP Modules (e.g. typing "i" suggests "io:", typing "l" suggests "lists:", etc.)
+  // Track discovered function signatures and names
+  const seenFunctionSignatures = new Set<string>();
+  const seenFunctionNames = new Set<string>();
+
+  // B. In-file Exported Functions from -export([fn/arity, ...])
+  const exportMatches = fullContent.matchAll(/-export\s*\(\s*\[([\s\S]*?)\]\s*\)\./g);
+  for (const em of exportMatches) {
+    const listBody = em[1];
+    const itemMatches = listBody.matchAll(/([a-z][a-zA-Z0-9_]*)\s*\/\s*(\d+)/g);
+    for (const im of itemMatches) {
+      const fn = im[1];
+      const arity = parseInt(im[2], 10);
+      const sig = `${fn}/${arity}`;
+      seenFunctionNames.add(fn);
+      if (!seenFunctionSignatures.has(sig)) {
+        seenFunctionSignatures.add(sig);
+        suggestions.push({
+          label: fn,
+          kind: FunctionKind,
+          detail: `${fn}/${arity} (exported function)`,
+          documentation: `Module function declared in -export([${sig}]).`,
+          insertText: `${fn}(${buildArgsSnippet(arity)})`,
+          insertTextRules: InsertAsSnippet,
+          range,
+          sortText: `10_${fn}`,
+        });
+      }
+    }
+  }
+
+  // C. In-file Local Function Definitions (e.g. fn(A, B) ->)
+  const funcDefRegex = /^[ \t]*([a-z][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*(?:when[\s\S]*?)?->/gm;
+  let defMatch;
+  while ((defMatch = funcDefRegex.exec(fullContent)) !== null) {
+    const fn = defMatch[1];
+    if (ERLANG_RESERVED_KEYWORDS.has(fn)) continue;
+    seenFunctionNames.add(fn);
+
+    const rawArgs = defMatch[2].trim();
+    let arity = 0;
+    if (rawArgs.length > 0) {
+      let depth = 0;
+      let count = 1;
+      for (let i = 0; i < rawArgs.length; i++) {
+        const ch = rawArgs[i];
+        if (ch === '(' || ch === '[' || ch === '{' || ch === '<') depth++;
+        else if (ch === ')' || ch === ']' || ch === '}' || ch === '>') depth = Math.max(0, depth - 1);
+        else if (ch === ',' && depth === 0) count++;
+      }
+      arity = count;
+    }
+
+    const sig = `${fn}/${arity}`;
+    if (!seenFunctionSignatures.has(sig)) {
+      seenFunctionSignatures.add(sig);
+      suggestions.push({
+        label: fn,
+        kind: FunctionKind,
+        detail: `${fn}/${arity} (local function)`,
+        documentation: `Local function defined in current module.`,
+        insertText: `${fn}(${buildArgsSnippet(arity)})`,
+        insertTextRules: InsertAsSnippet,
+        range,
+        sortText: `12_${fn}`,
+      });
+    }
+  }
+
+  // D. Standard Auto-Imported Erlang BIFs
+  for (const bif of ERLANG_BUILTIN_FUNCTIONS) {
+    suggestions.push({
+      label: bif.label,
+      kind: FunctionKind,
+      detail: bif.detail,
+      documentation: bif.doc,
+      insertText: bif.snippet,
+      insertTextRules: InsertAsSnippet,
+      range,
+      sortText: `20_${bif.label}`,
+    });
+  }
+
+  // E. In-Scope Atoms (Common Erlang atoms + module in-file atoms)
+  const seenAtoms = new Set<string>();
+  const bifNames = new Set(ERLANG_BUILTIN_FUNCTIONS.map((b) => b.label));
+  const fileAtomMatches = fullContent.match(/\b[a-z][a-zA-Z0-9_]*\b/g);
+  const candidateAtoms = [
+    ...COMMON_ERLANG_ATOMS,
+    ...(fileAtomMatches || []),
+  ];
+
+  for (const a of candidateAtoms) {
+    if (
+      typeof a === 'string' &&
+      a.length >= 2 &&
+      !ERLANG_RESERVED_KEYWORDS.has(a) &&
+      !bifNames.has(a) &&
+      !seenAtoms.has(a)
+    ) {
+      seenAtoms.add(a);
+      suggestions.push({
+        label: a,
+        kind: ConstantKind,
+        detail: 'Atom',
+        documentation: `Erlang atom ('${a}').`,
+        insertText: a,
+        range,
+        sortText: `30_${a}`,
+      });
+    }
+  }
+
+  // F. Standard OTP Modules (e.g. typing "i" suggests "io:", typing "l" suggests "lists:", etc.)
   const allModules = Object.keys(OTP_LIB_COMPLETIONS);
   for (const m of allModules) {
     suggestions.push({
@@ -378,15 +555,15 @@ export function getErlangCompletionItems(model: any, position: any, monaco?: any
       detail: `OTP ${m} standard library module`,
       insertText: `${m}:`,
       range,
+      sortText: `40_${m}`,
     });
   }
 
-  // In-scope variables: scan words starting with uppercase or underscore
-  const fullContent = model.getValue();
+  // G. In-scope variables: scan words starting with uppercase or underscore
   const varMatches = fullContent.match(/\b[A-Z_][a-zA-Z0-9_]*\b/g);
   if (varMatches) {
     const uniqueVars = Array.from(new Set(varMatches));
-    for (const v of uniqueVars.slice(0, 30)) {
+    for (const v of uniqueVars.slice(0, 40)) {
       if (typeof v === 'string' && v.length > 1) {
         suggestions.push({
           label: v,
@@ -394,6 +571,7 @@ export function getErlangCompletionItems(model: any, position: any, monaco?: any
           detail: 'In-scope variable',
           insertText: v,
           range,
+          sortText: `50_${v}`,
         });
       }
     }
