@@ -524,6 +524,51 @@ connect(Host, Port, Timeout) ->
 		}
 	})
 
+	t.Run("ch01-l06 rejects cascading delegation with hardcoded numbers instead of macros", func(t *testing.T) {
+		sessionID := "test-ch01-l06-neg-hardcoded-delegation"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cheat := map[string]string{
+			"src/arity_calc.erl": `-module(arity_calc).
+-export([connect/1, connect/2, connect/3]).
+
+connect(Host) ->
+    connect(Host, 80).
+
+connect(Host, Port) ->
+    connect(Host, Port, 5000).
+
+connect(Host, Port, Timeout) ->
+    {connection, arity_calc, Host, Port, Timeout}.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch01-l06", cheat)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected delegating but hardcoded arity_calc to fail AST verification, but got PASSED")
+		}
+
+		astFailed := false
+		for _, st := range report.Stages {
+			if st.ID == "ast_arity_and_macros_audit" && st.Status == "failed" {
+				astFailed = true
+			}
+		}
+		if !astFailed {
+			t.Errorf("Expected ast_arity_and_macros_audit stage to fail for hardcoded numbers during delegation, stages=%+v", report.Stages)
+		}
+	})
+
 	t.Run("ch01-l07 rejects if_expr branching and loose numeric equality", func(t *testing.T) {
 		sessionID := "test-ch01-l07-neg-if"
 		session, err := poolMgr.ClaimSession(sessionID)

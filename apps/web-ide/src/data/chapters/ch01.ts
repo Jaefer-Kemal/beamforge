@@ -963,20 +963,39 @@ Unlike tuples (which have a fixed size allocated upfront), Erlang **Lists** can 
 
 ## Deep Concept Breakdown & Under the Hood
 
-### Cons Cells: The Anatomy of a List
-An Erlang list is a **singly-linked chain of 2-word Cons Cells**.
-Each cons cell contains:
-1. **Head**: A pointer to the current element.
-2. **Tail**: A pointer to the rest of the list (or the empty list \`[]\`).
+### Cons Cells: The Lisp Heritage & The Anatomy of a List
 
-The syntax \`[Head | Tail]\` represents a cons cell:
+The term **Cons Cell** comes directly from **Lisp**, invented by John McCarthy in 1958.
+In Lisp, **\`cons\`** is short for **"construct"** — specifically the primitive that constructs a 2-pointer memory cell. On the IBM 704 vacuum-tube computer where Lisp was first implemented, a 36-bit machine word was divided into two hardware fields:
+- **\`CAR\`** ("Contents of the Address part of Register"): Stored the current element (the **Head**).
+- **\`CDR\`** ("Contents of the Decrement part of Register"): Stored the pointer to the next cell (the **Tail**).
+
+Erlang's **\`[Head | Tail]\`** syntax is the modern, direct syntactic descendant of Lisp's \`(cons Head Tail)\`.
+
+In the BEAM virtual machine, an Erlang list is **never a contiguous array**. It is a **singly-linked chain of heap-allocated 2-word Cons Cells**:
+1. **Head**: A 1-word pointer or immediate term holding the current element.
+2. **Tail**: A 1-word pointer referencing the next cons cell in the chain (or the special empty list immediate atom \`[]\`).
+
+The familiar comma-separated syntax \`[1, 2, 3]\` is purely syntactic sugar for nested cons cells:
 \`\`\`erlang
 [1, 2, 3]  %% Sugar for: [1 | [2 | [3 | []]]]
 \`\`\`
 
+### The Imperative Array vs. Functional Cons Cell Paradigm Shift
+
+Developers coming from imperative languages (C, C++, Java, Python, Go, JavaScript) usually assume a "list" is backed by a contiguous array buffer (like \`std::vector\`, \`ArrayList\`, Python \`list\`, or Go slices). In functional Erlang, this difference is fundamental:
+
+| Property | Imperative Array / Vector | Erlang Functional Cons List |
+| :--- | :--- | :--- |
+| **Memory Layout** | Contiguous memory buffer | Singly-linked 2-word heap cells |
+| **Random Indexing (\`arr[i]\`)** | $O(1)$ instant pointer offset | $O(N)$ sequential pointer traversal |
+| **Append to End** | Amortized $O(1)$ buffer push | $O(N)$ full list copy and re-allocation |
+| **Prepend to Front** | $O(N)$ memory shift of all elements | $O(1)$ instant zero-copy cons allocation |
+| **Structural Sharing** | Dangerous (mutating memory causes race conditions) | Safe & Native (immutable cells shared across 100,000 processes) |
+
 ### The Golden Performance Rule: Prepend, Never Append!
 - **Prepending (\`[NewItem | ExistingList]\`) is $O(1)$ Zero-Copy**:
-  Erlang simply allocates a single new 2-word cons cell whose tail points to the existing list. The existing list is untouched and shared in memory.
+  Erlang simply allocates a single new 2-word cons cell whose tail points to the existing list. Because data in Erlang is **strictly immutable**, the existing list is untouched and safely shared in memory. Ten thousand processes can reference the exact same tail without copying a single byte and without lock contention.
 - **Appending (\`List ++ [NewItem]\`) is $O(N)$ Memory Copy**:
   To add to the end of a singly-linked list, the BEAM must walk every single node in \`List\` from left to right, re-allocating new cons cells for the entire list!
 
@@ -1286,33 +1305,33 @@ Notice how the BEAM compiles and executes each piece:
 
 ## Assignment Specification
 
-In \`src/arity_calc.erl\`, define compile-time constants and implement/export \`connect/1\`, \`connect/2\`, and \`connect/3\`:
+In \`src/arity_calc.erl\`, define compile-time constants and implement cascading connection functions across arities:
 
 1. **Compile-Time Macros**:
-   - Define \`DEFAULT_PORT\` with integer value \`80\`.
-   - Define \`DEFAULT_TIMEOUT\` with integer value \`5000\` (milliseconds).
+   - \`DEFAULT_PORT\` is pre-defined with integer value \`80\` as a structural reference.
+   - Define the compile-time macro \`DEFAULT_TIMEOUT\` with integer value \`5000\` (milliseconds).
 
 2. **Cascading Functions**:
    - \`connect(Host)\`:
      - **Input**: A host identifier \`Host\` (atom or string, e.g., \`localhost\`).
-     - **Behavior**: Supplies the default port macro and delegates in $O(1)$ time to \`connect/2\`.
+     - **Behavior**: Supplies the default port constant and delegates in $O(1)$ time to \`connect/2\`.
      - **Examples**:
        - \`arity_calc:connect(localhost)\` returns \`{connection, arity_calc, localhost, 80, 5000}\`.
    - \`connect(Host, Port)\`:
      - **Input**: A host identifier \`Host\` and integer \`Port\`.
-     - **Behavior**: Supplies the default timeout macro and delegates in $O(1)$ time to \`connect/3\`.
+     - **Behavior**: Supplies the default timeout constant and delegates in $O(1)$ time to \`connect/3\`.
      - **Examples**:
        - \`arity_calc:connect(localhost, 8080)\` returns \`{connection, arity_calc, localhost, 8080, 5000}\`.
    - \`connect(Host, Port, Timeout)\`:
      - **Input**: A host identifier \`Host\`, integer \`Port\`, and integer \`Timeout\`.
-     - **Behavior**: Constructs and returns a 5-element tagged tuple in $O(1)$ time starting with the tag atom \`connection\`, followed by the current module atom (using \`?MODULE\`), \`Host\`, \`Port\`, and \`Timeout\`.
+     - **Behavior**: Constructs and returns a 5-element tagged tuple in $O(1)$ time starting with the tag atom \`connection\`, followed by the current module identifier (use the preprocessor's built-in module macro), \`Host\`, \`Port\`, and \`Timeout\`.
      - **Examples**:
        - \`arity_calc:connect(localhost, 8080, 2500)\` returns \`{connection, arity_calc, localhost, 8080, 2500}\`.
 
 ## Rules & Verification Constraints
 
 - **Exports**: \`arity_calc\` must export \`connect/1\`, \`connect/2\`, and \`connect/3\`.
-- **Cascading Delegation & Macros**: Reference \`?DEFAULT_PORT\`, \`?DEFAULT_TIMEOUT\`, and \`?MODULE\` inside the function bodies, and delegate from \`connect/1\` -> \`connect/2\` -> \`connect/3\` rather than hardcoding literals (verified by AST and source checks).
+- **Cascading Delegation & Macros**: Reference your defined compile-time macros and the built-in module macro rather than hardcoding numeric literals, and cascade calls from \`connect/1\` -> \`connect/2\` -> \`connect/3\` (enforced via AST and source verification).
 - **Primitives Only**: Do not use Maps or Binaries—pass host names as atoms or strings (e.g., \`localhost\` or \`"api.erlang.org"\`) with zero compiler warnings.`,
     otpDocCards: [
       {
@@ -1384,7 +1403,7 @@ In \`src/arity_calc.erl\`, define compile-time constants and implement/export \`
 -export([connect/1, connect/2, connect/3]).
 
 -define(DEFAULT_PORT, 80).
--define(DEFAULT_TIMEOUT, 5000).
+%% TODO: Define compile-time macro DEFAULT_TIMEOUT with integer value 5000
 
 %% @doc Connect using default port and timeout macros by delegating to connect/2.
 connect(_Host) ->
@@ -1422,7 +1441,7 @@ connect(Host, Port, Timeout) ->
 -export([connect/1, connect/2, connect/3]).
 
 -define(DEFAULT_PORT, 80).
--define(DEFAULT_TIMEOUT, 5000).
+%% TODO: Define compile-time macro DEFAULT_TIMEOUT with integer value 5000
 
 %% @doc Connect using default port and timeout macros by delegating to connect/2.
 connect(_Host) ->

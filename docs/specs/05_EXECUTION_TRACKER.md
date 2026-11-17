@@ -4547,3 +4547,22 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Deployment ID: `dpl_3942rd19XfqndYK5ae5gGWc3QBsg`, Status: `● Ready`.
   - Aliased and live at `https://web-ide-nine.vercel.app` and `https://beamforge-eight.vercel.app`.
   - Verified HTTP status 200 OK across production aliases.
+
+
+## Phase 266: CH01-L05 Cons Cells Lisp Pedagogy & CH01-L06 Macro Hardcoding Rejection Audit
+- [x] **266.1: CH01-L05 Cons Cells Lisp Heritage & Imperative Paradigm Shift**:
+  - Enriched `ch01-l05` concept markdown in `apps/web-ide/src/data/chapters/ch01.ts` (`lines 964–1005`): documented Lisp origin (John McCarthy, 1958, `cons` = "construct", IBM 704 vacuum-tube hardware CAR and CDR registers), added comprehensive comparison table between Imperative Arrays (`std::vector`, `ArrayList`, Python `list`, Go slices) and Functional Cons Lists, and explained zero-copy structural sharing across processes.
+- [x] **266.2: CH01-L06 Hardcoded Anti-Cheat & Delegation Rejection Test**:
+  - Audited Go orchestrator grader (`services/orchestrator/internal/bridge/erl_runner_chapters.go`, `lines 5124–5198`): confirmed AST verifier mandates cascading `connect/1` -> `connect/2` -> `connect/3` calls, while pre-parse source scans verify `?DEFAULT_PORT`, `?DEFAULT_TIMEOUT`, and `?MODULE` invocations.
+  - Added regression test `ch01-l06 rejects cascading delegation with hardcoded numbers instead of macros` to `services/orchestrator/internal/bridge/ch01_verification_test.go` (`lines 527–570`). Verified 100% rejection of hardcoded numbers even when delegating.
+
+## Phase 267: CH01-L06 Starter Scaffolding (Option C) & Anti-Spoiler De-Duplication
+- [x] **267.1: Option C Scaffolded Starter Pack Implementation**:
+  - Updated `files[0].content` and `starterCode` in `apps/web-ide/src/data/chapters/ch01.ts`: preserved `-define(DEFAULT_PORT, 80).` as a visible structural syntax pattern, and replaced `-define(DEFAULT_TIMEOUT, 5000).` with `%% TODO: Define compile-time macro DEFAULT_TIMEOUT with integer value 5000`.
+- [x] **267.2: Anti-Spoiler De-Duplication across Assignment Specification & Rules**:
+  - De-spoiled `Assignment Specification` and `Rules & Verification Constraints` in `apps/web-ide/src/data/chapters/ch01.ts`: purged all direct revelations of `?DEFAULT_PORT`, `?DEFAULT_TIMEOUT`, and `?MODULE`. The student is tasked to define the macro and reference compile-time constants through macro invocation syntax on their own.
+- [x] **267.3: Full Test Suite & Build Certification**:
+  - `go test -v -count=1 -run TestChapter1Verification ./internal/bridge` -> 17/17 subtests passed (4.58s).
+  - `TEST_CHAPTER=1 go test -v -count=1 -run TestDynamicVisibleTestsCurriculum ./internal/bridge` -> 8/8 lessons passed (9.59s).
+  - `npx tsc --noEmit` -> 0 errors.
+  - `npm run build` -> Next.js production build generated all 9/9 static pages with 0 errors.
