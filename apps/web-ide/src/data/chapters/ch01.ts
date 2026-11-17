@@ -1652,14 +1652,15 @@ In \`src/clause_router.erl\`, implement and export \`describe_status/1\`, \`head
      - \`clause_router:head_or_default([], default_val)\` returns \`default_val\`.
 
 3. \`verify_identical_pair(PairTuple)\`:
-   - **Input**: A single 2-element tuple term \`PairTuple\` (or non-matching fallback term). Notice that even though the tuple contains two elements, it is passed as **one single argument (Arity 1)**.
+   - **Input**: A term \`PairTuple\` (a 2-element tuple or any arbitrary fallback term). Notice that even though a pair contains two elements, it is passed as **one single argument (Arity 1)**.
    - **Behavior**: Checks whether \`PairTuple\` is a 2-element tuple whose two elements match strictly in both value and runtime type in $O(1)$ time using clause-head pattern matching:
      - When both elements are strictly identical (\`Value\`), returns \`{matched, Value}\`.
-     - Otherwise (mismatched elements or wrong tuple size), returns \`mismatch\`.
+     - For any other input (mismatched pair elements, tuples of different sizes such as 3-tuples, or non-tuple terms), returns \`mismatch\` via a universal catch-all wildcard clause (\`verify_identical_pair(_) -> mismatch.\`).
    - **Examples**:
      - \`clause_router:verify_identical_pair({alpha, alpha})\` returns \`{matched, alpha}\`.
      - \`clause_router:verify_identical_pair({omega, omega})\` returns \`{matched, omega}\`.
      - \`clause_router:verify_identical_pair({alpha, beta})\` returns \`mismatch\`.
+     - \`clause_router:verify_identical_pair({1, 2, 3})\` returns \`mismatch\`.
 
 ## Rules & Verification Constraints
 
@@ -1723,6 +1724,20 @@ In \`src/clause_router.erl\`, implement and export \`describe_status/1\`, \`head
         expectedOutput: '{matched, omega}',
         explanation: 'Matches a 2-tuple whose first and second elements are identical and returns the matched tuple.',
       },
+      {
+        id: 'tc-ch01-07-d',
+        title: 'Reject Mismatched Pair Elements',
+        erlangCall: 'clause_router:verify_identical_pair({alpha, beta})',
+        expectedOutput: 'mismatch',
+        explanation: 'Falls through to mismatch when the two elements in the tuple are not identical.',
+      },
+      {
+        id: 'tc-ch01-07-e',
+        title: 'Fallback Wildcard on Non-Pair Term',
+        erlangCall: 'clause_router:verify_identical_pair({1, 2, 3})',
+        expectedOutput: 'mismatch',
+        explanation: 'Universal catch-all wildcard clause (_) returns mismatch for wrong tuple sizes or non-tuples, preventing function_clause exceptions.',
+      },
     ],
     astRules: {
       requiredConstructs: [],
@@ -1744,7 +1759,7 @@ describe_status(_Code) ->
 head_or_default(_List, _Default) ->
     ok.
 
-%% @doc Return a matched 2-tuple if both elements of a 2-tuple match strictly, or mismatch otherwise.
+%% @doc Return {matched, Val} if passed a 2-tuple with strictly identical elements, or 'mismatch' for any other term (including mismatched pairs, wrong tuple sizes, or non-tuples).
 verify_identical_pair(_Pair) ->
     ok.`,
       },
@@ -1769,7 +1784,7 @@ head_or_default([H | _], _Default) ->
 head_or_default([], Default) ->
     Default.
 
-%% @doc Return a matched 2-tuple if both elements of a 2-tuple match strictly, or mismatch otherwise.
+%% @doc Return {matched, Val} if passed a 2-tuple with strictly identical elements, or 'mismatch' for any other term (including mismatched pairs, wrong tuple sizes, or non-tuples).
 verify_identical_pair({X, X}) ->
     {matched, X};
 verify_identical_pair(_) ->
@@ -1786,7 +1801,7 @@ describe_status(_Code) ->
 head_or_default(_List, _Default) ->
     ok.
 
-%% @doc Return a matched 2-tuple if both elements of a 2-tuple match strictly, or mismatch otherwise.
+%% @doc Return {matched, Val} if passed a 2-tuple with strictly identical elements, or 'mismatch' for any other term (including mismatched pairs, wrong tuple sizes, or non-tuples).
 verify_identical_pair(_Pair) ->
     ok.`,
     solutionCode: `-module(clause_router).
@@ -1808,7 +1823,7 @@ head_or_default([H | _], _Default) ->
 head_or_default([], Default) ->
     Default.
 
-%% @doc Return a matched 2-tuple if both elements of a 2-tuple match strictly, or mismatch otherwise.
+%% @doc Return {matched, Val} if passed a 2-tuple with strictly identical elements, or 'mismatch' for any other term (including mismatched pairs, wrong tuple sizes, or non-tuples).
 verify_identical_pair({X, X}) ->
     {matched, X};
 verify_identical_pair(_) ->

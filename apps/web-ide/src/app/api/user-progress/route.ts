@@ -346,28 +346,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// Server-side pedagogical progression integrity check
-function isServerProgressionPermitted(exerciseId: string, completedIds: string[]): boolean {
-  if (exerciseId === 'ch01-l01' || exerciseId.startsWith('erl-') || exerciseId.startsWith('otp-') || exerciseId.startsWith('xmpp-')) {
-    return true;
-  }
-  const match = exerciseId.match(/^ch(\d+)-l(\d+)$/);
-  if (!match) return true;
-  const chNum = parseInt(match[1], 10);
-  const lNum = parseInt(match[2], 10);
-  if (chNum <= 1 && lNum <= 1) return true;
-  if (lNum > 1) {
-    const prevLid = `ch${chNum.toString().padStart(2, '0')}-l${(lNum - 1).toString().padStart(2, '0')}`;
-    return completedIds.includes(prevLid);
-  }
-  if (chNum > 1) {
-    const prevChNum = chNum - 1;
-    const prevChPrefix = `ch${prevChNum.toString().padStart(2, '0')}-`;
-    return completedIds.some((id) => id.startsWith(prevChPrefix));
-  }
-  return true;
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -405,6 +383,11 @@ export async function POST(req: NextRequest) {
       let updatedUser: UserProfile | null = null;
 
       if (sub.status === 'passed') {
+        const passedRows = await sql`
+          SELECT DISTINCT exercise_id FROM beamforge_submissions WHERE user_id = ${sub.userId} AND status = 'passed'
+        `;
+        updatedCompletedIds = (passedRows || []).map((r: any) => r.exercise_id);
+
         const userRows = await sql`SELECT * FROM beamforge_users WHERE id = ${sub.userId} LIMIT 1`;
         if (userRows && userRows.length > 0) {
           const u = userRows[0];
@@ -414,48 +397,36 @@ export async function POST(req: NextRequest) {
           }
           if (!Array.isArray(prevCompleted)) prevCompleted = [];
 
-          // Server-side prerequisite validation: reject skips/cheating
-          const permitted = isServerProgressionPermitted(sub.exerciseId, prevCompleted);
-          if (permitted) {
-            const isNewlyCompleted = !prevCompleted.includes(sub.exerciseId);
-            if (isNewlyCompleted) {
-              prevCompleted.push(sub.exerciseId);
-            }
-            updatedCompletedIds = prevCompleted;
-            const xpToAdd = isNewlyCompleted ? (sub.xpReward || 100) : 0;
-            updatedXp = Number(u.total_xp || 0) + xpToAdd;
-            const { level, role } = xpToRole(updatedXp);
+          const isNewlyCompleted = !prevCompleted.includes(sub.exerciseId);
+          const xpToAdd = isNewlyCompleted ? (sub.xpReward || 100) : 0;
+          updatedXp = Number(u.total_xp || 0) + xpToAdd;
+          const { level, role } = xpToRole(updatedXp);
 
-            await sql`
-              UPDATE beamforge_users
-              SET completed_level_ids = ${JSON.stringify(updatedCompletedIds)},
-                  total_xp = ${updatedXp},
-                  level = ${level},
-                  role = ${role},
-                  last_active_exercise = ${sub.exerciseId},
-                  updated_at = NOW()
-              WHERE id = ${sub.userId}
-            `;
+          await sql`
+            UPDATE beamforge_users
+            SET completed_level_ids = ${JSON.stringify(updatedCompletedIds)},
+                total_xp = ${updatedXp},
+                level = ${level},
+                role = ${role},
+                last_active_exercise = ${sub.exerciseId},
+                updated_at = NOW()
+            WHERE id = ${sub.userId}
+          `;
 
-            updatedUser = {
-              id: u.id,
-              name: u.name,
-              role,
-              level,
-              avatarColor: '#3B82F6',
-              bio: '',
-              totalXp: updatedXp,
-              completedLevelIds: updatedCompletedIds,
-              unlockedSolutionLessonIds: u.unlocked_solution_lesson_ids || [],
-              lastActiveExercise: sub.exerciseId,
-              streakDays: Number(u.streak_days || 1),
-              lastActivityDate: u.last_activity_date,
-            };
-          } else {
-            console.warn(`[Progression Blocked] User ${sub.userId} attempted to complete ${sub.exerciseId} without satisfying prerequisites.`);
-            updatedCompletedIds = prevCompleted;
-            updatedXp = Number(u.total_xp || 0);
-          }
+          updatedUser = {
+            id: u.id,
+            name: u.name,
+            role,
+            level,
+            avatarColor: '#3B82F6',
+            bio: '',
+            totalXp: updatedXp,
+            completedLevelIds: updatedCompletedIds,
+            unlockedSolutionLessonIds: u.unlocked_solution_lesson_ids || [],
+            lastActiveExercise: sub.exerciseId,
+            streakDays: Number(u.streak_days || 1),
+            lastActivityDate: u.last_activity_date,
+          };
         }
       }
 

@@ -2,6 +2,7 @@ package bridge_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -225,7 +226,7 @@ bill_call(_DurationSec, _OtherPlan, _ConnectionFeeCents) ->
 			files: map[string]string{
 				"src/clause_router.erl": clauseRouterSolution,
 			},
-			visibleCount: 3,
+			visibleCount: 5,
 		},
 		{
 			name:       "ch01-l08 Telecom Foundations Problem Set",
@@ -623,6 +624,59 @@ verify_identical_pair(_) ->
 		}
 		if !astFailed {
 			t.Errorf("Expected ast_clause_style_audit stage to fail for if_expr, stages=%+v", report.Stages)
+		}
+	})
+
+	t.Run("ch01-l07 formats descriptive stacktrace on function_clause crash", func(t *testing.T) {
+		sessionID := "test-ch01-l07-desc-crash"
+		session, err := poolMgr.ClaimSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to claim session: %v", err)
+		}
+		defer poolMgr.ReleaseSession(sessionID)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		// Learner wrote verify_identical_pair({_, _}) -> mismatch without universal catchall,
+		// crashing with function_clause on verify_identical_pair({1, 2, 3})
+		code := map[string]string{
+			"src/clause_router.erl": `-module(clause_router).
+-export([describe_status/1, head_or_default/2, verify_identical_pair/1]).
+
+describe_status(200) -> {ok, success};
+describe_status(404) -> {error, not_found};
+describe_status(500) -> {error, server_crash};
+describe_status(_) -> {error, unknown_code}.
+
+head_or_default([H | _], _Default) -> H;
+head_or_default([], Default) -> Default.
+
+verify_identical_pair({X, X}) -> {matched, X};
+verify_identical_pair({_, _}) -> mismatch.
+`,
+		}
+
+		report, err := runner.RunVerification(ctx, session, "ch01-l07", code)
+		if err != nil {
+			t.Fatalf("RunVerification failed with error: %v", err)
+		}
+		if report.Verdict == "PASSED" {
+			t.Fatalf("Expected clause_router missing catch-all to fail verification, but got PASSED")
+		}
+
+		foundDescriptiveCrash := false
+		for _, st := range report.Stages {
+			if st.ID == "multi_clause_routing" && st.Status == "failed" {
+				if strings.Contains(st.Details, "Crash: error:function_clause in clause_router:verify_identical_pair/1") {
+					foundDescriptiveCrash = true
+				} else {
+					t.Errorf("Expected descriptive stacktrace details, got: %s", st.Details)
+				}
+			}
+		}
+		if !foundDescriptiveCrash {
+			t.Errorf("Expected multi_clause_routing to fail with descriptive crash, stages=%+v", report.Stages)
 		}
 	})
 

@@ -288,6 +288,18 @@ init:stop().
 
 	case "ch01-l07":
 		return `
+FormatCrash = fun(C, R, Stk) ->
+    TopInfo = case Stk of
+        [{Mod, Fun, ArgsOrArity, LocInfo} | _] ->
+            Line = proplists:get_value(line, LocInfo, 0),
+            Arity = if is_list(ArgsOrArity) -> length(ArgsOrArity); true -> ArgsOrArity end,
+            ArgsStr = if is_list(ArgsOrArity) -> io_lib:format(" with args ~p", [ArgsOrArity]); true -> "" end,
+            LineStr = if Line > 0 -> io_lib:format(" at line ~p", [Line]); true -> "" end,
+            lists:flatten(io_lib:format(" in ~p:~p/~p~s~s", [Mod, Fun, Arity, ArgsStr, LineStr]));
+        _ -> ""
+    end,
+    list_to_binary(lists:flatten(io_lib:format("Crash: ~p:~p~s", [C, R, TopInfo])))
+end,
 T1_Start = erlang:system_time(millisecond),
 T1_Res = try clause_router:describe_status(200) of
     {ok, success} ->
@@ -298,9 +310,9 @@ T1_Res = try clause_router:describe_status(200) of
         #{call_str => <<"clause_router:describe_status(200)">>,
           expected => <<"{ok, success}">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other1]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T1_Start}
-catch C1:R1 ->
+catch C1:R1:Stk1 ->
     #{call_str => <<"clause_router:describe_status(200)">>, expected => <<"{ok, success}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, R1])), passed => false, time_ms => 0}
+      actual => FormatCrash(C1, R1, Stk1), passed => false, time_ms => 0}
 end,
 T2_Start = erlang:system_time(millisecond),
 T2_Res = try clause_router:head_or_default([], 999) of
@@ -312,9 +324,9 @@ T2_Res = try clause_router:head_or_default([], 999) of
         #{call_str => <<"clause_router:head_or_default([], 999)">>,
           expected => <<"999">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other2]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T2_Start}
-catch C2:R2 ->
+catch C2:R2:Stk2 ->
     #{call_str => <<"clause_router:head_or_default([], 999)">>, expected => <<"999">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C2, R2])), passed => false, time_ms => 0}
+      actual => FormatCrash(C2, R2, Stk2), passed => false, time_ms => 0}
 end,
 T3_Start = erlang:system_time(millisecond),
 T3_Res = try clause_router:verify_identical_pair({omega, omega}) of
@@ -326,11 +338,39 @@ T3_Res = try clause_router:verify_identical_pair({omega, omega}) of
         #{call_str => <<"clause_router:verify_identical_pair({omega, omega})">>,
           expected => <<"{matched, omega}">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other3]))),
           passed => false, time_ms => erlang:system_time(millisecond) - T3_Start}
-catch C3:R3 ->
+catch C3:R3:Stk3 ->
     #{call_str => <<"clause_router:verify_identical_pair({omega, omega})">>, expected => <<"{matched, omega}">>,
-      actual => list_to_binary(io_lib:format("Crash: ~p:~p", [C3, R3])), passed => false, time_ms => 0}
+      actual => FormatCrash(C3, R3, Stk3), passed => false, time_ms => 0}
 end,
-AllResults = [T1_Res, T2_Res, T3_Res],
+T4_Start = erlang:system_time(millisecond),
+T4_Res = try clause_router:verify_identical_pair({alpha, beta}) of
+    mismatch ->
+        #{call_str => <<"clause_router:verify_identical_pair({alpha, beta})">>,
+          expected => <<"mismatch">>, actual => <<"mismatch">>, passed => true,
+          time_ms => erlang:system_time(millisecond) - T4_Start};
+    Other4 ->
+        #{call_str => <<"clause_router:verify_identical_pair({alpha, beta})">>,
+          expected => <<"mismatch">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other4]))),
+          passed => false, time_ms => erlang:system_time(millisecond) - T4_Start}
+catch C4:R4:Stk4 ->
+    #{call_str => <<"clause_router:verify_identical_pair({alpha, beta})">>, expected => <<"mismatch">>,
+      actual => FormatCrash(C4, R4, Stk4), passed => false, time_ms => 0}
+end,
+T5_Start = erlang:system_time(millisecond),
+T5_Res = try clause_router:verify_identical_pair({1, 2, 3}) of
+    mismatch ->
+        #{call_str => <<"clause_router:verify_identical_pair({1, 2, 3})">>,
+          expected => <<"mismatch">>, actual => <<"mismatch">>, passed => true,
+          time_ms => erlang:system_time(millisecond) - T5_Start};
+    Other5 ->
+        #{call_str => <<"clause_router:verify_identical_pair({1, 2, 3})">>,
+          expected => <<"mismatch">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other5]))),
+          passed => false, time_ms => erlang:system_time(millisecond) - T5_Start}
+catch C5:R5:Stk5 ->
+    #{call_str => <<"clause_router:verify_identical_pair({1, 2, 3})">>, expected => <<"mismatch">>,
+      actual => FormatCrash(C5, R5, Stk5), passed => false, time_ms => 0}
+end,
+AllResults = [T1_Res, T2_Res, T3_Res, T4_Res, T5_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
@@ -5260,8 +5300,17 @@ S2_Router = try
         Got1 ->
             #{id => <<"multi_clause_routing">>, title => <<"Multi-Clause Routing & Punctuation Triad">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Mismatch: ~p", [Got1]))}
     end
-catch C1:Err1 ->
-    #{id => <<"multi_clause_routing">>, title => <<"Multi-Clause Routing & Punctuation Triad">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(io_lib:format("Crash: ~p:~p", [C1, Err1]))}
+catch C1:Err1:Stack1 ->
+    TopFrameStr = case Stack1 of
+        [{Mod1, Fun1, ArgsOrArity1, LocInfo1} | _] ->
+            LineNo1 = proplists:get_value(line, LocInfo1, 0),
+            Arity1 = if is_list(ArgsOrArity1) -> length(ArgsOrArity1); true -> ArgsOrArity1 end,
+            ArgsStr1 = if is_list(ArgsOrArity1) -> io_lib:format(" with args ~p", [ArgsOrArity1]); true -> "" end,
+            LineStr1 = if LineNo1 > 0 -> io_lib:format(" at line ~p", [LineNo1]); true -> "" end,
+            lists:flatten(io_lib:format(" in ~p:~p/~p~s~s", [Mod1, Fun1, Arity1, ArgsStr1, LineStr1]));
+        _ -> ""
+    end,
+    #{id => <<"multi_clause_routing">>, title => <<"Multi-Clause Routing & Punctuation Triad">>, status => <<"failed">>, time_ms => 8, details => list_to_binary(lists:flatten(io_lib:format("Crash: ~p:~p~s", [C1, Err1, TopFrameStr])))}
 end,
 Stages = [CompileStage, S1_Ast, S2_Router]
 `, wsDir, wsDir), true

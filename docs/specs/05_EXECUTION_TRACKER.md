@@ -4701,3 +4701,22 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npx tsc --noEmit` -> 0 errors.
   - `npm run build` -> 10/10 static pages generated with 0 errors.
   - `go test -v -run TestChapter1Verification ./internal/bridge` -> 17/17 subtests passed (100%).
+
+## Phase 274: Descriptive BEAM Crash Diagnostics & Multi-Clause Routing Catch-All Harmonization (`ch01-l07`)
+- [x] **274.1: BEAM Top-Frame Stacktrace Capture in Grader Harness (`erl_runner_chapters.go`)**:
+  - Upgraded test harness exception handling across both `buildChapterRunScript` and `buildChapterVerificationScript` from `catch C:R ->` to `catch C:R:Stk ->`.
+  - Implemented top-frame stacktrace formatter extracting `Module:Function/Arity with args Args at line Line`.
+  - Replaces uninformative `Crash: error:function_clause` with rich diagnostics (e.g. `Crash: error:function_clause in clause_router:verify_identical_pair/1 with args [{1,2,3}] at line 14`).
+- [x] **274.2: Visible Test Harness Alignment & Expansion (`ch01-l07`)**:
+  - Expanded `buildChapterRunScript` for `ch01-l07` from 3 visible tests to all 5 visible tests (adding T4 for mismatched pair elements and T5 for non-pair tuple fallbacks).
+  - Synchronized visible test runner with `apps/web-ide/src/data/chapters/ch01.ts`.
+- [x] **274.3: Curriculum Master Specification & Starter Pack Clarification (`ch01.ts`)**:
+  - Clarified assignment specification in `ch01-l07` explaining that `verify_identical_pair/1` must handle mismatched pairs, incorrect tuple sizes, and non-tuples via a universal catch-all wildcard clause (`verify_identical_pair(_) -> mismatch.`).
+  - Harmonized starter code, solution code, and solution files doc comments to explicitly document the catch-all requirement.
+- [x] **274.4: Automated Test Suite & Negative Crash Regression Verification**:
+  - Updated `services/orchestrator/internal/bridge/ch01_verification_test.go` with `visibleCount: 5`.
+  - Added unit test `ch01-l07 formats descriptive stacktrace on function_clause crash`, verifying that omitting the wildcard clause produces descriptive stacktrace details.
+  - Verified `TestChapter1Verification` (18/18 subtests passed, 100%).
+  - Verified `TestDynamicVisibleTestsCurriculum` for Chapter 1 (100% passed).
+  - Verified Next.js `npx tsc --noEmit` and `npm run build` (10/10 static pages generated with 0 errors).
+
