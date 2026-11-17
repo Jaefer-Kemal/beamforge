@@ -1875,7 +1875,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                   {/* Unified Test Cards for visible test cases */}
                   {lesson.visibleTestCases.map((tc, idx) => {
                     const matchedTest = runResult?.visibleTests?.find(
-                      (t) => t.callStr.trim() === tc.erlangCall.trim() || t.expected.trim() === tc.expectedOutput.trim()
+                      (t) => t.callStr.trim() === tc.erlangCall.trim()
                     ) || (runResult?.visibleTests ? runResult.visibleTests[idx] : undefined);
 
                     return (
@@ -2071,7 +2071,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                             </div>
                             {lesson.visibleTestCases.map((tc, idx) => {
                               const matchedTest = runResult?.visibleTests?.find(
-                                (t) => t.callStr.trim() === tc.erlangCall.trim() || t.expected.trim() === tc.expectedOutput.trim()
+                                (t) => t.callStr.trim() === tc.erlangCall.trim()
                               ) || (runResult?.visibleTests ? runResult.visibleTests[idx] : undefined);
 
                               return (
@@ -2299,7 +2299,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                   </div>
                   {lesson.visibleTestCases.map((tc, idx) => {
                     const matchedTest = runResult?.visibleTests?.find(
-                      (t) => t.callStr.trim() === tc.erlangCall.trim() || t.expected.trim() === tc.expectedOutput.trim()
+                      (t) => t.callStr.trim() === tc.erlangCall.trim()
                     ) || (runResult?.visibleTests ? runResult.visibleTests[idx] : undefined);
 
                     return (
@@ -2409,7 +2409,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                       </div>
                       {lesson.visibleTestCases.map((tc, idx) => {
                         const matchedTest = runResult?.visibleTests?.find(
-                          (t) => t.callStr.trim() === tc.erlangCall.trim() || t.expected.trim() === tc.expectedOutput.trim()
+                          (t) => t.callStr.trim() === tc.erlangCall.trim()
                         ) || (runResult?.visibleTests ? runResult.visibleTests[idx] : undefined);
 
                         return (

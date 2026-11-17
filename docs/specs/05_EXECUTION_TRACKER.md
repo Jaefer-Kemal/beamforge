@@ -4720,3 +4720,22 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Verified `TestDynamicVisibleTestsCurriculum` for Chapter 1 (100% passed).
   - Verified Next.js `npx tsc --noEmit` and `npm run build` (10/10 static pages generated with 0 errors).
 
+## Phase 275: Revert Spoilers to Pure Pedagogy & Eliminate Cross-Test Expected-Output Matching Collision
+- [x] **275.1: Revert Left and Right Panes in `ch01.ts` to Non-Spoiling Original Text**:
+  - Reverted left-pane markdown description in `ch01-l07` to pure pedagogical spec, removing explicit spoilers for wildcard clauses (`verify_identical_pair(_) -> mismatch.`) and non-pair examples.
+  - Reverted right-pane comments across `files`, `starterCode`, `solutionFiles`, and `solutionCode` back to `%% @doc Return a matched 2-tuple if both elements of a 2-tuple match strictly, or mismatch otherwise.`
+  - Restored `visibleTestCases` to the original 3 visible tests (`tc-ch01-07-a`, `tc-ch01-07-b`, `tc-ch01-07-c`).
+- [x] **275.2: Eliminate Test Case Card Matching False-Positive Collision (`LessonSplitView.tsx`)**:
+  - Diagnosed root cause of the UI contradiction (where card 5 showed green "Passed" with return value "mismatch" while header badge displayed "4/5 Passed"): `find()` had `|| t.expected.trim() === tc.expectedOutput.trim()`.
+  - When multiple tests shared the expected return value `'mismatch'`, subsequent test cards falsely matched earlier test results instead of their own.
+  - Removed `t.expected.trim() === tc.expectedOutput.trim()` across all 4 UI card mapping locations in `LessonSplitView.tsx`, enforcing strict call-string matching (`t.callStr.trim() === tc.erlangCall.trim()`) with positional index fallback.
+- [x] **275.3: Orchestrator Visible Runner Alignment & Stacktrace Preservation (`erl_runner_chapters.go`)**:
+  - Reverted `ch01-l07` visible test runner in `buildChapterRunScript` to 3 visible tests (`AllResults = [T1_Res, T2_Res, T3_Res]`), matching `ch01.ts`.
+  - Preserved descriptive top-frame stacktrace capture (`catch C1:Err1:Stack1 ->`) so learner crashes in verification output exact module, function, arguments, and line numbers.
+- [x] **275.4: Test Suite & Regression Verification**:
+  - Set `visibleCount: 3` in `ch01_verification_test.go`.
+  - Verified `TestChapter1Verification` (18/18 subtests passed, 100%).
+  - Verified `TestDynamicVisibleTestsCurriculum` for Chapter 1 (100% passed).
+  - Verified Next.js `npx tsc --noEmit` and `npm run build` (10/10 static pages generated with 0 errors).
+
+

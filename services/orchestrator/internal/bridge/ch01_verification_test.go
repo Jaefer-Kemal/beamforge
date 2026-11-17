@@ -226,7 +226,7 @@ bill_call(_DurationSec, _OtherPlan, _ConnectionFeeCents) ->
 			files: map[string]string{
 				"src/clause_router.erl": clauseRouterSolution,
 			},
-			visibleCount: 5,
+			visibleCount: 3,
 		},
 		{
 			name:       "ch01-l08 Telecom Foundations Problem Set",

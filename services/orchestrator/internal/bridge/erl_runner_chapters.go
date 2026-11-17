@@ -342,35 +342,7 @@ catch C3:R3:Stk3 ->
     #{call_str => <<"clause_router:verify_identical_pair({omega, omega})">>, expected => <<"{matched, omega}">>,
       actual => FormatCrash(C3, R3, Stk3), passed => false, time_ms => 0}
 end,
-T4_Start = erlang:system_time(millisecond),
-T4_Res = try clause_router:verify_identical_pair({alpha, beta}) of
-    mismatch ->
-        #{call_str => <<"clause_router:verify_identical_pair({alpha, beta})">>,
-          expected => <<"mismatch">>, actual => <<"mismatch">>, passed => true,
-          time_ms => erlang:system_time(millisecond) - T4_Start};
-    Other4 ->
-        #{call_str => <<"clause_router:verify_identical_pair({alpha, beta})">>,
-          expected => <<"mismatch">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other4]))),
-          passed => false, time_ms => erlang:system_time(millisecond) - T4_Start}
-catch C4:R4:Stk4 ->
-    #{call_str => <<"clause_router:verify_identical_pair({alpha, beta})">>, expected => <<"mismatch">>,
-      actual => FormatCrash(C4, R4, Stk4), passed => false, time_ms => 0}
-end,
-T5_Start = erlang:system_time(millisecond),
-T5_Res = try clause_router:verify_identical_pair({1, 2, 3}) of
-    mismatch ->
-        #{call_str => <<"clause_router:verify_identical_pair({1, 2, 3})">>,
-          expected => <<"mismatch">>, actual => <<"mismatch">>, passed => true,
-          time_ms => erlang:system_time(millisecond) - T5_Start};
-    Other5 ->
-        #{call_str => <<"clause_router:verify_identical_pair({1, 2, 3})">>,
-          expected => <<"mismatch">>, actual => list_to_binary(lists:flatten(io_lib:format("~p", [Other5]))),
-          passed => false, time_ms => erlang:system_time(millisecond) - T5_Start}
-catch C5:R5:Stk5 ->
-    #{call_str => <<"clause_router:verify_identical_pair({1, 2, 3})">>, expected => <<"mismatch">>,
-      actual => FormatCrash(C5, R5, Stk5), passed => false, time_ms => 0}
-end,
-AllResults = [T1_Res, T2_Res, T3_Res, T4_Res, T5_Res],
+AllResults = [T1_Res, T2_Res, T3_Res],
 io:format("~n__BF_RUN_RESULT__~n~s~n", [bf_json:encode(#{visible_tests => AllResults})]),
 init:stop().
 `, true
