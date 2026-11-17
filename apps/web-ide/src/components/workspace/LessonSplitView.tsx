@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   FlaskConical,
   Terminal,
@@ -52,6 +53,7 @@ import { ResetConfirmModal } from './ResetConfirmModal';
 import { SolutionViewerTab } from './SolutionViewerTab';
 import { LessonSubmissionsList } from './LessonSubmissionsList';
 import { LessonSubmissionDetail } from './LessonSubmissionDetail';
+import { PrerequisiteModal } from './PrerequisiteModal';
 
 export type { LessonContent };
 
@@ -642,13 +644,16 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
     activeExerciseId,
     switchExercise,
     currentUser,
+    setIsAuthModalOpen,
   } = useWorkspaceStore();
 
+  const router = useRouter();
   const isDark = theme === 'dark';
 
   // Component-local drawer and tab state: guaranteed 100% fresh, closed, and isolated per lecture
   const [isLessonOutputOpen, setLessonOutputOpen] = useState(false);
   const [lessonOutputTab, setLessonOutputTab] = useState<'test_results' | 'console' | 'verification' | 'solution'>('test_results');
+  const [isPrereqModalOpen, setIsPrereqModalOpen] = useState(false);
 
   // Strictly scope runResult and verificationStages to this lesson
   const runResult = (rawRunResult && rawRunResult.exerciseId === lesson.id) ? rawRunResult : null;
@@ -1157,6 +1162,46 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
         {/* Left Scrollable Content */}
         {leftTab === 'guide' ? (
           <div key={`guide-${lesson.id}`} className="flex-1 overflow-y-auto overflow-x-hidden break-words px-3.5 sm:px-5 py-3 sm:py-4">
+            {/* Slot 0A: In-Pane Locked Lesson Alert Card */}
+            {!isLessonUnlocked && accessResult.prerequisite && (
+              <div
+                id="in-pane-locked-lesson-banner"
+                className="mb-4 p-3.5 sm:p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md"
+                style={{
+                  background: isDark ? 'rgba(245, 158, 11, 0.12)' : 'rgba(254, 243, 199, 0.7)',
+                  borderColor: isDark ? 'rgba(245, 158, 11, 0.35)' : 'rgba(245, 158, 11, 0.5)',
+                }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center flex-shrink-0 text-amber-500">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                      Prerequisite Required
+                    </h4>
+                    <p className="text-xs text-slate-700 dark:text-slate-300">
+                      {accessResult.prerequisite.message}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    if (accessResult.prerequisite?.type === 'auth_required') {
+                      setIsAuthModalOpen(true);
+                    } else if (accessResult.prerequisite?.prereqLessonId) {
+                      router.push(`/learn/${accessResult.prerequisite.prereqLessonId}`);
+                    }
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white shadow transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5 flex-shrink-0 cursor-pointer"
+                  style={{ background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)' }}
+                >
+                  <span>{accessResult.prerequisite?.type === 'auth_required' ? 'Sign In to Unlock' : 'Go to Prerequisite'}</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Slot 0: Prominent Lesson Title */}
             <h1
               className="text-xl sm:text-2xl font-black tracking-tight mb-4 flex items-center gap-2"
@@ -1496,21 +1541,24 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           <button
             id="run-btn"
             onClick={() => {
-              if (!isLessonUnlocked) return;
+              if (!isLessonUnlocked) {
+                setIsPrereqModalOpen(true);
+                return;
+              }
               setLessonOutputOpen(true);
               setLessonOutputTab('test_results');
               if (typeof window !== 'undefined' && window.innerWidth < 768) setMobileTab('results');
               handleRunCode();
             }}
-            disabled={!isLessonUnlocked || isRunning || isVerifying}
+            disabled={isRunning || isVerifying}
             title={
               !isLessonUnlocked
-                ? accessResult.prerequisite?.message || 'Lesson locked: Complete prerequisite lesson first to run code'
+                ? accessResult.prerequisite?.message ? `${accessResult.prerequisite.message} Click to view prerequisite.` : 'Lesson locked: Complete prerequisite lesson first'
                 : !isBackendOnline
                 ? 'Connecting to Go Orchestrator backend (waking up). Click to run code.'
                 : 'Run visible test cases'
             }
-            className={`btn-run flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${!isLessonUnlocked || isRunning || isVerifying ? 'pointer-events-none' : ''}`}
+            className={`btn-run flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl cursor-pointer ${isRunning || isVerifying ? 'pointer-events-none opacity-40' : !isLessonUnlocked ? 'opacity-85 hover:opacity-100' : ''}`}
           >
             {isRunning ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
@@ -1528,21 +1576,24 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           <button
             id="submit-btn"
             onClick={() => {
-              if (!isLessonUnlocked) return;
+              if (!isLessonUnlocked) {
+                setIsPrereqModalOpen(true);
+                return;
+              }
               setLessonOutputOpen(true);
               setLessonOutputTab('verification');
               if (typeof window !== 'undefined' && window.innerWidth < 768) setMobileTab('results');
               handleRunVerification();
             }}
-            disabled={!isLessonUnlocked || isVerifying || isRunning}
+            disabled={isRunning || isVerifying}
             title={
               !isLessonUnlocked
-                ? accessResult.prerequisite?.message || 'Lesson locked: Complete prerequisite lesson first to submit code'
+                ? accessResult.prerequisite?.message ? `${accessResult.prerequisite.message} Click to view prerequisite.` : 'Lesson locked: Complete prerequisite lesson first'
                 : !isBackendOnline
                 ? 'Connecting to Go Orchestrator backend (waking up). Click to submit.'
                 : 'Submit code for full verification suite'
             }
-            className={`btn-submit flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-bold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${!isLessonUnlocked || isVerifying || isRunning ? 'pointer-events-none' : ''}`}
+            className={`btn-submit flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 h-10 text-xs font-bold rounded-xl cursor-pointer ${isVerifying || isRunning ? 'pointer-events-none opacity-40' : !isLessonUnlocked ? 'opacity-85 hover:opacity-100' : ''}`}
           >
             {isVerifying ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
@@ -1559,9 +1610,11 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           {/* Solution */}
           <button
             id="solution-btn"
-            disabled={!isLessonUnlocked}
             onClick={() => {
-              if (!isLessonUnlocked) return;
+              if (!isLessonUnlocked) {
+                setIsPrereqModalOpen(true);
+                return;
+              }
               if (isUnlocked) {
                 if (isLessonOutputOpen && lessonOutputTab === 'solution') {
                   setLessonOutputOpen(false);
@@ -1574,7 +1627,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                 setIsUnlockModalOpen(true);
               }
             }}
-            className={`glass-pill flex items-center justify-center gap-1.5 px-3 h-10 text-xs font-medium rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${!isLessonUnlocked ? 'pointer-events-none' : ''}`}
+            className={`glass-pill flex items-center justify-center gap-1.5 px-3 h-10 text-xs font-medium rounded-xl cursor-pointer ${!isLessonUnlocked ? 'opacity-70 hover:opacity-100' : ''}`}
             style={{
               background: isLessonOutputOpen && lessonOutputTab === 'solution'
                 ? (isDark ? 'rgba(245,158,11,0.20)' : 'rgba(245,158,11,0.12)')
@@ -1586,7 +1639,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             }}
             title={
               !isLessonUnlocked
-                ? 'Lesson locked: Complete prerequisite lesson first'
+                ? accessResult.prerequisite?.message ? `${accessResult.prerequisite.message} Click to view prerequisite.` : 'Lesson locked: Complete prerequisite lesson first'
                 : `Inspect reference solution for ${activeFile?.name || 'active file'}`
             }
           >
@@ -2270,11 +2323,14 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                   </p>
                   <button
                     onClick={() => {
-                      if (!isLessonUnlocked) return;
+                      if (!isLessonUnlocked) {
+                        setIsPrereqModalOpen(true);
+                        return;
+                      }
                       handleRunCode();
                     }}
-                    disabled={!isLessonUnlocked || isRunning || isVerifying}
-                    className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    disabled={isRunning || isVerifying}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
                     style={{ background: '#007AFF' }}
                   >
                     {isRunning ? (
@@ -2384,11 +2440,14 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                   </p>
                   <button
                     onClick={() => {
-                      if (!isLessonUnlocked) return;
+                      if (!isLessonUnlocked) {
+                        setIsPrereqModalOpen(true);
+                        return;
+                      }
                       handleRunVerification();
                     }}
-                    disabled={!isLessonUnlocked || isVerifying || isRunning}
-                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-900 shadow-md inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    disabled={isVerifying || isRunning}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-900 shadow-md inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
                     style={{ background: '#F59E0B' }}
                   >
                     {isVerifying ? (
@@ -2450,11 +2509,14 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
 
           <button
             onClick={() => {
-              if (!isLessonUnlocked) return;
+              if (!isLessonUnlocked) {
+                setIsPrereqModalOpen(true);
+                return;
+              }
               handleRunCode();
             }}
-            disabled={!isLessonUnlocked || isRunning || isVerifying}
-            className={`btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${!isLessonUnlocked || isRunning || isVerifying ? 'pointer-events-none' : ''}`}
+            disabled={isRunning || isVerifying}
+            className={`btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer ${isRunning || isVerifying ? 'pointer-events-none opacity-40' : !isLessonUnlocked ? 'opacity-85' : ''}`}
           >
             {isRunning ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
@@ -2470,11 +2532,14 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
 
           <button
             onClick={() => {
-              if (!isLessonUnlocked) return;
+              if (!isLessonUnlocked) {
+                setIsPrereqModalOpen(true);
+                return;
+              }
               handleRunVerification();
             }}
-            disabled={!isLessonUnlocked || isVerifying || isRunning}
-            className={`btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${!isLessonUnlocked || isVerifying || isRunning ? 'pointer-events-none' : ''}`}
+            disabled={isVerifying || isRunning}
+            className={`btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer ${isVerifying || isRunning ? 'pointer-events-none opacity-40' : !isLessonUnlocked ? 'opacity-85' : ''}`}
           >
             {isVerifying ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
@@ -2518,6 +2583,33 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
         onClose={() => setIsResetModalOpen(false)}
         onConfirm={resetCurrentExerciseToStarter}
       />
+
+      {accessResult.prerequisite && (
+        <PrerequisiteModal
+          key={`prereq-modal-${lesson.id}`}
+          isOpen={isPrereqModalOpen}
+          type={accessResult.prerequisite.type}
+          targetChapterNum={accessResult.prerequisite.targetChapterNum}
+          targetChapterTitle={accessResult.prerequisite.targetChapterTitle}
+          targetLessonNum={accessResult.prerequisite.targetLessonNum}
+          targetLessonTitle={accessResult.prerequisite.targetLessonTitle}
+          prerequisiteChapterNum={accessResult.prerequisite.prereqChapterNum}
+          prerequisiteLessonId={accessResult.prerequisite.prereqLessonId}
+          prerequisiteLessonTitle={accessResult.prerequisite.prereqLessonTitle}
+          prerequisiteLessonNum={accessResult.prerequisite.prereqLessonNum}
+          message={accessResult.prerequisite.message}
+          isDark={isDark}
+          onClose={() => setIsPrereqModalOpen(false)}
+          onGoToPrerequisite={(targetId: string) => {
+            setIsPrereqModalOpen(false);
+            router.push(`/learn/${targetId}`);
+          }}
+          onOpenAuthModal={() => {
+            setIsPrereqModalOpen(false);
+            setIsAuthModalOpen(true);
+          }}
+        />
+      )}
     </div>
   );
 }

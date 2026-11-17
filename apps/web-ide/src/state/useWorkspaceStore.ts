@@ -2488,15 +2488,16 @@ if (typeof window !== 'undefined') {
   (window as any).useWorkspaceStore = useWorkspaceStore;
 
   // Immediate synchronous local progress hydration on client initial load:
-  // Guarantees completedLevelIds is populated from local storage synchronously
-  // before component mount, eliminating hydration race conditions on page reload.
+  // Guarantees active user's completedLevelIds is populated from local storage synchronously
+  // before component mount, eliminating hydration race conditions while isolating to active user.
   try {
-    const immediateCompleted = getSynchronousCompletedLevelIds();
+    const currentUid = localStorage.getItem('bf_current_user_id') || 'guest';
+    const immediateCompleted = getSynchronousCompletedLevelIds([], currentUid);
     if (immediateCompleted.length > 0) {
-      useWorkspaceStore.setState((state) => ({
-        completedLevelIds: Array.from(new Set([...state.completedLevelIds, ...immediateCompleted])),
-        completedWithXpLevelIds: Array.from(new Set([...state.completedWithXpLevelIds, ...immediateCompleted])),
-      }));
+      useWorkspaceStore.setState({
+        completedLevelIds: immediateCompleted,
+        completedWithXpLevelIds: immediateCompleted,
+      });
     }
   } catch {}
 

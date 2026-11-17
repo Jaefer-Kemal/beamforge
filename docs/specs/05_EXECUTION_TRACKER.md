@@ -4682,3 +4682,22 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npx tsc --noEmit` -> 0 errors.
   - `npm run build` -> 10/10 static pages built with 0 errors.
   - `go test -v -run TestChapter1Verification ./internal/bridge` -> 17/17 passed (100%).
+
+## Phase 273: Elimination of Cross-Profile Progress Leakage & Immediate Locked Lesson Prompt Recovery
+- [x] **273.1: Strict User Scoping in Synchronous Progress Extraction (`getSynchronousCompletedLevelIds`)**:
+  - Identified and eliminated cross-profile contamination where `getSynchronousCompletedLevelIds()` unscoped-ly scanned all `localStorage` keys, inadvertently ingesting all 88 completed lessons from cached tester presets like `user_master` and `user_beta` into `guest` and new accounts.
+  - Scoped synchronous extraction strictly to `currentUid` (`bf_current_user_id || 'guest'`).
+  - Now only inspects `beamforge_completed_${currentUid}_*` and `beamforge_user_${currentUid}`.
+- [x] **273.2: Scoped Solution Acceptance Check (`checkLessonAccessById`)**:
+  - Replaced indiscriminate wildcard scan of `beamforge_accepted_*_${lessonId}` with strict active user check: `localStorage.getItem('beamforge_accepted_' + currentUid + '_' + lessonId)`.
+  - Guarantees another user's accepted solutions on the same browser never bypass prerequisites for the active user.
+- [x] **273.3: Immediate Locked Lesson Route Banner Display (`page.tsx`)**:
+  - In `apps/web-ide/src/app/learn/[lessonId]/page.tsx`, removed the restrictive `isHydrated &&` blocker on `#locked-lesson-banner`.
+  - Direct route visits to locked URLs now display the prominent floating Apple-glass prerequisite banner immediately on frame 0.
+- [x] **273.4: In-Pane Locked Lesson Alert Card & Interactive Button Prompts (`LessonSplitView.tsx`)**:
+  - Added Slot 0A in the Left Guide panel: renders a dedicated Apple-glass alert card detailing the missing prerequisite with a direct `[Go to Prerequisite ➔]` navigation button.
+  - Replaced silent `pointer-events-none` on locked execution buttons: clicking the `Locked` Run or Submit button now triggers `PrerequisiteModal` directly, providing clear interactive guidance.
+- [x] **273.5: Zero-Error Compilation & Test Verification**:
+  - `npx tsc --noEmit` -> 0 errors.
+  - `npm run build` -> 10/10 static pages generated with 0 errors.
+  - `go test -v -run TestChapter1Verification ./internal/bridge` -> 17/17 subtests passed (100%).
