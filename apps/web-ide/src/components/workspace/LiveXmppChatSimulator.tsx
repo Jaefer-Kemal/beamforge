@@ -239,8 +239,7 @@ export function LiveXmppChatSimulator({
     offline_messages?: string[];
   }): Promise<BackendChatResponse | null> => {
     if (!isBackendOnline) {
-      showNotice('Go Orchestrator backend (port 8080) is offline. Start orchestrator to route real XMPP frames.', true);
-      return null;
+      showNotice('Connecting to Go Orchestrator backend (waking up)...', false);
     }
     setIsSending(true);
     try {

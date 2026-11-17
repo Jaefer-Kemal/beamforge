@@ -408,6 +408,33 @@ const loadInitialUser = (): UserProfile => {
   return GUEST_USER;
 };
 
+// ── Self-Healing Backend Health Check & Auto-Recovery Timer ──────────────────
+let healthRetryTimer: any = null;
+let healthRetryCount = 0;
+const MAX_HEALTH_RETRIES = 12; // 12 retries * 5s = 60s total window for Render cold start recovery
+
+function scheduleBackendHealthRetry() {
+  if (typeof window === 'undefined') return;
+  if (healthRetryTimer) return;
+  if (healthRetryCount >= MAX_HEALTH_RETRIES) {
+    healthRetryCount = 0;
+    return;
+  }
+  healthRetryTimer = setTimeout(async () => {
+    healthRetryTimer = null;
+    healthRetryCount++;
+    try {
+      const res = await fetch(`${getOrchestratorHttpUrl()}/health`, { cache: 'no-store' });
+      if (res.ok) {
+        healthRetryCount = 0;
+        useWorkspaceStore.getState().checkBackendHealth(true);
+        return;
+      }
+    } catch {}
+    scheduleBackendHealthRetry();
+  }, 5000);
+}
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   const initialUser = loadInitialUser();
   const lastActiveId = 'ch01-l01';
@@ -576,7 +603,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     setActiveView: (view) => set({ activeView: view }),
 
     // ── Phase 2: Boot.dev Glassmorphic UI ─────────────────────────────────
-    theme: (typeof window !== 'undefined' && localStorage.getItem('bf_theme') === 'dark' ? 'dark' : 'light') as AppTheme,
+    theme: 'light' as AppTheme,
     setTheme: (theme: AppTheme) => {
       set({ theme });
       if (typeof window !== 'undefined') {
@@ -741,6 +768,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         }
       } catch {
         // Backend is offline — DO NOT fake-pass!
+        scheduleBackendHealthRetry();
         set({
           isBackendOnline: false,
           runResult: {
@@ -1535,7 +1563,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       if (get().isBackendOnline && !force) return true;
       try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 8000); // 8s timeout handles cloud latency / cold start
+        const timer = setTimeout(() => controller.abort(), 20000); // 20s timeout accommodates Render cloud cold start
         const res = await fetch(`${getOrchestratorHttpUrl()}/health`, {
           signal: controller.signal,
           cache: 'no-store',
@@ -1545,11 +1573,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         if (get().isBackendOnline !== online) {
           set({ isBackendOnline: online });
         }
+        if (online) {
+          healthRetryCount = 0;
+        } else {
+          scheduleBackendHealthRetry();
+        }
         return online;
       } catch {
         if (get().isBackendOnline) {
           set({ isBackendOnline: false });
         }
+        scheduleBackendHealthRetry();
         return false;
       }
     },
@@ -2166,6 +2200,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         }
       } catch (e) {
         // Backend is offline — DO NOT fake-pass!
+        scheduleBackendHealthRetry();
         set({
           isBackendOnline: false,
           isVerifying: false,
@@ -2450,6 +2485,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
 if (typeof window !== 'undefined') {
   (window as any).useWorkspaceStore = useWorkspaceStore;
+
+  // Post-mount theme sync: deterministic 'light' on SSR ensures matching hydration.
+  // Immediate post-hydration microtask applies stored dark preference if present.
+  setTimeout(() => {
+    try {
+      const stored = localStorage.getItem('bf_theme');
+      if (stored === 'dark' && useWorkspaceStore.getState().theme !== 'dark') {
+        useWorkspaceStore.getState().setTheme('dark');
+      }
+    } catch {}
+  }, 0);
 
   // Mobile screen wake-up & browser tab focus auto-sync
   let lastAutoSyncTimestamp = 0;

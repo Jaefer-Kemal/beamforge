@@ -4637,3 +4637,26 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Next.js type check: `npx tsc --noEmit` -> 0 errors.
   - Next.js production build: `npm run build` -> 10/10 static pages generated with 0 errors.
   - Go orchestrator verification: `go test -v -run TestChapter1Verification ./internal/bridge` -> 17/17 passed (100%).
+
+## Phase 271: Dark Mode Hydration Mix Elimination, Self-Healing Backend Health Check & Execution Button Unblocking
+- [x] **271.1: Elimination of Dark Mode Hydration Mix & State Bailout**:
+  - Identified that `useWorkspaceStore.ts` initialized `theme: (typeof window !== 'undefined' && localStorage.getItem('bf_theme') === 'dark' ? 'dark' : 'light')`, causing a discrepancy with SSR (which rendered `theme: 'light'`).
+  - Fixed deterministic initialization to `theme: 'light'` across both server and client, ensuring 100% hydration consistency.
+  - Added post-mount theme synchronization via `setTimeout(..., 0)` and `hydrateFromStorageAndDb()`: when `storedTheme === 'dark'`, Zustand observes a genuine `'light' -> 'dark'` state transition, dispatches updates to all subscribed components (`LessonSplitView`, `BootDevTopBar`, `CurriculumWorldMap`, `BeamConceptVisualizer`, etc.), and flips all inline styles and classes synchronously to dark mode with zero mix.
+- [x] **271.2: Decoupled Button Disabling from Backend Online State & Waking State UX**:
+  - Discovered that `isBackendOnline: false` was hard-locking all execution buttons (`disabled={... || !isBackendOnline}` and `pointer-events-none`) across desktop, mobile action bars, drawer buttons, and Capstone studio (`LessonSplitView.tsx`, `CapstoneStudioView.tsx`, `LiveXmppChatSimulator.tsx`).
+  - Decoupled `!isBackendOnline` from `disabled` and `pointer-events-none`.
+  - Implemented graceful `Run (Waking)` and `Submit (Waking)` states with amber `WifiOff` icons and informative tooltips explaining that the Go Orchestrator is waking up.
+  - Clicking Run/Submit triggers an execution request directly, waking the cloud service up (Render cold starts) and restoring `isBackendOnline: true` on first successful response.
+- [x] **271.3: Self-Healing Backend Health Auto-Recovery & Extended Abort Timeout**:
+  - Increased health check timeout from 8s to 20s to tolerate Render free-tier cold starts.
+  - Implemented `scheduleBackendHealthRetry()`: a self-healing background polling loop that checks `/health` every 5 seconds for up to 60 seconds whenever an offline state or network failure occurs.
+  - Connected auto-recovery into `checkBackendHealth`, `runCode`, and `runVerificationSuite` failure handlers.
+- [x] **271.4: Tester Mode Gating & Safe Defaults**:
+  - Ensured `devModeUnlockedAll` remains strictly `false` by default across all stores and state initializations.
+  - Wired `devModeUnlockedAll` into `LessonSplitView.tsx` access check `checkLessonAccessById(lesson.id, completedLevelIds, devModeUnlockedAll)` so developer toggles in Settings work as expected without compromising sequential curriculum locks for students.
+- [x] **271.5: Compilation & Test Verification**:
+  - `npx tsc --noEmit` -> 0 errors.
+  - `npm run build` -> 10/10 pages built with 0 errors.
+  - `go test -v -run TestChapter1Verification ./internal/bridge` -> 17/17 passed (100%).
+  - `go test -v -run TestDynamicVisibleTestsCurriculum ./internal/bridge` -> All 12 chapters passed (100%).

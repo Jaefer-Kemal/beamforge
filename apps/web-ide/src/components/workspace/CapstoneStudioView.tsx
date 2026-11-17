@@ -1230,14 +1230,14 @@ export function CapstoneStudioView() {
           <button
             id="submit-btn"
             onClick={handleSubmit}
-            disabled={isVerifying || isRunning || !isBackendOnline}
-            title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to submit.' : activeMilestoneIndex < 5 ? `Verify Milestone ${activeMilestone.number} (${activeMilestone.targetFile})` : 'Submit full 6-milestone XMPP Capstone'}
-            className={`btn-submit flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${isVerifying || isRunning || !isBackendOnline ? 'pointer-events-none' : ''}`}
+            disabled={isVerifying || isRunning}
+            title={!isBackendOnline ? 'Connecting to Go Orchestrator backend (waking up). Click to submit.' : activeMilestoneIndex < 5 ? `Verify Milestone ${activeMilestone.number} (${activeMilestone.targetFile})` : 'Submit full 6-milestone XMPP Capstone'}
+            className={`btn-submit flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${isVerifying || isRunning ? 'pointer-events-none' : ''}`}
           >
             {isVerifying ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-slate-900 border-t-transparent" />
             ) : !isBackendOnline ? (
-              <WifiOff className="w-3.5 h-3.5 text-red-400" />
+              <WifiOff className="w-3.5 h-3.5 text-amber-300" />
             ) : (
               <ShieldCheck className="w-3.5 h-3.5" />
             )}
@@ -1247,7 +1247,7 @@ export function CapstoneStudioView() {
                   ? `Verifying M${activeMilestone.number}...`
                   : 'Verifying 6 Milestones...'
                 : !isBackendOnline
-                ? 'Submit (Offline)'
+                ? 'Submit (Waking)'
                 : activeMilestoneIndex < 5
                 ? `Verify M${activeMilestone.number}`
                 : 'Submit Capstone'}
@@ -1258,18 +1258,18 @@ export function CapstoneStudioView() {
           <button
             id="run-btn"
             onClick={handleRun}
-            disabled={isRunning || isVerifying || !isBackendOnline}
-            title={!isBackendOnline ? 'Go Orchestrator backend (port 8080) is offline. Start orchestrator.exe to run simulation.' : 'Run capstone simulation'}
-            className={`btn-run flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${isRunning || isVerifying || !isBackendOnline ? 'pointer-events-none' : ''}`}
+            disabled={isRunning || isVerifying}
+            title={!isBackendOnline ? 'Connecting to Go Orchestrator backend (waking up). Click to run simulation.' : 'Run capstone simulation'}
+            className={`btn-run flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${isRunning || isVerifying ? 'pointer-events-none' : ''}`}
           >
             {isRunning ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
             ) : !isBackendOnline ? (
-              <WifiOff className="w-3.5 h-3.5 text-red-300" />
+              <WifiOff className="w-3.5 h-3.5 text-amber-300" />
             ) : (
               <Play className="w-3.5 h-3.5 fill-current" />
             )}
-            <span>{isRunning ? 'Running...' : !isBackendOnline ? 'Run (Offline)' : 'Run'}</span>
+            <span>{isRunning ? 'Running...' : !isBackendOnline ? 'Run (Waking)' : 'Run'}</span>
           </button>
 
           {/* Solution Toggle targeting active file */}
@@ -2150,28 +2150,28 @@ export function CapstoneStudioView() {
 
           <button
             onClick={handleRun}
-            disabled={isRunning || isVerifying || !isBackendOnline}
-            className={`btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${isRunning || isVerifying || !isBackendOnline ? 'pointer-events-none' : ''}`}
+            disabled={isRunning || isVerifying}
+            className={`btn-run flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${isRunning || isVerifying ? 'pointer-events-none' : ''}`}
           >
             {isRunning ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
             ) : !isBackendOnline ? (
-              <WifiOff className="w-3.5 h-3.5 text-red-300" />
+              <WifiOff className="w-3.5 h-3.5 text-amber-300" />
             ) : (
               <Play className="w-3.5 h-3.5 fill-current" />
             )}
-            <span>{isRunning ? 'Running...' : !isBackendOnline ? 'Run (Offline)' : 'Run Simulation'}</span>
+            <span>{isRunning ? 'Running...' : !isBackendOnline ? 'Run (Waking)' : 'Run Simulation'}</span>
           </button>
 
           <button
             onClick={handleSubmit}
-            disabled={isVerifying || isRunning || !isBackendOnline}
-            className={`btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${isVerifying || isRunning || !isBackendOnline ? 'pointer-events-none' : ''}`}
+            disabled={isVerifying || isRunning}
+            className={`btn-submit flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${isVerifying || isRunning ? 'pointer-events-none' : ''}`}
           >
             {isVerifying ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
             ) : !isBackendOnline ? (
-              <WifiOff className="w-3.5 h-3.5 text-red-400" />
+              <WifiOff className="w-3.5 h-3.5 text-amber-300" />
             ) : (
               <ShieldCheck className="w-3.5 h-3.5" />
             )}
@@ -2181,7 +2181,7 @@ export function CapstoneStudioView() {
                   ? `Verifying M${activeMilestone.number}...`
                   : 'Verifying...'
                 : !isBackendOnline
-                ? 'Submit (Offline)'
+                ? 'Submit (Waking)'
                 : activeMilestoneIndex < 5
                 ? `Verify M${activeMilestone.number}`
                 : 'Submit Capstone'}
