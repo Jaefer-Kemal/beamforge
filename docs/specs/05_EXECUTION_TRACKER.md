@@ -4590,3 +4590,19 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npx tsc --noEmit` & `npm run build` in `apps/web-ide` -> 0 errors.
   - Render orchestrator deploy `dep-dbtvsorm8hqs73dn31h0` is `live`.
   - Vercel production deploy `dpl_7FnTRLEUnopZXkNXkwbBtLJHqL7i` is `Ready`.
+
+
+## Phase 269: CH01-L07 Punctuation Triad Comma Demonstration & Arity Compound Term Pedagogy
+- [x] **269.1: Multi-Expression Clause Bodies & Comma Sequencing Demonstration**:
+  - Enriched `ch01-l07` parallel worked example `gate_dispatch` in `apps/web-ide/src/data/chapters/ch01.ts` (`lines 1580–1620`): added `io:format/2` side effects and intermediate variable binding (`Processed = {queued, Priority}, io:format(...), Processed;`), proving the practical sequencing role of `,` ("AND THEN").
+  - Added documentation on Erlang's **Implicit Return Rule** (no `return` keyword; the final expression evaluated before `;` or `.` is returned to the caller).
+- [x] **269.2: Compound Term vs Function Arity Mental Model (`/1` vs `/2`)**:
+  - Added a dedicated subsection in `ch01-l07` explaining that a tuple `{X, Y}` or list `[H | T]` is **one single Erlang term** occupying **one single parameter slot** in the function's arity.
+  - Added side-by-side comparison between `compare_scalars(A, B)` (Arity 2) and `verify_pair({A, B})` (Arity 1).
+  - Clarified the three distinct grammatical roles of the comma in Erlang: argument separator in function heads, element separator in compound data, and expression sequencer in clause bodies.
+- [x] **269.3: Assignment & Rules Specification Clarification**:
+  - Updated assignment and constraints in `apps/web-ide/src/data/chapters/ch01.ts`: explicitly reminded learners that `verify_identical_pair/1` takes a single 2-tuple argument (`verify_identical_pair({X, X})`), preventing learners from inadvertently writing `verify_identical_pair/2`.
+- [x] **269.4: Tri-Verification & Compiler Certification**:
+  - Parallel example `gate_dispatch.erl` compiled cleanly with `erlc.exe -Wall` (0 warnings).
+  - `go test -v -run TestChapter1Verification ./internal/bridge` -> 17/17 passed (100% pass).
+  - `npx tsc --noEmit` & `npm run build` in `apps/web-ide` -> 0 errors.

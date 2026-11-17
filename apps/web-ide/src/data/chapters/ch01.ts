@@ -1496,11 +1496,14 @@ However, writing multi-clause functions requires understanding Erlang's most fam
 Erlang's punctuation is based on the logic of formal written English:
 
 1. **, (Comma) — "AND THEN"**:
-   Separates expressions inside the body of a clause.
+   Separates expressions inside the body of a clause. Expressions evaluate sequentially from top to bottom.
    \`\`\`erlang
-   Step1 = calculate_tax(),
-   Step2 = apply_discount(Step1)  %% comma tells compiler: "continue to next line"
+   Step1 = calculate_tax(Amount),
+   io:format("Tax computed: ~p~n", [Step1]),
+   Step2 = apply_discount(Step1),
+   Step2  %% comma tells compiler: "continue to next line"; final expression is returned
    \`\`\`
+   > **The Implicit Return Rule**: Erlang has **no \`return\` keyword**. Whatever value the final expression in a clause produces (the one immediately preceding the clause's terminating \`;\` or \`.\`) is automatically returned to the caller.
 
 2. **; (Semicolon) — "OR ELSE"**:
    Separates alternative clauses of the **same function and arity**.
@@ -1525,6 +1528,45 @@ Erlang's punctuation is based on the logic of formal written English:
 > The compiler will scream: \`defining already defined function handle/1\` or \`syntax error before: '->'\`!
 > **Rule:** Use \`;\` between clauses; use \`.\` only after the last clause.
 
+### The Three Grammatical Roles of the Comma (,) in Erlang
+Notice how the comma serves three completely distinct grammatical purposes depending on where it appears in your code:
+
+| Where Comma Appears | Example | Meaning to the BEAM |
+| :--- | :--- | :--- |
+| **Inside Function Head** | \`route(Header, Payload, Timeout) ->\` | **Argument Separator**: Defines function arity (here, 3 arguments = \`/3\`). |
+| **Inside Compound Term** | \`{packet, 200, "OK"}\` or \`[1, 2, 3]\` | **Element Separator**: Separates members within a single tuple or list. |
+| **Inside Clause Body** | \`A = 1, B = 2, A + B\` | **Expression Sequencer ("And Then")**: Evaluates sequentially, returning the final expression. |
+
+### Compound Term vs Function Arity: The /1 vs /2 Mental Trap
+Coming from languages like Python, JavaScript, or Go, a very frequent point of confusion is looking at a pattern like \`verify_identical_pair({X, X})\` and wondering:
+*"Wait, there are two variables inside the parentheses—does this function have Arity 2 or Arity 1?"*
+
+**Rule: A compound structure is ONE Erlang term, and therefore occupies ONE parameter slot in the function's arity.**
+- A 2-element tuple \`{A, B}\` is **one single argument** (\`fun/1\`).
+- A 5-element tuple \`{a, b, c, d, e}\` is **one single argument** (\`fun/1\`).
+- A list of 1,000 items \`[H | T]\` is **one single argument** (\`fun/1\`).
+
+Consider this side-by-side comparison:
+\`\`\`erlang
+%% Function Arity 2: Accepts TWO distinct arguments (two parameter slots)
+compare_scalars(A, B) ->
+    {compared, A, B}.
+
+%% Function Arity 1: Accepts ONE tuple argument and unpacks its two fields
+verify_pair({A, B}) ->
+    {unpacked, A, B}.
+
+%% Function Arity 2: Accepts ONE list argument AND ONE fallback argument
+head_or_default([Head | _Tail], Default) ->
+    Head;
+head_or_default([], Default) ->
+    Default.
+\`\`\`
+
+When writing exports:
+- \`verify_identical_pair({X, X})\` accepts a single tuple, so it is exported as \`-export([verify_identical_pair/1]).\`.
+- If you accidentally write \`verify_identical_pair(X, X) -> ...\`, you have defined an arity-2 function that will reject single tuple arguments at runtime!
+
 ### Matching Repeated Variables in Patterns
 Erlang allows the **same variable to appear multiple times in a single pattern**.
 When a variable name appears twice within the same pattern head, Erlang asserts that both occurrences must be identical for the clause to match:
@@ -1537,33 +1579,39 @@ If called with \`{node_a, node_b}\`, the first clause fails to match, falling th
 
 ## Parallel Worked Example
 
-Consider a deterministic signal dispatcher demonstrating semicolon-separated multi-clause heads, list vs atom matching, and repeated variable binding across arguments:
+Consider a deterministic signal dispatcher demonstrating multi-expression clause bodies with commas (\`,\`), semicolon-separated alternative clauses (\`;\`), final period termination (\`.\`), and pattern matching across tuples and lists:
 
 \`\`\`erlang
 -module(gate_dispatch).
 -export([classify_signal/1, confirm_dual_reading/2]).
 
-%% Dispatch empty lists, non-empty queues, named atoms, and fallback inputs via ';' and '.'
+%% Arity 1: Accepts ONE argument (an empty list, a non-empty queue, an atom, or a fallback term)
+%% Demonstrates commas (,) chaining expressions and side effects before the return value
 classify_signal([]) ->
+    io:format("[gate_dispatch] Empty signal queue received.~n"),
     {empty, halt};
 classify_signal([Priority | _Queue]) ->
-    {queued, Priority};
+    Processed = {queued, Priority},
+    io:format("[gate_dispatch] Queued signal detected: ~p~n", [Priority]),
+    Processed;
 classify_signal(reset) ->
     cleared;
 classify_signal(_Other) ->
     {ignored, unknown_signal}.
 
-%% Repeated variable ExpectedTag asserts arg 1 equals the tag inside arg 2's sensor tuple
+%% Arity 2: Arg 1 is a scalar tag; Arg 2 is a single 3-element sensor tuple
+%% Repeated variable ExpectedTag asserts equality without an 'if' branch
 confirm_dual_reading(ExpectedTag, {sensor, ExpectedTag, Value}) ->
-    {verified, ExpectedTag, Value};
+    Result = {verified, ExpectedTag, Value},
+    Result;
 confirm_dual_reading(_ExpectedTag, _Sample) ->
     rejected.
 \`\`\`
 
 Notice how the BEAM evaluates each feature:
-- Each clause of \`classify_signal/1\` separates alternative heads with \`;\`, ending only the final \`_Other\` fallback clause with a period \`.\`.
-- Non-empty list pattern \`[Priority | _Queue]\` matches the front signal in $O(1)$ time and skips earlier clauses cleanly on \`[]\`.
-- \`confirm_dual_reading/2\` reuses \`ExpectedTag\` twice in the first clause head to assert structural equality without writing an explicit \`if\` branch.
+- Each clause of \`classify_signal/1\` uses commas (\`,\`) to sequence logging and variable binding before returning the final expression, separates alternative heads with \`;\`, and ends only the final fallback clause with a period \`.\`.
+- Non-empty list pattern \`[Priority | _Queue]\` occupies a single argument slot (Arity 1), matches the front element in $O(1)$ time, and skips earlier clauses cleanly on \`[]\`.
+- \`confirm_dual_reading/2\` takes exactly two arguments (one atom, one 3-element tuple) and reuses \`ExpectedTag\` twice in the first clause head to assert structural equality without writing an explicit \`if\` branch.
 
 ## Official Erlang Docs & Function Reference
 
@@ -1604,7 +1652,7 @@ In \`src/clause_router.erl\`, implement and export \`describe_status/1\`, \`head
      - \`clause_router:head_or_default([], default_val)\` returns \`default_val\`.
 
 3. \`verify_identical_pair(PairTuple)\`:
-   - **Input**: A 2-element tuple (or non-matching fallback term).
+   - **Input**: A single 2-element tuple term \`PairTuple\` (or non-matching fallback term). Notice that even though the tuple contains two elements, it is passed as **one single argument (Arity 1)**.
    - **Behavior**: Checks whether \`PairTuple\` is a 2-element tuple whose two elements match strictly in both value and runtime type in $O(1)$ time using clause-head pattern matching:
      - When both elements are strictly identical (\`Value\`), returns \`{matched, Value}\`.
      - Otherwise (mismatched elements or wrong tuple size), returns \`mismatch\`.
@@ -1615,7 +1663,7 @@ In \`src/clause_router.erl\`, implement and export \`describe_status/1\`, \`head
 
 ## Rules & Verification Constraints
 
-- **Exports**: \`clause_router\` must export \`describe_status/1\`, \`head_or_default/2\`, and \`verify_identical_pair/1\`.
+- **Exports & Arity**: \`clause_router\` must export \`describe_status/1\`, \`head_or_default/2\`, and \`verify_identical_pair/1\`. Notice that pattern-matching a 2-tuple \`{X, X}\` is Arity 1 (\`verify_identical_pair/1\`), not Arity 2!
 - **No \`if\` Expressions**: Enforced via AST verification (\`if_expr\` is forbidden)—rely on multi-clause function heads separated by \`;\` and ending in \`.\`.
 - **Strict Type Matching & Clean Compilation**: Must distinguish numeric types (\`{42, 42.0}\` -> \`mismatch\`), reject non-pairs cleanly, and compile with zero unused-variable warnings.`,
     otpDocCards: [
