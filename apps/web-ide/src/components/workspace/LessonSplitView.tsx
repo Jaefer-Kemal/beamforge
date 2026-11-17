@@ -28,6 +28,7 @@ import {
   X,
   Maximize2,
   Minimize2,
+  Lock,
 } from 'lucide-react';
 import { useWorkspaceStore, loadUserDraft } from '../../state/useWorkspaceStore';
 import type {
@@ -1504,7 +1505,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             disabled={!isLessonUnlocked || isRunning || isVerifying}
             title={
               !isLessonUnlocked
-                ? 'Lesson locked: Complete prerequisite lesson first to run code'
+                ? accessResult.prerequisite?.message || 'Lesson locked: Complete prerequisite lesson first to run code'
                 : !isBackendOnline
                 ? 'Connecting to Go Orchestrator backend (waking up). Click to run code.'
                 : 'Run visible test cases'
@@ -1513,12 +1514,14 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           >
             {isRunning ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+            ) : !isLessonUnlocked ? (
+              <Lock className="w-3.5 h-3.5 text-amber-400" />
             ) : !isBackendOnline ? (
               <WifiOff className="w-3.5 h-3.5 text-amber-300" />
             ) : (
               <Play className="w-3.5 h-3.5 fill-current" />
             )}
-            <span>{isRunning ? 'Running...' : !isBackendOnline ? 'Run (Waking)' : 'Run'}</span>
+            <span>{isRunning ? 'Running...' : !isLessonUnlocked ? 'Locked' : !isBackendOnline ? 'Run (Waking)' : 'Run'}</span>
           </button>
 
           {/* ▶ Submit */}
@@ -1534,7 +1537,7 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
             disabled={!isLessonUnlocked || isVerifying || isRunning}
             title={
               !isLessonUnlocked
-                ? 'Lesson locked: Complete prerequisite lesson first to submit code'
+                ? accessResult.prerequisite?.message || 'Lesson locked: Complete prerequisite lesson first to submit code'
                 : !isBackendOnline
                 ? 'Connecting to Go Orchestrator backend (waking up). Click to submit.'
                 : 'Submit code for full verification suite'
@@ -1543,12 +1546,14 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           >
             {isVerifying ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+            ) : !isLessonUnlocked ? (
+              <Lock className="w-3.5 h-3.5 text-amber-300" />
             ) : !isBackendOnline ? (
               <WifiOff className="w-3.5 h-3.5 text-amber-300" />
             ) : (
               <ShieldCheck className="w-3.5 h-3.5" />
             )}
-            <span>{isVerifying ? 'Grading...' : !isBackendOnline ? 'Submit (Waking)' : 'Submit'}</span>
+            <span>{isVerifying ? 'Grading...' : !isLessonUnlocked ? 'Locked' : !isBackendOnline ? 'Submit (Waking)' : 'Submit'}</span>
           </button>
 
           {/* Solution */}
@@ -2272,8 +2277,14 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                     className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{ background: '#007AFF' }}
                   >
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>Run Tests Now</span>
+                    {isRunning ? (
+                      <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+                    ) : !isLessonUnlocked ? (
+                      <Lock className="w-3.5 h-3.5 text-amber-300" />
+                    ) : (
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                    )}
+                    <span>{isRunning ? 'Running...' : !isLessonUnlocked ? 'Locked' : 'Run Tests Now'}</span>
                   </button>
                 </div>
               )}
@@ -2380,8 +2391,14 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
                     className="px-4 py-2 rounded-xl text-xs font-bold text-slate-900 shadow-md inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{ background: '#F59E0B' }}
                   >
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Submit for Grading</span>
+                    {isVerifying ? (
+                      <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+                    ) : !isLessonUnlocked ? (
+                      <Lock className="w-3.5 h-3.5 text-slate-900" />
+                    ) : (
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isVerifying ? 'Grading...' : !isLessonUnlocked ? 'Locked' : 'Submit for Grading'}</span>
                   </button>
                 </div>
               )}
@@ -2441,12 +2458,14 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           >
             {isRunning ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+            ) : !isLessonUnlocked ? (
+              <Lock className="w-3.5 h-3.5 text-amber-400" />
             ) : !isBackendOnline ? (
               <WifiOff className="w-3.5 h-3.5 text-amber-300" />
             ) : (
               <Play className="w-3.5 h-3.5 fill-current" />
             )}
-            <span>{isRunning ? 'Running...' : !isBackendOnline ? 'Run (Waking)' : 'Run Again'}</span>
+            <span>{isRunning ? 'Running...' : !isLessonUnlocked ? 'Locked' : !isBackendOnline ? 'Run (Waking)' : 'Run Again'}</span>
           </button>
 
           <button
@@ -2459,12 +2478,14 @@ export function LessonSplitView({ lesson }: LessonSplitViewProps) {
           >
             {isVerifying ? (
               <div className="stage-spinner w-3 h-3 rounded-full border-2 border-white border-t-transparent" />
+            ) : !isLessonUnlocked ? (
+              <Lock className="w-3.5 h-3.5 text-amber-300" />
             ) : !isBackendOnline ? (
               <WifiOff className="w-3.5 h-3.5 text-amber-300" />
             ) : (
               <ShieldCheck className="w-3.5 h-3.5" />
             )}
-            <span>{isVerifying ? 'Grading...' : !isBackendOnline ? 'Submit (Waking)' : 'Submit'}</span>
+            <span>{isVerifying ? 'Grading...' : !isLessonUnlocked ? 'Locked' : !isBackendOnline ? 'Submit (Waking)' : 'Submit'}</span>
           </button>
         </div>
       </div>

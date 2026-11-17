@@ -32,6 +32,7 @@ import { Badge, BADGE_CATALOG, isBadgeUnlocked } from '../types/badges';
 import type { UserSubmissionRecord } from '../types/submissions';
 import { authClient } from '../lib/auth/client';
 import { migrateGuestProgress } from '../lib/auth/guestMigration';
+import { getSynchronousCompletedLevelIds } from '../lib/curriculumAccess';
 
 export const getUserDraftKey = (userId: string, exerciseId: string) => `beamforge_draft_${userId}_${exerciseId}`;
 
@@ -2485,6 +2486,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
 if (typeof window !== 'undefined') {
   (window as any).useWorkspaceStore = useWorkspaceStore;
+
+  // Immediate synchronous local progress hydration on client initial load:
+  // Guarantees completedLevelIds is populated from local storage synchronously
+  // before component mount, eliminating hydration race conditions on page reload.
+  try {
+    const immediateCompleted = getSynchronousCompletedLevelIds();
+    if (immediateCompleted.length > 0) {
+      useWorkspaceStore.setState((state) => ({
+        completedLevelIds: Array.from(new Set([...state.completedLevelIds, ...immediateCompleted])),
+        completedWithXpLevelIds: Array.from(new Set([...state.completedWithXpLevelIds, ...immediateCompleted])),
+      }));
+    }
+  } catch {}
 
   // Post-mount theme sync: deterministic 'light' on SSR ensures matching hydration.
   // Immediate post-hydration microtask applies stored dark preference if present.

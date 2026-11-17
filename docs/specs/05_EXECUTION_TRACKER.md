@@ -4660,3 +4660,25 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `npm run build` -> 10/10 pages built with 0 errors.
   - `go test -v -run TestChapter1Verification ./internal/bridge` -> 17/17 passed (100%).
   - `go test -v -run TestDynamicVisibleTestsCurriculum ./internal/bridge` -> All 12 chapters passed (100%).
+
+## Phase 272: Elimination of Progress Hydration Race Conditions, Explicit Locked UI & Server-Side Progression Integrity
+- [x] **272.1: Synchronous Local Completion Extraction (`getSynchronousCompletedLevelIds`)**:
+  - Implemented `getSynchronousCompletedLevelIds()` in `apps/web-ide/src/lib/curriculumAccess.ts`.
+  - Performs instant, synchronous extraction of all completed lesson IDs across all user namespaces (`beamforge_completed_*`), active user profile caches (`beamforge_user_*`), and `beamforge_progress`.
+  - Wired into `checkLessonAccess()` and `checkLessonAccessById()`: on fresh page reloads, preceding completed lessons (such as `ch01-l01`) are recognized immediately on the first render frame without waiting for async session/DB network calls.
+- [x] **272.2: Instant Client-Side Store Hydration on Initial Load**:
+  - In `apps/web-ide/src/state/useWorkspaceStore.ts`, added immediate synchronous hydration of `completedLevelIds` from `getSynchronousCompletedLevelIds()` upon client bundle instantiation.
+  - Guarantees that Zustand state matches persisted completions on mount, preventing false-negative locked states.
+- [x] **272.3: Unambiguous Curriculum Lock UI**:
+  - In `apps/web-ide/src/components/workspace/LessonSplitView.tsx`, upgraded the action bar, drawer buttons, and mobile buttons:
+    - If a lesson is legitimately locked (e.g. learner jumped ahead via URL without completing prerequisites), buttons display an explicit `Lock` icon, label `Locked`, and tooltip displaying `accessResult.prerequisite.message`.
+    - Eliminates confusion with offline/waking status; clearly communicates pedagogical prerequisite requirements.
+    - When a lesson is unlocked (e.g. `ch01-l02` when `ch01-l01` is solved), buttons are active as normal `Run` and `Submit`.
+- [x] **272.4: Server-Side Progression Integrity in `/api/user-progress`**:
+  - Added `isServerProgressionPermitted()` in `apps/web-ide/src/app/api/user-progress/route.ts`.
+  - Validates sequential prerequisite completion before updating `beamforge_users.completed_level_ids` and awarding XP in the database.
+  - Prevents cheating or progression bypass even if a client attempts to submit directly to the API out of order.
+- [x] **272.5: Compilation & Test Verification**:
+  - `npx tsc --noEmit` -> 0 errors.
+  - `npm run build` -> 10/10 static pages built with 0 errors.
+  - `go test -v -run TestChapter1Verification ./internal/bridge` -> 17/17 passed (100%).
