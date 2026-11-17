@@ -4566,3 +4566,27 @@ We execute the platform overhaul incrementally so every single piece is built to
   - `TEST_CHAPTER=1 go test -v -count=1 -run TestDynamicVisibleTestsCurriculum ./internal/bridge` -> 8/8 lessons passed (9.59s).
   - `npx tsc --noEmit` -> 0 errors.
   - `npm run build` -> Next.js production build generated all 9/9 static pages with 0 errors.
+
+
+## Phase 268: Client Console Error Resolution, WebSocket Reconnection Guard & Vercel/Render Production Sync
+- [x] **268.1: WebSocket URL Normalization & Connection Limit Guard**:
+  - Sanitized `getOrchestratorWsUrl()` in `apps/web-ide/src/lib/orchestratorConfig.ts` to automatically strip trailing slashes and guarantee the `/ws` route suffix.
+  - Hardened `WSMultiplexer` in `apps/web-ide/src/lib/ws-multiplexer.ts`: removed eager connection from constructor (lazy connect on IDE mount), capped reconnection attempts to 3 with exponential backoff, and cleanly transitioned to `'fallback_sim'` mode to prevent browser console spam on Render free-tier sleep or connection limits.
+  - Removed unneeded `wsMux.connect()` from `apps/web-ide/src/app/syllabus/page.tsx` to conserve Render connection slots.
+  - Added root HTTP and WebSocket upgrade handler to `services/orchestrator/cmd/server/main.go` so both `/` and `/ws` respond with HTTP 200 / WebSocket upgrade instead of 404.
+  - Updated Vercel environment variable `NEXT_PUBLIC_ORCHESTRATOR_WS_URL` to `wss://beamforge-orchestrator.onrender.com/ws` across Production, Preview, and Development.
+- [x] **268.2: React Hydration Mismatch Elimination (Errors #425, #418, #423)**:
+  - Added `suppressHydrationWarning` to `<html>` and `<body>` in `apps/web-ide/src/app/layout.tsx` to prevent theme class hydration mismatch warnings.
+  - Set deterministic SSR initial state in `apps/web-ide/src/state/useWorkspaceStore.ts`: `loadInitialUser` returns `GUEST_USER` and `lastActiveId` defaults to `'ch01-l01'` on initial store creation, allowing `hydrateFromStorageAndDb()` in `useEffect` to safely hydrate client profile and XP post-mount without markup divergence.
+  - Conditioned `isAuthed` on `mounted` state in `apps/web-ide/src/components/navigation/BootDevTopBar.tsx` to match guest markup during SSR and initial hydration.
+- [x] **268.3: Resilient Neon DB Offline Sync (Eliminated 500 Network Logs)**:
+  - Updated `POST` error handling in `apps/web-ide/src/app/api/user-progress/route.ts`: returns HTTP 200 with `{ status: 'offline', source: 'offline_fallback', dbConnected: false }` during cold starts, preventing red HTTP 500 error logs in the browser console.
+- [x] **268.4: Static Favicon & Icon Serving (Eliminated 404 Logs)**:
+  - Generated standard 32x32 multi-resolution `favicon.ico` in `apps/web-ide/public/favicon.ico` and `apps/web-ide/src/app/favicon.ico`.
+  - Added `apps/web-ide/public/icon.svg` and `apps/web-ide/public/favicon.svg`.
+  - Verified `https://web-ide-nine.vercel.app/favicon.ico` returns HTTP 200 OK with `image/x-icon`.
+- [x] **268.5: Full Verification & Dual Deployment**:
+  - `go test -v -run TestChapter1Verification ./internal/bridge` -> 17/17 passed (100% pass).
+  - `npx tsc --noEmit` & `npm run build` in `apps/web-ide` -> 0 errors.
+  - Render orchestrator deploy `dep-dbtvsorm8hqs73dn31h0` is `live`.
+  - Vercel production deploy `dpl_7FnTRLEUnopZXkNXkwbBtLJHqL7i` is `Ready`.
