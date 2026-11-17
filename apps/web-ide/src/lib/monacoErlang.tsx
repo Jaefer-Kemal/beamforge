@@ -219,95 +219,187 @@ export function configureMonacoErlang(monaco: any) {
     (monaco.languages as any).__bf_erlangCompletionRegistered = true;
     monaco.languages.registerCompletionItemProvider('erlang', {
       triggerCharacters: [':', '-', '?'],
-      provideCompletionItems: (model: any, position: any) => {
-        const textUntilPosition = model.getValueInRange({
-          startLineNumber: position.lineNumber,
-          startColumn: 1,
-          endLineNumber: position.lineNumber,
-          endColumn: position.column,
-        });
-
-        const word = model.getWordUntilPosition(position);
-        const range = {
-          startLineNumber: position.lineNumber,
-          endLineNumber: position.lineNumber,
-          startColumn: word.startColumn,
-          endColumn: word.endColumn,
-        };
-
-        const SnippetKind = monaco.languages.CompletionItemKind?.Snippet ?? 27;
-        const FunctionKind = monaco.languages.CompletionItemKind?.Function ?? 1;
-        const ModuleKind = monaco.languages.CompletionItemKind?.Module ?? 8;
-        const VariableKind = monaco.languages.CompletionItemKind?.Variable ?? 4;
-        const InsertAsSnippet = monaco.languages.CompletionItemInsertTextRule?.InsertAsSnippet ?? 4;
-
-        // Check if typing after a module colon e.g. "lists:", "maps:", "erlang:", "gen_server:"
-        const colonMatch = textUntilPosition.match(/([a-z_][a-zA-Z0-9_]*):$/);
-        if (colonMatch) {
-          const mod = colonMatch[1];
-          if (OTP_LIB_COMPLETIONS[mod]) {
-            return {
-              suggestions: OTP_LIB_COMPLETIONS[mod].map((c) => ({
-                label: c.label,
-                kind: FunctionKind,
-                documentation: c.doc,
-                detail: c.detail,
-                insertText: c.insertText,
-                insertTextRules: InsertAsSnippet,
-                range,
-              })),
-            };
-          }
-        }
-
-        const suggestions: any[] = [];
-
-        // Standard OTP Snippets (case, try, receive, fun, -module, -export, etc.)
-        for (const s of ERLANG_SNIPPETS) {
-          suggestions.push({
-            label: s.label,
-            kind: SnippetKind,
-            documentation: s.doc,
-            detail: s.detail,
-            insertText: s.insertText,
-            insertTextRules: InsertAsSnippet,
-            range,
-          });
-        }
-
-        // Standard OTP Modules
-        for (const m of ['lists', 'maps', 'erlang', 'gen_server', 'gen_statem', 'ets', 'timer', 'io', 'binary']) {
-          suggestions.push({
-            label: `${m}:`,
-            kind: ModuleKind,
-            detail: `OTP ${m} standard library module`,
-            insertText: `${m}:`,
-            range,
-          });
-        }
-
-        // In-scope variables: scan words starting with uppercase or underscore
-        const fullContent = model.getValue();
-        const varMatches = fullContent.match(/\b[A-Z_][a-zA-Z0-9_]*\b/g);
-        if (varMatches) {
-          const uniqueVars = Array.from(new Set(varMatches));
-          for (const v of uniqueVars.slice(0, 30)) {
-            if (typeof v === 'string' && v.length > 1) {
-              suggestions.push({
-                label: v,
-                kind: VariableKind,
-                detail: 'In-scope variable',
-                insertText: v,
-                range,
-              });
-            }
-          }
-        }
-
-        return { suggestions };
-      },
+      provideCompletionItems: (model: any, position: any) => getErlangCompletionItems(model, position, monaco),
     });
   }
+}
+
+/**
+ * Erlang Completion Provider
+ * Dispatches contextual completions based on cursor prefix:
+ * 1. Module remote calls: e.g. "io:", "io:f", "maps:g", "lists:rev"
+ * 2. Compile-time macros: e.g. "?", "?MODULE", "?DEFAULT_"
+ * 3. Module directives: e.g. "-", "-module", "-export", "-define" at start of line
+ * 4. General scope: Expressions, control flow, available OTP modules, and in-scope variables
+ */
+export function getErlangCompletionItems(model: any, position: any, monaco?: any) {
+  const textUntilPosition = model.getValueInRange({
+    startLineNumber: position.lineNumber,
+    startColumn: 1,
+    endLineNumber: position.lineNumber,
+    endColumn: position.column,
+  });
+
+  const word = model.getWordUntilPosition(position);
+  const range = {
+    startLineNumber: position.lineNumber,
+    endLineNumber: position.lineNumber,
+    startColumn: word.startColumn,
+    endColumn: word.endColumn,
+  };
+
+  const SnippetKind = monaco?.languages?.CompletionItemKind?.Snippet ?? 27;
+  const FunctionKind = monaco?.languages?.CompletionItemKind?.Function ?? 1;
+  const ModuleKind = monaco?.languages?.CompletionItemKind?.Module ?? 8;
+  const VariableKind = monaco?.languages?.CompletionItemKind?.Variable ?? 4;
+  const ConstantKind = monaco?.languages?.CompletionItemKind?.Constant ?? 14;
+  const InsertAsSnippet = monaco?.languages?.CompletionItemInsertTextRule?.InsertAsSnippet ?? 4;
+
+  // 1. Module remote calls: e.g. "io:", "io:f", "lists:rev", "maps:g"
+  const colonMatch = textUntilPosition.match(/([a-z_][a-zA-Z0-9_]*):([a-z_0-9]*)$/);
+  if (colonMatch) {
+    const mod = colonMatch[1];
+    const funcPrefix = colonMatch[2] || '';
+    if (OTP_LIB_COMPLETIONS[mod]) {
+      const matches = OTP_LIB_COMPLETIONS[mod].filter((c) => {
+        if (!funcPrefix) return true;
+        const p = funcPrefix.toLowerCase();
+        return c.label.toLowerCase().startsWith(p) || c.insertText.toLowerCase().startsWith(p);
+      });
+      return {
+        suggestions: matches.map((c) => ({
+          label: c.label,
+          kind: FunctionKind,
+          documentation: c.doc,
+          detail: c.detail,
+          insertText: c.insertText,
+          insertTextRules: InsertAsSnippet,
+          range,
+        })),
+      };
+    }
+    // If remote call to an unknown module, return empty suggestions rather than leaking top-level keywords
+    return { suggestions: [] };
+  }
+
+  // 2. Macro Trigger: e.g. "?", "?M", "?DEFAULT_"
+  const macroMatch = textUntilPosition.match(/\?([a-zA-Z0-9_]*)$/);
+  if (macroMatch) {
+    const macroPrefix = (macroMatch[1] || '').toLowerCase();
+    const builtInMacros = [
+      { label: 'MODULE', detail: '?MODULE (current module atom)', insertText: 'MODULE', doc: 'Expands at compile time to the current module name atom.' },
+      { label: 'LINE', detail: '?LINE (current line number)', insertText: 'LINE', doc: 'Expands at compile time to the current source line number.' },
+      { label: 'FILE', detail: '?FILE (current filename string)', insertText: 'FILE', doc: 'Expands at compile time to the current source file name.' },
+      { label: 'MACHINE', detail: '?MACHINE (BEAM VM name)', insertText: 'MACHINE', doc: 'Expands at compile time to the current VM target machine name.' },
+    ];
+
+    // Scan file for user-defined -define(NAME, ...) macros
+    const fullContent = model.getValue();
+    const defineMatches = fullContent.matchAll(/-define\s*\(\s*([a-zA-Z0-9_]+)/g);
+    const userMacros = new Set<string>();
+    for (const dm of defineMatches) {
+      if (dm[1]) userMacros.add(dm[1]);
+    }
+
+    const allMacros = [
+      ...builtInMacros,
+      ...Array.from(userMacros).map((mName) => ({
+        label: mName,
+        detail: `?${mName} (compile-time macro)`,
+        insertText: mName,
+        doc: `User-defined macro -define(${mName}, ...) in current file.`,
+      })),
+    ];
+
+    const filteredMacros = allMacros.filter((m) => !macroPrefix || m.label.toLowerCase().startsWith(macroPrefix));
+    return {
+      suggestions: filteredMacros.map((m) => ({
+        label: m.label,
+        kind: ConstantKind,
+        documentation: m.doc,
+        detail: m.detail,
+        insertText: m.insertText,
+        insertTextRules: InsertAsSnippet,
+        range,
+      })),
+    };
+  }
+
+  // 3. Module Directive Trigger: e.g. at line start typing "-" or "-mod"
+  const directiveMatch = textUntilPosition.match(/^\s*-([a-z_]*)$/);
+  if (directiveMatch) {
+    const dirPrefix = (directiveMatch[1] || '').toLowerCase();
+    const hyphenCol = textUntilPosition.lastIndexOf('-') + 1;
+    const dirRange = {
+      startLineNumber: position.lineNumber,
+      endLineNumber: position.lineNumber,
+      startColumn: hyphenCol,
+      endColumn: position.column,
+    };
+    const directiveSnippets = ERLANG_SNIPPETS.filter((s) => s.label.startsWith('-'));
+    const filtered = directiveSnippets.filter((s) => !dirPrefix || s.label.toLowerCase().includes(dirPrefix));
+    return {
+      suggestions: filtered.map((s) => ({
+        label: s.label,
+        kind: SnippetKind,
+        documentation: s.doc,
+        detail: s.detail,
+        insertText: s.insertText,
+        insertTextRules: InsertAsSnippet,
+        range: dirRange,
+      })),
+    };
+  }
+
+  // 4. General Scope: Expressions, Control Flow, Modules & In-Scope Variables
+  const suggestions: any[] = [];
+
+  // Control flow snippets (exclude directives like -module, -export when not at start of line with hyphen)
+  for (const s of ERLANG_SNIPPETS) {
+    if (!s.label.startsWith('-')) {
+      suggestions.push({
+        label: s.label,
+        kind: SnippetKind,
+        documentation: s.doc,
+        detail: s.detail,
+        insertText: s.insertText,
+        insertTextRules: InsertAsSnippet,
+        range,
+      });
+    }
+  }
+
+  // Standard OTP Modules (e.g. typing "i" suggests "io:", typing "l" suggests "lists:", etc.)
+  const allModules = Object.keys(OTP_LIB_COMPLETIONS);
+  for (const m of allModules) {
+    suggestions.push({
+      label: `${m}:`,
+      kind: ModuleKind,
+      detail: `OTP ${m} standard library module`,
+      insertText: `${m}:`,
+      range,
+    });
+  }
+
+  // In-scope variables: scan words starting with uppercase or underscore
+  const fullContent = model.getValue();
+  const varMatches = fullContent.match(/\b[A-Z_][a-zA-Z0-9_]*\b/g);
+  if (varMatches) {
+    const uniqueVars = Array.from(new Set(varMatches));
+    for (const v of uniqueVars.slice(0, 30)) {
+      if (typeof v === 'string' && v.length > 1) {
+        suggestions.push({
+          label: v,
+          kind: VariableKind,
+          detail: 'In-scope variable',
+          insertText: v,
+          range,
+        });
+      }
+    }
+  }
+
+  return { suggestions };
 }
 
 // ── Standard OTP Snippets ──────────────────────────────────────────────────
@@ -373,6 +465,18 @@ export const ERLANG_SNIPPETS = [
     doc: 'Defines an Erlang record structure.',
   },
   {
+    label: '-define',
+    detail: '-define(CONST, value).',
+    insertText: '-define(${1:MACRO_NAME}, ${2:Value}).\n',
+    doc: 'Compile-time macro definition directive.',
+  },
+  {
+    label: '-type',
+    detail: '-type name() :: type.',
+    insertText: '-type ${1:type_name}() :: ${2:term()}.\n',
+    doc: 'Custom type specification definition.',
+  },
+  {
     label: '-spec',
     detail: '-spec func(args) -> return.',
     insertText: '-spec ${1:func_name}(${2:arg_types}) -> ${3:return_type}.\n',
@@ -388,6 +492,142 @@ export const ERLANG_SNIPPETS = [
 
 // ── Standard OTP Library Function Completions ─────────────────────────────
 export const OTP_LIB_COMPLETIONS: Record<string, Array<{ label: string; detail: string; insertText: string; doc: string }>> = {
+  io: [
+    { label: 'format/1', detail: 'io:format(Format)', insertText: 'format("${1:~s~n}")', doc: 'Writes formatted output string to standard_io.' },
+    { label: 'format/2', detail: 'io:format(Format, Data)', insertText: 'format("${1:~p~n}", [${2:Data}])', doc: 'Writes formatted output string with argument list to standard_io.' },
+    { label: 'fwrite/1', detail: 'io:fwrite(Format)', insertText: 'fwrite("${1:~s~n}")', doc: 'Identical to format/1.' },
+    { label: 'fwrite/2', detail: 'io:fwrite(Format, Data)', insertText: 'fwrite("${1:~p~n}", [${2:Data}])', doc: 'Identical to format/2.' },
+    { label: 'get_line/1', detail: 'io:get_line(Prompt)', insertText: 'get_line("${1:Prompt: }")', doc: 'Reads a line of text terminated by newline from standard_io.' },
+    { label: 'get_line/2', detail: 'io:get_line(Device, Prompt)', insertText: 'get_line(${1:Device}, "${2:Prompt: }")', doc: 'Reads a line of text terminated by newline from Device.' },
+    { label: 'setopts/2', detail: 'io:setopts(Device, Opts)', insertText: 'setopts(${1:standard_io}, [${2:encoding, utf8}])', doc: 'Sets options for standard or file IO device.' },
+    { label: 'read/1', detail: 'io:read(Prompt)', insertText: 'read("${1:Prompt: }")', doc: 'Reads an Erlang term terminated by dot from standard_io.' },
+    { label: 'read/2', detail: 'io:read(Device, Prompt)', insertText: 'read(${1:Device}, "${2:Prompt: }")', doc: 'Reads an Erlang term terminated by dot from Device.' },
+  ],
+  timer: [
+    { label: 'sleep/1', detail: 'timer:sleep(TimeMs)', insertText: 'sleep(${1:TimeMs})', doc: 'Suspends the calling process for TimeMs milliseconds.' },
+    { label: 'send_after/2', detail: 'timer:send_after(TimeMs, Message)', insertText: 'send_after(${1:TimeMs}, ${2:Message})', doc: 'Evaluates Pid ! Message after TimeMs milliseconds.' },
+    { label: 'send_after/3', detail: 'timer:send_after(TimeMs, Dest, Message)', insertText: 'send_after(${1:TimeMs}, ${2:Dest}, ${3:Message})', doc: 'Evaluates Dest ! Message after TimeMs milliseconds.' },
+    { label: 'send_interval/2', detail: 'timer:send_interval(TimeMs, Message)', insertText: 'send_interval(${1:TimeMs}, ${2:Message})', doc: 'Periodically sends Message to calling process every TimeMs milliseconds.' },
+    { label: 'send_interval/3', detail: 'timer:send_interval(TimeMs, Dest, Message)', insertText: 'send_interval(${1:TimeMs}, ${2:Dest}, ${3:Message})', doc: 'Periodically sends Message to Dest every TimeMs milliseconds.' },
+    { label: 'cancel/1', detail: 'timer:cancel(TRef)', insertText: 'cancel(${1:TRef})', doc: 'Cancels a previously scheduled timer reference.' },
+    { label: 'tc/1', detail: 'timer:tc(Fun)', insertText: 'tc(${1:Fun})', doc: 'Measures execution time of Fun in microseconds: returns {TimeUs, Value}.' },
+    { label: 'tc/2', detail: 'timer:tc(Fun, Arguments)', insertText: 'tc(${1:Fun}, [${2:Args}])', doc: 'Measures execution time of Fun with Arguments in microseconds: returns {TimeUs, Value}.' },
+    { label: 'tc/3', detail: 'timer:tc(Module, Function, Arguments)', insertText: 'tc(${1:Module}, ${2:Function}, [${3:Args}])', doc: 'Measures execution time of Module:Function(Arguments) in microseconds.' },
+    { label: 'seconds/1', detail: 'timer:seconds(Seconds)', insertText: 'seconds(${1:Seconds})', doc: 'Converts Seconds to milliseconds.' },
+    { label: 'minutes/1', detail: 'timer:minutes(Minutes)', insertText: 'minutes(${1:Minutes})', doc: 'Converts Minutes to milliseconds.' },
+    { label: 'hours/1', detail: 'timer:hours(Hours)', insertText: 'hours(${1:Hours})', doc: 'Converts Hours to milliseconds.' },
+  ],
+  binary: [
+    { label: 'part/2', detail: 'binary:part(Subject, PosLen)', insertText: 'part(${1:Subject}, {${2:Start}, ${3:Length}})', doc: 'Extracts a slice from Subject binary.' },
+    { label: 'part/3', detail: 'binary:part(Subject, Start, Length)', insertText: 'part(${1:Subject}, ${2:Start}, ${3:Length})', doc: 'Extracts Length bytes starting at zero-indexed Start from Subject.' },
+    { label: 'split/2', detail: 'binary:split(Subject, Pattern)', insertText: 'split(${1:Subject}, ${2:Pattern})', doc: 'Splits Subject binary on the first occurrence of Pattern.' },
+    { label: 'split/3', detail: 'binary:split(Subject, Pattern, Options)', insertText: 'split(${1:Subject}, ${2:Pattern}, [${3:global}])', doc: 'Splits Subject on Pattern with options ([global, trim]).' },
+    { label: 'replace/3', detail: 'binary:replace(Subject, Pattern, Replacement)', insertText: 'replace(${1:Subject}, ${2:Pattern}, ${3:Replacement})', doc: 'Replaces the first occurrence of Pattern in Subject with Replacement.' },
+    { label: 'replace/4', detail: 'binary:replace(Subject, Pattern, Replacement, Options)', insertText: 'replace(${1:Subject}, ${2:Pattern}, ${3:Replacement}, [${4:global}])', doc: 'Replaces occurrences of Pattern in Subject with Replacement using Options.' },
+    { label: 'match/2', detail: 'binary:match(Subject, Pattern)', insertText: 'match(${1:Subject}, ${2:Pattern})', doc: 'Searches for first occurrence of Pattern in Subject; returns {Start, Length} or nomatch.' },
+    { label: 'matches/2', detail: 'binary:matches(Subject, Pattern)', insertText: 'matches(${1:Subject}, ${2:Pattern})', doc: 'Returns all occurrences of Pattern in Subject as a list of {Start, Length}.' },
+    { label: 'copy/1', detail: 'binary:copy(Subject)', insertText: 'copy(${1:Subject})', doc: 'Creates a unshared copy of Subject binary.' },
+    { label: 'copy/2', detail: 'binary:copy(Subject, N)', insertText: 'copy(${1:Subject}, ${2:N})', doc: 'Duplicates Subject binary N times.' },
+    { label: 'first/1', detail: 'binary:first(Subject)', insertText: 'first(${1:Subject})', doc: 'Returns the first byte of Subject binary as an integer.' },
+    { label: 'last/1', detail: 'binary:last(Subject)', insertText: 'last(${1:Subject})', doc: 'Returns the last byte of Subject binary as an integer.' },
+    { label: 'bin_to_list/1', detail: 'binary:bin_to_list(Subject)', insertText: 'bin_to_list(${1:Subject})', doc: 'Converts Subject binary to a list of byte integers.' },
+    { label: 'list_to_bin/1', detail: 'binary:list_to_bin(ByteList)', insertText: 'list_to_bin(${1:ByteList})', doc: 'Converts a list of bytes into an Erlang binary.' },
+  ],
+  string: [
+    { label: 'trim/1', detail: 'string:trim(String)', insertText: 'trim(${1:String})', doc: 'Trims leading and trailing whitespace characters.' },
+    { label: 'trim/2', detail: 'string:trim(String, Direction)', insertText: 'trim(${1:String}, ${2:both})', doc: 'Trims whitespace in Direction (leading, trailing, both).' },
+    { label: 'split/2', detail: 'string:split(String, SearchPattern)', insertText: 'split(${1:String}, ${2:SearchPattern})', doc: 'Splits String on the first occurrence of SearchPattern.' },
+    { label: 'split/3', detail: 'string:split(String, SearchPattern, Where)', insertText: 'split(${1:String}, ${2:SearchPattern}, ${3:all})', doc: 'Splits String on SearchPattern (leading, trailing, or all).' },
+    { label: 'uppercase/1', detail: 'string:uppercase(String)', insertText: 'uppercase(${1:String})', doc: 'Converts all characters in String to uppercase.' },
+    { label: 'lowercase/1', detail: 'string:lowercase(String)', insertText: 'lowercase(${1:String})', doc: 'Converts all characters in String to lowercase.' },
+    { label: 'length/1', detail: 'string:length(String)', insertText: 'length(${1:String})', doc: 'Returns the character length of String.' },
+    { label: 'find/2', detail: 'string:find(String, SearchPattern)', insertText: 'find(${1:String}, ${2:SearchPattern})', doc: 'Searches for SearchPattern in String: returns suffix or nomatch.' },
+    { label: 'replace/3', detail: 'string:replace(String, SearchPattern, Replacement)', insertText: 'replace(${1:String}, ${2:SearchPattern}, ${3:Replacement})', doc: 'Replaces SearchPattern with Replacement in String.' },
+    { label: 'prefix/2', detail: 'string:prefix(String, Prefix)', insertText: 'prefix(${1:String}, ${2:Prefix})', doc: 'Returns the remainder of String after Prefix, or nomatch.' },
+    { label: 'slice/2', detail: 'string:slice(String, Start)', insertText: 'slice(${1:String}, ${2:Start})', doc: 'Extracts a substring starting at zero-indexed character position Start.' },
+    { label: 'slice/3', detail: 'string:slice(String, Start, Length)', insertText: 'slice(${1:String}, ${2:Start}, ${3:Length})', doc: 'Extracts Length characters starting at Start.' },
+  ],
+  gen_tcp: [
+    { label: 'listen/2', detail: 'gen_tcp:listen(Port, Options)', insertText: 'listen(${1:Port}, [binary, {packet, raw}, {active, false}, {reuseaddr, true}])', doc: 'Sets up a socket to listen on Port with given Options.' },
+    { label: 'accept/1', detail: 'gen_tcp:accept(ListenSocket)', insertText: 'accept(${1:ListenSocket})', doc: 'Accepts an incoming TCP connection on ListenSocket.' },
+    { label: 'accept/2', detail: 'gen_tcp:accept(ListenSocket, TimeoutMs)', insertText: 'accept(${1:ListenSocket}, ${2:5000})', doc: 'Accepts an incoming TCP connection with timeout.' },
+    { label: 'connect/3', detail: 'gen_tcp:connect(Address, Port, Options)', insertText: 'connect(${1:Address}, ${2:Port}, [binary, {active, false}])', doc: 'Connects to a server on Address:Port with Options.' },
+    { label: 'connect/4', detail: 'gen_tcp:connect(Address, Port, Options, TimeoutMs)', insertText: 'connect(${1:Address}, ${2:Port}, [binary, {active, false}], ${3:5000})', doc: 'Connects to a server with explicit timeout.' },
+    { label: 'send/2', detail: 'gen_tcp:send(Socket, Packet)', insertText: 'send(${1:Socket}, ${2:Packet})', doc: 'Sends a packet (binary or iolist) over a TCP socket.' },
+    { label: 'recv/2', detail: 'gen_tcp:recv(Socket, Length)', insertText: 'recv(${1:Socket}, ${2:0})', doc: 'Receives a packet from a socket in passive mode ({active, false}).' },
+    { label: 'recv/3', detail: 'gen_tcp:recv(Socket, Length, TimeoutMs)', insertText: 'recv(${1:Socket}, ${2:0}, ${3:5000})', doc: 'Receives a packet with timeout.' },
+    { label: 'close/1', detail: 'gen_tcp:close(Socket)', insertText: 'close(${1:Socket})', doc: 'Closes a TCP socket.' },
+    { label: 'controlling_process/2', detail: 'gen_tcp:controlling_process(Socket, Pid)', insertText: 'controlling_process(${1:Socket}, ${2:Pid})', doc: 'Assigns a new controlling process Pid to Socket.' },
+    { label: 'shutdown/2', detail: 'gen_tcp:shutdown(Socket, How)', insertText: 'shutdown(${1:Socket}, ${2:read_write})', doc: 'Shuts down Socket for read, write, or read_write.' },
+  ],
+  inet: [
+    { label: 'setopts/2', detail: 'inet:setopts(Socket, Options)', insertText: 'setopts(${1:Socket}, [{active, ${2:once}}])', doc: 'Sets socket options dynamically (e.g. {active, once}, {packet, http}).' },
+    { label: 'getopts/2', detail: 'inet:getopts(Socket, Options)', insertText: 'getopts(${1:Socket}, [${2:active, buffer}])', doc: 'Retrieves current socket options.' },
+    { label: 'peername/1', detail: 'inet:peername(Socket)', insertText: 'peername(${1:Socket})', doc: 'Returns the remote IP address and port: {ok, {Address, Port}}.' },
+    { label: 'sockname/1', detail: 'inet:sockname(Socket)', insertText: 'sockname(${1:Socket})', doc: 'Returns the local IP address and port: {ok, {Address, Port}}.' },
+    { label: 'port/1', detail: 'inet:port(Socket)', insertText: 'port(${1:Socket})', doc: 'Returns the local port number for Socket.' },
+    { label: 'parse_address/1', detail: 'inet:parse_address(AddressStr)', insertText: 'parse_address("${1:127.0.0.1}")', doc: 'Parses an IPv4 or IPv6 string into a tuple address.' },
+    { label: 'format_error/1', detail: 'inet:format_error(Reason)', insertText: 'format_error(${1:Reason})', doc: 'Returns a human-readable diagnostic string for an inet POSIX error atom.' },
+  ],
+  file: [
+    { label: 'read_file/1', detail: 'file:read_file(Filename)', insertText: 'read_file(${1:Filename})', doc: 'Reads the entire file into a binary: {ok, Binary} | {error, Reason}.' },
+    { label: 'write_file/2', detail: 'file:write_file(Filename, Bytes)', insertText: 'write_file(${1:Filename}, ${2:Bytes})', doc: 'Writes binary or iodata to Filename: ok | {error, Reason}.' },
+    { label: 'write_file/3', detail: 'file:write_file(Filename, Bytes, Modes)', insertText: 'write_file(${1:Filename}, ${2:Bytes}, [${3:append}])', doc: 'Writes binary or iodata to Filename with modes.' },
+    { label: 'open/2', detail: 'file:open(Filename, Modes)', insertText: 'open(${1:Filename}, [${2:read, binary}])', doc: 'Opens Filename with specified access Modes.' },
+    { label: 'close/1', detail: 'file:close(IoDevice)', insertText: 'close(${1:IoDevice})', doc: 'Closes an open file descriptor.' },
+    { label: 'read/2', detail: 'file:read(IoDevice, Number)', insertText: 'read(${1:IoDevice}, ${2:Number})', doc: 'Reads Number bytes/characters from open IoDevice.' },
+    { label: 'write/2', detail: 'file:write(IoDevice, Bytes)', insertText: 'write(${1:IoDevice}, ${2:Bytes})', doc: 'Writes Bytes to open IoDevice.' },
+    { label: 'delete/1', detail: 'file:delete(Filename)', insertText: 'delete(${1:Filename})', doc: 'Deletes file Filename.' },
+    { label: 'make_dir/1', detail: 'file:make_dir(Dir)', insertText: 'make_dir(${1:Dir})', doc: 'Creates directory Dir.' },
+    { label: 'list_dir/1', detail: 'file:list_dir(Dir)', insertText: 'list_dir(${1:Dir})', doc: 'Lists filenames in directory Dir.' },
+    { label: 'consult/1', detail: 'file:consult(Filename)', insertText: 'consult(${1:Filename})', doc: 'Reads Erlang terms from file Filename: {ok, Terms} | {error, Reason}.' },
+  ],
+  crypto: [
+    { label: 'strong_rand_bytes/1', detail: 'crypto:strong_rand_bytes(N)', insertText: 'strong_rand_bytes(${1:32})', doc: 'Generates N cryptographically secure random bytes.' },
+    { label: 'hash/2', detail: 'crypto:hash(Type, Data)', insertText: 'hash(${1:sha256}, ${2:Data})', doc: 'Computes cryptographic digest (e.g. md5, sha256, sha512).' },
+    { label: 'mac/4', detail: 'crypto:mac(hmac, Type, Key, Data)', insertText: 'mac(hmac, ${1:sha256}, ${2:Key}, ${3:Data})', doc: 'Computes Message Authentication Code (HMAC, CMAC, Poly1305).' },
+    { label: 'crypto_one_time/4', detail: 'crypto:crypto_one_time(Cipher, Key, Data, Flag)', insertText: 'crypto_one_time(${1:aes_256_gcm}, ${2:Key}, ${3:Data}, ${4:true})', doc: 'Performs one-time symmetric cipher encryption or decryption.' },
+  ],
+  supervisor: [
+    { label: 'start_link/2', detail: 'supervisor:start_link(?MODULE, Args)', insertText: 'start_link(?MODULE, ${1:Args})', doc: 'Starts supervisor process with callback module ?MODULE.' },
+    { label: 'start_link/3', detail: 'supervisor:start_link({local, ?MODULE}, ?MODULE, Args)', insertText: 'start_link({local, ?MODULE}, ?MODULE, ${1:Args})', doc: 'Starts supervisor with registered local name.' },
+    { label: 'start_child/2', detail: 'supervisor:start_child(SupRef, ChildSpec)', insertText: 'start_child(${1:SupRef}, ${2:ChildSpec})', doc: 'Dynamically adds child specification to running supervisor.' },
+    { label: 'restart_child/2', detail: 'supervisor:restart_child(SupRef, Id)', insertText: 'restart_child(${1:SupRef}, ${2:Id})', doc: 'Restarts a terminated child process in supervisor tree.' },
+    { label: 'terminate_child/2', detail: 'supervisor:terminate_child(SupRef, Id)', insertText: 'terminate_child(${1:SupRef}, ${2:Id})', doc: 'Terminates running child process managed by supervisor.' },
+    { label: 'delete_child/2', detail: 'supervisor:delete_child(SupRef, Id)', insertText: 'delete_child(${1:SupRef}, ${2:Id})', doc: 'Deletes child specification from supervisor after termination.' },
+    { label: 'which_children/1', detail: 'supervisor:which_children(SupRef)', insertText: 'which_children(${1:SupRef})', doc: 'Returns list of child specifications and PIDs managed by supervisor.' },
+    { label: 'count_children/1', detail: 'supervisor:count_children(SupRef)', insertText: 'count_children(${1:SupRef})', doc: 'Returns counts of specs, active processes, supervisors, and workers.' },
+  ],
+  application: [
+    { label: 'start/1', detail: 'application:start(Application)', insertText: 'start(${1:Application})', doc: 'Starts an OTP application and all of its dependencies.' },
+    { label: 'start/2', detail: 'application:start(Application, Type)', insertText: 'start(${1:Application}, ${2:permanent})', doc: 'Starts application with restart type (permanent, transient, temporary).' },
+    { label: 'stop/1', detail: 'application:stop(Application)', insertText: 'stop(${1:Application})', doc: 'Stops a running OTP application.' },
+    { label: 'get_env/2', detail: 'application:get_env(Application, Par)', insertText: 'get_env(${1:Application}, ${2:Par})', doc: 'Retrieves application configuration parameter: {ok, Val} | undefined.' },
+    { label: 'get_env/3', detail: 'application:get_env(Application, Par, Def)', insertText: 'get_env(${1:Application}, ${2:Par}, ${3:Def})', doc: 'Retrieves application config parameter with fallback default.' },
+    { label: 'set_env/3', detail: 'application:set_env(Application, Par, Val)', insertText: 'set_env(${1:Application}, ${2:Par}, ${3:Val})', doc: 'Sets application environment parameter.' },
+    { label: 'which_applications/0', detail: 'application:which_applications()', insertText: 'which_applications()', doc: 'Lists currently running OTP applications with versions.' },
+  ],
+  rand: [
+    { label: 'uniform/0', detail: 'rand:uniform()', insertText: 'uniform()', doc: 'Returns a random float uniformly distributed in 0.0 =< X < 1.0.' },
+    { label: 'uniform/1', detail: 'rand:uniform(N)', insertText: 'uniform(${1:N})', doc: 'Returns a random integer uniformly distributed in 1 =< X =< N.' },
+    { label: 'seed/1', detail: 'rand:seed(Alg)', insertText: 'seed(${1:default})', doc: 'Seeds the process-local random number generator.' },
+  ],
+  math: [
+    { label: 'sqrt/1', detail: 'math:sqrt(X)', insertText: 'sqrt(${1:X})', doc: 'Returns square root of X.' },
+    { label: 'pow/2', detail: 'math:pow(X, Y)', insertText: 'pow(${1:X}, ${2:Y})', doc: 'Returns X raised to power Y.' },
+    { label: 'sin/1', detail: 'math:sin(X)', insertText: 'sin(${1:X})', doc: 'Returns sine of radian angle X.' },
+    { label: 'cos/1', detail: 'math:cos(X)', insertText: 'cos(${1:X})', doc: 'Returns cosine of radian angle X.' },
+    { label: 'tan/1', detail: 'math:tan(X)', insertText: 'tan(${1:X})', doc: 'Returns tangent of radian angle X.' },
+    { label: 'log/1', detail: 'math:log(X)', insertText: 'log(${1:X})', doc: 'Returns natural logarithm of X.' },
+    { label: 'log10/1', detail: 'math:log10(X)', insertText: 'log10(${1:X})', doc: 'Returns base-10 logarithm of X.' },
+    { label: 'pi/0', detail: 'math:pi()', insertText: 'pi()', doc: 'Returns the mathematical constant pi (3.14159...).' },
+  ],
+  code: [
+    { label: 'load_file/1', detail: 'code:load_file(Module)', insertText: 'load_file(${1:Module})', doc: 'Loads Erlang beam bytecode for Module.' },
+    { label: 'which/1', detail: 'code:which(Module)', insertText: 'which(${1:Module})', doc: 'Returns the file path of the beam file loaded for Module.' },
+    { label: 'is_loaded/1', detail: 'code:is_loaded(Module)', insertText: 'is_loaded(${1:Module})', doc: 'Checks if Module is currently loaded: {file, LoadedPath} | false.' },
+    { label: 'priv_dir/1', detail: 'code:priv_dir(Application)', insertText: 'priv_dir(${1:Application})', doc: 'Returns the priv directory path for Application.' },
+  ],
   lists: [
     { label: 'reverse/1', detail: 'lists:reverse(List)', insertText: 'reverse(${1:List})', doc: 'Reverses the elements of a list in O(n).' },
     { label: 'map/2', detail: 'lists:map(Fun, List)', insertText: 'map(${1:Fun}, ${2:List})', doc: 'Applies Fun to each element of List and returns the new list.' },
@@ -400,6 +640,10 @@ export const OTP_LIB_COMPLETIONS: Record<string, Array<{ label: string; detail: 
     { label: 'flatten/1', detail: 'lists:flatten(DeepList)', insertText: 'flatten(${1:DeepList})', doc: 'Flattens deep nested lists into a single flat list.' },
     { label: 'sort/1', detail: 'lists:sort(List)', insertText: 'sort(${1:List})', doc: 'Sorts elements of List into ascending order.' },
     { label: 'seq/2', detail: 'lists:seq(From, To)', insertText: 'seq(${1:From}, ${2:To})', doc: 'Generates an integer sequence from From to To.' },
+    { label: 'nth/2', detail: 'lists:nth(N, List)', insertText: 'nth(${1:N}, ${2:List})', doc: 'Returns the Nth element of List (1-indexed).' },
+    { label: 'delete/2', detail: 'lists:delete(Elem, List)', insertText: 'delete(${1:Elem}, ${2:List})', doc: 'Deletes first occurrence of Elem from List.' },
+    { label: 'append/2', detail: 'lists:append(List1, List2)', insertText: 'append(${1:List1}, ${2:List2})', doc: 'Concatenates two lists.' },
+    { label: 'concat/1', detail: 'lists:concat(Things)', insertText: 'concat(${1:Things})', doc: 'Concatenates atoms, integers, floats, or strings into a flat string.' },
   ],
   maps: [
     { label: 'get/2', detail: 'maps:get(Key, Map)', insertText: 'get(${1:Key}, ${2:Map})', doc: 'Returns the value for Key in Map. Throws badkey if missing.' },
@@ -411,6 +655,9 @@ export const OTP_LIB_COMPLETIONS: Record<string, Array<{ label: string; detail: 
     { label: 'values/1', detail: 'maps:values(Map)', insertText: 'values(${1:Map})', doc: 'Returns a list containing all values in Map.' },
     { label: 'merge/2', detail: 'maps:merge(Map1, Map2)', insertText: 'merge(${1:Map1}, ${2:Map2})', doc: 'Merges two maps. Values from Map2 override Map1.' },
     { label: 'new/0', detail: 'maps:new()', insertText: 'new()', doc: 'Returns a new empty map #{}.' },
+    { label: 'from_list/1', detail: 'maps:from_list(Pairs)', insertText: 'from_list(${1:Pairs})', doc: 'Builds a map from key-value tuples [{Key, Val}].' },
+    { label: 'to_list/1', detail: 'maps:to_list(Map)', insertText: 'to_list(${1:Map})', doc: 'Converts a map into a list of {Key, Val} tuples.' },
+    { label: 'is_key/2', detail: 'maps:is_key(Key, Map)', insertText: 'is_key(${1:Key}, ${2:Map})', doc: 'Returns true if Key is present in Map, false otherwise.' },
   ],
   erlang: [
     { label: 'monitor/2', detail: 'erlang:monitor(process, Item)', insertText: 'monitor(process, ${1:Item})', doc: 'Starts a unidirectional monitor watching Item process.' },

@@ -4606,3 +4606,34 @@ We execute the platform overhaul incrementally so every single piece is built to
   - Parallel example `gate_dispatch.erl` compiled cleanly with `erlc.exe -Wall` (0 warnings).
   - `go test -v -run TestChapter1Verification ./internal/bridge` -> 17/17 passed (100% pass).
   - `npx tsc --noEmit` & `npm run build` in `apps/web-ide` -> 0 errors.
+
+## Phase 270: Monaco Erlang IntelliSense Overhaul, Standard Library Function Tables & Prefix-Aware Autocomplete
+- [x] **270.1: Contextual Completion Provider Architecture**:
+  - Refactored `apps/web-ide/src/lib/monacoErlang.tsx` into a modular, exported provider `getErlangCompletionItems(model, position, monaco)`.
+  - Upgraded remote module dispatch regex to prefix-aware syntax `/([a-z_][a-zA-Z0-9_]*):([a-z_0-9]*)$/`, allowing fluid autocompletion for both bare module colons (e.g., `io:`) and typed function prefixes (e.g., `io:f`, `maps:g`, `lists:rev`, `timer:sl`, `gen_tcp:lis`, `supervisor:start_`).
+  - Strict scope isolation: remote calls to unknown modules return strictly empty suggestions (`{ suggestions: [] }`), completely eliminating keyword leakage (`case`, `fun`, `-module`, `-export`) into remote call contexts.
+- [x] **270.2: Standard OTP Library Completions Expansion (19 Modules)**:
+  - Added comprehensive function signatures, documentation, parameter snippets (`${1:...}` tab stops), and arity details across all standard libraries:
+    - `io`: `format/1`, `format/2`, `fwrite/1`, `fwrite/2`, `get_line/1`, `get_line/2`, `setopts/2`, `read/1`, `read/2`.
+    - `timer`: `sleep/1`, `send_after/2`, `send_after/3`, `send_interval/2`, `send_interval/3`, `cancel/1`, `tc/1`, `tc/2`, `tc/3`, `seconds/1`, `minutes/1`, `hours/1`.
+    - `binary`: `part/2`, `part/3`, `split/2`, `split/3`, `replace/3`, `replace/4`, `match/2`, `matches/2`, `copy/1`, `copy/2`, `first/1`, `last/1`, `bin_to_list/1`, `list_to_bin/1`.
+    - `string`: `trim/1`, `trim/2`, `split/2`, `split/3`, `uppercase/1`, `lowercase/1`, `length/1`, `find/2`, `replace/3`, `prefix/2`, `slice/2`, `slice/3`.
+    - `gen_tcp`: `listen/2`, `accept/1`, `accept/2`, `connect/3`, `connect/4`, `send/2`, `recv/2`, `recv/3`, `close/1`, `controlling_process/2`, `shutdown/2`.
+    - `inet`: `setopts/2`, `getopts/2`, `peername/1`, `sockname/1`, `port/1`, `parse_address/1`, `format_error/1`.
+    - `file`: `read_file/1`, `write_file/2`, `write_file/3`, `open/2`, `close/1`, `read/2`, `write/2`, `delete/1`, `make_dir/1`, `list_dir/1`, `consult/1`.
+    - `crypto`: `strong_rand_bytes/1`, `hash/2`, `mac/4`, `crypto_one_time/4`.
+    - `supervisor`: `start_link/2`, `start_link/3`, `start_child/2`, `restart_child/2`, `terminate_child/2`, `delete_child/2`, `which_children/1`, `count_children/1`.
+    - `application`: `start/1`, `start/2`, `stop/1`, `get_env/2`, `get_env/3`, `set_env/3`, `which_applications/0`.
+    - `rand`: `uniform/0`, `uniform/1`, `seed/1`.
+    - `math`: `sqrt/1`, `pow/2`, `sin/1`, `cos/1`, `tan/1`, `log/1`, `log10/1`, `pi/0`.
+    - `code`: `load_file/1`, `which/1`, `is_loaded/1`, `priv_dir/1`.
+    - Expanded `lists` (`nth/2`, `delete/2`, `append/2`, `concat/1`) and `maps` (`from_list/1`, `to_list/1`, `is_key/2`).
+- [x] **270.3: Dedicated Macro & Directive Trigger Handling**:
+  - Macro Trigger (`?`): suggests built-in BEAM macros (`?MODULE`, `?LINE`, `?FILE`, `?MACHINE`) and dynamically scans the active file buffer for user `-define(NAME, ...)` declarations.
+  - Directive Trigger (`-` at start of line): provides clean `-module`, `-export`, `-record`, `-define`, `-type`, `-spec`, `-behaviour` snippets replacing the typed hyphen range without duplication.
+  - Subtraction Guard: arithmetic subtraction `X - Y` in expressions falls back cleanly to general scope, preventing directive pollution.
+- [x] **270.4: Deep Test Suite Certification & Zero-Error Compilation**:
+  - Ran automated 77-case test suite covering all 15 scenarios: 77/77 tests passed cleanly (0 failures).
+  - Next.js type check: `npx tsc --noEmit` -> 0 errors.
+  - Next.js production build: `npm run build` -> 10/10 static pages generated with 0 errors.
+  - Go orchestrator verification: `go test -v -run TestChapter1Verification ./internal/bridge` -> 17/17 passed (100%).
