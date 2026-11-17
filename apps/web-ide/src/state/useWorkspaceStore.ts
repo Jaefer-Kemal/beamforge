@@ -405,36 +405,12 @@ const syncUserToStorageAndDb = (user: UserProfile) => {
 };
 
 const loadInitialUser = (): UserProfile => {
-  if (typeof window === 'undefined') {
-    return GUEST_USER;
-  }
-  try {
-    const isAuthed = localStorage.getItem('bf_is_authenticated') === 'true';
-    const currentUserId = localStorage.getItem('bf_current_user_id');
-
-    if (!currentUserId || !isAuthed) {
-      const cachedGuest = localStorage.getItem('beamforge_user_guest');
-      if (cachedGuest) {
-        try {
-          return JSON.parse(cachedGuest);
-        } catch {}
-      }
-      return GUEST_USER;
-    }
-
-    const cached = localStorage.getItem(`beamforge_user_${currentUserId}`);
-    if (cached) {
-      return JSON.parse(cached);
-    }
-    return DEFAULT_USERS[currentUserId] || GUEST_USER;
-  } catch {
-    return GUEST_USER;
-  }
+  return GUEST_USER;
 };
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   const initialUser = loadInitialUser();
-  const lastActiveId = (typeof window !== 'undefined' ? localStorage.getItem('bf_last_active_exercise') : null) || initialUser.lastActiveExercise || 'ch01-l01';
+  const lastActiveId = 'ch01-l01';
   const defaultLesson = getLessonById(lastActiveId) || getLessonById('ch01-l01');
   const defaultEx = ALL_EXERCISES['erl-101-pattern-matching'] || ALL_EXERCISES['otp-04-ets-heir-resilience'];
   const initialFiles: WorkspaceFile[] = (defaultLesson && defaultLesson.files) ? defaultLesson.files : (defaultEx?.files || []);

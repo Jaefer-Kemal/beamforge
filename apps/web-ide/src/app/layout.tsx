@@ -38,7 +38,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="min-h-full w-full">
+    <html lang="en" className="min-h-full w-full" suppressHydrationWarning>
       {/* Inline script: apply theme-dark class before first paint to avoid flash */}
       <head>
         <script
@@ -49,6 +49,7 @@ export default function RootLayout({
       </head>
       <body
         className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased min-h-screen w-full overflow-x-hidden`}
+        suppressHydrationWarning
       >
         {children}
       </body>

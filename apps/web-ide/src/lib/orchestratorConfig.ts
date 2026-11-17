@@ -24,17 +24,23 @@ export const getOrchestratorHttpUrl = (): string => {
 };
 
 export const getOrchestratorWsUrl = (): string => {
-  if (process.env.NEXT_PUBLIC_ORCHESTRATOR_WS_URL) {
-    return process.env.NEXT_PUBLIC_ORCHESTRATOR_WS_URL;
+  let wsUrl = process.env.NEXT_PUBLIC_ORCHESTRATOR_WS_URL;
+  if (!wsUrl) {
+    const httpUrl = getOrchestratorHttpUrl();
+    if (httpUrl.startsWith('https://')) {
+      wsUrl = httpUrl.replace(/^https:\/\//, 'wss://');
+    } else if (httpUrl.startsWith('http://')) {
+      wsUrl = httpUrl.replace(/^http:\/\//, 'ws://');
+    } else {
+      wsUrl = 'ws://localhost:8080';
+    }
   }
-  const httpUrl = getOrchestratorHttpUrl();
-  if (httpUrl.startsWith('https://')) {
-    return httpUrl.replace(/^https:\/\//, 'wss://') + '/ws';
+  // Strip trailing slashes, then guarantee /ws endpoint
+  wsUrl = wsUrl.replace(/\/+$/, '');
+  if (!wsUrl.endsWith('/ws')) {
+    wsUrl += '/ws';
   }
-  if (httpUrl.startsWith('http://')) {
-    return httpUrl.replace(/^http:\/\//, 'ws://') + '/ws';
-  }
-  return 'ws://localhost:8080/ws';
+  return wsUrl;
 };
 
 export const ORCHESTRATOR_HTTP_URL = (function () {

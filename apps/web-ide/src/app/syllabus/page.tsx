@@ -6,7 +6,6 @@ import { CurriculumWorldMap } from '../../components/curriculum/CurriculumWorldM
 import { CommandPalette } from '../../components/workspace/CommandPalette';
 import { BadgeCelebrationModal } from '../../components/workspace/BadgeCelebrationModal';
 import { useWorkspaceStore } from '../../state/useWorkspaceStore';
-import { wsMux } from '../../lib/ws-multiplexer';
 
 export default function SyllabusPage() {
   const {
@@ -21,7 +20,6 @@ export default function SyllabusPage() {
 
   useEffect(() => {
     setBootDevView('syllabus');
-    wsMux.connect();
     hydrateFromStorageAndDb();
   }, [setBootDevView, hydrateFromStorageAndDb]);
 

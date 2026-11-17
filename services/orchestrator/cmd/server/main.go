@@ -68,6 +68,28 @@ func buildRouter(poolMgr *pool.Manager, runner *bridge.Runner, wsHandler *gatewa
 		_ = json.NewEncoder(w).Encode(resp)
 	})
 
+	// Root Welcome / Discovery / WebSocket Fallback Endpoint
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		// If client attempted a WebSocket upgrade at root, upgrade cleanly via wsHandler
+		if r.Header.Get("Upgrade") == "websocket" {
+			wsHandler.ServeWS(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		resp := map[string]interface{}{
+			"service":   "BeamForge Orchestrator",
+			"status":    "ok",
+			"ws":        "/ws",
+			"health":    "/health",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
 	// 2. 5-Channel Multiplexed WebSocket Gateway
 	mux.HandleFunc("/ws", wsHandler.ServeWS)
 

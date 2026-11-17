@@ -200,7 +200,8 @@ export function BootDevTopBar() {
     setIsAuthModalOpen,
   } = useWorkspaceStore();
 
-  const isAuthed = (typeof window !== 'undefined' && localStorage.getItem('bf_is_authenticated') === 'true') || (!currentUser?.isGuest && currentUser?.id !== 'guest');
+  const [mounted, setMounted] = useState(false);
+  const isAuthed = mounted && ((typeof window !== 'undefined' && localStorage.getItem('bf_is_authenticated') === 'true') || (!currentUser?.isGuest && currentUser?.id !== 'guest'));
 
   const router = useRouter();
   const pathname = usePathname();
@@ -211,8 +212,6 @@ export function BootDevTopBar() {
 
   const currentChapterNum = routeLesson ? routeLesson.chapterNumber : activeChapter;
   const currentLessonNum = routeLesson ? routeLesson.lessonNumber : activeLesson;
-
-  const [mounted, setMounted] = useState(false);
   const [chapterOpen, setChapterOpen] = useState(false);
   const [lessonOpen, setLessonOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);

@@ -12,6 +12,7 @@ export interface WSResponseFrame {
 }
 
 class WSMultiplexer {
+  private static readonly MAX_RECONNECT_ATTEMPTS = 3;
   private ws: WebSocket | null = null;
   private status: WSConnectionStatus = 'disconnected';
   private statusListeners: Array<(status: WSConnectionStatus) => void> = [];
@@ -22,9 +23,7 @@ class WSMultiplexer {
   private url: string = getOrchestratorWsUrl();
 
   constructor() {
-    if (typeof window !== 'undefined') {
-      this.initConnection();
-    }
+    // Lazy connection: only connect when an active IDE or execution view calls connect()
   }
 
   public connect(): void {
@@ -32,7 +31,25 @@ class WSMultiplexer {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
+    this.reconnectAttempts = 0;
     this.initConnection();
+  }
+
+  public disconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.stopHeartbeat();
+    if (this.ws) {
+      try {
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
+    this.updateStatus('disconnected');
   }
 
   public onStatusChange(callback: (status: WSConnectionStatus) => void): () => void {
@@ -93,9 +110,11 @@ class WSMultiplexer {
     try {
       this.updateStatus('connecting');
       this.url = getOrchestratorWsUrl();
-      this.ws = new WebSocket(this.url);
+      const ws = new WebSocket(this.url);
+      this.ws = ws;
 
-      this.ws.onopen = () => {
+      ws.onopen = () => {
+        if (this.ws !== ws) return;
         this.reconnectAttempts = 0;
         this.updateStatus('connected');
         if (this.reconnectTimer) {
@@ -105,22 +124,25 @@ class WSMultiplexer {
         this.startHeartbeat();
       };
 
-      this.ws.onmessage = (event) => {
+      ws.onmessage = (event) => {
+        if (this.ws !== ws) return;
         try {
           const frame: WSResponseFrame = JSON.parse(event.data);
           this.messageListeners.forEach((cb) => cb(frame));
-        } catch (e) {
-          console.error('[WS Multiplexer] Error parsing frame', e);
+        } catch {
+          // Ignore invalid frames silently
         }
       };
 
-      this.ws.onclose = () => {
+      ws.onclose = () => {
+        if (this.ws !== ws) return;
         this.stopHeartbeat();
         this.updateStatus('disconnected');
         this.scheduleReconnect();
       };
 
-      this.ws.onerror = () => {
+      ws.onerror = () => {
+        if (this.ws !== ws) return;
         this.stopHeartbeat();
         this.updateStatus('disconnected');
       };
@@ -155,8 +177,13 @@ class WSMultiplexer {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return;
-    // Exponential backoff: 3s, 4.5s, 6.75s, 10s... capped at 30s
-    const delay = Math.min(30000, Math.round(3000 * Math.pow(1.5, Math.min(this.reconnectAttempts, 5))));
+    if (this.reconnectAttempts >= WSMultiplexer.MAX_RECONNECT_ATTEMPTS) {
+      // Free-tier connection cap or sleep reached: stop spamming connections and enter fallback mode
+      this.updateStatus('fallback_sim');
+      return;
+    }
+    // Exponential backoff: 3s, 6s, 12s...
+    const delay = Math.min(20000, Math.round(3000 * Math.pow(2, this.reconnectAttempts)));
     this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
